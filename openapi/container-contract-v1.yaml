@@ -1,0 +1,889 @@
+openapi: 3.1.0
+info:
+  title: Synth Containers Contract
+  version: 0.1.0
+  description: |
+    Canonical public wire contract for the standardized Synth container runtime.
+    It covers metadata discovery, task discovery, blocking and async rollouts,
+    rollout lifecycle polling, checkpoints, resume semantics, and control
+    surfaces such as pause and terminate.
+servers:
+  - url: http://localhost
+    description: Local development
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Read service health
+      responses:
+        '200':
+          description: Service health payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /metadata:
+    get:
+      operationId: getMetadata
+      summary: Read runtime contract metadata
+      responses:
+        '200':
+          description: Runtime metadata payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InfoResponse'
+  /info:
+    get:
+      operationId: getInfo
+      summary: Alias for metadata
+      responses:
+        '200':
+          description: Runtime metadata payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InfoResponse'
+  /task_info:
+    get:
+      operationId: getTaskInfo
+      summary: Read task and capability metadata for the active runtime
+      responses:
+        '200':
+          description: Task info payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskInfoResponse'
+  /task_catalog:
+    get:
+      operationId: getTaskCatalog
+      summary: Read task catalog metadata and instances
+      responses:
+        '200':
+          description: Task catalog payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskCatalogResponse'
+  /rollout:
+    post:
+      operationId: submitRollout
+      summary: Start a rollout using sync or async submission mode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RolloutRequest'
+      responses:
+        '200':
+          description: Rollout completed synchronously
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RolloutResponse'
+        '202':
+          description: Rollout accepted asynchronously and queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RolloutResponse'
+        '422':
+          description: Request validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+  /rollouts:
+    post:
+      operationId: submitRolloutAlias
+      summary: Alias for rollout submission
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RolloutRequest'
+      responses:
+        '200':
+          description: Rollout completed synchronously
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RolloutResponse'
+        '202':
+          description: Rollout accepted asynchronously and queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RolloutResponse'
+        '422':
+          description: Request validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+  /rollouts/{rollout_id}:
+    get:
+      operationId: getRollout
+      summary: Poll rollout lifecycle state or fetch the final result
+      parameters:
+        - $ref: '#/components/parameters/RolloutId'
+      responses:
+        '200':
+          description: Rollout lifecycle payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RolloutResponse'
+        '404':
+          description: Rollout not found
+  /rollouts/{rollout_id}/state:
+    get:
+      operationId: getRolloutState
+      summary: Read detailed rollout lifecycle/control state
+      parameters:
+        - $ref: '#/components/parameters/RolloutId'
+      responses:
+        '200':
+          description: Rollout state payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RolloutStateResponse'
+        '404':
+          description: Rollout not found
+  /rollouts/{rollout_id}/summary:
+    get:
+      operationId: getRolloutSummary
+      summary: Read rollout summary metrics
+      parameters:
+        - $ref: '#/components/parameters/RolloutId'
+      responses:
+        '200':
+          description: Summary payload
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /rollouts/{rollout_id}/usage:
+    get:
+      operationId: getRolloutUsage
+      summary: Read rollout token or usage metrics
+      parameters:
+        - $ref: '#/components/parameters/RolloutId'
+      responses:
+        '200':
+          description: Usage payload
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /rollouts/{rollout_id}/artifacts:
+    get:
+      operationId: getRolloutArtifacts
+      summary: Read rollout artifacts
+      parameters:
+        - $ref: '#/components/parameters/RolloutId'
+      responses:
+        '200':
+          description: Artifact payload
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rollout_id:
+                    type: string
+                  artifact:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ArtifactItem'
+                additionalProperties: true
+  /rollouts/{rollout_id}/events:
+    get:
+      operationId: getRolloutEvents
+      summary: Read emitted rollout events
+      parameters:
+        - $ref: '#/components/parameters/RolloutId'
+      responses:
+        '200':
+          description: Event payload
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rollout_id:
+                    type: string
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                additionalProperties: true
+  /rollouts/{rollout_id}/trace:
+    get:
+      operationId: getRolloutTrace
+      summary: Read rollout trace payload
+      parameters:
+        - $ref: '#/components/parameters/RolloutId'
+      responses:
+        '200':
+          description: Trace payload
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /rollouts/{rollout_id}/checkpoints:
+    get:
+      operationId: listRolloutCheckpoints
+      summary: List checkpoints created for a rollout
+      parameters:
+        - $ref: '#/components/parameters/RolloutId'
+      responses:
+        '200':
+          description: Checkpoint descriptors
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rollout_id:
+                    type: string
+                  checkpoints:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CheckpointDescriptor'
+                additionalProperties: true
+    post:
+      operationId: createRolloutCheckpoint
+      summary: Create a checkpoint for a rollout
+      parameters:
+        - $ref: '#/components/parameters/RolloutId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckpointBody'
+      responses:
+        '200':
+          description: Created checkpoint descriptor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckpointDescriptor'
+  /rollouts/{rollout_id}/checkpoints/{checkpoint_id}:
+    get:
+      operationId: getRolloutCheckpoint
+      summary: Read one checkpoint descriptor for a rollout
+      parameters:
+        - $ref: '#/components/parameters/RolloutId'
+        - $ref: '#/components/parameters/CheckpointId'
+      responses:
+        '200':
+          description: Checkpoint descriptor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckpointDescriptor'
+        '404':
+          description: Checkpoint not found
+  /checkpoints:
+    get:
+      operationId: listCheckpoints
+      summary: List all checkpoint descriptors visible to the runtime
+      responses:
+        '200':
+          description: Checkpoint descriptors
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  checkpoints:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CheckpointDescriptor'
+                additionalProperties: true
+  /checkpoints/{checkpoint_id}:
+    get:
+      operationId: getCheckpoint
+      summary: Read one checkpoint descriptor by checkpoint id
+      parameters:
+        - $ref: '#/components/parameters/CheckpointId'
+      responses:
+        '200':
+          description: Checkpoint descriptor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckpointDescriptor'
+        '404':
+          description: Checkpoint not found
+  /checkpoints/{checkpoint_id}/labels:
+    post:
+      operationId: updateCheckpointLabels
+      summary: Attach or replace labels and annotations for a checkpoint
+      parameters:
+        - $ref: '#/components/parameters/CheckpointId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckpointLabelsBody'
+      responses:
+        '200':
+          description: Updated checkpoint descriptor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckpointDescriptor'
+  /rollouts/{rollout_id}/resume:
+    post:
+      operationId: resumeRollout
+      summary: Resume or branch from a checkpoint or prior rollout
+      parameters:
+        - $ref: '#/components/parameters/RolloutId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResumeBody'
+      responses:
+        '200':
+          description: Rollout completed synchronously
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RolloutResponse'
+        '202':
+          description: Resumed rollout accepted asynchronously
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RolloutResponse'
+  /rollouts/{rollout_id}/pause:
+    post:
+      operationId: pauseRollout
+      summary: Pause a running rollout when supported
+      parameters:
+        - $ref: '#/components/parameters/RolloutId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PauseBody'
+      responses:
+        '200':
+          description: Updated rollout state payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RolloutStateResponse'
+  /rollouts/{rollout_id}/terminate:
+    post:
+      operationId: terminateRollout
+      summary: Terminate or cancel a rollout when supported
+      parameters:
+        - $ref: '#/components/parameters/RolloutId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TerminateBody'
+      responses:
+        '200':
+          description: Updated rollout state payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RolloutStateResponse'
+components:
+  parameters:
+    RolloutId:
+      name: rollout_id
+      in: path
+      required: true
+      schema:
+        type: string
+    CheckpointId:
+      name: checkpoint_id
+      in: path
+      required: true
+      schema:
+        type: string
+  schemas:
+    SubmissionMode:
+      type: string
+      enum: [sync, async]
+    RolloutState:
+      type: string
+      enum: [queued, running, paused, completed, failed, cancelled]
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          default: ok
+        contract_version:
+          type: string
+      additionalProperties: true
+    InfoResponse:
+      type: object
+      properties:
+        runtime:
+          type: object
+          additionalProperties: true
+        capabilities:
+          type: object
+          additionalProperties: true
+        metadata:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+    TaskInfoResponse:
+      type: object
+      properties:
+        task:
+          type: object
+          additionalProperties: true
+        dataset:
+          type: object
+          additionalProperties: true
+        capabilities:
+          type: object
+          additionalProperties: true
+        limits:
+          type: object
+          additionalProperties: true
+        inference:
+          type: object
+          additionalProperties: true
+        task_metadata:
+          type: object
+          additionalProperties: true
+        environment:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+    TaskCatalogResponse:
+      type: object
+      properties:
+        catalog_id:
+          type: string
+        tasks:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        instances:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        metadata:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+    RolloutStateResponse:
+      type: object
+      properties:
+        rollout_id:
+          type: string
+        trace_correlation_id:
+          type: string
+        trial_id:
+          type: string
+        status:
+          type: string
+        success_status:
+          type: string
+        status_detail:
+          type: string
+        control:
+          type: object
+          additionalProperties: true
+        progress:
+          type: object
+          additionalProperties: true
+        checkpoint:
+          type: object
+          additionalProperties: true
+        checkpoint_available:
+          type: boolean
+        resume_semantics:
+          type: object
+          additionalProperties: true
+        termination:
+          type: object
+          additionalProperties: true
+        reward_source:
+          type: string
+        proxy_rewards:
+          type: boolean
+        env_state:
+          type: object
+          additionalProperties: true
+        artifacts:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        metadata:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+    RolloutEnvSpec:
+      type: object
+      properties:
+        config:
+          type: object
+          additionalProperties: true
+        seed:
+          type: integer
+      additionalProperties: true
+    RolloutPolicySpec:
+      type: object
+      properties:
+        config:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+    RolloutDatasetSpec:
+      type: object
+      properties:
+        path:
+          type: string
+        split:
+          type: string
+        limit:
+          type: integer
+        config:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+    RolloutActorSpec:
+      type: object
+      required: [actor_id]
+      properties:
+        actor_id:
+          type: string
+        role:
+          type: string
+        config:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+    RewardInfo:
+      type: object
+      properties:
+        outcome_reward:
+          type: number
+          default: 0
+        event_rewards:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        score:
+          type: number
+        metrics:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+    ArtifactItem:
+      type: object
+      properties:
+        artifact_id:
+          type: string
+        kind:
+          type: string
+          default: generic
+        uri:
+          type: string
+        name:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+    RolloutRequest:
+      type: object
+      properties:
+        trace_correlation_id:
+          type: string
+        trial_id:
+          type: string
+        run_id:
+          type: string
+        mode:
+          type: string
+        submission_mode:
+          $ref: '#/components/schemas/SubmissionMode'
+        env:
+          $ref: '#/components/schemas/RolloutEnvSpec'
+        policy:
+          $ref: '#/components/schemas/RolloutPolicySpec'
+        dataset:
+          $ref: '#/components/schemas/RolloutDatasetSpec'
+        task_id:
+          type: string
+        task_instance_id:
+          type: string
+        task_metadata:
+          type: object
+          additionalProperties: true
+        checkpoint_id:
+          type: string
+        checkpoint_data_base64:
+          type: string
+        target_rollout_id:
+          type: string
+        actors:
+          type: array
+          items:
+            $ref: '#/components/schemas/RolloutActorSpec'
+        actor_ids:
+          type: array
+          items:
+            type: string
+        actor_overrides:
+          type: object
+          additionalProperties: true
+        metadata:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+    RolloutResponse:
+      type: object
+      required: [trace_correlation_id, rollout_id]
+      properties:
+        trace_correlation_id:
+          type: string
+        rollout_id:
+          type: string
+        trial_id:
+          type: string
+        status:
+          type: string
+          default: completed
+        success_status:
+          type: string
+          default: success
+        status_detail:
+          type: string
+        summary:
+          type: object
+          additionalProperties: true
+        reward_info:
+          $ref: '#/components/schemas/RewardInfo'
+        trace:
+          type: object
+          additionalProperties: true
+        turns:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        artifact:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArtifactItem'
+        artifacts:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArtifactItem'
+        events:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        usage:
+          type: object
+          additionalProperties: true
+        checkpoint:
+          type: object
+          additionalProperties: true
+        checkpoint_id:
+          type: string
+        task_id:
+          type: string
+        seed:
+          type: integer
+        created_at:
+          type: string
+        updated_at:
+          type: string
+        parent_rollout_id:
+          type: string
+        parent_checkpoint_id:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+        source:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+    CheckpointBody:
+      type: object
+      properties:
+        checkpoint_id:
+          type: string
+        checkpoint_uri:
+          type: string
+        checkpoint_version:
+          type: string
+        label:
+          type: string
+        labels:
+          type: array
+          items:
+            type: string
+        source:
+          type: string
+          default: go_explore
+        actor_ids:
+          type: array
+          items:
+            type: string
+        metadata:
+          type: object
+          additionalProperties: true
+        annotations:
+          type: object
+          additionalProperties: true
+        restore_eligible:
+          type: boolean
+      additionalProperties: true
+    CheckpointLabelsBody:
+      type: object
+      properties:
+        labels:
+          type: array
+          items:
+            type: string
+        annotations:
+          type: object
+          additionalProperties: true
+        metadata:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+    ResumeBody:
+      type: object
+      properties:
+        checkpoint_id:
+          type: string
+        target_rollout_id:
+          type: string
+        mode:
+          type: string
+        submission_mode:
+          $ref: '#/components/schemas/SubmissionMode'
+        overrides:
+          type: object
+          additionalProperties: true
+        branch_metadata:
+          type: object
+          additionalProperties: true
+        checkpoint_data_base64:
+          type: string
+      additionalProperties: true
+    PauseBody:
+      type: object
+      properties:
+        reason:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+    TerminateBody:
+      type: object
+      properties:
+        reason:
+          type: string
+      additionalProperties: true
+    CheckpointDescriptor:
+      type: object
+      required: [checkpoint_id, rollout_id]
+      properties:
+        checkpoint_id:
+          type: string
+        rollout_id:
+          type: string
+        checkpoint_uri:
+          type: string
+        created_at:
+          type: string
+        checkpoint_version:
+          type: string
+        parent_checkpoint_id:
+          type: string
+        parent_rollout_id:
+          type: string
+        restore_eligible:
+          type: boolean
+        label:
+          type: string
+        labels:
+          type: array
+          items:
+            type: string
+        source:
+          type: string
+        actor_ids:
+          type: array
+          items:
+            type: string
+        metadata:
+          type: object
+          additionalProperties: true
+        annotations:
+          type: object
+          additionalProperties: true
+        artifact_refs:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        checkpoint_available:
+          type: boolean
+        branchable:
+          type: boolean
+        checkpoint_semantics:
+          type: string
+        restore_semantics:
+          type: string
+        true_environment_snapshot:
+          type: boolean
+        resume_semantics:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+    ValidationError:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        fields:
+          type: array
+          items:
+            type: string
+      required: [code, message]
+      additionalProperties: true
