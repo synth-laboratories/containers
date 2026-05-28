@@ -108,9 +108,8 @@ def validate_submission_mode_request(request_payload: dict[str, Any]) -> Request
     mode_raw = request_payload.get("submission_mode")
     if mode_raw is None:
         return None
-    try:
-        SubmissionMode(str(mode_raw).strip().lower())
-    except ValueError:
+    normalized_mode = str(mode_raw).strip().lower()
+    if normalized_mode not in {item.value for item in SubmissionMode}:
         return RequestValidationIssue(
             code="invalid_submission_mode",
             message="submission_mode must be one of: sync, async.",

@@ -6,6 +6,7 @@ from typing import Any, Iterable
 
 from .capabilities import TaskCatalog, TaskInfo
 from .nouns import TaskDefinition, TaskInstance
+from .resources import ResourceRef
 
 
 class DatasetSplit(StrEnum):
@@ -68,9 +69,11 @@ class InMemoryTaskCatalog:
         *,
         catalog_id: str,
         metadata: dict[str, Any] | None = None,
+        resource_refs: Iterable[ResourceRef] | None = None,
     ) -> None:
         self._catalog_id = str(catalog_id)
         self._metadata = dict(metadata or {})
+        self._resource_refs = list(resource_refs or [])
         self._tasks: dict[str, TaskDefinition] = {}
         self._instances: dict[str, TaskInstance] = {}
 
@@ -79,6 +82,7 @@ class InMemoryTaskCatalog:
         catalog = cls(
             catalog_id=f"{task_info.task.task_family or task_info.task.task_id}:catalog",
             metadata={"source": "task_info_seed"},
+            resource_refs=task_info.resource_refs,
         )
         catalog.add_task(task_definition_from_task_info(task_info))
         return catalog
@@ -143,6 +147,7 @@ class InMemoryTaskCatalog:
             tasks=self.list_tasks(),
             instances=self.list_instances(),
             metadata=dict(self._metadata),
+            resource_refs=list(self._resource_refs),
         )
 
     def to_dict(self) -> dict[str, Any]:

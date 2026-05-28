@@ -14,12 +14,12 @@ class ToolRuntimeKind(StrEnum):
     NONE = "none"
 
     @classmethod
-    def parse(cls, value: Any, *, default: "ToolRuntimeKind" = NONE) -> "ToolRuntimeKind":
+    def parse(cls, value: Any, *, default: "ToolRuntimeKind | None" = None) -> "ToolRuntimeKind":
         if isinstance(value, cls):
             return value
         text = str(value or "").strip().lower().replace("-", "_")
         if not text:
-            return default
+            return default or cls.NONE
         aliases = {
             "provider_native_tools": cls.PROVIDER_NATIVE_TOOLS,
             "provider_tools": cls.PROVIDER_NATIVE_TOOLS,
@@ -31,10 +31,9 @@ class ToolRuntimeKind(StrEnum):
             "codex": cls.CODEX_SESSION_NATIVE,
             "none": cls.NONE,
         }
-        try:
-            return aliases[text]
-        except KeyError as exc:  # pragma: no cover - defensive branch
-            raise ValueError(f"unsupported tool runtime kind: {value!r}") from exc
+        if text not in aliases:
+            raise ValueError(f"unsupported tool runtime kind: {value!r}")
+        return aliases[text]
 
 
 class ToolCallSchemaKind(StrEnum):
@@ -44,12 +43,12 @@ class ToolCallSchemaKind(StrEnum):
     NONE = "none"
 
     @classmethod
-    def parse(cls, value: Any, *, default: "ToolCallSchemaKind" = NONE) -> "ToolCallSchemaKind":
+    def parse(cls, value: Any, *, default: "ToolCallSchemaKind | None" = None) -> "ToolCallSchemaKind":
         if isinstance(value, cls):
             return value
         text = str(value or "").strip().lower().replace("-", "_")
         if not text:
-            return default
+            return default or cls.NONE
         aliases = {
             "openai_chat_functions": cls.OPENAI_CHAT_FUNCTIONS,
             "chat_functions": cls.OPENAI_CHAT_FUNCTIONS,
@@ -61,10 +60,9 @@ class ToolCallSchemaKind(StrEnum):
             "codex": cls.CODEX_SESSION_EVENTS,
             "none": cls.NONE,
         }
-        try:
-            return aliases[text]
-        except KeyError as exc:  # pragma: no cover - defensive branch
-            raise ValueError(f"unsupported tool call schema kind: {value!r}") from exc
+        if text not in aliases:
+            raise ValueError(f"unsupported tool call schema kind: {value!r}")
+        return aliases[text]
 
 
 class ToolOutputMode(StrEnum):
@@ -74,22 +72,21 @@ class ToolOutputMode(StrEnum):
     NONE = "none"
 
     @classmethod
-    def parse(cls, value: Any, *, default: "ToolOutputMode" = NONE) -> "ToolOutputMode":
+    def parse(cls, value: Any, *, default: "ToolOutputMode | None" = None) -> "ToolOutputMode":
         if isinstance(value, cls):
             return value
         text = str(value or "").strip().lower().replace("-", "_")
         if not text:
-            return default
+            return default or cls.NONE
         aliases = {
             "tool_required": cls.TOOL_REQUIRED,
             "json_only": cls.JSON_ONLY,
             "text_only": cls.TEXT_ONLY,
             "none": cls.NONE,
         }
-        try:
-            return aliases[text]
-        except KeyError as exc:  # pragma: no cover - defensive branch
-            raise ValueError(f"unsupported tool output mode: {value!r}") from exc
+        if text not in aliases:
+            raise ValueError(f"unsupported tool output mode: {value!r}")
+        return aliases[text]
 
 
 @dataclass(frozen=True, slots=True)

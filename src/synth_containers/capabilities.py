@@ -17,6 +17,7 @@ from .ontology import (
     StatefulnessTier,
 )
 from .profiles import infer_profiles
+from .resources import ResourceRef
 from .serde import JsonDataclassMixin
 from .tool_runtime import ToolRuntimeCapabilities
 
@@ -52,6 +53,9 @@ class RouteHints(JsonDataclassMixin):
     metadata_routes: list[str] = field(default_factory=lambda: ["/metadata", "/info"])
     task_info_routes: list[str] = field(default_factory=lambda: ["/task_info"])
     task_catalog_routes: list[str] = field(default_factory=lambda: ["/task_catalog"])
+    compatibility_routes: list[str] = field(default_factory=lambda: ["/compatibility"])
+    program_routes: list[str] = field(default_factory=lambda: ["/program"])
+    dataset_routes: list[str] = field(default_factory=lambda: ["/dataset", "/dataset/rows"])
     rollout_routes: list[str] = field(default_factory=lambda: ["/rollout", "/rollouts"])
     state_routes: list[str] = field(default_factory=lambda: ["/rollouts/{rollout_id}/state"])
     pause_routes: list[str] = field(default_factory=lambda: ["/rollouts/{rollout_id}/pause"])
@@ -65,7 +69,12 @@ class RouteHints(JsonDataclassMixin):
             "/checkpoints/{checkpoint_id}/labels",
         ]
     )
-    resume_routes: list[str] = field(default_factory=lambda: ["/rollouts/{rollout_id}/resume"])
+    resume_routes: list[str] = field(
+        default_factory=lambda: [
+            "/rollouts/{rollout_id}/resume",
+            "/rollouts/{rollout_id}/fork",
+        ]
+    )
     summary_routes: list[str] = field(default_factory=lambda: ["/rollouts/{rollout_id}/summary"])
     usage_routes: list[str] = field(default_factory=lambda: ["/rollouts/{rollout_id}/usage"])
     event_routes: list[str] = field(default_factory=lambda: ["/rollouts/{rollout_id}/events"])
@@ -218,6 +227,7 @@ class TaskInfo(JsonDataclassMixin):
     task_metadata: dict[str, Any] = field(default_factory=dict)
     environment: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
+    resource_refs: list[ResourceRef] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -226,6 +236,7 @@ class TaskCatalog(JsonDataclassMixin):
     tasks: list[TaskDefinition] = field(default_factory=list)
     instances: list[TaskInstance] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    resource_refs: list[ResourceRef] = field(default_factory=list)
 
     def task_ids(self) -> list[str]:
         return [task.task_id for task in self.tasks]

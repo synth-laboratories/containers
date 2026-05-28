@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from threading import Lock
 from typing import Any, Callable, Mapping
 from uuid import uuid4
 
-from .capabilities import RuntimeMetadata, TaskCatalog, TaskInfo
+from .capabilities import RuntimeCapabilitySurface, RuntimeMetadata, TaskCatalog, TaskInfo
 from .formats import utc_now_iso
 from .nouns import (
     Action,
@@ -24,8 +24,24 @@ from .nouns import (
     Trajectory,
     TurnRecord,
 )
-from .ontology import CheckpointSemantics, OutcomeKind
+from .ontology import (
+    CapabilityLevel,
+    CheckpointSemantics,
+    ExecutionProfile,
+    OutcomeKind,
+    PrimitiveProtocol,
+    ResumeSemantics,
+    RolloutMode,
+    StatefulnessTier,
+)
 from .wire import RolloutState, SubmissionMode, lifecycle_projection, resolve_submission_mode, state_from_status
+from .runtime_requests import (
+    CheckpointLabelsRequest,
+    PauseRequest,
+    RuntimeCheckpointRequest,
+    RuntimeResumeRequest,
+    TerminateRequest,
+)
 
 
 CounterAction = str
@@ -187,7 +203,8 @@ class CounterRuntime:
         if isinstance(checkpoint, CheckpointDescriptor):
             checkpoint_id = checkpoint.checkpoint_id
         elif isinstance(checkpoint, Mapping):
-            checkpoint_id = str(checkpoint.get("checkpoint_id") or "")
+            checkpoint_payload = dict(checkpoint)
+            checkpoint_id = str(checkpoint_payload.get("checkpoint_id") or "")
         else:
             checkpoint_id = str(checkpoint)
         if checkpoint_id not in self._checkpoints:
@@ -579,6 +596,70 @@ class ReferenceManagedRuntime:
         self._executions: dict[str, ExecutionRecord] = {}
         self._checkpoints: dict[str, CheckpointDescriptor] = {}
 
+    @classmethod
+    def counter_default(cls, *, target: int = 3) -> "ReferenceManagedRuntime":
+        capabilities = RuntimeCapabilitySurface(
+            profiles=[ExecutionProfile.CHECKPOINTABLE_LONG_HORIZON_ENVIRONMENT],
+            rollout_modes=[RolloutMode.BLOCKING, RolloutMode.ASYNC],
+            statefulness_tier=StatefulnessTier.LONG_HORIZON,
+            protocol_fidelity={
+                PrimitiveProtocol.CATALOG_BACKED: CapabilityLevel.NATIVE,
+                PrimitiveProtocol.RESETTABLE: CapabilityLevel.NATIVE,
+                PrimitiveProtocol.STEPPABLE: CapabilityLevel.NATIVE,
+                PrimitiveProtocol.OBSERVABLE: CapabilityLevel.NATIVE,
+                PrimitiveProtocol.STATE_READABLE: CapabilityLevel.NATIVE,
+                PrimitiveProtocol.CHECKPOINTABLE: CapabilityLevel.NATIVE,
+                PrimitiveProtocol.RESTORABLE: CapabilityLevel.NATIVE,
+                PrimitiveProtocol.FORKABLE: CapabilityLevel.NATIVE,
+                PrimitiveProtocol.ROLLOUT_RUNNABLE: CapabilityLevel.NATIVE,
+                PrimitiveProtocol.ASYNC_ROLLOUT_RUNNABLE: CapabilityLevel.NATIVE,
+                PrimitiveProtocol.TRACE_EMITTING: CapabilityLevel.NATIVE,
+                PrimitiveProtocol.REWARD_EMITTING: CapabilityLevel.NATIVE,
+            },
+            checkpoint_semantics=CheckpointSemantics.TRUE_ENVIRONMENT_SNAPSHOT,
+            restore_semantics=CheckpointSemantics.TRUE_ENVIRONMENT_SNAPSHOT.value,
+            resume_semantics=ResumeSemantics.TRUE_ENVIRONMENT_SNAPSHOT,
+            checkpoint_support=True,
+            pause_support=True,
+            resume_support=True,
+            terminate_support=True,
+            state_support=True,
+            trace_support=True,
+            reward_support=True,
+            artifact_support=True,
+            supports_branching=True,
+            true_environment_snapshot=True,
+            metadata={"reference_runtime": "counter", "target": target},
+        )
+        task = TaskDefinition(
+            task_id="counter.default",
+            task_name="Counter Runtime",
+            task_family="reference",
+            description="Simple integer-counter reference runtime.",
+            version="v1",
+            benchmark="reference",
+            metadata={"target": target},
+        )
+        task_info = TaskInfo(
+            task=task,
+            capabilities=capabilities,
+            limits={"target": target},
+            environment="counter",
+            metadata={"source": "reference_runtime.counter_default"},
+        )
+        metadata = RuntimeMetadata(
+            runtime_id="counter.reference",
+            name="Counter Reference Runtime",
+            description="Reference implementation for the synth-containers HTTP contract.",
+            capabilities=capabilities,
+            metadata={"source": "reference_runtime.counter_default"},
+        )
+        return cls(
+            metadata=metadata,
+            task_info=task_info,
+            runtime_factory=lambda: CounterRuntime(target=target),
+        )
+
     def metadata(self) -> RuntimeMetadata:
         return self._metadata
 
@@ -617,6 +698,7 @@ class ReferenceManagedRuntime:
         return await self.get_execution(rollout_id)
 
     async def pause_execution(self, rollout_id: str, request: Mapping[str, Any]) -> ExecutionRecord | None:
+        pause_request = PauseRequest.from_payload(request)
         execution = await self.get_execution(rollout_id)
         if execution is None:
             return None
@@ -627,7 +709,7 @@ class ReferenceManagedRuntime:
         execution.success_status = lifecycle_projection(RolloutState.PAUSED)["success_status"]
         execution.updated_at = utc_now_iso()
         execution.metadata["termination"] = {
-            "reason": request.get("reason") or "paused",
+            "reason": pause_request.reason,
             "stop_action": "pause",
             "triggered_by": "operator",
             "at": execution.updated_at,
@@ -638,7 +720,7 @@ class ReferenceManagedRuntime:
                 rollout_id,
                 {
                     "label": "pause_snapshot",
-                    "metadata": {"pause_reason": request.get("reason") or "paused"},
+                    "metadata": {"pause_reason": pause_request.reason},
                 },
             )
             execution.checkpoint = checkpoint
@@ -646,6 +728,7 @@ class ReferenceManagedRuntime:
         return execution
 
     async def terminate_execution(self, rollout_id: str, request: Mapping[str, Any]) -> ExecutionRecord | None:
+        terminate_request = TerminateRequest.from_payload(request)
         execution = await self.get_execution(rollout_id)
         if execution is None:
             return None
@@ -653,7 +736,7 @@ class ReferenceManagedRuntime:
         execution.success_status = lifecycle_projection(RolloutState.CANCELLED)["success_status"]
         execution.updated_at = utc_now_iso()
         execution.metadata["termination"] = {
-            "reason": request.get("reason") or "terminated",
+            "reason": terminate_request.reason,
             "stop_action": "terminate",
             "triggered_by": "operator",
             "at": execution.updated_at,
@@ -663,22 +746,24 @@ class ReferenceManagedRuntime:
         return execution
 
     async def create_checkpoint(self, rollout_id: str, request: Mapping[str, Any]) -> CheckpointDescriptor | None:
+        checkpoint_request = RuntimeCheckpointRequest.from_payload(request)
         execution = await self.get_execution(rollout_id)
         if execution is None:
             return None
         checkpoint = CheckpointDescriptor(
-            checkpoint_id=str(request.get("checkpoint_id") or f"ckpt_{uuid4().hex[:10]}"),
+            checkpoint_id=checkpoint_request.checkpoint_id or f"ckpt_{uuid4().hex[:10]}",
             rollout_id=execution.execution_id,
-            checkpoint_uri=str(request.get("checkpoint_uri") or f"memory://checkpoints/{execution.execution_id}"),
+            checkpoint_uri=checkpoint_request.checkpoint_uri or f"memory://checkpoints/{execution.execution_id}",
             created_at=utc_now_iso(),
-            checkpoint_version=str(request.get("checkpoint_version") or "v1"),
-            label=request.get("label"),
-            labels=list(request.get("labels") or []),
-            source=request.get("source"),
-            actor_ids=list(request.get("actor_ids") or []),
-            metadata=dict(request.get("metadata") or {}),
-            annotations=dict(request.get("annotations") or {}),
-            restore_eligible=bool(request.get("restore_eligible", True)),
+            checkpoint_version=checkpoint_request.checkpoint_version,
+            label=checkpoint_request.label,
+            labels=list(checkpoint_request.labels),
+            source=checkpoint_request.source,
+            actor_ids=list(checkpoint_request.actor_ids),
+            metadata=dict(checkpoint_request.metadata),
+            annotations=dict(checkpoint_request.annotations),
+            artifact_refs=list(checkpoint_request.artifact_refs),
+            restore_eligible=checkpoint_request.restore_eligible,
             branchable=bool(self._metadata.capabilities.supports_branching),
             checkpoint_semantics=str(self._metadata.capabilities.checkpoint_semantics),
             restore_semantics=str(
@@ -716,22 +801,24 @@ class ReferenceManagedRuntime:
         checkpoint_id: str,
         request: Mapping[str, Any],
     ) -> CheckpointDescriptor | None:
+        label_request = CheckpointLabelsRequest.from_payload(request)
         checkpoint = self._checkpoints.get(str(checkpoint_id))
         if checkpoint is None:
             return None
-        checkpoint.labels = list(request.get("labels") or checkpoint.labels)
-        checkpoint.annotations = {**checkpoint.annotations, **dict(request.get("annotations") or {})}
-        checkpoint.metadata = {**checkpoint.metadata, **dict(request.get("metadata") or {})}
+        checkpoint.labels = list(label_request.labels or checkpoint.labels)
+        checkpoint.annotations = {**checkpoint.annotations, **label_request.annotations}
+        checkpoint.metadata = {**checkpoint.metadata, **label_request.metadata}
         return checkpoint
 
     async def get_checkpoint(self, checkpoint_id: str) -> CheckpointDescriptor | None:
         return self._checkpoints.get(str(checkpoint_id))
 
     async def resume_execution(self, rollout_id: str, request: Mapping[str, Any]) -> ExecutionRecord | None:
+        resume_request = RuntimeResumeRequest.from_payload(request)
         source = await self.get_execution(rollout_id)
         if source is None:
             return None
-        requested_checkpoint_id = str(request.get("checkpoint_id") or "").strip()
+        requested_checkpoint_id = resume_request.checkpoint_id
         checkpoint = (
             self._checkpoints.get(requested_checkpoint_id)
             if requested_checkpoint_id
@@ -739,7 +826,7 @@ class ReferenceManagedRuntime:
         )
         if checkpoint is None:
             return None
-        target_rollout_id = str(request.get("target_rollout_id") or f"{rollout_id}_resume_{uuid4().hex[:8]}")
+        target_rollout_id = resume_request.target_rollout_id or f"{rollout_id}_resume_{uuid4().hex[:8]}"
         clone = deepcopy(source)
         clone.execution_id = target_rollout_id
         clone.trace_correlation_id = target_rollout_id
@@ -749,12 +836,12 @@ class ReferenceManagedRuntime:
         clone.parent_checkpoint_id = checkpoint.checkpoint_id
         clone.metadata = {
             **dict(source.metadata),
-            **dict(request.get("branch_metadata") or {}),
+            **resume_request.branch_metadata,
             "resumed_from_rollout_id": source.execution_id,
             "resumed_from_checkpoint_id": checkpoint.checkpoint_id,
             "status_detail": "resumed",
         }
-        mode = resolve_submission_mode(dict(request))
+        mode = resolve_submission_mode({"submission_mode": resume_request.submission_mode})
         if mode is SubmissionMode.ASYNC:
             clone.status = RolloutState.QUEUED.value
             clone.success_status = lifecycle_projection(RolloutState.QUEUED)["success_status"]

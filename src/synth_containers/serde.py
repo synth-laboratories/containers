@@ -7,14 +7,12 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-try:  # pragma: no cover - pydantic is a package dependency, but keep the helper soft.
-    from pydantic import BaseModel
-except Exception:  # pragma: no cover
-    BaseModel = object  # type: ignore[misc,assignment]
+from pydantic import BaseModel
 
 
 JsonScalar = str | int | float | bool | None
 JsonValue = JsonScalar | dict[str, "JsonValue"] | list["JsonValue"]
+JsonObject = dict[str, JsonValue]
 
 
 def jsonable(value: Any) -> JsonValue:
@@ -36,8 +34,6 @@ def jsonable(value: Any) -> JsonValue:
         return {str(key): jsonable(item) for key, item in value.items()}
     if isinstance(value, (list, tuple, set, frozenset)):
         return [jsonable(item) for item in value]
-    if hasattr(value, "to_dict") and callable(value.to_dict):
-        return jsonable(value.to_dict())
     return str(value)
 
 

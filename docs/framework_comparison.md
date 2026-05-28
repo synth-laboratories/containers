@@ -1,6 +1,6 @@
 # Framework Comparison
 
-This document compares the planned Synth `containers` repo against the main
+This document compares the Synth `synth-containers` package against the main
 historical and external references currently shaping the design.
 
 ## High-level comparison
@@ -30,7 +30,7 @@ historical and external references currently shaping the design.
 
 ## Design takeaway
 
-The planned Synth `containers` repo should:
+The Synth `synth-containers` package should:
 
 - take the bottom-of-stack ideas from `Environments-old`
 - take typed environment interaction instincts from `OpenEnv`
@@ -38,4 +38,3 @@ The planned Synth `containers` repo should:
 - take MCP sandbox and snapshot grading ideas from `Archipelago`
 
 It should not copy any one of those systems wholesale.
-

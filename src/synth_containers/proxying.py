@@ -18,12 +18,12 @@ class InferenceApiFamily(StrEnum):
         return "chat/completions"
 
     @classmethod
-    def parse(cls, value: Any, *, default: "InferenceApiFamily" = CHAT_COMPLETIONS) -> "InferenceApiFamily":
+    def parse(cls, value: Any, *, default: "InferenceApiFamily | None" = None) -> "InferenceApiFamily":
         if isinstance(value, cls):
             return value
         text = str(value or "").strip().lower().replace("-", "_")
         if not text:
-            return default
+            return default or cls.CHAT_COMPLETIONS
         aliases = {
             "chat": cls.CHAT_COMPLETIONS,
             "chat_completions": cls.CHAT_COMPLETIONS,
@@ -31,10 +31,9 @@ class InferenceApiFamily(StrEnum):
             "responses": cls.RESPONSES,
             "response": cls.RESPONSES,
         }
-        try:
-            return aliases[text]
-        except KeyError as exc:  # pragma: no cover - defensive branch
-            raise ValueError(f"unsupported inference api family: {value!r}") from exc
+        if text not in aliases:
+            raise ValueError(f"unsupported inference api family: {value!r}")
+        return aliases[text]
 
 
 class ToolCallStyle(StrEnum):
@@ -44,12 +43,12 @@ class ToolCallStyle(StrEnum):
     NONE = "none"
 
     @classmethod
-    def parse(cls, value: Any, *, default: "ToolCallStyle" = NONE) -> "ToolCallStyle":
+    def parse(cls, value: Any, *, default: "ToolCallStyle | None" = None) -> "ToolCallStyle":
         if isinstance(value, cls):
             return value
         text = str(value or "").strip().lower().replace("-", "_")
         if not text:
-            return default
+            return default or cls.NONE
         aliases = {
             "openai_chat": cls.OPENAI_CHAT,
             "chat": cls.OPENAI_CHAT,
@@ -59,10 +58,9 @@ class ToolCallStyle(StrEnum):
             "codex": cls.CODEX_SESSION_NATIVE,
             "none": cls.NONE,
         }
-        try:
-            return aliases[text]
-        except KeyError as exc:  # pragma: no cover - defensive branch
-            raise ValueError(f"unsupported tool call style: {value!r}") from exc
+        if text not in aliases:
+            raise ValueError(f"unsupported tool call style: {value!r}")
+        return aliases[text]
 
 
 class ProxyMode(StrEnum):
@@ -71,22 +69,21 @@ class ProxyMode(StrEnum):
     ASSERT_PROXY = "assert_proxy"
 
     @classmethod
-    def parse(cls, value: Any, *, default: "ProxyMode" = ALLOW_DIRECT) -> "ProxyMode":
+    def parse(cls, value: Any, *, default: "ProxyMode | None" = None) -> "ProxyMode":
         if isinstance(value, cls):
             return value
         text = str(value or "").strip().lower().replace("-", "_")
         if not text:
-            return default
+            return default or cls.ALLOW_DIRECT
         aliases = {
             "allow_direct": cls.ALLOW_DIRECT,
             "allow": cls.ALLOW_DIRECT,
             "proxy_only": cls.PROXY_ONLY,
             "assert_proxy": cls.ASSERT_PROXY,
         }
-        try:
-            return aliases[text]
-        except KeyError as exc:  # pragma: no cover - defensive branch
-            raise ValueError(f"unsupported proxy mode: {value!r}") from exc
+        if text not in aliases:
+            raise ValueError(f"unsupported proxy mode: {value!r}")
+        return aliases[text]
 
 
 @dataclass(frozen=True, slots=True)

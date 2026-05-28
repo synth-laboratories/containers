@@ -1,9 +1,6 @@
 # Synth Containers
 
-Shared Synth container and environment runtime substrate. Canonical home for the
-`synth-containers` package and reference task containers consumed by
-[`synth-laboratories/optimizers`](https://github.com/synth-laboratories/optimizers)
-(GEPA and friends) and the broader Synth platform.
+Shared Synth container and environment runtime substrate.
 
 This package is the semver-friendly home for the shared ontology, protocols,
 profiles, capability vocabulary, reference HTTP transport, and adapter
@@ -41,6 +38,9 @@ and runtime/tool/proxy declarations.
 - `nouns.py`
   - task, actor, action, observation, state, checkpoint, artifact, trace,
     verifier, outcome, trajectory, execution records
+- `resources.py`
+  - neutral resource references for data, code, runtime, state, evaluation,
+    tooling, secrets, config, artifacts, and other heavy task inputs
 - `protocols.py`
   - runtime-checkable protocol definitions for the primitive behaviors
 - `profiles.py`
@@ -68,14 +68,24 @@ and runtime/tool/proxy declarations.
     reference HTTP contract
 - `reference_runtime.py`
   - concrete counter runtime + async queued executor + managed runtime adapter
+  - `ReferenceManagedRuntime.counter_default()` for a one-call reference runtime
 - `compatibility.py`
   - canonical consumer-target compatibility reporting and assertions
 - `tasks.py`
   - task/catalog convenience layer designed to stay evolvable toward persistent
     catalogs
+- `compat/`
+  - thin Harbor, OpenEnv, and Archipelago adapters that translate caller-owned
+    runtimes and services into the shared container contract
 - `adapters.py`
   - framework fidelity descriptors for `Environments-old`, `OpenEnv`,
     `Archipelago`, and `Harbor`
+- `rewards.py`
+  - reusable reward helpers, including the NLE Scout discovered-tile reward for
+    NetHack / NLE rollouts
+- `prompt_programs.py`
+  - public GEPA prompt-program nouns, candidate overlays, target modules, and
+    the `synth_optimizers.gepa.v1` optimizer contract helper
 
 ## Core ontology
 
@@ -159,6 +169,11 @@ The normalized capability surface includes:
 - token / logprob / logits support
 - route hints for discovery and control operations
 
+Task definitions, task instances, task info, and task catalogs can also carry
+`resource_refs`. These references are intentionally neutral: framework-specific
+detail belongs in `subtype` and `metadata`, while the umbrella `kind` remains
+small and stable.
+
 ## Reference HTTP surface
 
 The reference FastAPI adapter implements:
@@ -169,6 +184,10 @@ The reference FastAPI adapter implements:
 - `GET /info`
 - `GET /task_info`
 - `GET /task_catalog`
+- `GET /compatibility`
+- `GET /program`
+- `GET /dataset`
+- `POST /dataset/rows`
 - `POST /rollout`
 - `POST /rollouts`
 - `GET /rollouts/{rollout_id}`
@@ -188,9 +207,13 @@ The reference FastAPI adapter implements:
 - `POST /checkpoints/{checkpoint_id}/labels`
 - `POST /rollouts/{rollout_id}/resume`
 
+`GET /task_info` may receive selector query params. If a runtime implements
+`task_info_for_request(query)`, the reference adapter delegates to it; otherwise
+it returns the runtime's default task info.
+
 The rollout formatter is intentionally trainer-friendly:
 
-- `artifact[].turns`
+- `artifacts[].turns`
 - `trace.event_history`
 - `trace.inference.turns`
 - `reward_info.outcome_reward`
@@ -208,6 +231,34 @@ The package surfaces are structured to be directly verifiable for:
 - HTTP lifecycle operations including pause/checkpoint/resume/terminate
 - framework compatibility for `Environments-old`, `OpenEnv`, `Archipelago`,
   and `Harbor`
+
+## NLE Scout Reward
+
+`NLEScoutRewardTracker` implements the Scout metric used by NLE: reward is the
+increase in observed glyph tiles on the current `(dungeon_num, dungeon_level)`.
+NLE represents unseen tiles with `nethack.GLYPH_CMAP_OFF`, so cookbook code can
+construct the tracker from the NLE module and use the per-step update as the
+PipelineRL reward:
+
+```python
+from nle import nethack
+from synth_containers import NLEScoutRewardTracker
+
+reward_tracker = NLEScoutRewardTracker.from_nethack_module(nethack)
+
+previous_observation = None
+for observation in rollout_observations:
+    scout_update = reward_tracker.update_from_observation(
+        observation,
+        previous_observation=previous_observation,
+    )
+    reward = scout_update.reward
+    previous_observation = observation
+```
+
+The default is the pure Scout discovered-tile delta. If a cookbook needs the
+time-penalty behavior from the upstream NLE task, pass `penalty_mode` and
+`penalty_step` when constructing the tracker.
 
 ## References informing the design
 

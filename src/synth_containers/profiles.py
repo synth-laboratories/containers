@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
+from collections.abc import Mapping
+from typing import Any, Iterable
 
 from .ontology import CapabilityLevel, ExecutionProfile, PrimitiveProtocol
 
@@ -134,7 +135,7 @@ def spec_for_profile(profile: ExecutionProfile | str) -> ProfileSpec:
 
 
 def infer_profiles(
-    protocol_support: dict[PrimitiveProtocol | str, CapabilityLevel | str],
+    protocol_support: Mapping[Any, Any],
     *,
     minimum_level: CapabilityLevel = CapabilityLevel.DERIVED,
 ) -> list[ExecutionProfile]:
@@ -151,7 +152,7 @@ def infer_profiles(
 
 def missing_protocols(
     profile: ExecutionProfile | str,
-    protocol_support: dict[PrimitiveProtocol | str, CapabilityLevel | str],
+    protocol_support: Mapping[Any, Any],
     *,
     minimum_level: CapabilityLevel = CapabilityLevel.DERIVED,
 ) -> list[PrimitiveProtocol]:

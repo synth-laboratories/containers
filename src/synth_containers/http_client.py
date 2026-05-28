@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 from fastapi import FastAPI
@@ -88,7 +89,11 @@ class HTTPContainerClient:
             except httpx.HTTPStatusError as exc:
                 if optional and exc.response.status_code == 404:
                     return {}
-                last_error = exc
+                body = str(exc.response.text or "").strip()
+                detail = f"{exc.response.status_code} {exc.response.reason_phrase}"
+                if body:
+                    detail = f"{detail}: {body[:1000]}"
+                last_error = RuntimeError(detail)
             except (httpx.RequestError, ValueError) as exc:
                 last_error = exc
             if optional:
@@ -121,6 +126,21 @@ class HTTPContainerClient:
     async def task_catalog(self) -> dict[str, Any]:
         return await self._get("/task_catalog", optional=True)
 
+    async def program(self) -> dict[str, Any]:
+        return await self._get("/program", optional=True)
+
+    async def dataset(self) -> dict[str, Any]:
+        return await self._get("/dataset", optional=True)
+
+    async def dataset_rows(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        return await self._post("/dataset/rows", payload or {}, optional=True)
+
+    async def compatibility(self, target: str | None = None) -> dict[str, Any]:
+        if target is None or not str(target).strip():
+            return await self._get("/compatibility", optional=True)
+        encoded_target = quote(str(target).strip(), safe="")
+        return await self._get(f"/compatibility?target={encoded_target}", optional=True)
+
     async def rollout(self, payload: dict[str, Any]) -> dict[str, Any]:
         body = dict(payload)
         body.setdefault("submission_mode", "sync")
@@ -128,7 +148,7 @@ class HTTPContainerClient:
 
     async def rollouts(self, payload: dict[str, Any]) -> dict[str, Any]:
         body = dict(payload)
-        body.setdefault("submission_mode", "sync")
+        body.setdefault("submission_mode", "async")
         return await self._post("/rollouts", body)
 
     async def get_rollout(self, rollout_id: str) -> dict[str, Any]:
@@ -144,10 +164,7 @@ class HTTPContainerClient:
         return await self._get(f"/rollouts/{rollout_id}/usage", optional=True)
 
     async def artifacts(self, rollout_id: str) -> dict[str, Any]:
-        payload = await self._get(f"/rollouts/{rollout_id}/artifacts", optional=True)
-        if "artifact" not in payload and isinstance(payload.get("artifacts"), list):
-            payload["artifact"] = payload["artifacts"]
-        return payload
+        return await self._get(f"/rollouts/{rollout_id}/artifacts", optional=True)
 
     async def events(self, rollout_id: str) -> dict[str, Any]:
         return await self._get(f"/rollouts/{rollout_id}/events", optional=True)
@@ -185,3 +202,6 @@ class HTTPContainerClient:
 
     async def resume(self, rollout_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         return await self._post(f"/rollouts/{rollout_id}/resume", payload)
+
+    async def fork(self, rollout_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        return await self._post(f"/rollouts/{rollout_id}/fork", payload)

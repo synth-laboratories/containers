@@ -1,23 +1,26 @@
 # Implementation Handoff From Submission Review
 
-This document is the implementation handoff for building the local
-`synth-laboratories/containers` repo using the best ideas from the three
-downloaded submissions:
+This historical handoff seeded the public `synth-containers` package from three
+private submission snapshots. Active development now lives in
+`packages/synth-containers` in `synth-cookbooks-public`; keep this document as
+design provenance, not as the current development runbook.
 
-- [containers_repo](/Users/joshpurtell/Downloads/containers_repo)
-- [containers_repo-2](/Users/joshpurtell/Downloads/containers_repo-2)
-- [implemented_synth_containers](/Users/joshpurtell/Downloads/implemented_synth_containers)
+The original review compared these submissions:
+
+- [containers_repo](containers_repo)
+- [containers_repo-2](containers_repo-2)
+- [implemented_synth_containers](implemented_synth_containers)
 
 ## Executive Summary
 
-Use [containers_repo](/Users/joshpurtell/Downloads/containers_repo) as the base.
+Use [containers_repo](containers_repo) as the base.
 
 Cherry-pick:
 
 - the stronger consumer-target framing, reference runtime, and fuller OpenAPI
-  shape from [containers_repo-2](/Users/joshpurtell/Downloads/containers_repo-2)
+  shape from [containers_repo-2](containers_repo-2)
 - the compact compatibility-report and some task/catalog convenience patterns
-  from [implemented_synth_containers](/Users/joshpurtell/Downloads/implemented_synth_containers)
+  from [implemented_synth_containers](implemented_synth_containers)
 
 Do not try to merge all three wholesale. `containers_repo` is the best starting
 point because it already combines:
@@ -45,9 +48,9 @@ The local repo should become the canonical implementation of:
 
 The implementation should stay faithful to the design stance already written in:
 
-- [ontology.md](/Users/joshpurtell/Documents/GitHub/containers/docs/ontology.md)
-- [framework_comparison.md](/Users/joshpurtell/Documents/GitHub/containers/docs/framework_comparison.md)
-- [algorithm_support.md](/Users/joshpurtell/Documents/GitHub/containers/docs/algorithm_support.md)
+- [ontology.md](ontology.md)
+- [framework_comparison.md](framework_comparison.md)
+- [algorithm_support.md](algorithm_support.md)
 
 Core rule:
 
@@ -64,18 +67,18 @@ Use this as the implementation base.
 Best parts:
 
 - strongest overall package breadth in
-  [README.md](/Users/joshpurtell/Downloads/containers_repo/README.md:28)
+  [README.md](containers_repo/README.md:28)
 - best reference HTTP surface, including:
   - `/metadata`
   - `/task_catalog`
   - rollout lifecycle
   - artifacts / events / trace
   - pause / checkpoint / resume / terminate
-  in [http_adapter.py](/Users/joshpurtell/Downloads/containers_repo/src/synth_containers/http_adapter.py:119)
+  in [http_adapter.py](containers_repo/src/synth_containers/http_adapter.py:119)
 - strongest end-to-end workflow test in
-  [test_http_reference_adapter.py](/Users/joshpurtell/Downloads/containers_repo/tests/test_http_reference_adapter.py:17)
+  [test_http_reference_adapter.py](containers_repo/tests/test_http_reference_adapter.py:17)
 - best Go-Explore / MIPRO-specific contract and recovery modeling in
-  [test_go_ex_and_mipro_contracts.py](/Users/joshpurtell/Downloads/containers_repo/tests/test_go_ex_and_mipro_contracts.py:18)
+  [test_go_ex_and_mipro_contracts.py](containers_repo/tests/test_go_ex_and_mipro_contracts.py:18)
 
 Weaknesses to correct while implementing:
 
@@ -90,15 +93,15 @@ Use this as the source for conceptual refinements.
 Best parts:
 
 - best consumer-target assertions in
-  [test_consumers_and_adapters.py](/Users/joshpurtell/Downloads/containers_repo-2/tests/test_consumers_and_adapters.py:29)
+  [test_consumers_and_adapters.py](containers_repo-2/tests/test_consumers_and_adapters.py:29)
 - best honest “not yet supported” treatment for token-level NanoLong RL in
-  [test_consumers_and_adapters.py](/Users/joshpurtell/Downloads/containers_repo-2/tests/test_consumers_and_adapters.py:50)
+  [test_consumers_and_adapters.py](containers_repo-2/tests/test_consumers_and_adapters.py:50)
 - best self-contained reference runtime in
-  [reference_runtime.py](/Users/joshpurtell/Downloads/containers_repo-2/src/synth_containers/reference_runtime.py:53)
+  [reference_runtime.py](containers_repo-2/src/synth_containers/reference_runtime.py:53)
 - best async executor proving surface in
-  [test_reference_runtime.py](/Users/joshpurtell/Downloads/containers_repo-2/tests/test_reference_runtime.py:46)
+  [test_reference_runtime.py](containers_repo-2/tests/test_reference_runtime.py:46)
 - best OpenAPI starting point in
-  [container-contract-v1.yaml](/Users/joshpurtell/Downloads/containers_repo-2/openapi/container-contract-v1.yaml:1)
+  [container-contract-v1.yaml](containers_repo-2/openapi/container-contract-v1.yaml:1)
 
 Weaknesses to avoid carrying over directly:
 
@@ -114,22 +117,22 @@ Use this for some utility patterns, not as the base.
 Best parts:
 
 - compact compatibility-report API in
-  [compatibility.py](/Users/joshpurtell/Downloads/implemented_synth_containers/src/synth_containers/compatibility.py:12)
+  [compatibility.py](implemented_synth_containers/src/synth_containers/compatibility.py:12)
 - decent HTTP client shape in
-  [client.py](/Users/joshpurtell/Downloads/implemented_synth_containers/src/synth_containers/client.py:1)
+  [client.py](implemented_synth_containers/src/synth_containers/client.py:1)
 - some practical task/catalog convenience in
-  [tasks.py](/Users/joshpurtell/Downloads/implemented_synth_containers/src/synth_containers/tasks.py:32)
+  [tasks.py](implemented_synth_containers/src/synth_containers/tasks.py:32)
 
 Weaknesses:
 
 - much weaker OpenAPI / wire completeness in
-  [container-runtime-v0.1.yaml](/Users/joshpurtell/Downloads/implemented_synth_containers/openapi/container-runtime-v0.1.yaml:9)
+  [container-runtime-v0.1.yaml](implemented_synth_containers/openapi/container-runtime-v0.1.yaml:9)
 - more “compatibility utility library” than full substrate
 - ontology is a bit looser / less aligned with the current direction
 
 ## Implementation Plan For Local Repo
 
-Implement in `/Users/joshpurtell/Documents/GitHub/containers`.
+Implement in `packages/synth-containers`.
 
 ### Phase 1: Adopt the base package shape from `containers_repo`
 
@@ -156,7 +159,7 @@ split is too Synth-internal.
 
 Use the `CounterRuntime` and async executor ideas from:
 
-- [reference_runtime.py](/Users/joshpurtell/Downloads/containers_repo-2/src/synth_containers/reference_runtime.py:53)
+- [reference_runtime.py](containers_repo-2/src/synth_containers/reference_runtime.py:53)
 
 Bring over:
 
@@ -174,7 +177,7 @@ surface from `containers_repo-2`.
 
 Use:
 
-- [container-contract-v1.yaml](/Users/joshpurtell/Downloads/containers_repo-2/openapi/container-contract-v1.yaml:1)
+- [container-contract-v1.yaml](containers_repo-2/openapi/container-contract-v1.yaml:1)
 
 Then explicitly reconcile it with the stronger reference HTTP adapter from
 `containers_repo`.
@@ -192,9 +195,9 @@ Required outcome:
 Use:
 
 - the target vocabulary and assertion style from
-  [test_consumers_and_adapters.py](/Users/joshpurtell/Downloads/containers_repo-2/tests/test_consumers_and_adapters.py:29)
+  [test_consumers_and_adapters.py](containers_repo-2/tests/test_consumers_and_adapters.py:29)
 - the reporting ergonomics from
-  [compatibility.py](/Users/joshpurtell/Downloads/implemented_synth_containers/src/synth_containers/compatibility.py:12)
+  [compatibility.py](implemented_synth_containers/src/synth_containers/compatibility.py:12)
 
 Desired final shape:
 
@@ -215,7 +218,7 @@ reporting pattern for token-level RL support.
 
 Prefer the more explicit contract-aware pieces from:
 
-- [test_go_ex_and_mipro_contracts.py](/Users/joshpurtell/Downloads/containers_repo/tests/test_go_ex_and_mipro_contracts.py:18)
+- [test_go_ex_and_mipro_contracts.py](containers_repo/tests/test_go_ex_and_mipro_contracts.py:18)
 
 The final local repo should keep first-class types for:
 
@@ -244,7 +247,7 @@ But do not regress the richer route coverage from repo 1.
 ### Phase 7: Keep task abstractions explicit and ready for future SQLite-backed evolution
 
 Use the task/catalog convenience ideas from
-[implemented_synth_containers/tasks.py](/Users/joshpurtell/Downloads/implemented_synth_containers/src/synth_containers/tasks.py:32),
+[implemented_synth_containers/tasks.py](implemented_synth_containers/src/synth_containers/tasks.py:32),
 but keep them aligned with the ontology direction already documented for the new
 repo.
 

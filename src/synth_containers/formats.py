@@ -55,6 +55,7 @@ def task_info_to_http_payload(task_info: TaskInfo) -> dict[str, Any]:
         "task_metadata": dict(task_info.task_metadata),
         "environment": task_info.environment,
         "metadata": dict(task_info.metadata),
+        "resource_refs": [item.to_dict() for item in task_info.resource_refs],
     }
 
 
@@ -119,7 +120,8 @@ def execution_to_rollout_payload(execution: ExecutionRecord) -> dict[str, Any]:
         metadata.setdefault("seed", execution.seed())
     if trial_id:
         metadata.setdefault("trial_id", trial_id)
-    trace_metadata = trace_payload.get("metadata") if isinstance(trace_payload.get("metadata"), dict) else {}
+    raw_trace_metadata = trace_payload.get("metadata")
+    trace_metadata = dict(raw_trace_metadata) if isinstance(raw_trace_metadata, dict) else {}
     trace_metadata.setdefault("task_id", execution.task.task_id if execution.task else "")
     trace_metadata.setdefault("total_reward", execution.outcome_reward())
     trace_metadata.setdefault("status", execution.status)
@@ -157,7 +159,7 @@ def execution_to_rollout_payload(execution: ExecutionRecord) -> dict[str, Any]:
         },
         "summary": summary,
         "usage": dict(execution.usage),
-        "artifact": artifacts,
+        "artifacts": artifacts,
         "trace": trace_payload,
         "turns": turns,
         "metadata": metadata,
@@ -172,14 +174,11 @@ def execution_to_rollout_payload(execution: ExecutionRecord) -> dict[str, Any]:
 def execution_progress(execution: ExecutionRecord) -> ExecutionProgress:
     goal_signals = execution.metadata.get("goal_signals") or execution.summary.get("goal_signals") or []
     stall_signals = execution.metadata.get("stall_signals") or execution.summary.get("stall_signals") or []
+    wall_clock_seconds = execution.summary.get("wall_clock_seconds")
     return ExecutionProgress(
         step_count=int(execution.summary.get("step_count") or len(execution.trajectory.events) or len(execution.trajectory.turns)),
         agent_turn_count=len(execution.trajectory.turns),
-        wall_clock_seconds=(
-            float(execution.summary.get("wall_clock_seconds"))
-            if execution.summary.get("wall_clock_seconds") is not None
-            else None
-        ),
+        wall_clock_seconds=float(wall_clock_seconds) if wall_clock_seconds is not None else None,
         reward=execution.outcome_reward(),
         goal_signals=[str(item) for item in goal_signals],
         stall_signals=[str(item) for item in stall_signals],

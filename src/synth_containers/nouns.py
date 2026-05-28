@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .ontology import CheckpointSemantics, OutcomeKind, RuntimeKind
+from .resources import ResourceRef
 from .serde import JsonDataclassMixin, jsonable
 
 
@@ -16,6 +17,7 @@ class TaskDefinition(JsonDataclassMixin):
     version: str = "v1"
     benchmark: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
+    resource_refs: list[ResourceRef] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -28,6 +30,7 @@ class TaskInstance(JsonDataclassMixin):
     tags: list[str] = field(default_factory=list)
     asset_refs: list[dict[str, Any]] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    resource_refs: list[ResourceRef] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -353,14 +356,13 @@ class ExecutionRecord(JsonDataclassMixin):
         if self.task_instance and self.task_instance.seed is not None:
             return int(self.task_instance.seed)
         seed = self.summary.get("seed")
-        try:
-            return int(seed) if seed is not None and str(seed).strip() else None
-        except (TypeError, ValueError):
+        if seed is None or not str(seed).strip():
             return None
+        return int(seed)
 
     def trial_id(self) -> str | None:
         for source in (self.metadata, self.summary):
-            value = source.get("trial_id") if isinstance(source, dict) else None
+            value = source.get("trial_id")
             text = str(value or "").strip()
             if text:
                 return text
@@ -369,10 +371,7 @@ class ExecutionRecord(JsonDataclassMixin):
     def outcome_reward(self) -> float:
         summary_value = self.summary.get("outcome_reward")
         if summary_value is not None:
-            try:
-                return float(summary_value)
-            except (TypeError, ValueError):
-                pass
+            return float(summary_value)
         return self.outcome.outcome_reward()
 
     def artifact_turns(self) -> list[dict[str, Any]]:

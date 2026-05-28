@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
@@ -42,6 +42,7 @@ class CompatibilityReport:
     supported: bool
     missing_profiles: tuple[str, ...] = ()
     missing_protocols: tuple[str, ...] = ()
+    missing_protocol_groups: tuple[str, ...] = ()
     missing_features: tuple[str, ...] = ()
     issues: tuple[CompatibilityIssue, ...] = ()
     notes: tuple[str, ...] = ()
@@ -52,6 +53,7 @@ class CompatibilityReport:
             "supported": self.supported,
             "missing_profiles": list(self.missing_profiles),
             "missing_protocols": list(self.missing_protocols),
+            "missing_protocol_groups": list(self.missing_protocol_groups),
             "missing_features": list(self.missing_features),
             "issues": [issue.to_dict() for issue in self.issues],
             "notes": list(self.notes),
@@ -64,8 +66,10 @@ class ConsumerRequirement:
     summary: str
     required_profiles: tuple[ExecutionProfile, ...] = ()
     required_protocols: tuple[PrimitiveProtocol, ...] = ()
+    required_any_protocol_groups: tuple[tuple[PrimitiveProtocol, ...], ...] = ()
     required_rollout_modes: tuple[RolloutMode, ...] = ()
     minimum_statefulness: StatefulnessTier | None = None
+    minimum_level: CapabilityLevel = CapabilityLevel.DERIVED
     requires_checkpoint_support: bool = False
     requires_resume_support: bool = False
     requires_branching: bool = False
@@ -96,9 +100,18 @@ CONSUMER_REQUIREMENTS: dict[ConsumerTarget, ConsumerRequirement] = {
         required_protocols=(
             PrimitiveProtocol.CHECKPOINTABLE,
             PrimitiveProtocol.RESTORABLE,
-            PrimitiveProtocol.FORKABLE,
-            PrimitiveProtocol.ASYNC_ROLLOUT_RUNNABLE,
             PrimitiveProtocol.TRACE_EMITTING,
+        ),
+        required_any_protocol_groups=(
+            (
+                PrimitiveProtocol.STEPPABLE,
+                PrimitiveProtocol.ROLLOUT_RUNNABLE,
+                PrimitiveProtocol.ASYNC_ROLLOUT_RUNNABLE,
+            ),
+            (
+                PrimitiveProtocol.REWARD_EMITTING,
+                PrimitiveProtocol.VERIFIER_BACKED,
+            ),
         ),
         required_rollout_modes=(RolloutMode.ASYNC,),
         minimum_statefulness=StatefulnessTier.LONG_HORIZON,
@@ -110,16 +123,18 @@ CONSUMER_REQUIREMENTS: dict[ConsumerTarget, ConsumerRequirement] = {
     ),
     ConsumerTarget.MIPROV2: ConsumerRequirement(
         target=ConsumerTarget.MIPROV2,
-        summary="Stateless evaluator surface with task catalog + verifier-backed outcomes.",
-        required_profiles=(ExecutionProfile.STATELESS_EVALUATOR,),
-        required_protocols=(
-            PrimitiveProtocol.CATALOG_BACKED,
-            PrimitiveProtocol.ROLLOUT_RUNNABLE,
-            PrimitiveProtocol.VERIFIER_BACKED,
+        summary="Prompt/demo optimizer surface with rollout evaluation and scalar feedback.",
+        required_any_protocol_groups=(
+            (
+                PrimitiveProtocol.ROLLOUT_RUNNABLE,
+                PrimitiveProtocol.ASYNC_ROLLOUT_RUNNABLE,
+            ),
+            (
+                PrimitiveProtocol.REWARD_EMITTING,
+                PrimitiveProtocol.VERIFIER_BACKED,
+            ),
         ),
-        required_rollout_modes=(RolloutMode.BLOCKING,),
         minimum_statefulness=StatefulnessTier.STATELESS,
-        requires_verifier=True,
     ),
     ConsumerTarget.STANDARD_EVALS: ConsumerRequirement(
         target=ConsumerTarget.STANDARD_EVALS,
@@ -261,22 +276,30 @@ def _statefulness_at_least(actual: StatefulnessTier | str, minimum: Statefulness
     return _STATEFULNESS_RANK[actual_tier] >= _STATEFULNESS_RANK[minimum]
 
 
-def evaluate_consumer_support(
+def evaluate_runtime_requirement(
     metadata: RuntimeMetadata | RuntimeCapabilitySurface,
-    target: ConsumerTarget | str,
+    requirement: ConsumerRequirement,
 ) -> CompatibilityReport:
     capabilities = _capabilities_from(metadata)
-    requirement = consumer_requirement(target)
+    minimum_level = requirement.minimum_level
 
     missing_profiles = tuple(
         profile.value
         for profile in requirement.required_profiles
-        if capabilities.profile_level(profile).rank < CapabilityLevel.DERIVED.rank
+        if capabilities.profile_level(profile).rank < minimum_level.rank
     )
     missing_protocols = tuple(
         protocol.value
         for protocol in requirement.required_protocols
-        if capabilities.protocol_level(protocol).rank < CapabilityLevel.DERIVED.rank
+        if capabilities.protocol_level(protocol).rank < minimum_level.rank
+    )
+    missing_protocol_groups = tuple(
+        "|".join(protocol.value for protocol in group)
+        for group in requirement.required_any_protocol_groups
+        if not any(
+            capabilities.protocol_level(protocol).rank >= minimum_level.rank
+            for protocol in group
+        )
     )
 
     missing_features: list[str] = []
@@ -329,6 +352,14 @@ def evaluate_consumer_support(
                 fields=("protocol_fidelity",),
             )
         )
+    for group in missing_protocol_groups:
+        issues.append(
+            CompatibilityIssue(
+                code="missing_protocol_group",
+                message=f"missing one of protocol group: {group}",
+                fields=("protocol_fidelity",),
+            )
+        )
     for feature in missing_features:
         issues.append(
             CompatibilityIssue(
@@ -338,17 +369,30 @@ def evaluate_consumer_support(
             )
         )
 
-    supported = not missing_profiles and not missing_protocols and not missing_features
+    supported = (
+        not missing_profiles
+        and not missing_protocols
+        and not missing_protocol_groups
+        and not missing_features
+    )
     notes = tuple(sorted({str(note).strip() for note in capabilities.metadata.get("compatibility_notes", []) if str(note).strip()}))
     return CompatibilityReport(
         target=requirement.target,
         supported=supported,
         missing_profiles=missing_profiles,
         missing_protocols=missing_protocols,
+        missing_protocol_groups=missing_protocol_groups,
         missing_features=tuple(missing_features),
         issues=tuple(issues),
         notes=notes,
     )
+
+
+def evaluate_consumer_support(
+    metadata: RuntimeMetadata | RuntimeCapabilitySurface,
+    target: ConsumerTarget | str,
+) -> CompatibilityReport:
+    return evaluate_runtime_requirement(metadata, consumer_requirement(target))
 
 
 def assert_consumer_support(metadata: RuntimeMetadata | RuntimeCapabilitySurface, target: ConsumerTarget | str) -> None:
@@ -360,6 +404,8 @@ def assert_consumer_support(metadata: RuntimeMetadata | RuntimeCapabilitySurface
         chunks.append(f"missing_profiles={','.join(result.missing_profiles)}")
     if result.missing_protocols:
         chunks.append(f"missing_protocols={','.join(result.missing_protocols)}")
+    if result.missing_protocol_groups:
+        chunks.append(f"missing_protocol_groups={','.join(result.missing_protocol_groups)}")
     if result.missing_features:
         chunks.append(f"missing_features={','.join(result.missing_features)}")
     raise ValueError(f"consumer {result.target.value} is unsupported ({'; '.join(chunks)})")
