@@ -6,7 +6,7 @@ from typing import Any
 from .serde import JsonDataclassMixin
 
 
-GEPA_OPTIMIZER_CONTRACT_VERSION = "synth_optimizers.gepa.v1"
+GEPA_OPTIMIZER_CONTRACT_VERSION = "synth_optimizers.gepa.v2"
 
 
 @dataclass(slots=True)

@@ -1,8 +1,46 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from .proxying import (
+    CredentialMode,
+    InferenceApiFamily,
+    InferenceTarget,
+    PolicyDisableReasoning,
+    ProxyMode,
+    ToolCallStyle,
+)
 
 HttpObject = dict[str, object]
+_RAW_CREDENTIAL_KEYS = {
+    "access_token",
+    "api_key",
+    "apikey",
+    "authorization",
+    "bearer_token",
+    "openai_api_key",
+    "openrouter_api_key",
+    "secret_key",
+}
+
+
+def _find_raw_credential_key(value: Any) -> str | None:
+    if isinstance(value, dict):
+        for raw_key, raw_value in value.items():
+            normalized_key = str(raw_key).strip().lower().replace("-", "_")
+            if normalized_key in _RAW_CREDENTIAL_KEYS or normalized_key.endswith("_api_key"):
+                return str(raw_key)
+            nested = _find_raw_credential_key(raw_value)
+            if nested is not None:
+                return nested
+    if isinstance(value, list):
+        for item in value:
+            nested = _find_raw_credential_key(item)
+            if nested is not None:
+                return nested
+    return None
 
 
 class StrictModel(BaseModel):
@@ -21,6 +59,33 @@ class RolloutActorSpecModel(StrictModel):
     config: HttpObject = Field(default_factory=dict)
 
 
+class RolloutPolicySpecModel(StrictModel):
+    provider: str
+    model: str
+    api_family: InferenceApiFamily = InferenceApiFamily.CHAT_COMPLETIONS
+    base_url: str | None = None
+    inference_url: str | None = None
+    max_tokens: int | None = None
+    disable_reasoning: PolicyDisableReasoning = PolicyDisableReasoning.AUTO
+    tool_call_style: ToolCallStyle = ToolCallStyle.NONE
+    proxy_mode: ProxyMode = ProxyMode.ALLOW_DIRECT
+    credential_mode: CredentialMode = CredentialMode.BYOK
+    config: HttpObject = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def reject_raw_credentials(self) -> "RolloutPolicySpecModel":
+        raw_key = _find_raw_credential_key(self.config)
+        if raw_key is not None:
+            raise ValueError(
+                f"policy.config must not carry raw credential field {raw_key!r}; "
+                "set credential_mode and resolve credentials inside the container or proxy"
+            )
+        return self
+
+    def to_inference_target(self) -> InferenceTarget:
+        return InferenceTarget.from_policy_spec(self)
+
+
 class RolloutRequestModel(StrictModel):
     rollout_id: str | None = None
     trace_correlation_id: str | None = None
@@ -32,7 +97,7 @@ class RolloutRequestModel(StrictModel):
     task_instance_id: str | None = None
     task_metadata: HttpObject = Field(default_factory=dict)
     env: HttpObject = Field(default_factory=dict)
-    policy: HttpObject = Field(default_factory=dict)
+    policy: RolloutPolicySpecModel | None = None
     candidate: HttpObject = Field(default_factory=dict)
     candidate_overlay: HttpObject = Field(default_factory=dict)
     dataset_row: HttpObject = Field(default_factory=dict)

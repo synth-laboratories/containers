@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import StrEnum
 
 
-CONTRACT_VERSION = "2026-04-23"
+CONTRACT_VERSION = "2026-05-28"
 
 
 class CoreNoun(StrEnum):

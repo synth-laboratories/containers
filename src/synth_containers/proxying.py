@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import Any, Mapping
 
 from .serde import JsonDataclassMixin
 
@@ -86,6 +86,58 @@ class ProxyMode(StrEnum):
         return aliases[text]
 
 
+class CredentialMode(StrEnum):
+    BYOK = "byok"
+    PROXY = "proxy"
+
+    @classmethod
+    def parse(cls, value: Any, *, default: "CredentialMode | None" = None) -> "CredentialMode":
+        if isinstance(value, cls):
+            return value
+        text = str(value or "").strip().lower().replace("-", "_")
+        if not text:
+            return default or cls.BYOK
+        aliases = {
+            "byok": cls.BYOK,
+            "bring_your_own_key": cls.BYOK,
+            "proxy": cls.PROXY,
+        }
+        if text not in aliases:
+            raise ValueError(f"unsupported credential mode: {value!r}")
+        return aliases[text]
+
+
+class PolicyDisableReasoning(StrEnum):
+    AUTO = "auto"
+    ON = "on"
+    OFF = "off"
+
+    @classmethod
+    def parse(
+        cls,
+        value: Any,
+        *,
+        default: "PolicyDisableReasoning | None" = None,
+    ) -> "PolicyDisableReasoning":
+        if isinstance(value, cls):
+            return value
+        text = str(value or "").strip().lower().replace("-", "_")
+        if not text:
+            return default or cls.AUTO
+        aliases = {
+            "auto": cls.AUTO,
+            "on": cls.ON,
+            "true": cls.ON,
+            "1": cls.ON,
+            "off": cls.OFF,
+            "false": cls.OFF,
+            "0": cls.OFF,
+        }
+        if text not in aliases:
+            raise ValueError(f"unsupported policy disable_reasoning value: {value!r}")
+        return aliases[text]
+
+
 @dataclass(frozen=True, slots=True)
 class TraceIdentity(JsonDataclassMixin):
     trial_id: str
@@ -109,7 +161,10 @@ class InferenceTarget(JsonDataclassMixin):
     inference_url: str = ""
     base_url: str = ""
     proxy_mode: ProxyMode | str = ProxyMode.ALLOW_DIRECT
-    credential_mode: str = "byok"
+    credential_mode: CredentialMode | str = CredentialMode.BYOK
+    max_tokens: int | None = None
+    disable_reasoning: PolicyDisableReasoning | str | None = None
+    config: dict[str, Any] = field(default_factory=dict)
     adapter_ref: str | None = None
     finetune_ref: str | None = None
     compute_pool: str | None = None
@@ -122,8 +177,66 @@ class InferenceTarget(JsonDataclassMixin):
     def normalized_proxy_mode(self) -> ProxyMode:
         return ProxyMode.parse(self.proxy_mode)
 
+    def normalized_credential_mode(self) -> CredentialMode:
+        return CredentialMode.parse(self.credential_mode)
+
+    def normalized_disable_reasoning(self) -> PolicyDisableReasoning:
+        return PolicyDisableReasoning.parse(self.disable_reasoning)
+
     def normalized_tool_call_style(self) -> ToolCallStyle:
         return ToolCallStyle.parse(self.tool_call_style)
+
+    @classmethod
+    def from_policy_spec(cls, policy: Any) -> "InferenceTarget":
+        if isinstance(policy, cls):
+            return policy
+        if isinstance(policy, Mapping):
+            payload = dict(policy)
+        else:
+            model_dump = getattr(policy, "model_dump", None)
+            if callable(model_dump):
+                try:
+                    payload = dict(model_dump(mode="python", exclude_none=True))
+                except TypeError:
+                    payload = dict(model_dump())
+            else:
+                names = (
+                    "provider",
+                    "model",
+                    "api_family",
+                    "inference_url",
+                    "base_url",
+                    "proxy_mode",
+                    "credential_mode",
+                    "max_tokens",
+                    "disable_reasoning",
+                    "config",
+                    "tool_call_style",
+                )
+                payload = {key: getattr(policy, key) for key in names if hasattr(policy, key)}
+
+        provider = str(payload.get("provider") or "").strip()
+        model = str(payload.get("model") or "").strip()
+        if not provider:
+            raise ValueError("policy.provider must not be empty")
+        if not model:
+            raise ValueError("policy.model must not be empty")
+
+        max_tokens = payload.get("max_tokens")
+        config = payload.get("config")
+        return cls(
+            provider=provider,
+            model=model,
+            api_family=InferenceApiFamily.parse(payload.get("api_family")),
+            inference_url=str(payload.get("inference_url") or ""),
+            base_url=str(payload.get("base_url") or ""),
+            proxy_mode=ProxyMode.parse(payload.get("proxy_mode")),
+            credential_mode=CredentialMode.parse(payload.get("credential_mode")),
+            max_tokens=int(max_tokens) if max_tokens is not None else None,
+            disable_reasoning=PolicyDisableReasoning.parse(payload.get("disable_reasoning")),
+            config=dict(config) if isinstance(config, Mapping) else {},
+            tool_call_style=ToolCallStyle.parse(payload.get("tool_call_style")),
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -133,7 +246,10 @@ class InferenceTarget(JsonDataclassMixin):
             "inference_url": self.inference_url,
             "base_url": self.base_url,
             "proxy_mode": self.normalized_proxy_mode().value,
-            "credential_mode": self.credential_mode,
+            "credential_mode": self.normalized_credential_mode().value,
+            "max_tokens": self.max_tokens,
+            "disable_reasoning": self.normalized_disable_reasoning().value,
+            "config": dict(self.config),
             "adapter_ref": self.adapter_ref,
             "finetune_ref": self.finetune_ref,
             "compute_pool": self.compute_pool,

@@ -88,7 +88,17 @@ from .prompt_programs import (
     TargetModule,
     gepa_optimizer_contract,
 )
-from .proxying import AgentRuntimeTarget, InferenceApiFamily, InferenceTarget, ProxyMode, ProxyResolution, ToolCallStyle, TraceIdentity
+from .proxying import (
+    AgentRuntimeTarget,
+    CredentialMode,
+    InferenceApiFamily,
+    InferenceTarget,
+    PolicyDisableReasoning,
+    ProxyMode,
+    ProxyResolution,
+    ToolCallStyle,
+    TraceIdentity,
+)
 from .recovery import (
     ArtifactTrustLevel,
     RecoveryActionKind,
@@ -151,6 +161,7 @@ __all__ = [
     "ContainerExecutionContract",
     "ConsumerRequirement",
     "ConsumerTarget",
+    "CredentialMode",
     "CriterionVerdictV1",
     "CoreNoun",
     "CounterRuntime",
@@ -174,6 +185,7 @@ __all__ = [
     "Outcome",
     "OutcomeKind",
     "PauseRequest",
+    "PolicyDisableReasoning",
     "PrimitiveProtocol",
     "PromptModule",
     "PromptProgram",

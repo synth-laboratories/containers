@@ -1,12 +1,18 @@
 openapi: 3.1.0
 info:
   title: Synth Containers Contract
-  version: 0.1.0
+  version: 0.2.0
   description: |
     Canonical public wire contract for the standardized Synth container runtime.
     It covers metadata discovery, task discovery, blocking and async rollouts,
     rollout lifecycle polling, checkpoints, resume semantics, and control
     surfaces such as pause and terminate.
+
+    v0.2.0 (2026-05-28): RolloutPolicySpec is now a TYPED OpenAI-compatible
+    inference target (the "openai contract"), superseding the prior free-form
+    {config} bag and the per-container POLICY_* env side-channel. The GEPA
+    optimizer sub-contract bumps to `synth_optimizers.gepa.v2`. Credentials are
+    referenced via `credential_mode`; raw keys are never carried on the wire.
 servers:
   - url: http://localhost
     description: Local development
@@ -564,6 +570,34 @@ components:
     SubmissionMode:
       type: string
       enum: [sync, async]
+    InferenceApiFamily:
+      type: string
+      description: OpenAI-compatible inference family used to call the model.
+      enum: [chat_completions, responses]
+      default: chat_completions
+    ToolCallStyle:
+      type: string
+      description: How tool calls are encoded for the model.
+      enum: [openai_chat, openai_responses, codex_session_native, none]
+      default: none
+    ProxyMode:
+      type: string
+      description: Whether inference must route through the Synth inference proxy.
+      enum: [allow_direct, proxy_only, assert_proxy]
+      default: allow_direct
+    CredentialMode:
+      type: string
+      description: >-
+        How the container obtains the provider credential. Raw keys are never
+        sent on the wire: `byok` means the container reads its own env secret;
+        `proxy` means inference is routed through the Synth proxy which injects
+        credentials.
+      enum: [byok, proxy]
+      default: byok
+    PolicyDisableReasoning:
+      type: string
+      enum: [auto, "on", "off"]
+      default: auto
     RolloutState:
       type: string
       enum: [queued, running, paused, completed, failed, cancelled]
@@ -750,11 +784,49 @@ components:
       additionalProperties: true
     RolloutPolicySpec:
       type: object
+      description: >-
+        Typed OpenAI-compatible inference target for the policy model under
+        optimization (the "openai contract"). Supersedes the prior free-form
+        {config} bag and the per-container POLICY_* env side-channel. The
+        optimizer sends this on every rollout; the container calls the policy
+        model with it. Carries `credential_mode`, never a raw API key; the
+        secret is resolved by the container env or the Synth inference proxy.
+      required: [provider, model]
       properties:
+        provider:
+          type: string
+          description: >-
+            Inference provider, such as openai, openrouter, anthropic, groq,
+            together, or fireworks. String at this layer; the optimizer
+            validates its own closed enum upstream.
+        model:
+          type: string
+        api_family:
+          $ref: '#/components/schemas/InferenceApiFamily'
+        base_url:
+          type: string
+          description: OpenAI-compatible base URL; provider default if omitted.
+        inference_url:
+          type: string
+          description: Fully-resolved inference URL when proxied; overrides base_url.
+        max_tokens:
+          type: integer
+        disable_reasoning:
+          $ref: '#/components/schemas/PolicyDisableReasoning'
+        tool_call_style:
+          $ref: '#/components/schemas/ToolCallStyle'
+        proxy_mode:
+          $ref: '#/components/schemas/ProxyMode'
+        credential_mode:
+          $ref: '#/components/schemas/CredentialMode'
         config:
           type: object
           additionalProperties: true
-      additionalProperties: true
+          description: >-
+            Transitional escape hatch for provider-specific extras during the
+            v1 to v2 migration. Prefer the typed fields; this will be removed
+            once all containers consume the typed policy.
+      additionalProperties: false
     RolloutDatasetSpec:
       type: object
       properties:
