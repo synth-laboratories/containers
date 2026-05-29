@@ -54,6 +54,7 @@ for complete containers: Banking77, HotpotQA, MiniGrid, TBLite, and Crafter.
 
 - [Optimizers](https://github.com/synth-laboratories/optimizers) — GEPA on this contract
 - [Cookbooks](https://github.com/synth-laboratories/synth-cookbooks-public) — runnable containers
+- [Agent skill](skills/containers/SKILL.md) — drop into a coding agent to build and debug containers
 - [Contract OpenAPI](openapi/container-contract-v1.yaml)
 
 ## License
