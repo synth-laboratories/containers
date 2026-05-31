@@ -40,6 +40,43 @@ Keep these boundaries explicit:
 - External provider: policy/proposer inference APIs, remote execution services,
   model auth. Do not hide provider-specific semantics in generic route fields.
 
+### Task container vs proposer substrate
+
+These are separate concerns. Do not conflate them in docs, TOML, or skills.
+
+- **Task container** (this repo): HTTP `/rollout`, `/task_info`, `/program`, etc.
+  GEPA cookbook configs usually launch it locally:
+
+  ```toml
+  [container]
+  command = ["uv", "run", "--project", ".", "python", "synth_service_app.py"]
+  cwd = "."
+  ```
+
+  Dockerizing the task server is optional and independent of GEPA proposer config.
+
+- **Proposer substrate** (optimizers repo): where the Codex app-server runs during
+  reflective prompt optimization — `runtime_substrate = "local"` (default) or
+  `"docker"` with `[proposer.docker].image`. Staging, bind mounts, and Codex CLI
+  isolation live in `synth_optimizer_platform` agent runtime, not in
+  `synth-containers`.
+
+- **Policy credentials**: rollout models read keys from the task container
+  environment (`OPENAI_API_KEY`, etc.). That BYOK boundary is unrelated to the
+  proposer docker image, which bundles Codex CLI for proposal generation only.
+
+Vocabulary alignment (names only — containers does not launch GEPA proposers):
+
+- optimizers `runtime_substrate` — local host vs docker for Codex proposer process
+- optimizers `sandbox_mode` — Codex in-agent filesystem/sandbox policy
+- containers capability metadata `sandbox_profile` — task/environment sandbox hints
+  for agents reading `/metadata`; not the GEPA proposer launch substrate
+
+For proposer docker quickstarts and acceptance commands, see
+`optimizers/skills/gepa/SKILL.md` and `optimizers/README.md` (Authentication and
+models → Docker proposer substrate). The proposer image Dockerfile currently lives
+in `optimizers/docker/codex-gepa-proposer/`, not in this repo.
+
 ## Required HTTP Routes
 
 For GEPA and most public optimizer consumers, implement these routes:
