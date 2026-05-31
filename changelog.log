@@ -1,40 +1,21 @@
 # synth-containers changelog
 
-## 2026-05-31 — 0.2.0.dev202605312141
+## 2026-05-31
 
-Install:
+* Published `0.2.0.dev202605312141` to PyPI.
+* Added public `Container` authoring facade.
+* Added `Container.serve()` for local context-managed serving.
+* Added `ContainerRunner` for SDK containers, FastAPI apps, shell commands, and URLs.
+* Added `ContainerHandle.connection()` and immutable `ContainerConnection`.
+* Defaulted SDK-authored containers to async rollout submission.
+* Added async rollout polling through `/rollouts/{rollout_id}`.
+* Exported `Container`, `ContainerHandle`, `ContainerConnection`, and `ContainerRunner`.
+* Kept handwritten FastAPI containers and `create_reference_app()` compatible.
+* Merged PR #2 `better-ai-auth`; PR #1 `better-sdk` remains the SDK base.
+* Lifecycle APIs stay optimizer-neutral; GEPA appears only in metadata contracts.
 
-```bash
-pip install --pre synth-containers==0.2.0.dev202605312141
-```
+## 2026-05-30
 
-This daily dev release adds the public container authoring and lifecycle SDK. The
-contract stays algorithm-neutral: containers own datasets, rollout execution,
-policy credentials, and verifier output; optimizers receive a URL-only connection.
-
-### SDK
-
-* Add `Container` as the authoring facade for task info, tasksets, rollout handlers, beta program surfaces, and FastAPI app generation.
-* Add `Container.serve()` for context-managed local serving with automatic cleanup.
-* Add `ContainerRunner` for launching an SDK container, FastAPI app, shell command, or existing URL.
-* Add `ContainerHandle` with `url`, `connection()`, `health()`, `logs()`, `down()`, and context-manager cleanup.
-* Add immutable `ContainerConnection` for optimizer handoff; it carries only the URL.
-
-### Runtime Contract
-
-* Default SDK-authored containers to async rollout submission.
-* Wire async terminal payloads through `/rollout` submit, `/rollouts/{rollout_id}` poll, and client polling helpers.
-* Keep sync rollout mode available for local smoke runs and simple debugging.
-* Extend capability metadata and route hints for async rollout without adding GEPA-specific lifecycle nouns.
-
-### Packaging
-
-* Export `Container`, `ContainerHandle`, `ContainerConnection`, and `ContainerRunner` at package top level.
-* Publish `0.2.0.dev202605312141` to PyPI as source distribution and pure-Python wheel.
-* Pair with `synth-optimizers==0.2.0.dev202605312141` for the Better SDK examples.
-
-### Compatibility
-
-* Existing hand-written FastAPI containers and `create_reference_app()` continue to work.
-* Optimizer metadata may still advertise `optimizer_contracts.gepa`; lifecycle APIs stay optimizer-neutral.
-* Caller owns launch and teardown. Optimizers should not infer container lifecycle from `ContainerConnection`.
+* No main-branch package release.
+* Better SDK container lifecycle work stayed staged off main.
+* Next release target: cleaner examples, acceptance evidence, and lockstep optimizer docs.
