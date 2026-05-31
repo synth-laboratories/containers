@@ -45,7 +45,16 @@ class TokenEmissionCapabilities(JsonDataclassMixin):
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def any_supported(self) -> bool:
-        return any((self.token_ids, self.tokens, self.logprobs, self.logits, self.top_logprobs, self.old_logprobs))
+        return any(
+            (
+                self.token_ids,
+                self.tokens,
+                self.logprobs,
+                self.logits,
+                self.top_logprobs,
+                self.old_logprobs,
+            )
+        )
 
 
 @dataclass(slots=True)
@@ -55,11 +64,13 @@ class RouteHints(JsonDataclassMixin):
     task_catalog_routes: list[str] = field(default_factory=lambda: ["/task_catalog"])
     compatibility_routes: list[str] = field(default_factory=lambda: ["/compatibility"])
     program_routes: list[str] = field(default_factory=lambda: ["/program"])
-    dataset_routes: list[str] = field(default_factory=lambda: ["/dataset", "/dataset/rows"])
+    taskset_routes: list[str] = field(default_factory=lambda: ["/taskset", "/taskset/tasks"])
     rollout_routes: list[str] = field(default_factory=lambda: ["/rollout", "/rollouts"])
     state_routes: list[str] = field(default_factory=lambda: ["/rollouts/{rollout_id}/state"])
     pause_routes: list[str] = field(default_factory=lambda: ["/rollouts/{rollout_id}/pause"])
-    terminate_routes: list[str] = field(default_factory=lambda: ["/rollouts/{rollout_id}/terminate"])
+    terminate_routes: list[str] = field(
+        default_factory=lambda: ["/rollouts/{rollout_id}/terminate"]
+    )
     checkpoint_routes: list[str] = field(
         default_factory=lambda: [
             "/rollouts/{rollout_id}/checkpoints",
@@ -90,8 +101,12 @@ class RuntimeCapabilitySurface(JsonDataclassMixin):
     rollout_modes: list[RolloutMode | str] = field(default_factory=lambda: [RolloutMode.BLOCKING])
     statefulness_tier: StatefulnessTier | str = StatefulnessTier.EPISODIC
     noun_fidelity: dict[CoreNoun | str, CapabilityLevel | str] = field(default_factory=dict)
-    protocol_fidelity: dict[PrimitiveProtocol | str, CapabilityLevel | str] = field(default_factory=dict)
-    profile_fidelity: dict[ExecutionProfile | str, CapabilityLevel | str] = field(default_factory=dict)
+    protocol_fidelity: dict[PrimitiveProtocol | str, CapabilityLevel | str] = field(
+        default_factory=dict
+    )
+    profile_fidelity: dict[ExecutionProfile | str, CapabilityLevel | str] = field(
+        default_factory=dict
+    )
     checkpoint_semantics: CheckpointSemantics | str = CheckpointSemantics.NONE
     restore_semantics: str = ""
     resume_semantics: ResumeSemantics | str = ResumeSemantics.UNSUPPORTED
@@ -142,13 +157,19 @@ class RuntimeCapabilitySurface(JsonDataclassMixin):
         }
 
     def protocol_level(self, protocol: PrimitiveProtocol | str) -> CapabilityLevel:
-        return self.normalized_protocol_fidelity().get(PrimitiveProtocol(str(protocol)), CapabilityLevel.UNSUPPORTED)
+        return self.normalized_protocol_fidelity().get(
+            PrimitiveProtocol(str(protocol)), CapabilityLevel.UNSUPPORTED
+        )
 
     def profile_level(self, profile: ExecutionProfile | str) -> CapabilityLevel:
         explicit = self.normalized_profile_fidelity().get(ExecutionProfile(str(profile)))
         if explicit is not None:
             return explicit
-        return CapabilityLevel.NATIVE if ExecutionProfile(str(profile)) in self.normalized_profiles() else CapabilityLevel.UNSUPPORTED
+        return (
+            CapabilityLevel.NATIVE
+            if ExecutionProfile(str(profile)) in self.normalized_profiles()
+            else CapabilityLevel.UNSUPPORTED
+        )
 
     def noun_level(self, noun: CoreNoun | str) -> CapabilityLevel:
         return self.normalized_noun_fidelity().get(CoreNoun(str(noun)), CapabilityLevel.UNSUPPORTED)
@@ -170,7 +191,9 @@ class RuntimeCapabilitySurface(JsonDataclassMixin):
             raise ValueError("supports_branching=True requires resume_support=True")
         if self.token_emission.any_supported() and not self.trace_support:
             raise ValueError("token emission requires trace_support=True")
-        if self.multi_actor and not self.supports_protocol(PrimitiveProtocol.MULTI_ACTOR, minimum_level=CapabilityLevel.APPROXIMATE):
+        if self.multi_actor and not self.supports_protocol(
+            PrimitiveProtocol.MULTI_ACTOR, minimum_level=CapabilityLevel.APPROXIMATE
+        ):
             raise ValueError("multi_actor=True requires protocol_fidelity for multi_actor")
         self.tool_runtime.validate()
 
@@ -182,9 +205,15 @@ class RuntimeCapabilitySurface(JsonDataclassMixin):
             "profiles": [item.value for item in self.normalized_profiles()],
             "rollout_modes": [item.value for item in self.normalized_rollout_modes()],
             "statefulness_tier": str(self.statefulness_tier),
-            "noun_fidelity": {key.value: value.value for key, value in self.normalized_noun_fidelity().items()},
-            "protocol_fidelity": {key.value: value.value for key, value in self.normalized_protocol_fidelity().items()},
-            "profile_fidelity": {key.value: value.value for key, value in self.normalized_profile_fidelity().items()},
+            "noun_fidelity": {
+                key.value: value.value for key, value in self.normalized_noun_fidelity().items()
+            },
+            "protocol_fidelity": {
+                key.value: value.value for key, value in self.normalized_protocol_fidelity().items()
+            },
+            "profile_fidelity": {
+                key.value: value.value for key, value in self.normalized_profile_fidelity().items()
+            },
             "checkpoint_semantics": str(self.checkpoint_semantics),
             "restore_semantics": self.restore_semantics,
             "resume_semantics": str(self.resume_semantics),

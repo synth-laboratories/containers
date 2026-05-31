@@ -20,6 +20,31 @@ agent, or a live game environment, and in Python, Rust, or TypeScript.
 pip install synth-containers
 ```
 
+## Local Better SDK Dev
+
+This branch pair expects:
+
+- `containers`: `better-sdk`, package `synth-containers==0.2.0.dev20260531`
+- `optimizers`: `better-sdk`, package `synth-optimizers==0.2.0.dev20260531`
+
+Install both editable checkouts with `uv`:
+
+```bash
+cd /Users/joshpurtell/Documents/GitHub/optimizers
+uv sync --group dev
+uv pip install -e /Users/joshpurtell/Documents/GitHub/containers
+uv pip install -e /Users/joshpurtell/Documents/GitHub/optimizers
+```
+
+Verify import paths and versions:
+
+```bash
+uv run --project /Users/joshpurtell/Documents/GitHub/optimizers python -c "import importlib.metadata as m, synth_containers, synth_optimizers; print(synth_containers.__file__); print(m.version('synth-containers')); print(synth_optimizers.__version__)"
+```
+
+The SDK validation examples (Banking77, TBLite, Crafter, MiniGrid) live in local
+`optimizers/dev_examples/` (gitignored — not shipped in the repo).
+
 ## The contract
 
 | Route | Method | Purpose |
@@ -30,6 +55,11 @@ pip install synth-containers
 | `/dataset/rows` | POST | rows for a requested seed list |
 | `/rollout` | POST | run a candidate on a row → reward + usage |
 | `/health` | GET | liveness |
+
+The Python SDK also provides `Container`, `Container.serve()`,
+`ContainerHandle`, and `ContainerConnection` for URL-only optimizer handoff.
+Use generic route hints and capability metadata here; optimizer-specific GEPA
+settings belong in `synth-optimizers`.
 
 ## Example
 

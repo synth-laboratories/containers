@@ -56,7 +56,7 @@ def gepa_optimizer_contract() -> dict[str, str]:
     return {
         "version": GEPA_OPTIMIZER_CONTRACT_VERSION,
         "program_route": "/program",
-        "dataset_route": "/dataset",
-        "dataset_rows_route": "/dataset/rows",
+        "taskset_route": "/taskset",
+        "taskset_tasks_route": "/taskset/tasks",
         "rollout_route": "/rollout",
     }

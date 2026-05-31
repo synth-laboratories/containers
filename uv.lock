@@ -752,7 +752,7 @@ wheels = [
 
 [[package]]
 name = "synth-containers"
-version = "0.1.0"
+version = "0.2.0.dev20260531"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
