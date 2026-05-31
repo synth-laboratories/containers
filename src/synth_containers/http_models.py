@@ -100,7 +100,7 @@ class RolloutRequestModel(StrictModel):
     policy: RolloutPolicySpecModel | None = None
     candidate: HttpObject = Field(default_factory=dict)
     candidate_overlay: HttpObject = Field(default_factory=dict)
-    dataset_row: HttpObject = Field(default_factory=dict)
+    task: HttpObject = Field(default_factory=dict)
     metadata: HttpObject = Field(default_factory=dict)
     checkpoint: HttpObject | str | None = None
     checkpoint_id: str | None = None
@@ -109,7 +109,7 @@ class RolloutRequestModel(StrictModel):
     long_horizon: HttpObject = Field(default_factory=dict)
     terminator: HttpObject = Field(default_factory=dict)
     task_payload: HttpObject = Field(default_factory=dict)
-    dataset: HttpObject = Field(default_factory=dict)
+    taskset: HttpObject = Field(default_factory=dict)
     actors: list[RolloutActorSpecModel] = Field(default_factory=list)
     actor_ids: list[str] = Field(default_factory=list)
     actor_overrides: HttpObject = Field(default_factory=dict)

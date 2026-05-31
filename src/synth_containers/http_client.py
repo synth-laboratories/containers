@@ -100,12 +100,16 @@ class HTTPContainerClient:
                 return {}
             if attempt < self._max_retries:
                 await asyncio.sleep(self._retry_backoff_seconds * (attempt + 1))
-        raise RuntimeError(f"container request failed {method.upper()} {path}: {last_error}") from last_error
+        raise RuntimeError(
+            f"container request failed {method.upper()} {path}: {last_error}"
+        ) from last_error
 
     async def _get(self, path: str, *, optional: bool = False) -> dict[str, Any]:
         return await self._request("GET", path, optional=optional)
 
-    async def _post(self, path: str, payload: dict[str, Any] | None = None, *, optional: bool = False) -> dict[str, Any]:
+    async def _post(
+        self, path: str, payload: dict[str, Any] | None = None, *, optional: bool = False
+    ) -> dict[str, Any]:
         return await self._request("POST", path, payload=payload or {}, optional=optional)
 
     async def root(self) -> dict[str, Any]:
@@ -129,11 +133,11 @@ class HTTPContainerClient:
     async def program(self) -> dict[str, Any]:
         return await self._get("/program", optional=True)
 
-    async def dataset(self) -> dict[str, Any]:
-        return await self._get("/dataset", optional=True)
+    async def taskset(self) -> dict[str, Any]:
+        return await self._get("/taskset", optional=True)
 
-    async def dataset_rows(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
-        return await self._post("/dataset/rows", payload or {}, optional=True)
+    async def taskset_tasks(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        return await self._post("/taskset/tasks", payload or {}, optional=True)
 
     async def compatibility(self, target: str | None = None) -> dict[str, Any]:
         if target is None or not str(target).strip():
@@ -175,10 +179,14 @@ class HTTPContainerClient:
     async def pause(self, rollout_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         return await self._post(f"/rollouts/{rollout_id}/pause", payload)
 
-    async def terminate(self, rollout_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def terminate(
+        self, rollout_id: str, payload: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         return await self._post(f"/rollouts/{rollout_id}/terminate", payload)
 
-    async def checkpoint(self, rollout_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def checkpoint(
+        self, rollout_id: str, payload: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         return await self._post(f"/rollouts/{rollout_id}/checkpoints", payload)
 
     async def list_rollout_checkpoints(self, rollout_id: str) -> dict[str, Any]:
@@ -200,7 +208,9 @@ class HTTPContainerClient:
     ) -> dict[str, Any]:
         return await self._post(f"/checkpoints/{checkpoint_id}/labels", payload, optional=True)
 
-    async def resume(self, rollout_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def resume(
+        self, rollout_id: str, payload: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         return await self._post(f"/rollouts/{rollout_id}/resume", payload)
 
     async def fork(self, rollout_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:

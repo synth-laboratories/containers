@@ -42,21 +42,35 @@ class ManagedRuntime(Protocol):
 
     async def get_execution_state(self, rollout_id: str) -> ExecutionRecord | None: ...
 
-    async def pause_execution(self, rollout_id: str, request: JsonObject) -> ExecutionRecord | None: ...
+    async def pause_execution(
+        self, rollout_id: str, request: JsonObject
+    ) -> ExecutionRecord | None: ...
 
-    async def terminate_execution(self, rollout_id: str, request: JsonObject) -> ExecutionRecord | None: ...
+    async def terminate_execution(
+        self, rollout_id: str, request: JsonObject
+    ) -> ExecutionRecord | None: ...
 
-    async def create_checkpoint(self, rollout_id: str, request: JsonObject) -> CheckpointDescriptor | None: ...
+    async def create_checkpoint(
+        self, rollout_id: str, request: JsonObject
+    ) -> CheckpointDescriptor | None: ...
 
     async def get_checkpoint(self, checkpoint_id: str) -> CheckpointDescriptor | None: ...
 
-    async def list_checkpoints(self, rollout_id: str | None = None) -> list[CheckpointDescriptor]: ...
+    async def list_checkpoints(
+        self, rollout_id: str | None = None
+    ) -> list[CheckpointDescriptor]: ...
 
-    async def get_rollout_checkpoint(self, rollout_id: str, checkpoint_id: str) -> CheckpointDescriptor | None: ...
+    async def get_rollout_checkpoint(
+        self, rollout_id: str, checkpoint_id: str
+    ) -> CheckpointDescriptor | None: ...
 
-    async def update_checkpoint_labels(self, checkpoint_id: str, request: JsonObject) -> CheckpointDescriptor | None: ...
+    async def update_checkpoint_labels(
+        self, checkpoint_id: str, request: JsonObject
+    ) -> CheckpointDescriptor | None: ...
 
-    async def resume_execution(self, rollout_id: str, request: JsonObject) -> ExecutionRecord | None: ...
+    async def resume_execution(
+        self, rollout_id: str, request: JsonObject
+    ) -> ExecutionRecord | None: ...
 
 
 def _metadata(runtime: ManagedRuntime) -> RuntimeMetadata:
@@ -89,8 +103,8 @@ def _task_catalog(runtime: ManagedRuntime) -> TaskCatalog:
 def _gepa_optimizer_route_contract(runtime: ManagedRuntime) -> dict[str, Any] | None:
     route_methods = {
         "program_route": "program",
-        "dataset_route": "dataset_info",
-        "dataset_rows_route": "dataset_rows",
+        "taskset_route": "taskset_info",
+        "taskset_tasks_route": "taskset_tasks",
     }
     if not all(callable(getattr(runtime, method, None)) for method in route_methods.values()):
         return None
@@ -111,7 +125,10 @@ def _with_optimizer_contracts(payload: dict[str, Any], runtime: ManagedRuntime) 
             optimizer_contracts = {}
         else:
             optimizer_contracts = dict(optimizer_contracts)
-        optimizer_contracts["gepa"] = {**gepa_contract, **dict(optimizer_contracts.get("gepa") or {})}
+        optimizer_contracts["gepa"] = {
+            **gepa_contract,
+            **dict(optimizer_contracts.get("gepa") or {}),
+        }
         metadata["optimizer_contracts"] = optimizer_contracts
     value["metadata"] = metadata
     return value
@@ -147,7 +164,7 @@ def _coerce_state_payload(runtime: ManagedRuntime, value: ExecutionRecord) -> di
             terminate_supported=capabilities.terminate_support,
             resume_supported=capabilities.resume_support,
             checkpoint_supported=capabilities.checkpoint_support,
-        )
+        ),
     )
 
 
@@ -161,8 +178,9 @@ def _coerce_checkpoint_list(value: list[CheckpointDescriptor]) -> list[dict[str,
     return [item.to_dict() for item in value]
 
 
-
-def create_reference_app(runtime: ManagedRuntime, *, title: str = "synth-containers-reference") -> FastAPI:
+def create_reference_app(
+    runtime: ManagedRuntime, *, title: str = "synth-containers-reference"
+) -> FastAPI:
     app = FastAPI(title=title)
 
     @app.get("/")
@@ -199,16 +217,16 @@ def create_reference_app(runtime: ManagedRuntime, *, title: str = "synth-contain
     async def program() -> dict[str, Any]:
         return await _optional_runtime_contract_call(runtime, "program")
 
-    @app.get("/dataset")
-    async def dataset() -> dict[str, Any]:
-        return await _optional_runtime_contract_call(runtime, "dataset_info")
+    @app.get("/taskset")
+    async def taskset() -> dict[str, Any]:
+        return await _optional_runtime_contract_call(runtime, "taskset_info")
 
-    @app.post("/dataset/rows")
-    async def dataset_rows(request: Request) -> dict[str, Any]:
+    @app.post("/taskset/tasks")
+    async def taskset_tasks(request: Request) -> dict[str, Any]:
         payload = await request.json()
         if not isinstance(payload, Mapping):
-            raise HTTPException(status_code=400, detail="dataset_rows_request_must_be_object")
-        return await _optional_runtime_contract_call(runtime, "dataset_rows", payload)
+            raise HTTPException(status_code=400, detail="taskset_tasks_request_must_be_object")
+        return await _optional_runtime_contract_call(runtime, "taskset_tasks", payload)
 
     @app.get("/task_catalog")
     async def task_catalog() -> dict[str, Any]:
@@ -223,7 +241,9 @@ def create_reference_app(runtime: ManagedRuntime, *, title: str = "synth-contain
         try:
             return evaluate_consumer_support(metadata, normalized_target).to_dict()
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=f"invalid_compatibility_target:{normalized_target}:{exc}") from exc
+            raise HTTPException(
+                status_code=400, detail=f"invalid_compatibility_target:{normalized_target}:{exc}"
+            ) from exc
 
     @app.post("/rollout")
     @app.post("/rollouts")
@@ -279,7 +299,10 @@ def create_reference_app(runtime: ManagedRuntime, *, title: str = "synth-contain
         payload = await get_rollout(rollout_id)
         raw_trace = payload.get("trace")
         trace = dict(raw_trace) if isinstance(raw_trace, dict) else {}
-        return {"rollout_id": rollout_id, "events": trace.get("events") or trace.get("event_history") or []}
+        return {
+            "rollout_id": rollout_id,
+            "events": trace.get("events") or trace.get("event_history") or [],
+        }
 
     @app.get("/rollouts/{rollout_id}/trace")
     async def get_rollout_trace(rollout_id: str) -> dict[str, Any]:
@@ -305,7 +328,9 @@ def create_reference_app(runtime: ManagedRuntime, *, title: str = "synth-contain
         return _coerce_state_payload(runtime, result)
 
     @app.post("/rollouts/{rollout_id}/checkpoints")
-    async def create_checkpoint(rollout_id: str, request: CreateCheckpointRequestModel) -> dict[str, Any]:
+    async def create_checkpoint(
+        rollout_id: str, request: CreateCheckpointRequestModel
+    ) -> dict[str, Any]:
         payload = request.model_dump(mode="json", exclude_none=True)
         result = await runtime.create_checkpoint(rollout_id=rollout_id, request=payload)
         if result is None:

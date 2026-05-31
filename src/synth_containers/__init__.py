@@ -40,7 +40,12 @@ from .contracts import (
     TaskContract,
     TransformPreferencePolicy,
 )
-from .formats import execution_to_rollout_payload, execution_to_state_payload, metadata_to_http_payload, task_info_to_http_payload
+from .formats import (
+    execution_to_rollout_payload,
+    execution_to_state_payload,
+    metadata_to_http_payload,
+    task_info_to_http_payload,
+)
 from .http_adapter import ManagedRuntime, create_reference_app
 from .http_client import HTTPContainerClient
 from .nouns import (
@@ -126,8 +131,22 @@ from .runtime_requests import (
     RuntimeResumeRequest,
     TerminateRequest,
 )
+from .sdk import (
+    ActionableSideInfo,
+    Container,
+    ContainerConnection,
+    ContainerHandle,
+    ContainerRunner,
+    ObjectiveScore,
+    RolloutResult,
+)
 from .tasks import DatasetSplit, InMemoryTaskCatalog, TaskFilter, task_definition_from_task_info
-from .tool_runtime import ToolCallSchemaKind, ToolOutputMode, ToolRuntimeCapabilities, ToolRuntimeKind
+from .tool_runtime import (
+    ToolCallSchemaKind,
+    ToolOutputMode,
+    ToolRuntimeCapabilities,
+    ToolRuntimeKind,
+)
 from .wire import (
     RequestValidationIssue,
     RolloutState,
@@ -143,6 +162,7 @@ from .wire import (
 __all__ = [
     "Action",
     "Actor",
+    "ActionableSideInfo",
     "AgentRuntimeTarget",
     "ArtifactContract",
     "ArtifactDescriptor",
@@ -159,6 +179,10 @@ __all__ = [
     "CompatibilityReport",
     "CONTRACT_VERSION",
     "ContainerExecutionContract",
+    "Container",
+    "ContainerConnection",
+    "ContainerHandle",
+    "ContainerRunner",
     "ConsumerRequirement",
     "ConsumerTarget",
     "CredentialMode",
@@ -182,6 +206,7 @@ __all__ = [
     "ManagedRuntime",
     "NLEScoutRewardTracker",
     "Observation",
+    "ObjectiveScore",
     "Outcome",
     "OutcomeKind",
     "PauseRequest",
@@ -204,6 +229,7 @@ __all__ = [
     "RubricDefinitionV1",
     "RubricScaleV1",
     "RolloutMode",
+    "RolloutResult",
     "RolloutState",
     "RouteHints",
     "RunPolicyContract",
