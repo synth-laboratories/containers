@@ -1,0 +1,35 @@
+# synth-containers changelog
+
+Dense release notes. Newest first.
+
+## 2026-05-31 — better-sdk (`8bfb05c`)
+
+### Container lifecycle SDK (new public surface)
+- Added `src/synth_containers/sdk.py` (~700 lines): authoring facade, lifecycle, and URL-only optimizer handoff.
+- **`Container`**: decorator-driven authoring for task info, tasksets, rollout handlers, and beta program surfaces; builds FastAPI transport via `Container.fastapi()`.
+- **`Container.serve()` / `ContainerRunner`**: launch from `Container`, FastAPI app, shell command, or existing URL; returns a **`ContainerHandle`** with `url`, `connection()`, `health()`, `logs()`, `down()`, and context-manager cleanup.
+- **`ContainerConnection`**: immutable URL-only value passed to optimizers; no lifecycle ownership.
+- Default **`submission_mode="async"`** for SDK-authored containers (submit + poll `/rollouts/{rollout_id}`); sync remains available for smoke/debug.
+
+### HTTP adapter + client alignment
+- `http_adapter.py`: async rollout route wiring, reference app integration with SDK `Container`.
+- `http_client.py`: polling helpers for async rollout terminal payloads.
+- `capabilities.py`: route hints and capability metadata extended for async rollout without GEPA-specific naming in container nouns.
+
+### Exports + packaging
+- `__init__.py`: exports `Container`, `ContainerHandle`, `ContainerConnection`, `ContainerRunner`.
+- Version bump: **`0.2.0.dev20260531`**.
+- README: **Local Better SDK Dev** block — branch pair, editable `uv` install, version verification command, validation example pointers.
+
+### Boundary discipline (Synth Style)
+- Container SDK stays algorithm-neutral; GEPA appears only in existing `optimizer_contracts.gepa` metadata on `/metadata`, not in lifecycle APIs.
+- Optimizers receive **`ContainerConnection` only**; launch/teardown owned by caller or `ContainerHandle`.
+
+### Python SDK gates (this branch)
+- `ruff format --check`, `ruff check`, `ty check` on **`sdk.py` + `__init__.py`**: pass.
+- Repo-wide `ruff format --check src` reports 20 pre-existing files needing format (not introduced by this branch); risk documented, not blocking SDK delta.
+
+### Customer-facing impact
+- **Additive**: new preferred authoring/lifecycle path; existing `create_reference_app()` and hand-written FastAPI containers unchanged.
+- **Behavioral default**: SDK `Container` defaults to async rollout submission.
+- **Dependency**: optimizers branch pins `synth-containers>=0.2.0.dev20260531`.
