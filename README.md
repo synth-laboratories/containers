@@ -18,28 +18,37 @@ agent, or a live game environment, and in Python, Rust, or TypeScript.
 
 ```bash
 pip install synth-containers
+# or
+uv add synth-containers
+```
+
+Latest daily dev build:
+
+```bash
+pip install --pre synth-containers==0.2.0.dev202605312141
+uv add --prerelease allow synth-containers==0.2.0.dev202605312141
 ```
 
 ## Local Better SDK Dev
 
 This branch pair expects:
 
-- `containers`: `better-sdk`, package `synth-containers==0.2.0.dev20260531`
-- `optimizers`: `better-sdk`, package `synth-optimizers==0.2.0.dev20260531`
+- `containers`: package `synth-containers==0.2.0.dev202605312141`
+- `optimizers`: package `synth-optimizers==0.2.0.dev202605312141`
 
-Install both editable checkouts with `uv`:
+Install both editable checkouts with `uv` (sibling repos under your workspace):
 
 ```bash
-cd /Users/joshpurtell/Documents/GitHub/optimizers
+cd optimizers
 uv sync --group dev
-uv pip install -e /Users/joshpurtell/Documents/GitHub/containers
-uv pip install -e /Users/joshpurtell/Documents/GitHub/optimizers
+uv pip install -e ../containers
+uv pip install -e .
 ```
 
 Verify import paths and versions:
 
 ```bash
-uv run --project /Users/joshpurtell/Documents/GitHub/optimizers python -c "import importlib.metadata as m, synth_containers, synth_optimizers; print(synth_containers.__file__); print(m.version('synth-containers')); print(synth_optimizers.__version__)"
+uv run python -c "import importlib.metadata as m, synth_containers, synth_optimizers; print(synth_containers.__file__); print(m.version('synth-containers')); print(synth_optimizers.__version__)"
 ```
 
 The SDK validation examples (Banking77, TBLite, Crafter, MiniGrid) live in local

@@ -1,35 +1,40 @@
 # synth-containers changelog
 
-Dense release notes. Newest first.
+## 2026-05-31 — 0.2.0.dev202605312141
 
-## 2026-05-31 — better-sdk (`8bfb05c`)
+Install:
 
-### Container lifecycle SDK (new public surface)
-- Added `src/synth_containers/sdk.py` (~700 lines): authoring facade, lifecycle, and URL-only optimizer handoff.
-- **`Container`**: decorator-driven authoring for task info, tasksets, rollout handlers, and beta program surfaces; builds FastAPI transport via `Container.fastapi()`.
-- **`Container.serve()` / `ContainerRunner`**: launch from `Container`, FastAPI app, shell command, or existing URL; returns a **`ContainerHandle`** with `url`, `connection()`, `health()`, `logs()`, `down()`, and context-manager cleanup.
-- **`ContainerConnection`**: immutable URL-only value passed to optimizers; no lifecycle ownership.
-- Default **`submission_mode="async"`** for SDK-authored containers (submit + poll `/rollouts/{rollout_id}`); sync remains available for smoke/debug.
+```bash
+pip install --pre synth-containers==0.2.0.dev202605312141
+```
 
-### HTTP adapter + client alignment
-- `http_adapter.py`: async rollout route wiring, reference app integration with SDK `Container`.
-- `http_client.py`: polling helpers for async rollout terminal payloads.
-- `capabilities.py`: route hints and capability metadata extended for async rollout without GEPA-specific naming in container nouns.
+This daily dev release adds the public container authoring and lifecycle SDK. The
+contract stays algorithm-neutral: containers own datasets, rollout execution,
+policy credentials, and verifier output; optimizers receive a URL-only connection.
 
-### Exports + packaging
-- `__init__.py`: exports `Container`, `ContainerHandle`, `ContainerConnection`, `ContainerRunner`.
-- Version bump: **`0.2.0.dev20260531`**.
-- README: **Local Better SDK Dev** block — branch pair, editable `uv` install, version verification command, validation example pointers.
+### SDK
 
-### Boundary discipline (Synth Style)
-- Container SDK stays algorithm-neutral; GEPA appears only in existing `optimizer_contracts.gepa` metadata on `/metadata`, not in lifecycle APIs.
-- Optimizers receive **`ContainerConnection` only**; launch/teardown owned by caller or `ContainerHandle`.
+* Add `Container` as the authoring facade for task info, tasksets, rollout handlers, beta program surfaces, and FastAPI app generation.
+* Add `Container.serve()` for context-managed local serving with automatic cleanup.
+* Add `ContainerRunner` for launching an SDK container, FastAPI app, shell command, or existing URL.
+* Add `ContainerHandle` with `url`, `connection()`, `health()`, `logs()`, `down()`, and context-manager cleanup.
+* Add immutable `ContainerConnection` for optimizer handoff; it carries only the URL.
 
-### Python SDK gates (this branch)
-- `ruff format --check`, `ruff check`, `ty check` on **`sdk.py` + `__init__.py`**: pass.
-- Repo-wide `ruff format --check src` reports 20 pre-existing files needing format (not introduced by this branch); risk documented, not blocking SDK delta.
+### Runtime Contract
 
-### Customer-facing impact
-- **Additive**: new preferred authoring/lifecycle path; existing `create_reference_app()` and hand-written FastAPI containers unchanged.
-- **Behavioral default**: SDK `Container` defaults to async rollout submission.
-- **Dependency**: optimizers branch pins `synth-containers>=0.2.0.dev20260531`.
+* Default SDK-authored containers to async rollout submission.
+* Wire async terminal payloads through `/rollout` submit, `/rollouts/{rollout_id}` poll, and client polling helpers.
+* Keep sync rollout mode available for local smoke runs and simple debugging.
+* Extend capability metadata and route hints for async rollout without adding GEPA-specific lifecycle nouns.
+
+### Packaging
+
+* Export `Container`, `ContainerHandle`, `ContainerConnection`, and `ContainerRunner` at package top level.
+* Publish `0.2.0.dev202605312141` to PyPI as source distribution and pure-Python wheel.
+* Pair with `synth-optimizers==0.2.0.dev202605312141` for the Better SDK examples.
+
+### Compatibility
+
+* Existing hand-written FastAPI containers and `create_reference_app()` continue to work.
+* Optimizer metadata may still advertise `optimizer_contracts.gepa`; lifecycle APIs stay optimizer-neutral.
+* Caller owns launch and teardown. Optimizers should not infer container lifecycle from `ContainerConnection`.
