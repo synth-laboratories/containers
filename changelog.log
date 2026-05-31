@@ -11,7 +11,7 @@
 * Added async rollout polling through `/rollouts/{rollout_id}`.
 * Exported `Container`, `ContainerHandle`, `ContainerConnection`, and `ContainerRunner`.
 * Kept handwritten FastAPI containers and `create_reference_app()` compatible.
-* Merged PR #2 `better-ai-auth`; PR #1 `better-sdk` remains the SDK base.
+* Merged [PR #2](https://github.com/synth-laboratories/containers/pull/2) `better-ai-auth`; [PR #1](https://github.com/synth-laboratories/containers/pull/1) `better-sdk` remains the SDK base.
 * Lifecycle APIs stay optimizer-neutral; GEPA appears only in metadata contracts.
 
 ## 2026-05-30
