@@ -4,3 +4,7 @@ dist/
 *.egg-info/
 __pycache__/
 *.py[cod]
+
+# Editor / IDE — local workspace files only.
+*.code-workspace
+.cursor/
