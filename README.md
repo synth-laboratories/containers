@@ -42,8 +42,8 @@ Verify import paths and versions:
 uv run --project /Users/joshpurtell/Documents/GitHub/optimizers python -c "import importlib.metadata as m, synth_containers, synth_optimizers; print(synth_containers.__file__); print(m.version('synth-containers')); print(synth_optimizers.__version__)"
 ```
 
-The SDK validation examples are Banking77, TBLite, and Crafter under
-`optimizers/dev_examples`.
+The SDK validation examples (Banking77, TBLite, Crafter, MiniGrid) live in local
+`optimizers/dev_examples/` (gitignored — not shipped in the repo).
 
 ## The contract
 
