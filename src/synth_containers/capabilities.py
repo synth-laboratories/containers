@@ -83,6 +83,7 @@ class RouteHints(JsonDataclassMixin):
     resume_routes: list[str] = field(
         default_factory=lambda: [
             "/rollouts/{rollout_id}/resume",
+            "/rollouts/{rollout_id}/resume_async",
             "/rollouts/{rollout_id}/fork",
         ]
     )

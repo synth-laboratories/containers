@@ -360,6 +360,40 @@ def create_reference_app(
         rows = await runtime.list_checkpoints(rollout_id=None)
         return {"checkpoints": _coerce_checkpoint_list(rows)}
 
+    @app.get("/checkpoints/{checkpoint_id}/export")
+    async def export_checkpoint(checkpoint_id: str) -> dict[str, Any]:
+        handler = getattr(runtime, "export_checkpoint", None)
+        if not callable(handler):
+            raise HTTPException(status_code=404, detail="container_route_not_supported:export_checkpoint")
+        result = handler(checkpoint_id=checkpoint_id)
+        if isawaitable(result):
+            result = await result
+        if result is None:
+            raise HTTPException(status_code=404, detail=f"unknown_checkpoint:{checkpoint_id}")
+        if not isinstance(result, Mapping):
+            raise TypeError("runtime.export_checkpoint() must return a mapping")
+        return dict(result)
+
+    @app.post("/checkpoints/import")
+    async def import_checkpoint(request: Request) -> dict[str, Any]:
+        handler = getattr(runtime, "import_checkpoint", None)
+        if not callable(handler):
+            raise HTTPException(status_code=404, detail="container_route_not_supported:import_checkpoint")
+        payload = await request.json()
+        if not isinstance(payload, Mapping):
+            raise HTTPException(status_code=400, detail="checkpoint_import_request_must_be_object")
+        try:
+            result = handler(payload)
+            if isawaitable(result):
+                result = await result
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"checkpoint_import_failed:{exc}") from exc
+        if result is None:
+            raise HTTPException(status_code=400, detail="checkpoint_import_failed")
+        if not isinstance(result, CheckpointDescriptor):
+            raise TypeError("runtime.import_checkpoint() must return CheckpointDescriptor")
+        return _coerce_checkpoint_payload(result)
+
     @app.get("/checkpoints/{checkpoint_id}")
     async def get_checkpoint(checkpoint_id: str) -> dict[str, Any]:
         result = await runtime.get_checkpoint(checkpoint_id=checkpoint_id)
@@ -382,6 +416,7 @@ def create_reference_app(
         return _coerce_checkpoint_payload(result)
 
     @app.post("/rollouts/{rollout_id}/resume")
+    @app.post("/rollouts/{rollout_id}/resume_async")
     @app.post("/rollouts/{rollout_id}/fork")
     async def resume_rollout(rollout_id: str, request: ResumeRequestModel) -> dict[str, Any]:
         payload = request.model_dump(mode="json", exclude_none=True)
