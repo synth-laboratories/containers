@@ -134,7 +134,7 @@ def execution_to_rollout_payload(execution: ExecutionRecord) -> dict[str, Any]:
     executed_action_count = sum(len(turn.executed_actions) for turn in execution.trajectory.turns)
     effective_action_count = sum(len(turn.executed_actions or turn.actions) for turn in execution.trajectory.turns)
     status_detail = str(metadata.get("status_detail") or summary.get("status_detail") or execution.status).strip()
-    return {
+    payload = {
         "rollout_id": execution.execution_id,
         "trace_correlation_id": execution.trace_correlation_id,
         "trial_id": trial_id,
@@ -168,6 +168,13 @@ def execution_to_rollout_payload(execution: ExecutionRecord) -> dict[str, Any]:
         "parent_rollout_id": execution.parent_rollout_id,
         "parent_checkpoint_id": execution.parent_checkpoint_id,
     }
+    scheduled = metadata.get("scheduled_checkpoints")
+    if isinstance(scheduled, list) and scheduled:
+        payload["scheduled_checkpoints"] = scheduled
+    achievements_unlocked = summary.get("achievements_unlocked")
+    if isinstance(achievements_unlocked, list) and achievements_unlocked:
+        payload["achievements_unlocked"] = achievements_unlocked
+    return payload
 
 
 

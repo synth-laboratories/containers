@@ -59,9 +59,16 @@ class RolloutActorSpecModel(StrictModel):
     config: HttpObject = Field(default_factory=dict)
 
 
+class OptimizerRolloutArmModel(StrictModel):
+    arm_id: str | None = None
+    react_system_prompt: str | None = None
+
+
 class RolloutPolicySpecModel(StrictModel):
     provider: str
     model: str
+    enabled: bool | None = None
+    policy_type: str | None = None
     api_family: InferenceApiFamily = InferenceApiFamily.CHAT_COMPLETIONS
     base_url: str | None = None
     inference_url: str | None = None
@@ -86,7 +93,15 @@ class RolloutPolicySpecModel(StrictModel):
         return InferenceTarget.from_policy_spec(self)
 
 
-class RolloutRequestModel(StrictModel):
+class RolloutRequestModel(BaseModel):
+    """Rollout submission body.
+
+    Uses ``extra="allow"`` so optimizers (Go-Ex, GEPA) can attach forward-compatible
+    control fields without breaking strict reference containers.
+    """
+
+    model_config = ConfigDict(extra="allow", use_enum_values=True)
+
     rollout_id: str | None = None
     trace_correlation_id: str | None = None
     trial_id: str | None = None
@@ -113,6 +128,21 @@ class RolloutRequestModel(StrictModel):
     actors: list[RolloutActorSpecModel] = Field(default_factory=list)
     actor_ids: list[str] = Field(default_factory=list)
     actor_overrides: HttpObject = Field(default_factory=dict)
+    # Go-Ex / optimizer control-plane fields (also accepted via extra="allow").
+    schema_version: str | None = None
+    dispatch_kind: str | None = None
+    split: str | None = None
+    seed: int | None = None
+    segment_steps: int | None = None
+    arms: list[OptimizerRolloutArmModel] = Field(default_factory=list)
+    resume_from_checkpoint_id: str | None = None
+    theme_id: str | None = None
+    allow_resume_fallback_to_fresh: bool | None = None
+    rollout_state_poll_seconds: float | None = None
+    rollout_terminator_poll_seconds: float | None = None
+    rollout_stall_timeout_seconds: float | None = None
+    checkpoint_schedule: HttpObject | None = None
+    params: HttpObject = Field(default_factory=dict)
 
 
 class PauseRequestModel(StrictModel):
