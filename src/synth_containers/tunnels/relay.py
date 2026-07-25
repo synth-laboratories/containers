@@ -611,7 +611,11 @@ def _parse_local_target(local_url: str) -> _LocalTarget:
     if parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise ValueError("local_url cannot include credentials, query, or fragment")
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    netloc = f"[{parsed.hostname}]:{port}" if ":" in parsed.hostname else f"{parsed.hostname}:{port}"
+    netloc = (
+        f"[{parsed.hostname}]:{port}"
+        if ":" in parsed.hostname
+        else f"{parsed.hostname}:{port}"
+    )
     base_url = urlunparse(
         (parsed.scheme, netloc, parsed.path.rstrip("/"), "", "", "")
     )
