@@ -16,10 +16,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import replace
+from dataclasses import fields, is_dataclass, replace
 from datetime import UTC, datetime
 from typing import Any, TypeVar
 
+from pydantic import BaseModel
 from synth_containers.serde import jsonable
 
 
@@ -45,7 +46,24 @@ def _strip_nulls(value: Any) -> Any:
 def canonical_payload(value: Any) -> Any:
     """Return the JSON-safe, null-stripped payload used for digests and storage."""
 
+    _reject_unordered(value)
     return _strip_nulls(jsonable(value))
+
+
+def _reject_unordered(value: Any, *, path: str = "$") -> None:
+    if isinstance(value, (set, frozenset)):
+        raise TypeError(f"unordered container is not canonical at {path}")
+    if isinstance(value, dict):
+        for key, item in value.items():
+            _reject_unordered(item, path=f"{path}.{key}")
+    elif isinstance(value, (list, tuple)):
+        for index, item in enumerate(value):
+            _reject_unordered(item, path=f"{path}[{index}]")
+    elif is_dataclass(value):
+        for item in fields(value):
+            _reject_unordered(getattr(value, item.name), path=f"{path}.{item.name}")
+    elif isinstance(value, BaseModel):
+        _reject_unordered(value.model_dump(mode="python"), path=path)
 
 
 def canonical_bytes(value: Any) -> bytes:

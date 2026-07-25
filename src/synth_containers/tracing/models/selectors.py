@@ -12,7 +12,7 @@ from typing import Any
 
 from synth_containers.serde import JsonDataclassMixin
 
-from ..canonical import text_digest
+from ..canonical import canonical_payload, canonical_text, content_digest, text_digest
 from .document import TraceDocumentV5
 
 
@@ -98,9 +98,9 @@ def resolve_selector(
 
     kind = str(selector.kind)
     if kind == SelectorKind.TRACE:
-        return SelectorResolutionV1(
-            selector=selector,
-            resolved=True,
+        return _finish_resolution(
+            selector,
+            entity=document,
             entity_kind=kind,
             entity_digest=document.content_digest,
         )
@@ -134,16 +134,17 @@ def resolve_selector(
     if entity is None:
         return SelectorResolutionV1(selector=selector, resolved=False, reason="entity_not_found")
 
-    entity_digest = getattr(entity, digest_attr, None) if digest_attr else None
-    if selector.entity_digest and entity_digest and selector.entity_digest != entity_digest:
-        return SelectorResolutionV1(
-            selector=selector, resolved=False, reason="entity_digest_mismatch"
-        )
-    return SelectorResolutionV1(
-        selector=selector,
-        resolved=True,
+    entity_digest = (
+        getattr(entity, digest_attr, None)
+        if digest_attr
+        else content_digest(entity)
+    )
+    return _finish_resolution(
+        selector,
+        entity=entity,
         entity_kind=kind,
         entity_digest=entity_digest,
+        default_text=entity.text() if kind == SelectorKind.MESSAGE else None,
     )
 
 
@@ -154,25 +155,173 @@ def _resolve_part(
     message = document.message(selector.entity_id or "")
     if message is None:
         return SelectorResolutionV1(selector=selector, resolved=False, reason="message_not_found")
+    if not selector.part_id:
+        return SelectorResolutionV1(selector=selector, resolved=False, reason="part_id_required")
     part = next((item for item in message.parts if item.part_id == selector.part_id), None)
     if part is None:
         return SelectorResolutionV1(selector=selector, resolved=False, reason="part_not_found")
-    text = part.text or part.arguments_json or ""
-    if selector.range is not None:
-        text = text[selector.range.start : selector.range.end]
-    if selector.quote is not None:
-        expected = selector.quote_digest or text_digest(selector.quote)
-        if text_digest(text) != expected and selector.quote not in (part.text or ""):
+    return _finish_resolution(
+        selector=selector,
+        entity=part,
+        entity_kind=SelectorKind.PART.value,
+        entity_digest=content_digest(part),
+        default_text=part.text or part.arguments_json or "",
+    )
+
+
+def _finish_resolution(
+    selector: TraceSelectorV1,
+    *,
+    entity: Any,
+    entity_kind: str,
+    entity_digest: str,
+    default_text: str | None = None,
+) -> SelectorResolutionV1:
+    if selector.entity_digest is not None and selector.entity_digest != entity_digest:
+        return SelectorResolutionV1(
+            selector=selector,
+            resolved=False,
+            reason="entity_digest_mismatch",
+            entity_kind=entity_kind,
+            entity_digest=entity_digest,
+        )
+
+    text = default_text
+    if selector.json_pointer is not None:
+        pointer_ok, pointed, reason = _resolve_json_pointer(
+            canonical_payload(entity), selector.json_pointer
+        )
+        if not pointer_ok:
             return SelectorResolutionV1(
-                selector=selector, resolved=False, reason="quote_mismatch", resolved_text=text
+                selector=selector,
+                resolved=False,
+                reason=reason,
+                entity_kind=entity_kind,
+                entity_digest=entity_digest,
             )
+        text = pointed if isinstance(pointed, str) else canonical_text(pointed)
+    elif text is None and (
+        selector.range is not None
+        or selector.quote is not None
+        or selector.quote_digest is not None
+    ):
+        text = canonical_text(entity)
+
+    if selector.range is not None:
+        if selector.range.unit != "character":
+            return SelectorResolutionV1(
+                selector=selector,
+                resolved=False,
+                reason="range_unit_unsupported",
+                entity_kind=entity_kind,
+                entity_digest=entity_digest,
+            )
+        assert text is not None
+        if (
+            selector.range.start < 0
+            or selector.range.end < selector.range.start
+            or selector.range.end > len(text)
+        ):
+            return SelectorResolutionV1(
+                selector=selector,
+                resolved=False,
+                reason="range_invalid",
+                entity_kind=entity_kind,
+                entity_digest=entity_digest,
+                resolved_text=text,
+            )
+        text = text[selector.range.start : selector.range.end]
+
+    if selector.quote is not None:
+        quote_digest = text_digest(selector.quote)
+        if (
+            selector.quote_digest is not None
+            and selector.quote_digest != quote_digest
+        ):
+            return SelectorResolutionV1(
+                selector=selector,
+                resolved=False,
+                reason="quote_digest_mismatch",
+                entity_kind=entity_kind,
+                entity_digest=entity_digest,
+                resolved_text=text,
+            )
+        assert text is not None
+        exact_quote_required = selector.range is not None or selector.json_pointer is not None
+        if (
+            (exact_quote_required and text != selector.quote)
+            or (not exact_quote_required and selector.quote not in text)
+        ):
+            return SelectorResolutionV1(
+                selector=selector,
+                resolved=False,
+                reason="quote_mismatch",
+                entity_kind=entity_kind,
+                entity_digest=entity_digest,
+                resolved_text=text,
+            )
+        text = selector.quote
+    elif selector.quote_digest is not None:
+        assert text is not None
+        if text_digest(text) != selector.quote_digest:
+            return SelectorResolutionV1(
+                selector=selector,
+                resolved=False,
+                reason="quote_digest_mismatch",
+                entity_kind=entity_kind,
+                entity_digest=entity_digest,
+                resolved_text=text,
+            )
+
     return SelectorResolutionV1(
         selector=selector,
         resolved=True,
-        entity_kind=SelectorKind.PART.value,
-        entity_digest=message.content_digest,
+        entity_kind=entity_kind,
+        entity_digest=entity_digest,
         resolved_text=text,
     )
+
+
+def _resolve_json_pointer(value: Any, pointer: str) -> tuple[bool, Any, str]:
+    if pointer == "":
+        return True, value, ""
+    if not pointer.startswith("/"):
+        return False, None, "json_pointer_invalid"
+    current = value
+    for raw_token in pointer.split("/")[1:]:
+        token = _decode_pointer_token(raw_token)
+        if token is None:
+            return False, None, "json_pointer_invalid"
+        if isinstance(current, dict):
+            if token not in current:
+                return False, None, "json_pointer_not_found"
+            current = current[token]
+        elif isinstance(current, list):
+            if not token.isdigit() or (len(token) > 1 and token.startswith("0")):
+                return False, None, "json_pointer_not_found"
+            index = int(token)
+            if index >= len(current):
+                return False, None, "json_pointer_not_found"
+            current = current[index]
+        else:
+            return False, None, "json_pointer_not_found"
+    return True, current, ""
+
+
+def _decode_pointer_token(token: str) -> str | None:
+    decoded: list[str] = []
+    index = 0
+    while index < len(token):
+        character = token[index]
+        if character != "~":
+            decoded.append(character)
+            index += 1
+            continue
+        if index + 1 >= len(token) or token[index + 1] not in {"0", "1"}:
+            return None
+        decoded.append("~" if token[index + 1] == "0" else "/")
+        index += 2
+    return "".join(decoded)
 
 
 def selector_for(

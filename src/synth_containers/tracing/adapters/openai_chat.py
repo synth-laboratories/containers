@@ -9,7 +9,6 @@ express instead of dropping it: unknown roles and content shapes survive as
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from ..models.messages import (
@@ -19,21 +18,14 @@ from ..models.messages import (
     ReasoningAvailability,
 )
 from ..models.spans import UsageProvenance, UsageV5
+from .base import NormalizedMessage, NormalizedProviderResult
+from .sse import SSEDecoder
 
 
 NORMALIZER_NAME = "openai_chat_completions"
 NORMALIZER_VERSION = "1"
 
 _KNOWN_ROLES = {role.value for role in MessageRole}
-
-
-@dataclass(slots=True)
-class NormalizedMessage:
-    role: str
-    parts: list[MessagePartV5] = field(default_factory=list)
-    diagnostics: list[str] = field(default_factory=list)
-    finish_reason: str | None = None
-    tool_call_id: str | None = None
 
 
 def _part(part_id: str, **kwargs: Any) -> MessagePartV5:
@@ -64,8 +56,13 @@ def normalize_request_messages(body: Mapping[str, Any]) -> list[NormalizedMessag
                 )
             )
             continue
-        messages.append(_normalize_one_message(raw, prefix=f"p{index}"))
+        messages.append(_normalize_one_message(_mapping(raw), prefix=f"p{index}"))
     return messages
+
+
+def _mapping(value: Any) -> Mapping[str, Any]:
+    """A foreign payload section, or an empty one when absent or the wrong shape."""
+    return value if isinstance(value, Mapping) else {}
 
 
 def _normalize_one_message(raw: Mapping[str, Any], *, prefix: str) -> NormalizedMessage:
@@ -152,7 +149,9 @@ def _normalize_one_message(raw: Mapping[str, Any], *, prefix: str) -> Normalized
                 type=PartType.TOOL_CALL,
                 tool_call_id=str(call.get("id") or ""),
                 tool_name=str(function.get("name") or call.get("name") or ""),
-                arguments_json=str(function.get("arguments") or call.get("arguments") or "{}"),
+                arguments_json=_arguments_json(
+                    function.get("arguments", call.get("arguments", "{}"))
+                ),
             )
         )
         counter += 1
@@ -339,10 +338,70 @@ def _int_or_none(value: Any) -> int | None:
         return None
 
 
+def _arguments_json(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    try:
+        return json.dumps(value, sort_keys=True, separators=(",", ":"))
+    except (TypeError, ValueError):
+        return json.dumps({"unsupported": str(value)}, sort_keys=True)
+
+
+class _ChatStream:
+    def __init__(self) -> None:
+        self.decoder = SSEDecoder()
+        self.frames: list[str] = []
+
+    def feed(self, chunk: bytes) -> None:
+        for event in self.decoder.feed(chunk):
+            self.frames.append(f"data: {event.data}\n\n")
+
+    def finish(self) -> NormalizedProviderResult:
+        for event in self.decoder.finish():
+            self.frames.append(f"data: {event.data}\n\n")
+        message, usage_payload, diagnostics = assemble_sse_frames(self.frames)
+        return NormalizedProviderResult(
+            messages=[message] if message else [],
+            usage=usage_from_provider(usage_payload),
+            diagnostics=diagnostics,
+            terminal_observed=any("[DONE]" in item for item in self.frames),
+        )
+
+
+class OpenAIChatAdapter:
+    name: str = NORMALIZER_NAME
+    version: str = NORMALIZER_VERSION
+    routes: tuple[str, ...] = ("/v1/chat/completions",)
+
+    def normalize_request(self, body: Mapping[str, Any]) -> list[NormalizedMessage]:
+        return normalize_request_messages(body)
+
+    def normalize_unary(self, body: Mapping[str, Any]) -> NormalizedProviderResult:
+        message, diagnostics = normalize_unary_response(body)
+        return NormalizedProviderResult(
+            messages=[message] if message else [],
+            usage=usage_from_provider(body.get("usage") if isinstance(body, Mapping) else None),
+            diagnostics=diagnostics,
+            provider_ids={
+                "response_id": str(body.get("id"))
+                for _ in (0,)
+                if body.get("id") is not None
+            },
+            terminal_observed=True,
+        )
+
+    def new_stream(self) -> _ChatStream:
+        return _ChatStream()
+
+    def usage(self, payload: Mapping[str, Any] | None) -> UsageV5:
+        return usage_from_provider(payload)
+
+
 __all__ = [
     "NORMALIZER_NAME",
     "NORMALIZER_VERSION",
     "NormalizedMessage",
+    "OpenAIChatAdapter",
     "assemble_sse_frames",
     "normalize_request_messages",
     "normalize_unary_response",

@@ -70,6 +70,8 @@ from .spans import (
     UsageProvenance,
     UsageV5,
 )
+from .tokens import TokenCaptureProvenance, TokenCaptureV5, TokenSequenceRefV1
+from .capture_data import CapturedBodyRefV1, RawCaptureDisposition
 from .standards import (
     AnnotationV1,
     BenchmarkVerdictV1,
@@ -93,6 +95,7 @@ from .standards import (
     VerifierDefinitionV1,
     VerifierKind,
     VerifierResultV2,
+    aggregate_reward_values,
     aggregate_rubric_score,
 )
 
@@ -112,6 +115,7 @@ __all__ = [
     "BranchReason",
     "BranchV5",
     "CaptureStatus",
+    "CapturedBodyRefV1",
     "CoverageState",
     "CriterionDefinitionV1",
     "CriterionResultV1",
@@ -131,6 +135,7 @@ __all__ = [
     "ProjectionLossV1",
     "ProjectionManifestV1",
     "ReasoningAvailability",
+    "RawCaptureDisposition",
     "ReceiptV1",
     "RecordState",
     "RewardAggregationV1",
@@ -166,6 +171,9 @@ __all__ = [
     "TraceRefV5",
     "TraceSelectorV1",
     "TraceStatus",
+    "TokenCaptureProvenance",
+    "TokenCaptureV5",
+    "TokenSequenceRefV1",
     "TransformationRecordV1",
     "UsageProvenance",
     "UsageV5",
@@ -175,6 +183,7 @@ __all__ = [
     "VerifierKind",
     "VerifierResultV2",
     "Visibility",
+    "aggregate_reward_values",
     "aggregate_rubric_score",
     "mint_actor_id",
     "mint_capture_id",

@@ -16,13 +16,23 @@ from ..capture.binding import TraceCaptureBindingV1
 from ..capture.coverage import CaptureCoverageReceiptV1
 from ..capture.envelope import RawCaptureEnvelopeV1
 from ..capture.spool import TraceSegmentManifestV1
+from ..models.capture_data import CapturedBodyRefV1
+from ..models.tokens import TokenCaptureV5, TokenSequenceRefV1
+from ..store.bundle import (
+    BundleManifestPointerV1,
+    BundleManifestV1,
+    BundleObjectRefV1,
+)
 from ..models.document import TraceDocumentV5
 from ..models.evidence import TraceEvidenceBundleV5
 from ..models.projection import ProjectionManifestV1
 from ..models.selectors import TraceSelectorV1
 from ..models.standards import (
     AnnotationV1,
+    BenchmarkVerdictV1,
     CriterionDefinitionV1,
+    EvaluationResultV1,
+    ReceiptV1,
     RewardAggregationV1,
     RewardDefinitionV1,
     RewardRecordV1,
@@ -40,9 +50,15 @@ PUBLIC_CONTRACTS: tuple[type, ...] = (
     TraceCaptureBindingV1,
     RawCaptureEnvelopeV1,
     TraceSegmentManifestV1,
+    CapturedBodyRefV1,
     CaptureCoverageReceiptV1,
     TraceDocumentV5,
     TraceEvidenceBundleV5,
+    TokenCaptureV5,
+    TokenSequenceRefV1,
+    BundleManifestV1,
+    BundleManifestPointerV1,
+    BundleObjectRefV1,
     TraceSelectorV1,
     CriterionDefinitionV1,
     RubricDefinitionV2,
@@ -50,6 +66,9 @@ PUBLIC_CONTRACTS: tuple[type, ...] = (
     VerifierResultV2,
     TraceAnnotatorDefinitionV1,
     AnnotationV1,
+    EvaluationResultV1,
+    BenchmarkVerdictV1,
+    ReceiptV1,
     RewardDefinitionV1,
     RewardRecordV1,
     RewardAggregationV1,
@@ -85,6 +104,7 @@ def _schema_for(record_type: type, defs: dict[str, Any]) -> dict[str, Any]:
         properties[field_info.name] = _annotation_schema(hints[field_info.name], defs)
         if (
             field_info.default is MISSING and field_info.default_factory is MISSING  # type: ignore[misc]
+            and not _allows_none(hints[field_info.name])
         ):
             required.append(field_info.name)
     schema: dict[str, Any] = {
@@ -95,6 +115,11 @@ def _schema_for(record_type: type, defs: dict[str, Any]) -> dict[str, Any]:
     if required:
         schema["required"] = required
     return schema
+
+
+def _allows_none(annotation: Any) -> bool:
+    origin = get_origin(annotation)
+    return origin in (Union, types.UnionType) and type(None) in get_args(annotation)
 
 
 def _annotation_schema(annotation: Any, defs: dict[str, Any]) -> dict[str, Any]:

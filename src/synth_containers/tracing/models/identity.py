@@ -21,7 +21,9 @@ ENV_CAPTURE_ID = "SYNTH_CAPTURE_ID"
 ENV_ACTOR_ID = "SYNTH_ACTOR_ID"
 ENV_ACTOR_SESSION_ID = "SYNTH_ACTOR_SESSION_ID"
 ENV_PARENT_ACTOR_ID = "SYNTH_PARENT_ACTOR_ID"
+ENV_PARENT_ACTOR_SESSION_ID = "SYNTH_PARENT_ACTOR_SESSION_ID"
 ENV_PARENT_SPAN_ID = "SYNTH_PARENT_SPAN_ID"
+ENV_DELEGATION_ID = "SYNTH_DELEGATION_ID"
 ENV_WORKFLOW_ADDRESS = "SYNTH_WORKFLOW_ADDRESS"
 ENV_BINDING_PATH = "SYNTH_TRACE_BINDING_PATH"
 ENV_COLLECTOR_URL = "SYNTH_TRACE_COLLECTOR_URL"
@@ -101,6 +103,7 @@ class TraceContextV1(JsonDataclassMixin):
     binding_path: str | None = None
     collector_url: str | None = None
     output_dir: str | None = None
+    w3c_traceparent: str | None = None
 
     def to_environment(self) -> dict[str, str]:
         values = {
@@ -109,12 +112,14 @@ class TraceContextV1(JsonDataclassMixin):
             ENV_ACTOR_ID: self.actor_id,
             ENV_ACTOR_SESSION_ID: self.actor_session_id,
             ENV_PARENT_ACTOR_ID: self.parent_actor_id or "",
+            ENV_PARENT_ACTOR_SESSION_ID: self.parent_actor_session_id or "",
             ENV_PARENT_SPAN_ID: self.parent_span_id or "",
+            ENV_DELEGATION_ID: self.delegation_id or "",
             ENV_WORKFLOW_ADDRESS: self.workflow_address or "",
             ENV_BINDING_PATH: self.binding_path or "",
             ENV_COLLECTOR_URL: self.collector_url or "",
             ENV_OUTPUT_DIR: self.output_dir or "",
-            "TRACEPARENT": self.traceparent(),
+            "TRACEPARENT": self.w3c_traceparent or self.traceparent(),
         }
         return {key: value for key, value in values.items() if value}
 
@@ -138,11 +143,17 @@ class TraceContextV1(JsonDataclassMixin):
             actor_id=actor_id,
             actor_session_id=session_id,
             parent_actor_id=str(source.get(ENV_PARENT_ACTOR_ID) or "") or None,
+            parent_actor_session_id=str(
+                source.get(ENV_PARENT_ACTOR_SESSION_ID) or ""
+            )
+            or None,
             parent_span_id=str(source.get(ENV_PARENT_SPAN_ID) or "") or None,
+            delegation_id=str(source.get(ENV_DELEGATION_ID) or "") or None,
             workflow_address=str(source.get(ENV_WORKFLOW_ADDRESS) or "") or None,
             binding_path=str(source.get(ENV_BINDING_PATH) or "") or None,
             collector_url=str(source.get(ENV_COLLECTOR_URL) or "") or None,
             output_dir=str(source.get(ENV_OUTPUT_DIR) or "") or None,
+            w3c_traceparent=_bounded_traceparent(source.get("TRACEPARENT")),
         )
 
 
@@ -175,6 +186,28 @@ def _hex_suffix(value: str, length: int) -> str:
     return hexed.rjust(length, "0")
 
 
+def _bounded_traceparent(value: str | None) -> str | None:
+    if value is None:
+        return None
+    candidate = str(value).strip()
+    if len(candidate) != 55:
+        return None
+    pieces = candidate.split("-")
+    if (
+        len(pieces) != 4
+        or [len(piece) for piece in pieces] != [2, 32, 16, 2]
+        or pieces[0].lower() == "ff"
+        or pieces[1] == "0" * 32
+        or pieces[2] == "0" * 16
+        or any(
+        any(char not in "0123456789abcdefABCDEF" for char in piece)
+        for piece in pieces
+        )
+    ):
+        return None
+    return candidate.lower()
+
+
 def mint_trace_id(*, kind: str, key: Any) -> str:
     return record_id("trace", kind=kind, key=key)
 
@@ -187,8 +220,19 @@ def mint_actor_id(*, trace_id: str, name: str) -> str:
     return record_id("actor", kind="actor", scope=(trace_id,), key=name)
 
 
-def mint_session_id(*, trace_id: str, actor_id: str, attempt: int = 0) -> str:
-    return record_id("sess", kind="session", scope=(trace_id, actor_id), key=attempt)
+def mint_session_id(
+    *,
+    trace_id: str,
+    actor_id: str,
+    attempt: int = 0,
+    nonce: str | None = None,
+) -> str:
+    return record_id(
+        "sess",
+        kind="session",
+        scope=(trace_id, actor_id),
+        key={"attempt": attempt, "nonce": nonce} if nonce else attempt,
+    )
 
 
 __all__ = [
@@ -200,7 +244,9 @@ __all__ = [
     "ENV_COLLECTOR_URL",
     "ENV_OUTPUT_DIR",
     "ENV_PARENT_ACTOR_ID",
+    "ENV_PARENT_ACTOR_SESSION_ID",
     "ENV_PARENT_SPAN_ID",
+    "ENV_DELEGATION_ID",
     "ENV_TRACE_ID",
     "ENV_WORKFLOW_ADDRESS",
     "EVIDENCE_BUNDLE_SCHEMA_VERSION",

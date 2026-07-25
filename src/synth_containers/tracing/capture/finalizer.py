@@ -11,20 +11,14 @@ Nothing here invents facts: a call with no observed provider usage yields
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Mapping
 
-from ..adapters.openai_chat import (
-    NORMALIZER_NAME,
-    NORMALIZER_VERSION,
-    NormalizedMessage,
-    assemble_sse_frames,
-    normalize_request_messages,
-    normalize_unary_response,
-    usage_from_provider,
-)
-from ..canonical import record_id, utc_now
+from ..adapters import provider_adapters
+from ..adapters.base import NormalizedMessage, NormalizedProviderResult
+from ..canonical import bytes_digest, record_id, utc_now
 from ..models.actors import (
     ActorKind,
     ActorV5,
@@ -53,6 +47,8 @@ from ..models.spans import (
     UsageProvenance,
     UsageV5,
 )
+from ..models.tokens import TokenCaptureV5
+from ..store.filesystem import FilesystemBlobStore
 from .binding import TraceCaptureBindingV1
 from .coverage import CaptureCoverageReceiptV1, CaptureScope, Completeness
 from .envelope import RawRecordType
@@ -82,6 +78,8 @@ class FinalizationError(RuntimeError):
 class _CallState:
     call_id: str
     call_index: int
+    actor_id: str
+    session_id: str
     started_at: str
     model: str | None
     streaming: bool
@@ -97,6 +95,12 @@ class _CallState:
     ended_at: str | None = None
     usage_payload: dict[str, Any] | None = None
     usage_observed: bool = False
+    provider_adapter: str = "openai_chat_completions"
+    provider_adapter_version: str = "1"
+    route: str = ""
+    request_body_ref: dict[str, Any] | None = None
+    response_body_ref: dict[str, Any] | None = None
+    native_correlation: dict[str, str] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,6 +135,7 @@ class TraceFinalizer:
         self.identity = identity
         self.root_actor_name = root_actor_name
         self.root_actor_kind = root_actor_kind
+        self.adapters = provider_adapters()
 
     def seal(
         self,
@@ -152,11 +157,12 @@ class TraceFinalizer:
         envelope_to_event: dict[str, str] = {}
         call_index_to_span: dict[int, str] = {}
         transformations: list[TransformationRecordV1] = []
-        diagnostics: list[str] = []
+        diagnostics: list[str] = list(coverage.completeness_reasons)
         application_events = 0
         started_at = records[0]["occurred_at"] if records else utc_now()
         ended_at = records[-1]["occurred_at"] if records else started_at
         application_records: list[Mapping[str, Any]] = []
+        terminal_capture_record = False
 
         for record in records:
             record_type = str(record.get("record_type") or "")
@@ -175,10 +181,22 @@ class TraceFinalizer:
                 calls[call_id] = _CallState(
                     call_id=call_id,
                     call_index=int(payload.get("call_index") or 0),
+                    actor_id=str(
+                        record.get("actor_id") or self.binding.workload.root_actor_id
+                    ),
+                    session_id=str(
+                        record.get("session_id")
+                        or self.binding.workload.actor_session_id
+                    ),
                     started_at=str(payload.get("started_at") or record["occurred_at"]),
                     model=payload.get("model"),
                     streaming=bool(payload.get("stream")),
                     request_body=dict(payload.get("request_body") or {}),
+                    request_body_ref=(
+                        dict(payload["request_body_ref"])
+                        if isinstance(payload.get("request_body_ref"), Mapping)
+                        else None
+                    ),
                     request_digest=str(payload.get("request_digest") or ""),
                     frames=[],
                     request_headers={
@@ -186,14 +204,35 @@ class TraceFinalizer:
                         for key, value in (payload.get("request_headers") or {}).items()
                     },
                     started_ordinal=int(record["ordinal"]),
+                    provider_adapter=str(
+                        payload.get("provider_adapter") or "openai_chat_completions"
+                    ),
+                    provider_adapter_version=str(
+                        payload.get("provider_adapter_version") or "1"
+                    ),
+                    route=str(payload.get("route") or ""),
                 )
+                started = calls[call_id]
+                if not started.request_body and started.request_body_ref:
+                    started.request_body = self._load_body_ref(started.request_body_ref)
                 order.append(str(call_id))
             elif record_type == RawRecordType.RESPONSE_FRAME and call_id in calls:
-                calls[call_id].frames.append(str(payload.get("frame") or ""))
+                frame = str(payload.get("frame") or "")
+                frame_ref = payload.get("frame_ref")
+                if not frame and isinstance(frame_ref, Mapping):
+                    frame = self._load_frame_ref(dict(frame_ref))
+                calls[call_id].frames.append(frame)
             elif record_type == RawRecordType.RESPONSE_BODY and call_id in calls:
                 state = calls[call_id]
                 body = payload.get("response_body")
                 state.response_body = dict(body) if isinstance(body, Mapping) else None
+                state.response_body_ref = (
+                    dict(payload["response_body_ref"])
+                    if isinstance(payload.get("response_body_ref"), Mapping)
+                    else None
+                )
+                if state.response_body is None and state.response_body_ref:
+                    state.response_body = self._load_body_ref(state.response_body_ref)
                 state.response_truncated = bool(payload.get("truncated"))
                 state.http_status = _int(payload.get("http_status"))
             elif record_type == RawRecordType.MODEL_CALL_FINISHED and call_id in calls:
@@ -206,10 +245,23 @@ class TraceFinalizer:
                 )
                 state.usage_observed = bool(payload.get("usage_observed"))
                 state.finished_ordinal = int(record["ordinal"])
+                state.provider_adapter = str(
+                    payload.get("provider_adapter") or state.provider_adapter
+                )
             elif record_type == RawRecordType.ARTIFACT:
                 artifacts.append(_artifact_from_payload(payload, occurred_at=record["occurred_at"]))
             elif record_type == RawRecordType.APPLICATION_EVENT:
                 application_records.append(record)
+            elif record_type == RawRecordType.CAPTURE_FINISHED:
+                terminal_capture_record = True
+
+        diagnostics.extend(
+            self._correlate_provider_calls(
+                calls,
+                extra_sessions=extra_sessions,
+                aliases=aliases,
+            )
+        )
 
         # Model calls are built first so an application event may cite the call that
         # produced it. Chronological sequence is the raw capture ordinal throughout,
@@ -261,37 +313,78 @@ class TraceFinalizer:
             workflow_id=self.binding.workload.workflow_id,
         ).sealed()
 
-        model_calls_state = CoverageState.COMPLETE if order else CoverageState.NOT_CAPTURED
-        usage_state = (
-            CoverageState.COMPLETE
-            if order and all(calls[item].usage_observed for item in order)
-            else (CoverageState.PARTIAL if order else CoverageState.NOT_CAPTURED)
+        model_calls_state, usage_state, raw_state = _call_coverage(
+            tuple(calls[item] for item in order)
         )
         application_state = (
             CoverageState.COMPLETE if application_events else CoverageState.NOT_CAPTURED
         )
+        event_names = {
+            str((item.get("payload") or {}).get("event_type") or "")
+            for item in application_records
+        }
+        agent_state = _coverage_for_prefixes(event_names, ("agent.", "codex.", "react.", "jesterky."))
+        environment_state = _coverage_for_prefixes(event_names, ("environment.", "gamebench."))
+        tool_state = _coverage_for_prefixes(event_names, ("tool.", "codex.command", "codex.tool"))
+        root_call_coverage = _call_coverage(
+            tuple(
+                calls[item]
+                for item in order
+                if calls[item].session_id == self.binding.workload.actor_session_id
+            )
+        )
+        root_event_names = {
+            str((item.get("payload") or {}).get("event_type") or "")
+            for item in application_records
+            if str(
+                item.get("session_id")
+                or self.binding.workload.actor_session_id
+            )
+            == self.binding.workload.actor_session_id
+        }
         root_session = SessionV5(
             session_id=self.binding.workload.actor_session_id,
             actor_id=root_actor.actor_id,
             started_at=started_at,
             ended_at=ended_at,
             capture_id=self.binding.capture_id,
-            status=(
-                SessionStatus.COMPLETED
-                if str(status) == TraceStatus.COMPLETED
-                else SessionStatus.INTERRUPTED
-            ),
+            status=_session_status(status),
             harness=self.provenance.harness,
             provider=self.provenance.provider,
             coverage=SessionCoverageV5(
-                model_calls=model_calls_state,
-                agent_events=application_state,
-                environment_events=application_state,
-                tool_events=application_state,
-                usage=usage_state,
-                raw_provider=CoverageState.COMPLETE if order else CoverageState.NOT_CAPTURED,
+                model_calls=root_call_coverage[0],
+                agent_events=_coverage_for_prefixes(
+                    root_event_names,
+                    ("agent.", "codex.", "react.", "jesterky."),
+                ),
+                environment_events=_coverage_for_prefixes(
+                    root_event_names,
+                    ("environment.", "gamebench."),
+                ),
+                tool_events=_coverage_for_prefixes(
+                    root_event_names,
+                    ("tool.", "codex.command", "codex.tool"),
+                ),
+                usage=root_call_coverage[1],
+                raw_provider=root_call_coverage[2],
             ),
         ).sealed()
+        attributed_extra_sessions = tuple(
+            _with_observed_session_coverage(
+                session,
+                call_states=tuple(
+                    calls[item]
+                    for item in order
+                    if calls[item].session_id == session.session_id
+                ),
+                event_names={
+                    str((item.get("payload") or {}).get("event_type") or "")
+                    for item in application_records
+                    if str(item.get("session_id") or "") == session.session_id
+                },
+            )
+            for session in extra_sessions
+        )
 
         scope = (
             CaptureScope.MODEL_CALLS_AND_APPLICATION
@@ -308,14 +401,18 @@ class TraceFinalizer:
             segment_bytes=sum(segment.byte_size for segment in self.segments),
             segment_digests=segment_digests,
             model_calls=model_calls_state,
-            raw_provider=CoverageState.COMPLETE if order else CoverageState.NOT_CAPTURED,
-            agent_events=application_state,
-            environment_events=application_state,
-            tool_events=application_state,
+            raw_provider=raw_state,
+            agent_events=agent_state,
+            environment_events=environment_state,
+            tool_events=tool_state,
             usage=usage_state,
             completeness=(
                 Completeness.COMPLETE
                 if str(status) == TraceStatus.COMPLETED
+                and terminal_capture_record
+                and model_calls_state != CoverageState.PARTIAL
+                and raw_state != CoverageState.PARTIAL
+                and not diagnostics
                 else Completeness.PARTIAL
             ),
             completeness_reasons=tuple(sorted(set(diagnostics))),
@@ -327,14 +424,18 @@ class TraceFinalizer:
             capture_status=(
                 CaptureStatus.COMPLETE
                 if str(status) == TraceStatus.COMPLETED
+                and terminal_capture_record
+                and model_calls_state != CoverageState.PARTIAL
+                and raw_state != CoverageState.PARTIAL
+                and not diagnostics
                 else CaptureStatus.PARTIAL
             ),
-            terminal_event_observed=bool(records),
+            terminal_event_observed=terminal_capture_record,
             model_calls=model_calls_state,
-            raw_provider=CoverageState.COMPLETE if order else CoverageState.NOT_CAPTURED,
-            agent_events=application_state,
-            environment_events=application_state,
-            tool_events=application_state,
+            raw_provider=raw_state,
+            agent_events=agent_state,
+            environment_events=environment_state,
+            tool_events=tool_state,
             usage=usage_state,
             captured_record_count=len(records),
             high_water_ordinal=max((int(item["ordinal"]) for item in records), default=None),
@@ -379,7 +480,7 @@ class TraceFinalizer:
             ),
             completeness=completeness,
             actors=(root_actor, *extra_actors),
-            sessions=(root_session, *extra_sessions),
+            sessions=(root_session, *attributed_extra_sessions),
             messages=tuple(messages),
             spans=tuple(spans),
             events=tuple(sorted(events, key=lambda item: item.order.chronological_sequence or 0)),
@@ -396,17 +497,163 @@ class TraceFinalizer:
             call_index_to_span=call_index_to_span,
         )
 
+    def _correlate_provider_calls(
+        self,
+        calls: Mapping[str, _CallState],
+        *,
+        extra_sessions: tuple[SessionV5, ...],
+        aliases: tuple[AliasV1, ...],
+    ) -> tuple[str, ...]:
+        """Join late native Codex identities to earlier provider captures.
+
+        Codex does not forward arbitrary Synth headers to its provider request, but
+        its Responses request carries the Codex thread id as ``prompt_cache_key``.
+        The native JSONL stream independently observes that thread id. An exact,
+        unique ``codex.thread`` alias is therefore sufficient to attribute the call
+        without guessing. Explicit non-root capture context always wins.
+        """
+
+        root_session_id = self.binding.workload.actor_session_id
+        sessions = {
+            session.session_id: session
+            for session in extra_sessions
+        }
+        thread_targets: dict[str, set[str]] = {}
+        for alias in aliases:
+            if (
+                str(alias.namespace) != str(AliasNamespace.CODEX_THREAD)
+                or alias.target_kind != "session"
+                or not alias.value
+            ):
+                continue
+            thread_targets.setdefault(alias.value, set()).add(alias.target_id)
+
+        diagnostics: list[str] = []
+        for state in calls.values():
+            cache_key = state.request_body.get("prompt_cache_key")
+            if not isinstance(cache_key, str):
+                websocket_response = state.request_body.get("response")
+                cache_key = (
+                    websocket_response.get("prompt_cache_key")
+                    if isinstance(websocket_response, Mapping)
+                    else None
+                )
+            if not isinstance(cache_key, str) or not cache_key:
+                continue
+            targets = thread_targets.get(cache_key)
+            if not targets:
+                continue
+            if len(targets) != 1:
+                diagnostics.append(
+                    "provider call "
+                    f"{state.call_id} has ambiguous codex.thread alias for "
+                    "prompt_cache_key"
+                )
+                continue
+            target_id = next(iter(targets))
+            if target_id == root_session_id:
+                state.native_correlation = {
+                    "basis": "exact_native_alias",
+                    "request_field": (
+                        "response.prompt_cache_key"
+                        if isinstance(state.request_body.get("response"), Mapping)
+                        else "prompt_cache_key"
+                    ),
+                    "alias_namespace": str(AliasNamespace.CODEX_THREAD),
+                    "alias_value": cache_key,
+                    "alias_target_id": target_id,
+                }
+                continue
+            target = sessions.get(target_id)
+            if target is None:
+                diagnostics.append(
+                    "provider call "
+                    f"{state.call_id} codex.thread alias targets unknown session "
+                    f"{target_id}"
+                )
+                continue
+            if state.session_id != root_session_id:
+                if state.session_id != target_id:
+                    diagnostics.append(
+                        "provider call "
+                        f"{state.call_id} explicit session conflicts with "
+                        "codex.thread alias"
+                    )
+                continue
+            state.session_id = target.session_id
+            state.actor_id = target.actor_id
+            state.native_correlation = {
+                "basis": "exact_native_alias",
+                "request_field": (
+                    "response.prompt_cache_key"
+                    if isinstance(state.request_body.get("response"), Mapping)
+                    else "prompt_cache_key"
+                ),
+                "alias_namespace": str(AliasNamespace.CODEX_THREAD),
+                "alias_value": cache_key,
+                "alias_target_id": target.session_id,
+            }
+        return tuple(diagnostics)
+
+    def _load_body_ref(self, ref: Mapping[str, Any]) -> dict[str, Any]:
+        """Rehydrate a captured provider body, which is always a JSON object."""
+
+        inline = ref.get("inline")
+        if isinstance(inline, Mapping):
+            return dict(inline)
+        payload = self._read_stored_body(ref)
+        if payload is None:
+            return {}
+        loaded = json.loads(payload.decode("utf-8"))
+        if not isinstance(loaded, Mapping):
+            raise FinalizationError(
+                f"captured provider body {ref.get('uri')!r} is not a JSON object"
+            )
+        return dict(loaded)
+
+    def _load_frame_ref(self, ref: Mapping[str, Any]) -> str:
+        """Rehydrate a captured stream frame, which is wire text rather than an object."""
+
+        payload = self._read_stored_body(ref)
+        if payload is None:
+            return ""
+        return payload.decode("utf-8", errors="replace")
+
+    def _read_stored_body(self, ref: Mapping[str, Any]) -> bytes | None:
+        """The stored bytes behind a body ref, or None when it names no blob."""
+
+        uri = ref.get("uri")
+        digest = str(ref.get("stored_digest") or "")
+        if not uri or not digest:
+            return None
+        store = FilesystemBlobStore(self.spool_root.parents[1] / "blobs")
+        expected_uri = store.uri(digest)
+        if str(uri) != expected_uri:
+            raise FinalizationError(
+                f"captured body URI does not match its digest: {uri!r} != "
+                f"{expected_uri!r}"
+            )
+        try:
+            return store.get(digest)
+        except (FileNotFoundError, ValueError) as exc:
+            raise FinalizationError(f"captured body cannot be verified: {exc}") from exc
+
     # -- per-call normalization --------------------------------------------------
 
     def _build_call(self, state: _CallState) -> "_BuiltCall":
         trace_id = self.binding.trace_id
-        actor_id = self.binding.workload.root_actor_id
-        session_id = self.binding.workload.actor_session_id
+        actor_id = state.actor_id
+        session_id = state.session_id
         span_id = record_id("span", kind="model_call", scope=(trace_id,), key=state.call_id)
         diagnostics: list[str] = []
         messages: list[MessageNodeV5] = []
+        adapter = self.adapters.by_name(state.provider_adapter)
+        if adapter is None:
+            raise FinalizationError(
+                f"capture names unsupported provider adapter {state.provider_adapter!r}"
+            )
 
-        request_messages = normalize_request_messages(state.request_body)
+        request_messages = adapter.normalize_request(state.request_body)
         input_ids: list[str] = []
         previous: tuple[str, ...] = ()
         for index, normalized in enumerate(request_messages):
@@ -425,36 +672,44 @@ class TraceFinalizer:
             input_ids.append(node.message_id)
             previous = (node.message_id,)
 
-        response: NormalizedMessage | None = None
-        usage_payload = state.usage_payload
+        provider_result = NormalizedProviderResult()
         if state.streaming:
-            response, streamed_usage, stream_diagnostics = assemble_sse_frames(state.frames)
-            diagnostics.extend(stream_diagnostics)
-            usage_payload = usage_payload or streamed_usage
-        elif state.response_truncated:
-            diagnostics.append("response body exceeded the inline limit and was not normalized")
+            stream = adapter.new_stream()
+            for frame in state.frames:
+                stream.feed(frame.encode("utf-8"))
+            provider_result = stream.finish()
         elif state.response_body is not None:
-            response, response_diagnostics = normalize_unary_response(state.response_body)
-            diagnostics.extend(response_diagnostics)
-            if usage_payload is None and isinstance(state.response_body.get("usage"), Mapping):
-                usage_payload = dict(state.response_body["usage"])
+            provider_result = adapter.normalize_unary(state.response_body)
+        elif state.response_truncated:
+            diagnostics.append("response body was not retained and could not be normalized")
+        diagnostics.extend(provider_result.diagnostics)
 
         output_ids: list[str] = []
-        if response is not None:
+        response_previous = previous
+        for response_index, response in enumerate(provider_result.messages):
             node = _message_node(
                 trace_id=trace_id,
-                key={"call": state.call_id, "slot": "response"},
+                key={
+                    "call": state.call_id,
+                    "slot": "response",
+                    "index": response_index,
+                },
                 normalized=response,
                 actor_id=actor_id,
                 session_id=session_id,
                 span_id=span_id,
                 occurred_at=state.ended_at or state.started_at,
-                predecessors=previous,
+                predecessors=response_previous,
             )
             messages.append(node)
             output_ids.append(node.message_id)
+            response_previous = (node.message_id,)
 
-        usage = usage_from_provider(usage_payload)
+        usage = (
+            adapter.usage(state.usage_payload)
+            if state.usage_payload is not None
+            else provider_result.usage or adapter.usage(None)
+        )
         status = (
             SpanStatus.OK
             if state.http_status is not None and 200 <= state.http_status < 300
@@ -475,16 +730,31 @@ class TraceFinalizer:
                 "streaming": state.streaming,
                 "http_status": state.http_status,
                 "request_digest": state.request_digest,
-                "finish_reason": response.finish_reason if response else None,
+                "finish_reason": (
+                    provider_result.messages[-1].finish_reason
+                    if provider_result.messages
+                    else None
+                ),
+                "provider_adapter": state.provider_adapter,
+                "provider_adapter_version": state.provider_adapter_version,
+                "route": state.route,
+                "provider_ids": provider_result.provider_ids,
+                "provider_terminal_observed": provider_result.terminal_observed,
                 "correlation_headers": _correlation_headers(state.request_headers),
+                "native_correlation": state.native_correlation,
             },
             input_message_ids=tuple(input_ids),
             output_message_ids=tuple(output_ids),
             usage=usage,
+            token_capture=provider_result.token_capture,
+            aliases=_call_aliases(
+                state.request_headers,
+                span_id=span_id,
+            ),
             transformations=(
                 TransformationRecordV1(
-                    name=NORMALIZER_NAME,
-                    version=NORMALIZER_VERSION,
+                    name=adapter.name,
+                    version=adapter.version,
                     input_refs=(state.call_id,),
                     output_refs=tuple(input_ids + output_ids),
                     losses=tuple(sorted(set(diagnostics))),
@@ -525,7 +795,15 @@ class TraceFinalizer:
             payload={
                 "call_index": state.call_index,
                 "http_status": state.http_status,
-                "usage_observed": usage_payload is not None,
+                "usage_observed": (
+                    state.usage_payload is not None
+                    or (
+                        provider_result.usage is not None
+                        and str(provider_result.usage.provenance)
+                        != UsageProvenance.UNAVAILABLE
+                    )
+                ),
+                "provider_terminal_observed": provider_result.terminal_observed,
             },
         ).sealed()
 
@@ -675,6 +953,116 @@ def _correlation_headers(headers: Mapping[str, str]) -> dict[str, str]:
     }
 
 
+def _call_aliases(headers: Mapping[str, str], *, span_id: str) -> tuple[AliasV1, ...]:
+    value = headers.get("x-synth-call-correlation-id")
+    if not value:
+        return ()
+    return (
+        AliasV1(
+            namespace=AliasNamespace.CORRELATION,
+            value=str(value),
+            target_id=span_id,
+            target_kind="span",
+            provenance="declared_by_workload",
+        ),
+    )
+
+
+def _coverage_for_prefixes(
+    event_names: set[str],
+    prefixes: tuple[str, ...],
+) -> CoverageState:
+    return (
+        CoverageState.COMPLETE
+        if any(name.startswith(prefixes) for name in event_names)
+        else CoverageState.NOT_CAPTURED
+    )
+
+
+def _call_coverage(
+    calls: tuple[_CallState, ...],
+) -> tuple[CoverageState, CoverageState, CoverageState]:
+    if not calls:
+        return (
+            CoverageState.NOT_CAPTURED,
+            CoverageState.NOT_CAPTURED,
+            CoverageState.NOT_CAPTURED,
+        )
+    model_calls = (
+        CoverageState.COMPLETE
+        if all(call.finished_ordinal > 0 for call in calls)
+        else CoverageState.PARTIAL
+    )
+    usage = (
+        CoverageState.COMPLETE
+        if all(call.usage_observed for call in calls)
+        else CoverageState.PARTIAL
+    )
+    raw_provider = (
+        CoverageState.COMPLETE
+        if all(
+            call.request_body
+            and (call.response_body is not None or call.frames)
+            for call in calls
+        )
+        else CoverageState.PARTIAL
+    )
+    return model_calls, usage, raw_provider
+
+
+def _with_observed_session_coverage(
+    session: SessionV5,
+    *,
+    call_states: tuple[_CallState, ...],
+    event_names: set[str],
+) -> SessionV5:
+    """Overlay facts captured for one session without erasing declared coverage."""
+
+    model_calls, usage, raw_provider = _call_coverage(call_states)
+    declared = session.coverage
+
+    def observed_or_declared(
+        observed: CoverageState,
+        prior: CoverageState | str,
+    ) -> CoverageState | str:
+        return prior if observed == CoverageState.NOT_CAPTURED else observed
+
+    agent_events = _coverage_for_prefixes(
+        event_names,
+        ("agent.", "codex.", "react.", "jesterky."),
+    )
+    environment_events = _coverage_for_prefixes(
+        event_names,
+        ("environment.", "gamebench."),
+    )
+    tool_events = _coverage_for_prefixes(
+        event_names,
+        ("tool.", "codex.command", "codex.tool"),
+    )
+    return replace(
+        session,
+        coverage=SessionCoverageV5(
+            model_calls=observed_or_declared(model_calls, declared.model_calls),
+            agent_events=observed_or_declared(
+                agent_events,
+                declared.agent_events,
+            ),
+            environment_events=observed_or_declared(
+                environment_events,
+                declared.environment_events,
+            ),
+            tool_events=observed_or_declared(tool_events, declared.tool_events),
+            usage=observed_or_declared(usage, declared.usage),
+            raw_provider=observed_or_declared(
+                raw_provider,
+                declared.raw_provider,
+            ),
+            reasons=declared.reasons,
+        ),
+        content_digest="",
+    ).sealed()
+
+
 def _int(value: Any) -> int | None:
     if value is None:
         return None
@@ -682,6 +1070,14 @@ def _int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _session_status(status: TraceStatus | str) -> SessionStatus:
+    if str(status) == str(TraceStatus.COMPLETED):
+        return SessionStatus.COMPLETED
+    if str(status) == str(TraceStatus.FAILED):
+        return SessionStatus.FAILED
+    return SessionStatus.INTERRUPTED
 
 
 def alias(

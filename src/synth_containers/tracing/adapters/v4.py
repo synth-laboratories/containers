@@ -42,6 +42,7 @@ def import_rollout_trace_v4(
     *,
     trace_id: str | None = None,
     producer: str = "synth_containers.tracing.adapters.v4",
+    imported_at: str = "1970-01-01T00:00:00Z",
 ) -> TraceDocumentV5:
     """Build a sealed V5 document from a V4 rollout trace payload."""
 
@@ -132,7 +133,7 @@ def import_rollout_trace_v4(
                 span_kind=SpanKind.MODEL_CALL,
                 actor_id=actor_id,
                 session_id=session_id,
-                started_at=utc_now(),
+                started_at=imported_at,
                 status=SpanStatus.OK,
                 detail={
                     "call_index": int(raw.get("call_index") or sequence - 1),
@@ -166,7 +167,7 @@ def import_rollout_trace_v4(
                 event_type=EventType.MODEL_CALL_FINISHED,
                 actor_id=actor_id,
                 session_id=session_id,
-                occurred_at=utc_now(),
+                occurred_at=imported_at,
                 span_id=span_id,
                 order=EventOrderV1(chronological_sequence=sequence, source_order_id=source_span_id),
                 payload={"call_index": int(raw.get("call_index") or sequence - 1)},
@@ -193,7 +194,7 @@ def import_rollout_trace_v4(
     session = SessionV5(
         session_id=session_id,
         actor_id=actor_id,
-        started_at=utc_now(),
+        started_at=imported_at,
         coverage=SessionCoverageV5(
             model_calls=CoverageState.PARTIAL,
             usage=CoverageState.AGGREGATE_ONLY,
@@ -209,7 +210,7 @@ def import_rollout_trace_v4(
             rollout_id=rollout_id or None,
             correlation_id=str(correlation) if correlation else None,
         ),
-        lifecycle=TraceLifecycleV5(status=TraceStatus.COMPLETED, started_at=utc_now()),
+        lifecycle=TraceLifecycleV5(status=TraceStatus.COMPLETED, started_at=imported_at),
         capture=TraceCaptureSummaryV5(
             capture_id=record_id(
                 "cap", kind="imported", scope=(resolved_trace_id,), key=source_digest
@@ -224,13 +225,15 @@ def import_rollout_trace_v4(
             producer=producer,
             producer_version=IMPORTER_VERSION,
             source_format="synth_rollout_trace_v4",
-            captured_at=utc_now(),
+            captured_at=imported_at,
             transformation_chain=(f"{IMPORTER_NAME}@{IMPORTER_VERSION}",),
             extra={"source_digest": source_digest},
         ),
         completeness=TraceCompletenessV5(
             capture_status=CaptureStatus.PARTIAL,
-            terminal_event_observed=False,
+            # The source rollout is a completed terminal artifact even though its
+            # raw provider transport is unavailable.
+            terminal_event_observed=True,
             model_calls=CoverageState.PARTIAL,
             raw_provider=CoverageState.UNAVAILABLE,
             usage=CoverageState.AGGREGATE_ONLY,
