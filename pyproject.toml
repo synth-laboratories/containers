@@ -1,6 +1,6 @@
 [project]
 name = "synth-containers"
-version = "0.3.1.20260725"
+version = "0.4.0.20260725"
 description = "Shared Synth container and environment runtime substrate"
 authors = [{name = "Synth Laboratories", email = "josh@usesynth.ai"}]
 readme = "README.md"
