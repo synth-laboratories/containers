@@ -83,6 +83,8 @@ class AttachedSynthTunnelLease:
     connector_mode: str
     _control_plane: SynthTunnelControlPlane = field(repr=False)
     _agent: "SynthTunnelRelayAgent" = field(repr=False)
+    route_token: str | None = None
+    diagnostics_hint: str | None = None
     _close_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
     _agent_stopped: bool = field(default=False, repr=False)
     _control_plane_closed: bool = field(default=False, repr=False)
@@ -196,6 +198,8 @@ class SynthTunnelProvider:
             expires_at=_optional_text(response.get("expires_at")),
             connector_mode=_optional_text(response.get("connector_mode"))
             or "synth_tunnel_agent",
+            route_token=_optional_text(response.get("route_token")),
+            diagnostics_hint=_optional_text(response.get("diagnostics_hint")),
             _control_plane=self._control_plane,
             _agent=agent,
         )
@@ -333,12 +337,12 @@ class SynthTunnelRelayAgent:
                     if isinstance(payload, Mapping):
                         self._handle_frame(payload, connection_generation)
             except _FatalAttachError as error:
-                self._startup_error = type(error).__name__
+                self._startup_error = _startup_error_detail(error)
                 self._fatal.set()
                 break
             except Exception as error:
                 if not self._ready.is_set():
-                    self._startup_error = type(error).__name__
+                    self._startup_error = _startup_error_detail(error)
                 if self._stop.wait(0.5):
                     break
             finally:
@@ -704,3 +708,14 @@ def _decode_bytes(data: str) -> bytes:
 def _websocket_message_limit(max_request_body_bytes: int) -> int:
     base64_bytes = ((max_request_body_bytes + 2) // 3) * 4
     return max(1024 * 1024, base64_bytes + 64 * 1024)
+
+
+def _startup_error_detail(error: Exception) -> str:
+    if isinstance(error, ModuleNotFoundError):
+        missing_module = str(error.name or "").strip()
+        if missing_module and all(
+            character.isalnum() or character in {"_", ".", "-"}
+            for character in missing_module
+        ):
+            return f"ModuleNotFoundError({missing_module})"
+    return type(error).__name__
