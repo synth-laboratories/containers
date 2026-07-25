@@ -22,6 +22,7 @@ import secrets
 from types import TracebackType
 from typing import Any
 from collections.abc import Callable
+from urllib.parse import urlsplit, urlunsplit
 import uuid
 
 import httpx
@@ -227,13 +228,30 @@ class CaptureSupervisor:
             context_resolver=self._resolve_provider_context,
         )
         self.collector = LocalCollector(self.session)
+        responses_endpoint = next(
+            (
+                endpoint
+                for endpoint in self._endpoints
+                if endpoint.route == RESPONSES_PATH
+            ),
+            None,
+        )
+        if config.responses_websocket and responses_endpoint is None:
+            raise ValueError(
+                "Responses WebSocket capture requires a /v1/responses provider endpoint"
+            )
         self.websocket_server = (
             ResponsesWebSocketServer(
                 ResponsesWebSocketRelay(
                     self.session,
+                    upstream_url=_websocket_url(responses_endpoint.upstream_url()),
                     authorization=(
-                        f"Bearer {config.upstream_api_key}"
-                        if config.upstream_api_key
+                        (
+                            f"{responses_endpoint.auth_scheme} "
+                            f"{responses_endpoint.api_key}"
+                        ).strip()
+                        if responses_endpoint.auth_kind == UpstreamAuthKind.BEARER
+                        and responses_endpoint.api_key
                         else None
                     ),
                 ),
@@ -921,6 +939,19 @@ def _default_provider_endpoints(
             )
         )
     return tuple(endpoints)
+
+
+def _websocket_url(http_url: str) -> str:
+    parsed = urlsplit(http_url)
+    schemes = {"http": "ws", "https": "wss", "ws": "ws", "wss": "wss"}
+    scheme = schemes.get(parsed.scheme.lower())
+    if scheme is None:
+        raise ValueError(
+            f"Responses WebSocket upstream requires HTTP(S) or WS(S), got {http_url!r}"
+        )
+    return urlunsplit(
+        (scheme, parsed.netloc, parsed.path, parsed.query, parsed.fragment)
+    )
 
 
 def _mitm_lifecycle_failure(

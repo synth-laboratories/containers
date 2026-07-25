@@ -54,7 +54,6 @@ class ResponsesWebSocketRelay:
         ) as upstream:
             in_flight = False
             call_id: str | None = None
-            call_index = 0
             while True:
                 request = await downstream.recv()
                 wire_request = (
@@ -73,10 +72,8 @@ class ResponsesWebSocketRelay:
                 if in_flight:
                     raise ValueError("only one response may be in flight per WebSocket")
                 in_flight = True
-                call_id = self.session.mint(
-                    "call",
+                call_id, call_index = self.session.mint_call(
                     kind="responses_websocket",
-                    key=call_index,
                 )
                 inline_request, request_ref, request_redaction = self._capture_json(
                     body,
@@ -180,7 +177,6 @@ class ResponsesWebSocketRelay:
                     raise RuntimeError(
                         "Responses WebSocket upstream closed before a terminal event"
                     )
-                call_index += 1
 
     def _capture_json(
         self,

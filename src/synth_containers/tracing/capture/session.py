@@ -7,6 +7,7 @@ calls and application events interleave in a single, replayable order.
 from __future__ import annotations
 
 import threading
+from collections.abc import Mapping
 from typing import Any
 
 from ..canonical import record_id
@@ -33,6 +34,15 @@ class CaptureSession:
         self.last_observed_at: str | None = None
         self._lock = threading.Lock()
         self._ordinal = spool.high_water_ordinal
+        self._call_index = max(
+            (
+                int(payload.get("call_index"))
+                for record in spool.records()
+                if isinstance((payload := record.get("payload")), Mapping)
+                and isinstance(payload.get("call_index"), int)
+            ),
+            default=0,
+        )
 
     def append(
         self,
@@ -84,6 +94,22 @@ class CaptureSession:
             kind=kind,
             scope=(self.binding.trace_id, self.binding.capture_id),
             key=key,
+        )
+
+    def mint_call(self, *, kind: str) -> tuple[str, int]:
+        """Atomically allocate one capture-global model-call identity.
+
+        HTTP and WebSocket producers share a finalizer, so their call indices must
+        occupy one sequence. The persisted high-water scan above also prevents a
+        resumed capture from reusing an earlier call identity.
+        """
+
+        with self._lock:
+            self._call_index += 1
+            call_index = self._call_index
+        return (
+            self.mint("call", kind=kind, key=call_index),
+            call_index,
         )
 
 
