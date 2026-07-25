@@ -729,10 +729,28 @@ def test_structured_catalog_search_compounds_trace_entity_and_evidence_filters(
         content_digest="",
     ).sealed()
     evidence = _valid_evidence(trace)
+    split_reward_evidence = replace(
+        evidence,
+        reward_records=(
+            replace(
+                evidence.reward_records[0],
+                value=0.0,
+                content_digest="",
+            ).sealed(),
+        ),
+        reward_aggregations=(
+            replace(
+                evidence.reward_aggregations[0],
+                value=2.0,
+                content_digest="",
+            ).sealed(),
+        ),
+        content_digest="",
+    ).sealed()
     catalog = SqliteCatalogStore(tmp_path / "catalog.sqlite3")
     try:
         catalog.index_trace(trace)
-        catalog.index_evidence(evidence)
+        catalog.index_evidence(split_reward_evidence)
 
         rows = list(
             catalog.query_traces(
@@ -751,8 +769,8 @@ def test_structured_catalog_search_compounds_trace_entity_and_evidence_filters(
                 criterion_id="gate",
                 annotation_id="annotation",
                 reward_id="source-reward",
-                reward_min=1.0,
-                reward_max=1.0,
+                reward_min=0.0,
+                reward_max=0.0,
                 workflow_address="workflow-search/map/0",
                 started_after="1969-01-01T00:00:00Z",
                 started_before="1971-01-01T00:00:00Z",
@@ -762,7 +780,13 @@ def test_structured_catalog_search_compounds_trace_entity_and_evidence_filters(
             )
         )
         assert [row["trace_digest"] for row in rows] == [trace.content_digest]
-        assert list(catalog.query_traces(reward_max=0.5)) == []
+        assert list(catalog.query_traces(reward_min=1.0, reward_max=1.0)) == []
+        assert list(
+            catalog.query_traces(
+                reward_id="source-reward",
+                reward_min=2.0,
+            )
+        ) == []
         with pytest.raises(ValueError, match="reward_min"):
             list(catalog.query_traces(reward_min=2.0, reward_max=1.0))
     finally:

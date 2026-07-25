@@ -326,6 +326,7 @@ def test_native_import_persists_only_redacted_source_artifact(tmp_path: Path) ->
     source_bytes = canonical_bytes(
         {
             "api_key": secret,
+            "trace_correlation_id": secret,
             "events": [
                 {
                     "event_id": "step-1",
@@ -353,6 +354,8 @@ def test_native_import_persists_only_redacted_source_artifact(tmp_path: Path) ->
     assert secret.encode() not in stored
     assert REDACTED.encode() in stored
     assert secret.encode() not in bundle.archive_bytes()
+    trace = bundle.read_trace(imported["trace_digest"])
+    assert trace["identity"]["correlation_id"] == REDACTED
     assert bundle.verify_self_contained() == (True, ())
 
 

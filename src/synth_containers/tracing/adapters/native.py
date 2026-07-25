@@ -74,9 +74,9 @@ def import_native_to_bundle(
     )
     stored_source_digest = bundle.blobs.put(safe_source)
     if normalized in {"codex", "codex_jsonl", "codex_stdout_jsonl"}:
-        result = _import_codex(source, source_digest=source_digest, bundle=bundle)
+        result = _import_codex(safe_source, source_digest=source_digest, bundle=bundle)
     elif normalized in {"react", "craftax_react", "gamebench_react"}:
-        payload = _json_object(source_bytes)
+        payload = _json_object(safe_source)
         result = _import_events(
             payload,
             source_digest=source_digest,
@@ -89,7 +89,7 @@ def import_native_to_bundle(
             ),
         )
     else:
-        payload = _json_object(source_bytes)
+        payload = _json_object(safe_source)
         run_id = str(payload.get("run_id") or "")
         result = _import_events(
             payload,
@@ -206,7 +206,7 @@ def write_imported_document(
 
 
 def _import_codex(
-    source: Path,
+    source: bytes,
     *,
     source_digest: str,
     bundle: LocalTraceBundle,

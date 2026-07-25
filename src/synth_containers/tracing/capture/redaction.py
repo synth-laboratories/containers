@@ -223,6 +223,7 @@ def redact_json_source_bytes(
             safe_lines.append(
                 canonical_bytes(
                     {
+                        "_synth_redacted_malformed_jsonl": True,
                         "malformed_line": line_number,
                         "wire_byte_size": len(line),
                         "wire_digest": bytes_digest(line),

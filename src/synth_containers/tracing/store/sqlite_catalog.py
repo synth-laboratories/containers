@@ -605,30 +605,27 @@ class SqliteCatalogStore:
                 "AND er.record_kind = 'annotation' AND er.record_id = ?)"
             )
             params.append(annotation_id)
-        if reward_id:
+        if reward_id or reward_min is not None or reward_max is not None:
+            reward_predicates = [
+                "er.trace_digest = d.trace_digest",
+                "er.record_kind IN ('reward_record', 'reward_aggregation')",
+            ]
+            reward_params: list[Any] = []
+            if reward_id:
+                reward_predicates.append("er.definition_id = ?")
+                reward_params.append(reward_id)
+            if reward_min is not None:
+                reward_predicates.append("er.value >= ?")
+                reward_params.append(float(reward_min))
+            if reward_max is not None:
+                reward_predicates.append("er.value <= ?")
+                reward_params.append(float(reward_max))
             clauses.append(
-                "EXISTS (SELECT 1 FROM evidence_records er "
-                "WHERE er.trace_digest = d.trace_digest "
-                "AND er.record_kind IN ('reward_record', 'reward_aggregation') "
-                "AND er.definition_id = ?)"
+                "EXISTS (SELECT 1 FROM evidence_records er WHERE "
+                + " AND ".join(reward_predicates)
+                + ")"
             )
-            params.append(reward_id)
-        if reward_min is not None:
-            clauses.append(
-                "EXISTS (SELECT 1 FROM evidence_records er "
-                "WHERE er.trace_digest = d.trace_digest "
-                "AND er.record_kind IN ('reward_record', 'reward_aggregation') "
-                "AND er.value >= ?)"
-            )
-            params.append(float(reward_min))
-        if reward_max is not None:
-            clauses.append(
-                "EXISTS (SELECT 1 FROM evidence_records er "
-                "WHERE er.trace_digest = d.trace_digest "
-                "AND er.record_kind IN ('reward_record', 'reward_aggregation') "
-                "AND er.value <= ?)"
-            )
-            params.append(float(reward_max))
+            params.extend(reward_params)
         if workflow_address:
             clauses.append(
                 "EXISTS (SELECT 1 FROM trace_aliases a "
