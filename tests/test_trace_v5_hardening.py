@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 import io
 import json
 from pathlib import Path
 import subprocess
 import sys
+import threading
 from urllib.parse import urlsplit
 import zipfile
 from types import SimpleNamespace
@@ -27,6 +29,7 @@ from synth_containers.tracing.models.identity import TraceProvenanceV5
 from synth_containers.tracing.models.evidence import TraceEvidenceBundleV5, TraceRefV5
 from synth_containers.tracing.capture.collector_server import CollectorServer
 from synth_containers.tracing.capture.emitter import TraceEmitter
+from synth_containers.tracing.capture.envelope import RawRecordType
 from synth_containers.tracing.capture.redaction import REDACTED, redact_payload
 from synth_containers.tracing.capture.binding import CaptureMode, Interception
 from synth_containers.tracing.capture.supervisor import CaptureSupervisor, SupervisorConfig
@@ -452,6 +455,7 @@ def test_registered_child_can_emit_real_event() -> None:
         context_for_child=lambda: root_context,
     )
     received: list[dict[str, object]] = []
+    finished: list[dict[str, object]] = []
 
     class Collector:
         def __init__(self) -> None:
@@ -460,6 +464,10 @@ def test_registered_child_can_emit_real_event() -> None:
         def event(self, **kwargs: object) -> str:
             received.append(dict(kwargs))
             return "envelope-child"
+
+        def finish_session(self, **kwargs: object) -> tuple[str, str]:
+            finished.append(dict(kwargs))
+            return "envelope-finished", str(kwargs["ended_at"])
 
     registrations: list[tuple[TraceContextV1, dict[str, object], dict[str, object]]] = []
     server = CollectorServer(
@@ -477,6 +485,14 @@ def test_registered_child_can_emit_real_event() -> None:
         parent_actor_id="root",
         delegation_id="delegation",
     )
+    sibling = TraceContextV1(
+        "trace",
+        "sibling-cap",
+        "sibling",
+        "sibling-session",
+        parent_actor_id="root",
+        delegation_id="sibling-delegation",
+    )
     try:
         with TraceEmitter(server.base_url, root_context, collector_token="secret") as parent:
             assert (
@@ -487,12 +503,110 @@ def test_registered_child_can_emit_real_event() -> None:
                 )
                 == "child-cap"
             )
-        with TraceEmitter(server.base_url, child, collector_token="secret") as emitter:
+            child_token = parent.registered_context_token(child)
+            assert (
+                parent.register_context(
+                    sibling,
+                    actor={"actor_id": "sibling"},
+                    session={
+                        "session_id": "sibling-session",
+                        "actor_id": "sibling",
+                    },
+                )
+                == "sibling-cap"
+            )
+            sibling_token = parent.registered_context_token(sibling)
+        with TraceEmitter(
+            server.base_url,
+            child,
+            collector_token=sibling_token,
+        ) as sibling_impersonation:
+            with pytest.raises(httpx.HTTPStatusError) as sibling_denied:
+                sibling_impersonation.event(
+                    "agent.child",
+                    {"wrong_capability": True},
+                )
+            assert sibling_denied.value.response.status_code == 403
+        with TraceEmitter(
+            server.base_url,
+            child,
+            collector_token="secret",
+        ) as root_impersonation:
+            with pytest.raises(httpx.HTTPStatusError) as root_denied:
+                root_impersonation.event(
+                    "agent.child",
+                    {"root_impersonation": True},
+                )
+            assert root_denied.value.response.status_code == 403
+        with TraceEmitter(
+            server.base_url,
+            sibling,
+            collector_token=sibling_token,
+        ) as sibling_emitter:
+            assert (
+                sibling_emitter.event("agent.sibling", {"ok": True})
+                == "envelope-child"
+            )
+        with TraceEmitter(
+            server.base_url,
+            child,
+            collector_token=child_token,
+        ) as emitter:
             assert emitter.event("agent.child", {"ok": True}) == "envelope-child"
+            assert (
+                emitter.finish(ended_at="2026-07-25T01:02:03Z")
+                == "envelope-finished"
+            )
+            assert emitter.finish() == "envelope-finished"
+            with pytest.raises(httpx.HTTPStatusError) as conflicting:
+                emitter.finish(status="failed")
+            assert conflicting.value.response.status_code == 400
+            with pytest.raises(httpx.HTTPStatusError) as late_event:
+                emitter.event("agent.child", {"too_late": True})
+            assert late_event.value.response.status_code == 409
+            with pytest.raises(httpx.HTTPStatusError) as late_artifact:
+                emitter.artifact(
+                    "output",
+                    "text/plain",
+                    b"too late",
+                    "late.txt",
+                )
+            assert late_artifact.value.response.status_code == 409
+        with TraceEmitter(
+            server.base_url,
+            child,
+            collector_token="wrong",
+        ) as unauthorized:
+            with pytest.raises(httpx.HTTPStatusError) as unauthorized_finish:
+                unauthorized.finish()
+            assert unauthorized_finish.value.response.status_code == 403
+        with TraceEmitter(
+            server.base_url,
+            root_context,
+            collector_token="secret",
+        ) as root:
+            with pytest.raises(httpx.HTTPStatusError) as root_finish:
+                root.finish()
+            assert root_finish.value.response.status_code == 400
     finally:
         server.stop()
-    assert received[0]["actor_id"] == "child"
+    assert [
+        (item["actor_id"], item["session_id"])
+        for item in received
+    ] == [
+        ("sibling", "sibling-session"),
+        ("child", "child-session"),
+    ]
     assert registrations[0][0] == child
+    assert registrations[1][0] == sibling
+    assert finished == [
+        {
+            "status": "completed",
+            "actor_id": "child",
+            "session_id": "child-session",
+            "ended_at": "2026-07-25T01:02:03Z",
+        }
+    ]
 
 
 def test_rubric_required_missing_fails_and_ranges_normalize() -> None:
@@ -796,6 +910,101 @@ def test_provider_streams_survive_split_utf8_and_capture_usage() -> None:
     assert result.terminal_observed
     assert result.usage is not None
     assert result.usage.prompt_tokens == 3
+
+
+def test_http_sse_finalize_waits_for_accepted_stream(tmp_path: Path) -> None:
+    stream_entered = threading.Event()
+    release_stream = threading.Event()
+    finalize_entered = threading.Event()
+
+    class BlockingSSEStream(httpx.SyncByteStream):
+        def __iter__(self):
+            stream_entered.set()
+            assert release_stream.wait(timeout=10.0)
+            yield (
+                b"event: response.completed\n"
+                b'data: {"type":"response.completed","response":'
+                b'{"id":"resp_sse_drain","status":"completed","output":[],'
+                b'"usage":{"input_tokens":2,"output_tokens":1,'
+                b'"total_tokens":3}}}\n\n'
+            )
+
+    def upstream(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            stream=BlockingSSEStream(),
+        )
+
+    supervisor = CaptureSupervisor(
+        SupervisorConfig(
+            bundle_root=tmp_path / "sse-finalize-drain",
+            trace_key={"task": "sse-finalize-drain"},
+            upstream_base_url="https://api.openai.com/v1",
+            provenance=TraceProvenanceV5(
+                producer="test",
+                producer_version="1",
+            ),
+        )
+    )
+    supervisor.proxy._client.close()
+    supervisor.proxy._client = httpx.Client(
+        transport=httpx.MockTransport(upstream),
+        trust_env=False,
+    )
+    supervisor.start_capture()
+
+    def request_stream() -> httpx.Response:
+        return httpx.post(
+            f"{supervisor.openai_base_url}/responses",
+            json={
+                "model": "gpt-5.4",
+                "input": "drain the accepted SSE stream",
+                "stream": True,
+            },
+            timeout=20.0,
+        )
+
+    def finalize() -> object:
+        finalize_entered.set()
+        return supervisor.finalize()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        request_future = pool.submit(request_stream)
+        assert stream_entered.wait(timeout=10.0)
+        finalize_future = pool.submit(finalize)
+        assert finalize_entered.wait(timeout=10.0)
+        assert not finalize_future.done()
+        assert not any(
+            record["record_type"] == str(RawRecordType.CAPTURE_FINISHED)
+            for record in supervisor.spool.records()
+        )
+        release_stream.set()
+        response = request_future.result(timeout=10.0)
+        sealed = finalize_future.result(timeout=10.0)
+
+    assert response.status_code == 200
+    records = tuple(supervisor.spool.records())
+    terminal_records = tuple(
+        record
+        for record in records
+        if record["record_type"] == str(RawRecordType.CAPTURE_FINISHED)
+    )
+    assert len(terminal_records) == 1
+    assert terminal_records[0] == records[-1]
+    assert next(
+        record["ordinal"]
+        for record in records
+        if record["record_type"] == str(RawRecordType.MODEL_CALL_FINISHED)
+    ) < terminal_records[0]["ordinal"]
+    assert sealed.coverage.calls_accepted == 1
+    assert sealed.coverage.calls_completed == 1
+    assert sealed.coverage.calls_normalized == 1
+    with pytest.raises(RuntimeError, match="closed"):
+        supervisor.session.append(
+            RawRecordType.APPLICATION_EVENT,
+            payload={"forbidden": True},
+        )
 
 
 def test_current_codex_jsonl_kinds_preserve_native_aliases_and_usage(

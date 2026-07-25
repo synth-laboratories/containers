@@ -18,8 +18,10 @@ from .collector_server import CollectorServer
 from .emitter import TraceEmitter
 from .coverage import (
     CaptureCoverageReceiptV1,
+    CaptureFinalizationV1,
     CaptureScope,
     Completeness,
+    finalization_from_dict,
     new_coverage_receipt,
 )
 from .envelope import RawCaptureEnvelopeV1, RawRecordType, make_envelope
@@ -53,6 +55,7 @@ __all__ = [
     "BindingContextV1",
     "BindingWorkloadV1",
     "CaptureCoverageReceiptV1",
+    "CaptureFinalizationV1",
     "CapturedCommandResult",
     "CaptureMode",
     "CaptureNotReady",
@@ -90,6 +93,7 @@ __all__ = [
     "WorkloadKind",
     "application_event_id",
     "assert_egress",
+    "finalization_from_dict",
     "make_envelope",
     "mint_binding",
     "mitm_environment",

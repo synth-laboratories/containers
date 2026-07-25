@@ -8,6 +8,7 @@ from typing import Any
 
 import httpx
 
+from ..models.actors import SessionStatus
 from ..models.identity import TraceContextV1
 
 
@@ -25,6 +26,7 @@ class TraceEmitter:
         self.context = context
         self.collector_token = collector_token
         self._client = httpx.Client(timeout=timeout)
+        self._registered_context_tokens: dict[str, str] = {}
 
     @classmethod
     def from_environment(cls, *, timeout: float = 10.0) -> "TraceEmitter":
@@ -44,6 +46,8 @@ class TraceEmitter:
         headers = {
             "x-synth-trace-id": self.context.trace_id,
             "x-synth-capture-id": self.context.capture_id,
+            "x-synth-actor-id": self.context.actor_id,
+            "x-synth-session-id": self.context.actor_session_id,
             "content-type": "application/json",
         }
         if self.collector_token:
@@ -130,7 +134,71 @@ class TraceEmitter:
             json={"context": child.to_dict(), "actor": actor, "session": session},
         )
         response.raise_for_status()
-        return str(response.json()["capture_id"])
+        receipt = response.json()
+        capture_id = str(receipt["capture_id"])
+        collector_token = str(receipt.get("collector_token") or "")
+        if not collector_token:
+            raise RuntimeError("child registration did not return a collector capability")
+        self._registered_context_tokens[capture_id] = collector_token
+        return capture_id
+
+    def registered_context_token(
+        self,
+        child: TraceContextV1 | str,
+    ) -> str:
+        """Return the ephemeral capability minted by ``register_context``."""
+
+        capture_id = child.capture_id if isinstance(child, TraceContextV1) else child
+        try:
+            return self._registered_context_tokens[capture_id]
+        except KeyError as exc:
+            raise ValueError("child context was not registered by this emitter") from exc
+
+    def emitter_for_registered_context(
+        self,
+        child: TraceContextV1,
+        *,
+        timeout: float = 10.0,
+    ) -> "TraceEmitter":
+        """Create a child emitter with only that child's scoped capability."""
+
+        return TraceEmitter(
+            self.base_url,
+            child,
+            timeout=timeout,
+            collector_token=self.registered_context_token(child),
+        )
+
+    def finish(
+        self,
+        *,
+        status: SessionStatus | str = SessionStatus.COMPLETED,
+        ended_at: str | None = None,
+    ) -> str:
+        """Durably finish this delegated child session.
+
+        Root-session lifecycle remains owned by ``CaptureSupervisor.finalize``.
+        Repeating the same terminal fact is idempotent; a conflicting terminal
+        status fails at the collector authority.
+        """
+
+        response = self._client.post(
+            f"{self.base_url}/v1/sessions/finish",
+            headers=self._headers(),
+            json={"status": str(status), "ended_at": ended_at},
+        )
+        response.raise_for_status()
+        return str(response.json()["envelope_id"])
+
+    def finish_session(
+        self,
+        *,
+        status: SessionStatus | str = SessionStatus.COMPLETED,
+        ended_at: str | None = None,
+    ) -> str:
+        """Compatibility spelling for ``finish``."""
+
+        return self.finish(status=status, ended_at=ended_at)
 
     def flush(self) -> None:
         """The synchronous transport has no buffered writes."""

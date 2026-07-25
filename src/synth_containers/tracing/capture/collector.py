@@ -12,10 +12,15 @@ without adding evidence.
 from __future__ import annotations
 
 import json
+from functools import wraps
+import threading
 from dataclasses import dataclass
 from typing import Any
 
 from ..canonical import record_id, utc_now
+from ..models.actors import ActorV5, SessionStatus, SessionV5
+from ..models.events import EventType
+from ..models.identity import TraceContextV1
 from .envelope import RawRecordType
 from .redaction import RedactionReportV1, assert_no_secrets, redact_payload, scrub_text
 from .session import CaptureSession
@@ -24,10 +29,23 @@ from .session import CaptureSession
 COLLECTOR_VERSION = "synth-trace-collector/1"
 
 
+def _requires_writable(method: Any) -> Any:
+    @wraps(method)
+    def guarded(self: "LocalCollector", *args: Any, **kwargs: Any) -> Any:
+        with self._write_lock:
+            if not self._accepting_writes:
+                raise RuntimeError("local collector is frozen")
+            return method(self, *args, **kwargs)
+
+    return guarded
+
+
 @dataclass(slots=True)
 class CollectorStats:
     application_events: int = 0
     artifacts: int = 0
+    children_registered: int = 0
+    sessions_finished: int = 0
 
 
 class LocalCollector:
@@ -36,11 +54,18 @@ class LocalCollector:
     def __init__(self, session: CaptureSession) -> None:
         self.session = session
         self.stats = CollectorStats()
+        self._write_lock = threading.RLock()
+        self._accepting_writes = True
 
     @property
     def binding(self) -> Any:
         return self.session.binding
 
+    def freeze(self) -> None:
+        with self._write_lock:
+            self._accepting_writes = False
+
+    @_requires_writable
     def event(
         self,
         *,
@@ -72,6 +97,7 @@ class LocalCollector:
         self.stats.application_events += 1
         return envelope.envelope_id
 
+    @_requires_writable
     def artifact(
         self,
         *,
@@ -95,32 +121,104 @@ class LocalCollector:
             {"artifact": stored.decode("utf-8", errors="replace")},
             where=f"artifact {logical_name}",
         )
-        digest, uri = self.session.store_blob(stored)
-        artifact_id = record_id(
-            "art",
-            kind="artifact",
-            scope=(self.session.binding.trace_id,),
-            key={"digest": digest, "name": logical_name},
-        )
-        self.session.append(
-            RawRecordType.ARTIFACT,
+        with self.session.write_transaction():
+            digest, uri = self.session.store_blob(stored)
+            artifact_id = record_id(
+                "art",
+                kind="artifact",
+                scope=(self.session.binding.trace_id,),
+                key={"digest": digest, "name": logical_name},
+            )
+            self.session.append(
+                RawRecordType.ARTIFACT,
+                payload={
+                    "artifact_id": artifact_id,
+                    "digest": digest,
+                    "media_type": media_type,
+                    "size_bytes": len(stored),
+                    "role": role,
+                    "logical_name": logical_name,
+                    "visibility": visibility,
+                    "uri": uri,
+                    "redaction": redaction.to_dict(),
+                },
+                actor_id=actor_id,
+                session_id=session_id,
+                producer_version=COLLECTOR_VERSION,
+            )
+        self.stats.artifacts += 1
+        return artifact_id
+
+    @_requires_writable
+    def finish_session(
+        self,
+        *,
+        status: SessionStatus | str,
+        actor_id: str,
+        session_id: str,
+        ended_at: str | None = None,
+    ) -> tuple[str, str]:
+        """Append one durable terminal child-session fact.
+
+        The collector server owns idempotency and ordering against later child
+        writes. This append point owns the raw fact from which the finalizer derives
+        the immutable ``SessionV5`` lifecycle and canonical ``session.finished``
+        event.
+        """
+
+        normalized = str(status)
+        if normalized not in {
+            str(SessionStatus.COMPLETED),
+            str(SessionStatus.FAILED),
+            str(SessionStatus.INTERRUPTED),
+        }:
+            raise ValueError("child session status must be terminal")
+        terminal_at = ended_at or utc_now()
+        envelope = self.session.append(
+            RawRecordType.SESSION_FINISHED,
             payload={
-                "artifact_id": artifact_id,
-                "digest": digest,
-                "media_type": media_type,
-                "size_bytes": len(stored),
-                "role": role,
-                "logical_name": logical_name,
-                "visibility": visibility,
-                "uri": uri,
-                "redaction": redaction.to_dict(),
+                "event_type": str(EventType.SESSION_FINISHED),
+                "body": {
+                    "status": normalized,
+                    "ended_at": terminal_at,
+                },
+                "caused_by": [],
+                "structural": None,
+                "redaction": RedactionReportV1().to_dict(),
             },
             actor_id=actor_id,
             session_id=session_id,
+            occurred_at=terminal_at,
             producer_version=COLLECTOR_VERSION,
         )
-        self.stats.artifacts += 1
-        return artifact_id
+        self.stats.sessions_finished += 1
+        return envelope.envelope_id, terminal_at
+
+    @_requires_writable
+    def register_child(
+        self,
+        *,
+        actor: ActorV5,
+        session: SessionV5,
+        context: TraceContextV1 | None,
+    ) -> str:
+        """Persist delegated topology without persisting its bearer capability."""
+
+        payload = {
+            "actor": actor.to_dict(),
+            "session": session.to_dict(),
+            "context": context.to_dict() if context is not None else None,
+        }
+        assert_no_secrets(payload, where=f"child registration {session.session_id}")
+        envelope = self.session.append(
+            RawRecordType.CHILD_REGISTERED,
+            payload=payload,
+            actor_id=actor.actor_id,
+            session_id=session.session_id,
+            producer_version=COLLECTOR_VERSION,
+        )
+        self.stats.children_registered += 1
+        return envelope.envelope_id
 
 
 def _redact_artifact(content: bytes, *, media_type: str) -> tuple[bytes, RedactionReportV1]:

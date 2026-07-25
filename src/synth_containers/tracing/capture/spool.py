@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from pathlib import PurePosixPath
@@ -115,6 +116,9 @@ class RawSpool:
         self._open_handle: Any = None
         self._open_records: list[RawCaptureEnvelopeV1] = []
         self._high_water = -1
+        self._latest_manifest: LiveManifestV1 | None = None
+        self._closed_manifest: LiveManifestV1 | None = None
+        self._lock = threading.RLock()
         self._resume()
 
     def _resume(self) -> None:
@@ -129,6 +133,7 @@ class RawSpool:
                 )
             return
         self._generation = manifest.generation
+        self._latest_manifest = manifest
         self._sealed = list(manifest.segments)
         self._sequence = max((item.sequence for item in manifest.segments), default=0)
         self._high_water = manifest.high_water_ordinal
@@ -143,52 +148,79 @@ class RawSpool:
     def append(self, envelope: RawCaptureEnvelopeV1) -> RawCaptureEnvelopeV1:
         """Append one raw record. The record is durable before this returns."""
 
-        assert_no_secrets(envelope.payload, where=f"raw envelope {envelope.envelope_id}")
-        if envelope.capture_id != self.capture_id:
-            raise ValueError(
-                f"envelope capture_id {envelope.capture_id!r} does not match {self.capture_id!r}"
+        with self._lock:
+            if self._closed_manifest is not None:
+                raise RuntimeError("capture spool is closed")
+            assert_no_secrets(
+                envelope.payload,
+                where=f"raw envelope {envelope.envelope_id}",
             )
-        if int(envelope.ordinal) <= self._high_water:
-            raise ValueError(
-                f"envelope ordinal {envelope.ordinal} is not above high-water "
-                f"{self._high_water}"
-            )
-        if self._open_handle is None:
-            self._open_segment()
-        assert self._open_handle is not None
-        self._open_handle.write(canonical_text(envelope) + "\n")
-        self._open_handle.flush()
-        os.fsync(self._open_handle.fileno())
-        self._open_records.append(envelope)
-        self._high_water = max(self._high_water, int(envelope.ordinal))
-        if len(self._open_records) >= self.max_segment_records:
-            self.rotate()
-        return envelope
+            if envelope.capture_id != self.capture_id:
+                raise ValueError(
+                    f"envelope capture_id {envelope.capture_id!r} does not match "
+                    f"{self.capture_id!r}"
+                )
+            if int(envelope.ordinal) <= self._high_water:
+                raise ValueError(
+                    f"envelope ordinal {envelope.ordinal} is not above high-water "
+                    f"{self._high_water}"
+                )
+            if self._open_handle is None:
+                self._open_segment()
+            assert self._open_handle is not None
+            self._open_handle.write(canonical_text(envelope) + "\n")
+            self._open_handle.flush()
+            os.fsync(self._open_handle.fileno())
+            self._open_records.append(envelope)
+            self._high_water = max(self._high_water, int(envelope.ordinal))
+            if len(self._open_records) >= self.max_segment_records:
+                self.rotate()
+            return envelope
 
     def rotate(self) -> TraceSegmentManifestV1 | None:
         """Seal the open partial into an immutable segment and publish a manifest."""
 
-        if self._open_handle is None or self._open_path is None:
-            return None
-        self._open_handle.flush()
-        os.fsync(self._open_handle.fileno())
-        self._open_handle.close()
-        self._open_handle = None
-        payload = self._open_path.read_bytes()
-        records = list(self._open_records)
-        self._open_records = []
-        partial_path = self._open_path
-        self._open_path = None
-        if not records:
-            partial_path.unlink(missing_ok=True)
-            return None
-        manifest = self._seal_segment(partial_path, payload, records)
-        self._publish_manifest()
-        return manifest
+        with self._lock:
+            if self._closed_manifest is not None:
+                return None
+            if self._open_handle is None or self._open_path is None:
+                return None
+            self._open_handle.flush()
+            os.fsync(self._open_handle.fileno())
+            self._open_handle.close()
+            self._open_handle = None
+            payload = self._open_path.read_bytes()
+            records = list(self._open_records)
+            self._open_records = []
+            partial_path = self._open_path
+            self._open_path = None
+            if not records:
+                partial_path.unlink(missing_ok=True)
+                return None
+            manifest = self._seal_segment(partial_path, payload, records)
+            self._publish_manifest()
+            return manifest
 
     def close(self) -> LiveManifestV1:
-        self.rotate()
-        return self._publish_manifest()
+        with self._lock:
+            if self._closed_manifest is not None:
+                return self._closed_manifest
+            self.rotate()
+            self._closed_manifest = self._publish_manifest()
+            return self._closed_manifest
+
+    def freeze_existing(self) -> LiveManifestV1:
+        """Seal a resumed terminal authority without publishing a new generation."""
+
+        with self._lock:
+            if self._closed_manifest is not None:
+                return self._closed_manifest
+            if self._open_handle is not None or self._open_records:
+                raise RuntimeError("cannot freeze a capture spool with an open segment")
+            if self._latest_manifest is None:
+                raise RuntimeError("cannot freeze a capture spool without a manifest")
+            self._closed_manifest = self._latest_manifest
+            return self._closed_manifest
 
     def _open_segment(self) -> None:
         self._sequence += 1
@@ -250,17 +282,25 @@ class RawSpool:
         temp = latest.with_suffix(".json.tmp")
         temp.write_text(canonical_text(pointer) + "\n", encoding="utf-8")
         temp.replace(latest)
+        self._latest_manifest = manifest
         return manifest
 
     # -- reading -----------------------------------------------------------------
 
     @property
     def segments(self) -> tuple[TraceSegmentManifestV1, ...]:
-        return tuple(self._sealed)
+        with self._lock:
+            return tuple(self._sealed)
+
+    @property
+    def closed(self) -> bool:
+        with self._lock:
+            return self._closed_manifest is not None
 
     @property
     def high_water_ordinal(self) -> int:
-        return self._high_water
+        with self._lock:
+            return self._high_water
 
     def records(self) -> Iterator[dict[str, Any]]:
         yield from read_segments(self.root, self.segments)

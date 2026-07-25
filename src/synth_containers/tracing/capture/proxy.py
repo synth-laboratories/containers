@@ -74,6 +74,10 @@ class CaptureContextError(RuntimeError):
     """A request declared a trace context that the supervisor did not authorize."""
 
 
+class CaptureClosedError(RuntimeError):
+    """Raised when a request arrives after capture shutdown has begun."""
+
+
 class UnsupportedContentEncoding(ValueError):
     """Raised when a provider request uses an encoding the proxy cannot inspect."""
 
@@ -93,6 +97,118 @@ class ProxyStats:
     redacted_headers: set[str] = field(default_factory=set)
     frames: int = 0
     truncated_records: int = 0
+    _lock: threading.Lock = field(
+        default_factory=threading.Lock,
+        init=False,
+        repr=False,
+    )
+
+    def increment(self, **values: int) -> None:
+        with self._lock:
+            for name, amount in values.items():
+                current = getattr(self, name)
+                if not isinstance(current, int):
+                    raise TypeError(f"proxy stat {name} is not an integer counter")
+                setattr(self, name, current + int(amount))
+
+    def add_redacted_headers(self, names: tuple[str, ...]) -> None:
+        with self._lock:
+            self.redacted_headers.update(names)
+
+    def add_unsupported_route(self, path: str) -> None:
+        with self._lock:
+            self.unsupported_routes.append(path)
+
+    def snapshot(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "calls_accepted": self.calls_accepted,
+                "calls_completed": self.calls_completed,
+                "calls_errored": self.calls_errored,
+                "calls_normalized": self.calls_normalized,
+                "upstream_retries": self.upstream_retries,
+                "truncated_records": self.truncated_records,
+                "redacted_headers": tuple(sorted(self.redacted_headers)),
+                "unsupported_routes": tuple(self.unsupported_routes),
+                "frames": self.frames,
+            }
+
+    def restore(self, records: tuple[Mapping[str, Any], ...]) -> None:
+        """Rebuild durable counters when a non-terminal capture resumes."""
+
+        accepted = 0
+        completed = 0
+        errored = 0
+        normalized = 0
+        frames = 0
+        truncated = 0
+        redacted_headers: set[str] = set()
+        unsupported_routes: list[str] = []
+        started_call_ids: set[str] = set()
+        finished_call_ids: set[str] = set()
+        errored_call_ids: set[str] = set()
+        attempt_high_water: dict[str, int] = {}
+        for record in records:
+            record_type = str(record.get("record_type") or "")
+            payload = record.get("payload")
+            values = payload if isinstance(payload, Mapping) else {}
+            call_id = str(record.get("call_id") or "")
+            redaction = values.get("redaction")
+            if isinstance(redaction, Mapping):
+                redacted_headers.update(
+                    str(item)
+                    for item in redaction.get("removed_headers") or ()
+                )
+            if record_type == str(RawRecordType.MODEL_CALL_STARTED):
+                started_call_ids.add(call_id)
+            elif record_type == str(RawRecordType.MODEL_CALL_FINISHED):
+                finished_call_ids.add(call_id)
+                normalized += 1
+                status = int(values.get("http_status") or 0)
+                if 200 <= status < 300:
+                    completed += 1
+                else:
+                    errored += 1
+            elif record_type == str(RawRecordType.RESPONSE_FRAME):
+                frames += 1
+            elif (
+                record_type == str(RawRecordType.RESPONSE_BODY)
+                and values.get("truncated")
+            ):
+                truncated += 1
+            elif record_type == str(RawRecordType.UPSTREAM_ATTEMPT_STARTED):
+                attempt = int(values.get("attempt") or 1)
+                attempt_high_water[call_id] = max(
+                    attempt_high_water.get(call_id, 0),
+                    attempt,
+                )
+            elif record_type == str(RawRecordType.ERROR):
+                if call_id and values.get("stage") in {
+                    "request_parse",
+                    "upstream_request",
+                    "upstream_stream",
+                }:
+                    errored_call_ids.add(call_id)
+                if values.get("code") == "unsupported_protocol":
+                    unsupported_routes.append(str(values.get("path") or ""))
+        accepted = len(started_call_ids | errored_call_ids)
+        errored += len(errored_call_ids - finished_call_ids)
+        retries = sum(
+            max(0, attempt - 1)
+            for attempt in attempt_high_water.values()
+        )
+        self.increment(
+            calls_accepted=accepted,
+            calls_completed=completed,
+            calls_errored=errored,
+            calls_normalized=normalized,
+            upstream_retries=retries,
+            frames=frames,
+            truncated_records=truncated,
+        )
+        self.add_redacted_headers(tuple(redacted_headers))
+        for path in unsupported_routes:
+            self.add_unsupported_route(path)
 
 
 class CaptureProxy:
@@ -110,6 +226,11 @@ class CaptureProxy:
         port: int = 0,
         request_timeout: float = 600.0,
         context_resolver: Callable[[Mapping[str, str]], TraceContextV1 | None] | None = None,
+        context_activity_begin: Callable[
+            [TraceContextV1],
+            Callable[[], None],
+        ]
+        | None = None,
     ) -> None:
         self.session = session
         self.binding = session.binding
@@ -140,10 +261,16 @@ class CaptureProxy:
         ).rstrip("/")
         self.upstream_api_key = upstream_api_key
         self.stats = ProxyStats()
+        self.stats.restore(tuple(session.spool.records()))
         self.request_timeout = request_timeout
         self.context_resolver = context_resolver
+        self.context_activity_begin = context_activity_begin
         self._lock = threading.Lock()
+        self._condition = threading.Condition(self._lock)
+        self._accepting_operations = True
+        self._active_operations = 0
         self._call_contexts: dict[str, tuple[str, str]] = {}
+        self._call_activity_releases: dict[str, Callable[[], None]] = {}
         # This client is the registered upstream boundary. It must never inherit
         # child-facing HTTP_PROXY/HTTPS_PROXY settings, especially when the scoped
         # MITM chains decrypted provider traffic into this proxy.
@@ -156,6 +283,7 @@ class CaptureProxy:
         )
         self._max_inline = int(self.binding.policy.max_inline_bytes)
         self._started = False
+        self._stopping = False
         self._stopped = False
 
     # -- lifecycle ---------------------------------------------------------------
@@ -178,10 +306,13 @@ class CaptureProxy:
         return f"{self.base_url}/v1"
 
     def start(self) -> "CaptureProxy":
-        if self._started:
-            return self
-        self._thread.start()
-        self._started = True
+        with self._condition:
+            if self._started:
+                return self
+            if not self._accepting_operations or self._stopped:
+                raise CaptureClosedError("capture proxy is not accepting requests")
+            self._thread.start()
+            self._started = True
         self._append(
             RawRecordType.CAPTURE_STARTED,
             payload={
@@ -195,22 +326,44 @@ class CaptureProxy:
         return self
 
     def stop(self, *, reason: str = "normal") -> None:
-        if self._stopped:
-            return
-        self._stopped = True
-        if self._started:
-            # BaseServer.shutdown deadlocks when serve_forever was never started.
-            self._server.shutdown()
-            self._server.server_close()
-            # ThreadingHTTPServer.server_close waits for request threads. Emit the
-            # terminal record only after every accepted call has drained.
-            self._append(
-                RawRecordType.CAPTURE_FINISHED,
-                payload={"reason": reason, "calls_accepted": self.stats.calls_accepted},
-            )
-        else:
-            self._server.server_close()
-        self._client.close()
+        """Drain and close transport activity.
+
+        The supervisor owns the sole durable ``capture.finished`` fact because it
+        must include outcomes that are only known after every capture transport
+        and the egress assertion have stopped.
+        """
+
+        with self._condition:
+            if self._stopped:
+                return
+            if self._stopping:
+                while not self._stopped:
+                    self._condition.wait()
+                return
+            self._stopping = True
+            self._accepting_operations = False
+        try:
+            if self._started:
+                # BaseServer.shutdown deadlocks when serve_forever was never started.
+                self._server.shutdown()
+                self._server.server_close()
+            else:
+                self._server.server_close()
+            with self._condition:
+                while self._active_operations:
+                    self._condition.wait()
+            self._client.close()
+        finally:
+            with self._condition:
+                self._stopping = False
+                self._stopped = True
+                self._condition.notify_all()
+
+    def freeze(self) -> None:
+        """Stop new admission without closing sockets or interrupting active calls."""
+
+        with self._condition:
+            self._accepting_operations = False
 
     def __enter__(self) -> "CaptureProxy":
         return self.start()
@@ -312,6 +465,35 @@ class CaptureProxy:
             body=body,
         )
 
+    def handle_models(self, *, headers: Mapping[str, str]) -> "ProxyResponse":
+        """Pass model discovery through the same shutdown lease as model calls."""
+
+        release_operation = self._begin_operation()
+        try:
+            endpoint = ProviderEndpointConfig(
+                route=MODELS_PATH,
+                adapter_name="models_passthrough",
+                upstream_base_url=self.upstream_base_url,
+                auth_kind=(
+                    UpstreamAuthKind.BEARER
+                    if self.upstream_api_key
+                    else UpstreamAuthKind.PASSTHROUGH
+                ),
+                api_key=self.upstream_api_key,
+            )
+            response = self._client.get(
+                f"{self.upstream_base_url}/models",
+                headers=_forward_headers(headers, endpoint),
+            )
+            return ProxyResponse(
+                status_code=response.status_code,
+                headers=_client_headers(response.headers, decoded=True),
+                body=response.content,
+                stream=None,
+            )
+        finally:
+            release_operation()
+
     def handle_provider_request(
         self,
         *,
@@ -320,78 +502,107 @@ class CaptureProxy:
         body: bytes,
         query: str = "",
     ) -> "ProxyResponse":
-        endpoint = self.routes.resolve(path)
-        if endpoint is None:
-            self.handle_unsupported(path)
-            raise UnsupportedProtocol(f"no provider route configured for {path}")
-        adapter = self.adapters.by_name(endpoint.adapter_name)
-        if adapter is None:
-            raise UnsupportedProtocol(f"no provider adapter configured for {endpoint.adapter_name}")
-        actor_id, session_id = self._request_identity(headers)
-        decoded_body, content_encodings = _decode_request_body(headers, body)
-        call_id, call_index = self._next_call()
-        with self._lock:
-            self._call_contexts[call_id] = (actor_id, session_id)
-        self.stats.calls_accepted += 1
-        request_headers, header_report = redact_headers(headers)
-        self.stats.redacted_headers.update(header_report.removed_headers)
+        release_operation = self._begin_operation()
+        release_activity: Callable[[], None] | None = None
+        release_call = release_operation
+        call_id: str | None = None
         try:
-            request_payload = json.loads(decoded_body.decode("utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            self.stats.calls_errored += 1
+            endpoint = self.routes.resolve(path)
+            if endpoint is None:
+                self._record_unsupported(path)
+                raise UnsupportedProtocol(f"no provider route configured for {path}")
+            adapter = self.adapters.by_name(endpoint.adapter_name)
+            if adapter is None:
+                raise UnsupportedProtocol(
+                    f"no provider adapter configured for {endpoint.adapter_name}"
+                )
+            decoded_body, content_encodings = _decode_request_body(headers, body)
+            actor_id, session_id, release_activity = self._request_identity(headers)
+            release_call = _combine_releases(
+                release_operation,
+                release_activity,
+            )
+            call_id, call_index = self._next_call()
+            with self._lock:
+                self._call_contexts[call_id] = (actor_id, session_id)
+                self._call_activity_releases[call_id] = release_call
+            self.stats.increment(calls_accepted=1)
+            request_headers, header_report = redact_headers(headers)
+            self.stats.add_redacted_headers(header_report.removed_headers)
+            try:
+                request_payload = json.loads(decoded_body.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                self.stats.increment(calls_errored=1)
+                self._append(
+                    RawRecordType.ERROR,
+                    payload={"stage": "request_parse", "message": str(exc)},
+                    call_id=call_id,
+                )
+                raise
+            streaming = (
+                bool(request_payload.get("stream"))
+                and path != RESPONSES_COMPACT_PATH
+            )
+            redacted_request, request_report = redact_payload(request_payload)
+            inline_request, request_body_ref = self._capture_body(
+                decoded_body,
+                media_type=str(
+                    headers.get("content-type") or "application/json"
+                ),
+                wire_payload=body,
+            )
+            started_at = utc_now()
             self._append(
-                RawRecordType.ERROR,
-                payload={"stage": "request_parse", "message": str(exc)},
+                RawRecordType.MODEL_CALL_STARTED,
+                payload={
+                    "call_index": call_index,
+                    "route": path,
+                    "provider_adapter": endpoint.adapter_name,
+                    "provider_adapter_version": adapter.version,
+                    "model": request_payload.get("model"),
+                    "stream": streaming,
+                    "request_headers": request_headers,
+                    "request_body": inline_request or {},
+                    "request_body_ref": request_body_ref.to_dict(),
+                    "request_digest": bytes_digest(body),
+                    "decoded_request_digest": bytes_digest(decoded_body),
+                    "content_encodings": content_encodings,
+                    "redaction": request_report.merged(header_report).to_dict(),
+                    "started_at": started_at,
+                },
                 call_id=call_id,
             )
-            with self._lock:
-                self._call_contexts.pop(call_id, None)
-            raise
-        streaming = bool(request_payload.get("stream")) and path != RESPONSES_COMPACT_PATH
-        redacted_request, request_report = redact_payload(request_payload)
-        inline_request, request_body_ref = self._capture_body(
-            decoded_body,
-            media_type=str(headers.get("content-type") or "application/json"),
-            wire_payload=body,
-        )
-        started_at = utc_now()
-        self._append(
-            RawRecordType.MODEL_CALL_STARTED,
-            payload={
-                "call_index": call_index,
-                "route": path,
-                "provider_adapter": endpoint.adapter_name,
-                "provider_adapter_version": adapter.version,
-                "model": request_payload.get("model"),
-                "stream": streaming,
-                "request_headers": request_headers,
-                "request_body": inline_request or {},
-                "request_body_ref": request_body_ref.to_dict(),
-                "request_digest": bytes_digest(body),
-                "decoded_request_digest": bytes_digest(decoded_body),
-                "content_encodings": content_encodings,
-                "redaction": request_report.merged(header_report).to_dict(),
-                "started_at": started_at,
-            },
-            call_id=call_id,
-        )
-
-        attempt_id = record_id("att", kind="upstream_attempt", scope=(call_id,), key=1)
-        upstream_url = _append_query(endpoint.upstream_url(), query)
-        forward_headers = _forward_headers(headers, endpoint)
-        self._append(
-            RawRecordType.UPSTREAM_ATTEMPT_STARTED,
-            payload={
-                "attempt": 1,
-                "upstream_host": urlparse(upstream_url).netloc,
-                "upstream_path": urlparse(upstream_url).path,
-                "provider_adapter": endpoint.adapter_name,
-            },
-            call_id=call_id,
-            upstream_attempt_id=attempt_id,
-        )
-        if streaming:
-            return self._stream_call(
+            attempt_id = record_id(
+                "att",
+                kind="upstream_attempt",
+                scope=(call_id,),
+                key=1,
+            )
+            upstream_url = _append_query(endpoint.upstream_url(), query)
+            forward_headers = _forward_headers(headers, endpoint)
+            self._append(
+                RawRecordType.UPSTREAM_ATTEMPT_STARTED,
+                payload={
+                    "attempt": 1,
+                    "upstream_host": urlparse(upstream_url).netloc,
+                    "upstream_path": urlparse(upstream_url).path,
+                    "provider_adapter": endpoint.adapter_name,
+                },
+                call_id=call_id,
+                upstream_attempt_id=attempt_id,
+            )
+            if streaming:
+                return self._stream_call(
+                    call_id=call_id,
+                    call_index=call_index,
+                    attempt_id=attempt_id,
+                    url=upstream_url,
+                    headers=forward_headers,
+                    body=body,
+                    started_at=started_at,
+                    adapter_name=endpoint.adapter_name,
+                )
+            return self._unary_call(
                 call_id=call_id,
                 call_index=call_index,
                 attempt_id=attempt_id,
@@ -401,16 +612,18 @@ class CaptureProxy:
                 started_at=started_at,
                 adapter_name=endpoint.adapter_name,
             )
-        return self._unary_call(
-            call_id=call_id,
-            call_index=call_index,
-            attempt_id=attempt_id,
-            url=upstream_url,
-            headers=forward_headers,
-            body=body,
-            started_at=started_at,
-            adapter_name=endpoint.adapter_name,
-        )
+        except BaseException as exc:
+            if call_id is None:
+                release_call()
+            else:
+                if isinstance(exc, httpx.HTTPError):
+                    self._record_call_error(
+                        call_id,
+                        stage="upstream_request",
+                        error=exc,
+                    )
+                self._abort_call(call_id)
+            raise
 
     def _unary_call(
         self,
@@ -427,14 +640,14 @@ class CaptureProxy:
         response = self._client.post(url, content=body, headers=headers)
         payload = response.content
         response_headers, header_report = redact_headers(response.headers)
-        self.stats.redacted_headers.update(header_report.removed_headers)
+        self.stats.add_redacted_headers(header_report.removed_headers)
         inline_body, body_ref = self._capture_body(
             payload,
             media_type=str(response.headers.get("content-type") or "application/json"),
         )
         truncated = bool(body_ref.truncated)
         if truncated:
-            self.stats.truncated_records += 1
+            self.stats.increment(truncated_records=1)
         redacted_body, body_report = redact_payload(inline_body or {})
         self._append(
             RawRecordType.UPSTREAM_ATTEMPT_FINISHED,
@@ -494,7 +707,7 @@ class CaptureProxy:
     ) -> "ProxyResponse":
         proxy = self
 
-        def generate(sink: Any) -> None:
+        def run(sink: Any) -> None:
             frames = 0
             status = 0
             usage: dict[str, Any] | None = None
@@ -506,7 +719,7 @@ class CaptureProxy:
                 sink.begin(status, _client_headers(response.headers))
                 content_decoder = _StreamingContentDecoder(response.headers)
                 response_headers, header_report = redact_headers(response.headers)
-                proxy.stats.redacted_headers.update(header_report.removed_headers)
+                proxy.stats.add_redacted_headers(header_report.removed_headers)
                 proxy._append(
                     RawRecordType.UPSTREAM_ATTEMPT_FINISHED,
                     payload={
@@ -552,7 +765,7 @@ class CaptureProxy:
                     )
                     if parsed is not None:
                         usage = parsed
-            proxy.stats.frames += frames
+            proxy.stats.increment(frames=frames)
             proxy._finish_call(
                 call_id=call_id,
                 call_index=call_index,
@@ -568,6 +781,19 @@ class CaptureProxy:
                     "capture_boundary": "complete_sse_event",
                 },
             )
+
+        def generate(sink: Any) -> None:
+            try:
+                run(sink)
+            except Exception as exc:
+                proxy._record_call_error(
+                    call_id,
+                    stage="upstream_stream",
+                    error=exc,
+                )
+                raise
+            finally:
+                proxy._abort_call(call_id)
 
         return ProxyResponse(status_code=0, headers={}, body=b"", stream=generate)
 
@@ -586,9 +812,9 @@ class CaptureProxy:
     ) -> None:
         ended_at = utc_now()
         if 200 <= status < 300:
-            self.stats.calls_completed += 1
+            self.stats.increment(calls_completed=1)
         else:
-            self.stats.calls_errored += 1
+            self.stats.increment(calls_errored=1)
         self._append(
             RawRecordType.MODEL_CALL_FINISHED,
             payload={
@@ -607,15 +833,49 @@ class CaptureProxy:
         )
         with self._lock:
             self._call_contexts.pop(call_id, None)
-        self.stats.calls_normalized += 1
+            release_activity = self._call_activity_releases.pop(call_id, None)
+        if release_activity is not None:
+            release_activity()
+        self.stats.increment(calls_normalized=1)
 
-    def _request_identity(self, headers: Mapping[str, str]) -> tuple[str, str]:
+    def _abort_call(self, call_id: str) -> None:
+        with self._lock:
+            self._call_contexts.pop(call_id, None)
+            release_activity = self._call_activity_releases.pop(call_id, None)
+        if release_activity is not None:
+            release_activity()
+
+    def _record_call_error(
+        self,
+        call_id: str,
+        *,
+        stage: str,
+        error: BaseException,
+    ) -> None:
+        """Persist one secret-free error fact so resumed counters stay truthful."""
+
+        self._append(
+            RawRecordType.ERROR,
+            payload={
+                "stage": stage,
+                "code": "upstream_error",
+                "error_type": type(error).__name__,
+            },
+            call_id=call_id,
+        )
+        self.stats.increment(calls_errored=1)
+
+    def _request_identity(
+        self,
+        headers: Mapping[str, str],
+    ) -> tuple[str, str, Callable[[], None] | None]:
         """Resolve an authenticated child context, or use the root workload."""
 
         if self.context_resolver is None:
             return (
                 self.binding.workload.root_actor_id,
                 self.binding.workload.actor_session_id,
+                None,
             )
         context = self.context_resolver(headers)
         declares_context = any(
@@ -625,19 +885,23 @@ class CaptureProxy:
                 "x-synth-capture-id",
                 "x-synth-actor-id",
                 "x-synth-session-id",
+                "x-synth-context-token",
             }
             for name in headers
         )
         if context is None:
             if declares_context:
                 raise CaptureContextError("provider request trace context is not authorized")
-            return (
-                self.binding.workload.root_actor_id,
-                self.binding.workload.actor_session_id,
-            )
+            context = self.binding.context_for_child()
         if context.trace_id != self.binding.trace_id:
             raise CaptureContextError("provider request belongs to a different trace")
-        return context.actor_id, context.actor_session_id
+        release_activity = None
+        if self.context_activity_begin is not None:
+            try:
+                release_activity = self.context_activity_begin(context)
+            except (RuntimeError, ValueError) as exc:
+                raise CaptureContextError(str(exc)) from exc
+        return context.actor_id, context.actor_session_id, release_activity
 
     def _capture_sse_event(
         self,
@@ -685,7 +949,14 @@ class CaptureProxy:
         return _usage_from_sse_chunk(frame)
 
     def handle_unsupported(self, path: str) -> None:
-        self.stats.unsupported_routes.append(path)
+        release_operation = self._begin_operation()
+        try:
+            self._record_unsupported(path)
+        finally:
+            release_operation()
+
+    def _record_unsupported(self, path: str) -> None:
+        self.stats.add_unsupported_route(path)
         self._append(
             RawRecordType.ERROR,
             payload={"stage": "route", "code": "unsupported_protocol", "path": path},
@@ -713,39 +984,46 @@ class CaptureProxy:
         cannot turn this fallback into an arbitrary-host forward proxy.
         """
 
-        if str(self.binding.capture.mode) != CaptureMode.BEST_EFFORT:
-            raise UnsupportedProtocol(
-                "unsupported-route passthrough requires best_effort capture mode"
+        release_operation = self._begin_operation()
+        try:
+            if str(self.binding.capture.mode) != CaptureMode.BEST_EFFORT:
+                raise UnsupportedProtocol(
+                    "unsupported-route passthrough requires best_effort capture mode"
+                )
+            parsed = urlsplit(request_target)
+            if parsed.scheme or parsed.netloc or not parsed.path.startswith("/"):
+                raise UnsupportedProtocol(
+                    "unsupported-route passthrough requires an origin-form path"
+                )
+            endpoint = ProviderEndpointConfig(
+                route=parsed.path,
+                adapter_name="best_effort_passthrough",
+                upstream_base_url=self.upstream_base_url,
+                upstream_path=parsed.path,
+                auth_kind=(
+                    UpstreamAuthKind.BEARER
+                    if self.upstream_api_key
+                    else UpstreamAuthKind.PASSTHROUGH
+                ),
+                api_key=self.upstream_api_key,
             )
-        parsed = urlsplit(request_target)
-        if parsed.scheme or parsed.netloc or not parsed.path.startswith("/"):
-            raise UnsupportedProtocol("unsupported-route passthrough requires an origin-form path")
-        endpoint = ProviderEndpointConfig(
-            route=parsed.path,
-            adapter_name="best_effort_passthrough",
-            upstream_base_url=self.upstream_base_url,
-            upstream_path=parsed.path,
-            auth_kind=(
-                UpstreamAuthKind.BEARER
-                if self.upstream_api_key
-                else UpstreamAuthKind.PASSTHROUGH
-            ),
-            api_key=self.upstream_api_key,
-        )
-        upstream_url = endpoint.upstream_url()
-        if parsed.query:
-            upstream_url = f"{upstream_url}?{parsed.query}"
-        request = self._client.build_request(
-            method,
-            upstream_url,
-            headers=_forward_headers(
-                headers,
-                endpoint,
-                ensure_json_content_type=False,
-            ),
-            content=body,
-        )
-        response = self._client.send(request, stream=True)
+            upstream_url = endpoint.upstream_url()
+            if parsed.query:
+                upstream_url = f"{upstream_url}?{parsed.query}"
+            request = self._client.build_request(
+                method,
+                upstream_url,
+                headers=_forward_headers(
+                    headers,
+                    endpoint,
+                    ensure_json_content_type=False,
+                ),
+                content=body,
+            )
+            response = self._client.send(request, stream=True)
+        except BaseException:
+            release_operation()
+            raise
 
         def generate(sink: Any) -> None:
             try:
@@ -762,6 +1040,7 @@ class CaptureProxy:
                             sink.write(chunk)
             finally:
                 response.close()
+                release_operation()
 
         return ProxyResponse(
             status_code=response.status_code,
@@ -770,21 +1049,42 @@ class CaptureProxy:
             stream=generate,
         )
 
+    def _begin_operation(self) -> Callable[[], None]:
+        with self._condition:
+            if not self._accepting_operations:
+                raise CaptureClosedError("capture proxy is not accepting requests")
+            self._active_operations += 1
+        released = False
+        release_lock = threading.Lock()
+
+        def release() -> None:
+            nonlocal released
+            with release_lock:
+                if released:
+                    return
+                released = True
+            with self._condition:
+                self._active_operations -= 1
+                self._condition.notify_all()
+
+        return release
+
     def apply_to_receipt(self, receipt: CaptureCoverageReceiptV1) -> CaptureCoverageReceiptV1:
         """Fold observed proxy counters into a coverage receipt."""
 
         from dataclasses import replace
 
+        stats = self.stats.snapshot()
         return replace(
             receipt,
-            calls_accepted=self.stats.calls_accepted,
-            calls_completed=self.stats.calls_completed,
-            calls_errored=self.stats.calls_errored,
-            calls_normalized=self.stats.calls_normalized,
-            upstream_retries=self.stats.upstream_retries,
-            truncated_records=self.stats.truncated_records,
-            redacted_headers=tuple(sorted(self.stats.redacted_headers)),
-            unsupported_routes=tuple(self.stats.unsupported_routes),
+            calls_accepted=stats["calls_accepted"],
+            calls_completed=stats["calls_completed"],
+            calls_errored=stats["calls_errored"],
+            calls_normalized=stats["calls_normalized"],
+            upstream_retries=stats["upstream_retries"],
+            truncated_records=stats["truncated_records"],
+            redacted_headers=stats["redacted_headers"],
+            unsupported_routes=stats["unsupported_routes"],
             first_observed_at=self.session.first_observed_at,
             last_observed_at=self.session.last_observed_at,
             provider_adapters=self.routes.adapter_names,
@@ -799,6 +1099,25 @@ class ProxyResponse:
     headers: dict[str, str]
     body: bytes
     stream: Any | None
+
+
+def _combine_releases(
+    *releases: Callable[[], None] | None,
+) -> Callable[[], None]:
+    active = tuple(item for item in releases if item is not None)
+    released = False
+    lock = threading.Lock()
+
+    def release() -> None:
+        nonlocal released
+        with lock:
+            if released:
+                return
+            released = True
+        for item in reversed(active):
+            item()
+
+    return release
 
 
 def _forward_headers(
@@ -1101,27 +1420,24 @@ def _build_handler(proxy: CaptureProxy) -> type[BaseHTTPRequestHandler]:
                 )
                 return
             if path == MODELS_PATH:
-                response = proxy._client.get(
-                    f"{proxy.upstream_base_url}/models",
-                    headers=_forward_headers(
-                        self.headers,
-                        ProviderEndpointConfig(
-                            route=MODELS_PATH,
-                            adapter_name="models_passthrough",
-                            upstream_base_url=proxy.upstream_base_url,
-                            auth_kind=(
-                                UpstreamAuthKind.BEARER
-                                if proxy.upstream_api_key
-                                else UpstreamAuthKind.PASSTHROUGH
-                            ),
-                            api_key=proxy.upstream_api_key,
-                        ),
-                    ),
-                )
+                try:
+                    response = proxy.handle_models(headers=self.headers)
+                except CaptureClosedError as exc:
+                    self._send_json(
+                        503,
+                        {"error": {"type": "capture_closed", "message": str(exc)}},
+                    )
+                    return
+                except httpx.HTTPError as exc:
+                    self._send_json(
+                        502,
+                        {"error": {"type": "upstream_error", "message": str(exc)}},
+                    )
+                    return
                 self._send(
                     response.status_code,
-                    _client_headers(response.headers, decoded=True),
-                    response.content,
+                    response.headers,
+                    response.body,
                 )
                 return
             self._unsupported(method="GET", request_target=self.path)
@@ -1152,6 +1468,12 @@ def _build_handler(proxy: CaptureProxy) -> type[BaseHTTPRequestHandler]:
                     {"error": {"type": "capture_context_error", "message": str(exc)}},
                 )
                 return
+            except CaptureClosedError as exc:
+                self._send_json(
+                    503,
+                    {"error": {"type": "capture_closed", "message": str(exc)}},
+                )
+                return
             except UnsupportedContentEncoding as exc:
                 self._send_json(
                     415,
@@ -1175,7 +1497,6 @@ def _build_handler(proxy: CaptureProxy) -> type[BaseHTTPRequestHandler]:
                 )
                 return
             except httpx.HTTPError as exc:
-                proxy.stats.calls_errored += 1
                 self._send_json(502, {"error": {"type": "upstream_error", "message": str(exc)}})
                 return
             except (json.JSONDecodeError, UnicodeDecodeError) as exc:
@@ -1196,6 +1517,12 @@ def _build_handler(proxy: CaptureProxy) -> type[BaseHTTPRequestHandler]:
             path = urlparse(request_target).path
             try:
                 proxy.handle_unsupported(path)
+            except CaptureClosedError as exc:
+                self._send_json(
+                    503,
+                    {"error": {"type": "capture_closed", "message": str(exc)}},
+                )
+                return
             except UnsupportedProtocol as exc:
                 self._send_json(
                     501,
@@ -1214,7 +1541,7 @@ def _build_handler(proxy: CaptureProxy) -> type[BaseHTTPRequestHandler]:
                         result.stream(_StreamSink(self))
                     else:
                         self._send(result.status_code, result.headers, result.body)
-                except (UnsupportedProtocol, httpx.HTTPError) as exc:
+                except (CaptureClosedError, UnsupportedProtocol, httpx.HTTPError) as exc:
                     self._send_json(
                         502,
                         {
@@ -1235,6 +1562,7 @@ def _build_handler(proxy: CaptureProxy) -> type[BaseHTTPRequestHandler]:
 
 __all__ = [
     "CHAT_COMPLETIONS_PATH",
+    "CaptureClosedError",
     "CaptureContextError",
     "HEALTH_PATH",
     "MODELS_PATH",

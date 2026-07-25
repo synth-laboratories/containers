@@ -6,15 +6,16 @@ calls and application events interleave in a single, replayable order.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import threading
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from typing import Any
 
 from ..canonical import record_id
 from ..store.base import BlobStore
 from .binding import TraceCaptureBindingV1
 from .envelope import RawCaptureEnvelopeV1, RawRecordType, make_envelope
-from .spool import RawSpool
+from .spool import LiveManifestV1, RawSpool
 
 
 class CaptureSession:
@@ -30,14 +31,24 @@ class CaptureSession:
         self.binding = binding
         self.spool = spool
         self.blobs = blobs
-        self.first_observed_at: str | None = None
-        self.last_observed_at: str | None = None
-        self._lock = threading.Lock()
+        existing_records = tuple(spool.records())
+        self.first_observed_at: str | None = (
+            str(existing_records[0]["occurred_at"])
+            if existing_records
+            else None
+        )
+        self.last_observed_at: str | None = (
+            str(existing_records[-1]["occurred_at"])
+            if existing_records
+            else None
+        )
+        self._lock = threading.RLock()
+        self._closed = False
         self._ordinal = spool.high_water_ordinal
         self._call_index = max(
             (
                 int(payload.get("call_index"))
-                for record in spool.records()
+                for record in existing_records
                 if isinstance((payload := record.get("payload")), Mapping)
                 and isinstance(payload.get("call_index"), int)
             ),
@@ -58,6 +69,7 @@ class CaptureSession:
         producer_version: str = "1",
     ) -> RawCaptureEnvelopeV1:
         with self._lock:
+            self._assert_open()
             self._ordinal += 1
             ordinal = self._ordinal
             envelope = make_envelope(
@@ -85,8 +97,36 @@ class CaptureSession:
     def store_blob(self, content: bytes) -> tuple[str, str]:
         """Write a content-addressed body and return ``(digest, relative uri)``."""
 
-        digest = self.blobs.put(content)
-        return digest, self.blobs.uri(digest)
+        with self._lock:
+            self._assert_open()
+            digest = self.blobs.put(content)
+            return digest, self.blobs.uri(digest)
+
+    def close(self) -> LiveManifestV1:
+        """Atomically seal the spool against every CaptureSession append."""
+
+        with self._lock:
+            if self._closed:
+                return self.spool.close()
+            manifest = self.spool.close()
+            self._closed = True
+            return manifest
+
+    def freeze_existing(self) -> LiveManifestV1:
+        """Make a resumed terminal spool immutable without rewriting its manifest."""
+
+        with self._lock:
+            manifest = self.spool.freeze_existing()
+            self._closed = True
+            return manifest
+
+    @contextmanager
+    def write_transaction(self) -> Iterator[None]:
+        """Keep a compound collector write atomic against finalization."""
+
+        with self._lock:
+            self._assert_open()
+            yield
 
     def mint(self, prefix: str, *, kind: str, key: Any) -> str:
         return record_id(
@@ -105,12 +145,17 @@ class CaptureSession:
         """
 
         with self._lock:
+            self._assert_open()
             self._call_index += 1
             call_index = self._call_index
         return (
             self.mint("call", kind=kind, key=call_index),
             call_index,
         )
+
+    def _assert_open(self) -> None:
+        if self._closed or self.spool.closed:
+            raise RuntimeError("capture session is closed")
 
 
 __all__ = ["CaptureSession"]
