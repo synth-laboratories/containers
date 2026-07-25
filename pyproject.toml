@@ -29,6 +29,9 @@ dev = [
     "ty>=0.0.32",
 ]
 
+[project.scripts]
+synth-trace = "synth_containers.tracing.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/synth-laboratories/containers"
 Repository = "https://github.com/synth-laboratories/containers"
