@@ -54,14 +54,10 @@ def import_experiments_trace_v4(
     session_id = record_id("sess", kind="session", scope=(trace_id, agent_actor_id), key=0)
     env_session_id = record_id("sess", kind="session", scope=(trace_id, env_actor_id), key=0)
 
-    interaction = (
-        payload.get("interaction") if isinstance(payload.get("interaction"), Mapping) else {}
-    )
-    environment = (
-        payload.get("environment") if isinstance(payload.get("environment"), Mapping) else {}
-    )
-    operations = payload.get("operations") if isinstance(payload.get("operations"), Mapping) else {}
-    timestamps = payload.get("timestamps") if isinstance(payload.get("timestamps"), Mapping) else {}
+    interaction = _mapping(payload.get("interaction"))
+    environment = _mapping(payload.get("environment"))
+    operations = _mapping(payload.get("operations"))
+    timestamps = _mapping(payload.get("timestamps"))
 
     spans: list[SpanV5] = []
     events: list[EventV5] = []
@@ -223,6 +219,11 @@ def import_experiments_trace_v4(
         if correlation
         else (),
     ).sealed()
+
+
+def _mapping(value: Any) -> Mapping[str, Any]:
+    """A foreign payload section, or an empty one when it is absent or the wrong shape."""
+    return value if isinstance(value, Mapping) else {}
 
 
 def _int(value: Any) -> int | None:

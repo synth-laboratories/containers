@@ -63,6 +63,20 @@ from .spool import TraceSegmentManifestV1, read_segments
 FINALIZER_NAME = "synth-trace-finalizer"
 FINALIZER_VERSION = "1"
 
+# Record types keyed by call id. Without one they cannot be correlated to a call.
+_CALL_RECORD_TYPES = frozenset(
+    {
+        RawRecordType.MODEL_CALL_STARTED,
+        RawRecordType.RESPONSE_FRAME,
+        RawRecordType.RESPONSE_BODY,
+        RawRecordType.MODEL_CALL_FINISHED,
+    }
+)
+
+
+class FinalizationError(RuntimeError):
+    """A capture segment cannot be sealed into a trace without losing facts."""
+
 
 @dataclass(slots=True)
 class _CallState:
@@ -147,10 +161,19 @@ class TraceFinalizer:
         for record in records:
             record_type = str(record.get("record_type") or "")
             payload = record.get("payload") or {}
-            call_id = record.get("call_id")
+            raw_call_id = record.get("call_id")
+            # A model-call record without a call id cannot be correlated. Keying the
+            # table on None would stringify to "None" and merge unrelated calls, so
+            # fail with the record type rather than seal a wrong trace.
+            if raw_call_id is None and record_type in _CALL_RECORD_TYPES:
+                raise FinalizationError(
+                    f"capture record {record_type!r} is missing call_id at ordinal "
+                    f"{record.get('ordinal')!r}"
+                )
+            call_id = str(raw_call_id)
             if record_type == RawRecordType.MODEL_CALL_STARTED:
                 calls[call_id] = _CallState(
-                    call_id=str(call_id),
+                    call_id=call_id,
                     call_index=int(payload.get("call_index") or 0),
                     started_at=str(payload.get("started_at") or record["occurred_at"]),
                     model=payload.get("model"),

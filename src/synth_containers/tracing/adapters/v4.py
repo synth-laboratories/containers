@@ -80,8 +80,8 @@ def import_rollout_trace_v4(
                 target_kind="span",
             )
         )
-        request = raw.get("request") if isinstance(raw.get("request"), Mapping) else {}
-        response = raw.get("response") if isinstance(raw.get("response"), Mapping) else {}
+        request = _mapping(raw.get("request"))
+        response = _mapping(raw.get("response"))
         input_ids: list[str] = []
         previous: tuple[str, ...] = ()
         for index, message in enumerate(list(request.get("messages") or [])):
@@ -115,7 +115,7 @@ def import_rollout_trace_v4(
                 )
                 messages.append(node)
                 output_ids.append(node.message_id)
-        usage_payload = response.get("usage") if isinstance(response.get("usage"), Mapping) else {}
+        usage_payload = _mapping(response.get("usage"))
         usage = UsageV5(
             provenance=UsageProvenance.OBSERVED_HARNESS,
             prompt_tokens=_int(usage_payload.get("prompt_tokens")),
@@ -316,6 +316,11 @@ def _message_from_v4(
         predecessor_message_ids=predecessors,
         produced_by_span_id=span_id,
     ).sealed()
+
+
+def _mapping(value: Any) -> Mapping[str, Any]:
+    """A foreign payload section, or an empty one when absent or the wrong shape."""
+    return value if isinstance(value, Mapping) else {}
 
 
 def _int(value: Any) -> int | None:
