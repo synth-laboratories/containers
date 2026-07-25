@@ -318,6 +318,7 @@ class CaptureProxy:
         path: str,
         headers: Mapping[str, str],
         body: bytes,
+        query: str = "",
     ) -> "ProxyResponse":
         endpoint = self.routes.resolve(path)
         if endpoint is None:
@@ -376,7 +377,7 @@ class CaptureProxy:
         )
 
         attempt_id = record_id("att", kind="upstream_attempt", scope=(call_id,), key=1)
-        upstream_url = endpoint.upstream_url()
+        upstream_url = _append_query(endpoint.upstream_url(), query)
         forward_headers = _forward_headers(headers, endpoint)
         self._append(
             RawRecordType.UPSTREAM_ATTEMPT_STARTED,
@@ -431,8 +432,8 @@ class CaptureProxy:
             payload,
             media_type=str(response.headers.get("content-type") or "application/json"),
         )
-        truncated = inline_body is None
-        if inline_body is None:
+        truncated = bool(body_ref.truncated)
+        if truncated:
             self.stats.truncated_records += 1
         redacted_body, body_report = redact_payload(inline_body or {})
         self._append(
@@ -455,7 +456,13 @@ class CaptureProxy:
             call_id=call_id,
             sequence_in_call=0,
         )
-        usage = _usage_from_response(inline_body)
+        usage_payload = inline_body
+        if usage_payload is None:
+            try:
+                usage_payload = json.loads(payload.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                usage_payload = None
+        usage = _usage_from_response(usage_payload)
         self._finish_call(
             call_id=call_id,
             call_index=call_index,
@@ -1011,6 +1018,16 @@ def _usage_from_sse_chunk(text: str) -> dict[str, Any] | None:
     return found
 
 
+def _append_query(url: str, query: str) -> str:
+    """Append an origin-form query without decoding or normalizing its bytes."""
+
+    if not query:
+        return url
+    parsed = urlsplit(url)
+    combined = f"{parsed.query}&{query}" if parsed.query else query
+    return parsed._replace(query=combined).geturl()
+
+
 class _StreamSink:
     """Adapts a BaseHTTPRequestHandler into the begin/write sink the proxy streams to."""
 
@@ -1127,6 +1144,7 @@ def _build_handler(proxy: CaptureProxy) -> type[BaseHTTPRequestHandler]:
                     path=path,
                     headers=self.headers,
                     body=body,
+                    query=urlparse(self.path).query,
                 )
             except CaptureContextError as exc:
                 self._send_json(

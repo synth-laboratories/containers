@@ -9,6 +9,7 @@ from pathlib import Path
 import stat
 import sys
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlsplit
 import zipfile
 
 import httpx
@@ -19,12 +20,15 @@ import zstandard
 from synth_containers.tracing.adapters.experiments_v4 import (
     import_experiments_trace_v4,
 )
+from synth_containers.tracing.adapters.native import import_native_to_bundle
 from synth_containers.tracing.adapters.v4 import import_rollout_trace_v4
 from synth_containers.tracing.canonical import (
+    bytes_digest,
     canonical_bytes,
     canonical_text,
     content_digest,
 )
+from synth_containers.tracing.cli import main as trace_cli_main
 from synth_containers.tracing.capture.binding import (
     BindingCaptureV1,
     BindingWorkloadV1,
@@ -65,6 +69,7 @@ from synth_containers.tracing.models.completeness import CaptureStatus, TraceSta
 from synth_containers.tracing.models.identity import (
     AliasNamespace,
     AliasV1,
+    TraceContextV1,
     TraceProvenanceV5,
 )
 from synth_containers.tracing.models.spans import SpanKind
@@ -77,6 +82,7 @@ def _session(
     *,
     capture_id: str = "capture_test",
     mode: CaptureMode | str = CaptureMode.REQUIRED,
+    max_inline_bytes: int = 256 * 1024,
 ) -> CaptureSession:
     trace_id = f"trace_{capture_id}"
     binding = mint_binding(
@@ -91,7 +97,10 @@ def _session(
             mode=mode,
             output_artifact_root=str(tmp_path),
         ),
-        policy=CapturePolicyV1(max_segment_records=128),
+        policy=CapturePolicyV1(
+            max_inline_bytes=max_inline_bytes,
+            max_segment_records=128,
+        ),
     )
     bundle = LocalTraceBundle(tmp_path / "bundle")
     return CaptureSession(
@@ -241,6 +250,173 @@ def test_best_effort_unknown_route_passthrough_is_same_upstream_only(
     assert seen[0].headers["authorization"] == "Bearer child-token"
     assert seen[0].headers["host"] == "provider.example"
     assert proxy.stats.unsupported_routes == ["/v1/files"]
+
+
+def test_configured_provider_route_preserves_query_and_retained_blob_is_not_truncated(
+    tmp_path: Path,
+) -> None:
+    session = _session(tmp_path, max_inline_bytes=128)
+    proxy = CaptureProxy(
+        session,
+        upstream_base_url="https://provider.example/v1",
+        provider_endpoints=(
+            ProviderEndpointConfig(
+                route="/v1/responses",
+                adapter_name="openai_responses",
+                upstream_base_url="https://provider.example/v1",
+                auth_kind=UpstreamAuthKind.NONE,
+            ),
+        ),
+    )
+    seen: list[httpx.Request] = []
+
+    def upstream(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            headers={"Content-Type": "application/json"},
+            json={
+                "id": "resp_query",
+                "object": "response",
+                "status": "completed",
+                "output": [{"type": "message", "content": "x" * 512}],
+                "usage": {"input_tokens": 3, "output_tokens": 5, "total_tokens": 8},
+            },
+        )
+
+    proxy._client.close()
+    proxy._client = httpx.Client(
+        transport=httpx.MockTransport(upstream),
+        trust_env=False,
+    )
+    result = proxy.handle_provider_request(
+        path="/v1/responses",
+        query="include=usage%2Coutput&mode=exact",
+        headers={"Content-Type": "application/json"},
+        body=canonical_bytes({"model": "gpt-test", "input": "hello"}),
+    )
+    session.spool.close()
+    response_record = next(
+        record
+        for record in session.spool.records()
+        if record["record_type"] == RawRecordType.RESPONSE_BODY
+    )
+    finished_record = next(
+        record
+        for record in session.spool.records()
+        if record["record_type"] == RawRecordType.MODEL_CALL_FINISHED
+    )
+
+    assert result.status_code == 200
+    assert str(seen[0].url) == (
+        "https://provider.example/v1/responses"
+        "?include=usage%2Coutput&mode=exact"
+    )
+    assert response_record["payload"]["response_body_ref"]["disposition"] == (
+        "redacted_artifact"
+    )
+    assert response_record["payload"]["truncated"] is False
+    assert proxy.stats.truncated_records == 0
+    assert finished_record["payload"]["usage"]["total_tokens"] == 8
+
+
+def test_native_import_persists_only_redacted_source_artifact(tmp_path: Path) -> None:
+    secret = "sk-test-native-import-secret-123456789"
+    source = tmp_path / "react.json"
+    source_bytes = canonical_bytes(
+        {
+            "api_key": secret,
+            "trace_correlation_id": secret,
+            "events": [
+                {
+                    "event_id": "step-1",
+                    "event_type": "react.step",
+                    "payload": {
+                        "authorization": f"Bearer {secret}",
+                        "action": "wait",
+                    },
+                }
+            ],
+        }
+    )
+    source.write_bytes(source_bytes)
+    bundle = LocalTraceBundle(tmp_path / "native-import")
+
+    imported = import_native_to_bundle(
+        source,
+        source_format="react",
+        bundle=bundle,
+    )
+    stored = bundle.blobs.get(imported["stored_source_digest"])
+
+    assert imported["source_digest"] == bytes_digest(source_bytes)
+    assert imported["stored_source_digest"] != imported["source_digest"]
+    assert secret.encode() not in stored
+    assert REDACTED.encode() in stored
+    assert secret.encode() not in bundle.archive_bytes()
+    trace = bundle.read_trace(imported["trace_digest"])
+    assert trace["identity"]["correlation_id"] == REDACTED
+    assert bundle.verify_self_contained() == (True, ())
+
+
+def test_legacy_cli_import_persists_only_redacted_source_artifact(
+    tmp_path: Path,
+) -> None:
+    secret = "sk-test-legacy-import-secret-123456789"
+    source = tmp_path / "rollout-v4.json"
+    source.write_bytes(
+        canonical_bytes(
+            {
+                "rollout_id": "rollout-secret-regression",
+                "api_key": secret,
+                "spans": [
+                    {
+                        "span_id": "call-secret-regression",
+                        "call_index": 0,
+                        "request": {
+                            "model": "test-model",
+                            "messages": [
+                                {
+                                    "role": "user",
+                                    "content": f"Bearer {secret}",
+                                }
+                            ],
+                        },
+                        "response": {
+                            "choices": [],
+                            "usage": {
+                                "prompt_tokens": 1,
+                                "completion_tokens": 0,
+                            },
+                        },
+                    }
+                ],
+            }
+        )
+    )
+    bundle_root = tmp_path / "legacy-import"
+
+    assert (
+        trace_cli_main(
+            [
+                "import",
+                str(source),
+                "--format",
+                "containers.rollout_trace.v4",
+                "--bundle",
+                str(bundle_root),
+            ]
+        )
+        == 0
+    )
+    bundle = LocalTraceBundle(bundle_root)
+
+    assert secret.encode() not in bundle.archive_bytes()
+    assert any(
+        REDACTED.encode() in bundle.blobs.get(digest)
+        for digest in bundle.read_manifest()["blob_digests"]
+    )
+    assert bundle.verify_self_contained() == (True, ())
 
 
 def test_supervisor_resume_loads_exact_binding_and_continues_high_water(
@@ -738,6 +914,85 @@ def test_responses_websocket_server_rejects_missing_capture_context() -> None:
 
     assert connection.closed == (1008, "capture context required")
     assert relay.calls == 0
+
+
+def test_runner_websocket_url_uses_secret_context_capability(
+    tmp_path: Path,
+) -> None:
+    supervisor = CaptureSupervisor(
+        _supervisor_config(
+            tmp_path / "runner-websocket",
+            responses_websocket=True,
+        )
+    )
+    try:
+        supervisor.start_capture()
+        environment = supervisor.environment()
+        descriptor = supervisor.environment_descriptor()
+        parsed = urlsplit(environment["OPENAI_RESPONSES_WEBSOCKET_URL"])
+        tokens = parse_qs(parsed.query).get("synth_trace_token", ())
+
+        assert parsed.path == "/v1/responses"
+        assert len(tokens) == 1
+        assert tokens[0].startswith("sk_trace_")
+        assert tokens[0] not in json.dumps(descriptor)
+        assert supervisor._resolve_websocket_context_token(tokens[0]) == (
+            supervisor.binding.context_for_child()
+        )
+        assert supervisor._resolve_websocket_context_token("wrong-token") is None
+    finally:
+        supervisor.finalize(status=TraceStatus.COMPLETED)
+
+
+def test_responses_websocket_server_accepts_capability_without_custom_headers() -> None:
+    context = TraceContextV1(
+        trace_id="trace_runner_ws",
+        capture_id="capture_runner_ws",
+        actor_id="actor_runner_ws",
+        actor_session_id="session_runner_ws",
+    )
+
+    class FakeRelay:
+        def __init__(self) -> None:
+            self.received: tuple[str, str] | None = None
+
+        async def relay(
+            self,
+            _connection: object,
+            *,
+            actor_id: str,
+            session_id: str,
+        ) -> None:
+            self.received = (actor_id, session_id)
+
+    class FakeConnection:
+        request = SimpleNamespace(
+            path="/v1/responses?synth_trace_token=runner-capability",
+            headers={},
+        )
+
+        def __init__(self) -> None:
+            self.closed: tuple[int, str] | None = None
+
+        async def close(self, *, code: int, reason: str) -> None:
+            self.closed = (code, reason)
+
+    relay = FakeRelay()
+    server = ResponsesWebSocketServer(
+        relay,
+        context_resolver=lambda _headers: None,
+        query_context_resolver=(
+            lambda token: context if token == "runner-capability" else None
+        ),
+    )
+    connection = FakeConnection()
+    try:
+        asyncio.run(server._handle_connection(connection))
+    finally:
+        server._loop.close()
+
+    assert connection.closed is None
+    assert relay.received == ("actor_runner_ws", "session_runner_ws")
 
 
 def test_raw_repair_does_not_promote_complete_logically_forged_envelope(

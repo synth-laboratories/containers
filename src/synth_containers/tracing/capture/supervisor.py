@@ -215,6 +215,8 @@ class CaptureSupervisor:
         self._endpoints = config.provider_endpoints or _default_provider_endpoints(config)
         self._collector_token = secrets.token_urlsafe(32)
         root_context = self.binding.context_for_child()
+        self._root_context = root_context
+        self._websocket_context_token = f"sk_trace_{secrets.token_urlsafe(32)}"
         self._contexts: dict[str, TraceContextV1] = {
             root_context.capture_id: root_context
         }
@@ -258,6 +260,7 @@ class CaptureSupervisor:
                 host=config.websocket_host,
                 port=config.websocket_port,
                 context_resolver=self._resolve_provider_context,
+                query_context_resolver=self._resolve_websocket_context_token,
             )
             if config.responses_websocket
             else None
@@ -328,6 +331,14 @@ class CaptureSupervisor:
         if any(normalized.get(name) != value for name, value in expected.items()):
             return None
         return context
+
+    def _resolve_websocket_context_token(
+        self,
+        token: str,
+    ) -> TraceContextV1 | None:
+        if not secrets.compare_digest(token, self._websocket_context_token):
+            return None
+        return self._root_context
 
     def _register_remote_context(
         self,
@@ -607,6 +618,7 @@ class CaptureSupervisor:
             ws_host = host or self.config.websocket_host
             values["OPENAI_RESPONSES_WEBSOCKET_URL"] = (
                 f"ws://{ws_host}:{self.websocket_server.port}/v1/responses"
+                f"?synth_trace_token={self._websocket_context_token}"
             )
         if (
             interception in {Interception.PROVIDER_PROXY, Interception.BOTH}
@@ -822,7 +834,11 @@ class CaptureSupervisor:
         if self.sealed is None:
             raise RuntimeError("capture must be finalized before projection")
         from ..adapters.atif import export_atif
-        from ..models.projection import ProjectionLossV1, ProjectionManifestV1
+        from ..models.projection import (
+            ProjectionLossV1,
+            ProjectionManifestV1,
+            bind_projection_manifest,
+        )
         from ..projections.v4 import project_v4
         from ..canonical import record_id
 
@@ -860,6 +876,7 @@ class CaptureSupervisor:
             )
         else:
             raise ValueError(f"unsupported supervisor projection {kind!r}")
+        manifest = bind_projection_manifest(manifest, self.binding)
         path, sealed_manifest = self.bundle.write_projection(
             manifest,
             projection_payload,

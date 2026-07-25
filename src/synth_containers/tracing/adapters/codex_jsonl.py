@@ -62,16 +62,20 @@ class CodexImport:
     malformed_lines: int = 0
 
 
-def import_codex_jsonl(path: Path, *, target_id: str) -> CodexImport:
-    """Read a Codex stdout JSONL file into typed application events."""
+def import_codex_jsonl(source: Path | bytes, *, target_id: str) -> CodexImport:
+    """Read a Codex stdout JSONL file or secret-safe payload into typed events."""
 
     result = CodexImport()
-    if not path.exists():
-        return result
+    if isinstance(source, bytes):
+        text = source.decode("utf-8", errors="replace")
+    else:
+        if not source.exists():
+            return result
+        text = source.read_text(encoding="utf-8", errors="replace")
     seen_threads: set[str] = set()
     seen_turns: set[str] = set()
     seen_items: set[str] = set()
-    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+    for line in text.splitlines():
         stripped = line.strip()
         if not stripped:
             continue
@@ -82,6 +86,9 @@ def import_codex_jsonl(path: Path, *, target_id: str) -> CodexImport:
             result.malformed_lines += 1
             continue
         if not isinstance(record, Mapping):
+            result.malformed_lines += 1
+            continue
+        if record.get("_synth_redacted_malformed_jsonl") is True:
             result.malformed_lines += 1
             continue
         message = record.get("msg") if isinstance(record.get("msg"), Mapping) else record

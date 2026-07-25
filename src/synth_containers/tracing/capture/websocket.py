@@ -7,7 +7,7 @@ import asyncio
 import threading
 from collections.abc import Callable, Mapping
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 import websockets.asyncio.client
 import websockets.asyncio.server
@@ -257,6 +257,7 @@ class ResponsesWebSocketServer:
         relay: ResponsesWebSocketRelay,
         *,
         context_resolver: Callable[[Any], TraceContextV1 | None],
+        query_context_resolver: Callable[[str], TraceContextV1 | None] | None = None,
         host: str = "127.0.0.1",
         port: int = 0,
     ) -> None:
@@ -264,6 +265,7 @@ class ResponsesWebSocketServer:
         self.host = host
         self.requested_port = port
         self.context_resolver = context_resolver
+        self.query_context_resolver = query_context_resolver
         self.port = 0
         self._loop = asyncio.new_event_loop()
         self._ready = threading.Event()
@@ -286,10 +288,26 @@ class ResponsesWebSocketServer:
         self._loop.run_forever()
 
     async def _handle_connection(self, connection: Any) -> None:
-        if connection.request.path != "/v1/responses":
+        request_target = urlsplit(connection.request.path)
+        if request_target.path != "/v1/responses":
             await connection.close(code=1008, reason="unsupported path")
             return
         context = self.context_resolver(connection.request.headers)
+        declares_header_context = any(
+            str(name).lower().startswith("x-synth-")
+            for name in connection.request.headers
+        )
+        if (
+            context is None
+            and not declares_header_context
+            and self.query_context_resolver is not None
+        ):
+            tokens = parse_qs(
+                request_target.query,
+                keep_blank_values=True,
+            ).get("synth_trace_token", ())
+            if len(tokens) == 1:
+                context = self.query_context_resolver(tokens[0])
         if context is None:
             await connection.close(code=1008, reason="capture context required")
             return

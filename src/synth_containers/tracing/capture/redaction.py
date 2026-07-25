@@ -7,6 +7,7 @@ when the scan still finds a secret shape in a body that is about to be written.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from typing import Any, Mapping
@@ -92,6 +93,7 @@ _SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("google_key", re.compile(r"\bAIza[0-9A-Za-z._\-]{20,}")),
     ("tinker_key", re.compile(r"\btk-[A-Za-z0-9._\-]{16,}")),
     ("synth_key", re.compile(r"\bsk_(?:live|test|prod|dev)_[A-Za-z0-9._\-]{12,}")),
+    ("trace_capability", re.compile(r"\bsk_trace_[A-Za-z0-9._\-]{16,}")),
 )
 
 
@@ -188,6 +190,72 @@ def redact_payload(value: Any) -> tuple[Any, RedactionReportV1]:
     return redacted, report
 
 
+def redact_json_source_bytes(
+    payload: bytes,
+    *,
+    json_lines: bool = False,
+) -> tuple[bytes, RedactionReportV1]:
+    """Return a secret-safe canonical source artifact for a JSON import.
+
+    The original byte digest remains provenance, but only this redacted
+    representation may enter a bundle blob store. Malformed JSONL records are
+    represented by their digest and size rather than persisted as opaque text.
+    """
+
+    from ..canonical import bytes_digest, canonical_bytes
+
+    if not json_lines:
+        loaded = json.loads(payload.decode("utf-8"))
+        redacted, report = redact_payload(loaded)
+        assert_no_secrets(redacted, where="redacted JSON import source")
+        return canonical_bytes(redacted), report
+
+    safe_lines: list[bytes] = []
+    reports: list[RedactionReportV1] = []
+    malformed_lines = 0
+    for line_number, line in enumerate(payload.splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            loaded = json.loads(line.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            malformed_lines += 1
+            safe_lines.append(
+                canonical_bytes(
+                    {
+                        "_synth_redacted_malformed_jsonl": True,
+                        "malformed_line": line_number,
+                        "wire_byte_size": len(line),
+                        "wire_digest": bytes_digest(line),
+                    }
+                )
+            )
+            continue
+        redacted, report = redact_payload(loaded)
+        assert_no_secrets(redacted, where=f"redacted JSONL import line {line_number}")
+        safe_lines.append(canonical_bytes(redacted))
+        reports.append(report)
+
+    merged = RedactionReportV1()
+    for report in reports:
+        merged = merged.merged(report)
+    merged = RedactionReportV1(
+        profile=merged.profile,
+        removed_headers=merged.removed_headers,
+        redacted_body_keys=merged.redacted_body_keys,
+        matched_patterns=merged.matched_patterns,
+        metadata={
+            **merged.metadata,
+            "source_encoding": "canonical_jsonl",
+            "malformed_lines_omitted": malformed_lines,
+        },
+    )
+    safe = b"\n".join(safe_lines)
+    if safe_lines:
+        safe += b"\n"
+    return safe, merged
+
+
 def _normalize_body_key(key: str) -> str:
     snake_case = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", key)
     return re.sub(r"[^a-z0-9]+", "_", snake_case.lower()).strip("_")
@@ -208,14 +276,24 @@ def assert_no_secrets(value: Any, *, where: str) -> None:
     for name, pattern in _SECRET_PATTERNS:
         if pattern.search(text):
             raise RedactionError(f"{where}: unredacted secret shape {name!r} would be persisted")
-    lowered = text.lower()
-    for header in DENIED_HEADERS:
-        # Match the header as an object key. A redaction report legitimately lists the
-        # same names as values, and naming what was stripped is not a leak.
-        if f'"{header}":' in lowered:
-            raise RedactionError(
-                f"{where}: credential-bearing header {header!r} would be persisted"
-            )
+
+    def visit(node: Any) -> None:
+        if isinstance(node, Mapping):
+            for key, item in node.items():
+                lowered = str(key).lower()
+                normalized = _normalize_body_key(str(key))
+                if (
+                    lowered in DENIED_HEADERS or _body_key_denied(normalized)
+                ) and item != REDACTED:
+                    raise RedactionError(
+                        f"{where}: credential-bearing field {key!r} would be persisted"
+                    )
+                visit(item)
+        elif isinstance(node, (list, tuple)):
+            for item in node:
+                visit(item)
+
+    visit(value)
 
 
 __all__ = [
@@ -230,6 +308,7 @@ __all__ = [
     "RedactionReportV1",
     "assert_no_secrets",
     "redact_headers",
+    "redact_json_source_bytes",
     "redact_payload",
     "scrub_text",
 ]

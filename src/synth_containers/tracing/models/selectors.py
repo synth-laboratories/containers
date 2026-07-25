@@ -31,6 +31,11 @@ class SelectorKind(StrEnum):
     ARTIFACT = "artifact"
 
 
+class TokenSequence(StrEnum):
+    PROMPT = "prompt"
+    COMPLETION = "completion"
+
+
 class GroundingStatus(StrEnum):
     GROUNDED = "grounded"
     PARTIALLY_GROUNDED = "partially_grounded"
@@ -56,6 +61,7 @@ class TraceSelectorV1(JsonDataclassMixin):
     part_id: str | None = None
     json_pointer: str | None = None
     range: TextRangeV1 | None = None
+    token_sequence: TokenSequence | str | None = None
     quote: str | None = None
     quote_digest: str | None = None
     entity_digest: str | None = None
@@ -186,6 +192,14 @@ def _finish_resolution(
             entity_digest=entity_digest,
         )
 
+    if selector.range is not None and selector.range.unit == "token":
+        return _resolve_token_range(
+            selector,
+            entity=entity,
+            entity_kind=entity_kind,
+            entity_digest=entity_digest,
+        )
+
     text = default_text
     if selector.json_pointer is not None:
         pointer_ok, pointed, reason = _resolve_json_pointer(
@@ -282,6 +296,130 @@ def _finish_resolution(
     )
 
 
+def _resolve_token_range(
+    selector: TraceSelectorV1,
+    *,
+    entity: Any,
+    entity_kind: str,
+    entity_digest: str,
+) -> SelectorResolutionV1:
+    if entity_kind != SelectorKind.SPAN.value or str(
+        getattr(entity, "span_kind", "")
+    ) != "model_call":
+        return SelectorResolutionV1(
+            selector=selector,
+            resolved=False,
+            reason="token_range_requires_model_call_span",
+            entity_kind=entity_kind,
+            entity_digest=entity_digest,
+        )
+    if selector.json_pointer is not None:
+        return SelectorResolutionV1(
+            selector=selector,
+            resolved=False,
+            reason="token_range_json_pointer_conflict",
+            entity_kind=entity_kind,
+            entity_digest=entity_digest,
+        )
+    sequence_name = str(selector.token_sequence or "")
+    if sequence_name not in {TokenSequence.PROMPT, TokenSequence.COMPLETION}:
+        return SelectorResolutionV1(
+            selector=selector,
+            resolved=False,
+            reason="token_sequence_required",
+            entity_kind=entity_kind,
+            entity_digest=entity_digest,
+        )
+    capture = getattr(entity, "token_capture", None)
+    sequence = getattr(capture, sequence_name, None) if capture is not None else None
+    if sequence is None:
+        return SelectorResolutionV1(
+            selector=selector,
+            resolved=False,
+            reason="token_sequence_unavailable",
+            entity_kind=entity_kind,
+            entity_digest=entity_digest,
+        )
+    if sequence.artifact_id and not sequence.token_ids:
+        return SelectorResolutionV1(
+            selector=selector,
+            resolved=False,
+            reason="token_sequence_artifact_backed",
+            entity_kind=entity_kind,
+            entity_digest=entity_digest,
+            detail={"artifact_id": sequence.artifact_id},
+        )
+    if not sequence.token_ids:
+        return SelectorResolutionV1(
+            selector=selector,
+            resolved=False,
+            reason="token_sequence_unavailable",
+            entity_kind=entity_kind,
+            entity_digest=entity_digest,
+        )
+    assert selector.range is not None
+    if (
+        selector.range.start < 0
+        or selector.range.end < selector.range.start
+        or selector.range.end > len(sequence.token_ids)
+    ):
+        return SelectorResolutionV1(
+            selector=selector,
+            resolved=False,
+            reason="range_invalid",
+            entity_kind=entity_kind,
+            entity_digest=entity_digest,
+            detail={
+                "token_sequence": sequence_name,
+                "token_count": len(sequence.token_ids),
+            },
+        )
+    selected = sequence.token_ids[selector.range.start : selector.range.end]
+    text = canonical_text(list(selected))
+    if selector.quote is not None:
+        quote_digest = text_digest(selector.quote)
+        if selector.quote_digest is not None and selector.quote_digest != quote_digest:
+            return SelectorResolutionV1(
+                selector=selector,
+                resolved=False,
+                reason="quote_digest_mismatch",
+                entity_kind=entity_kind,
+                entity_digest=entity_digest,
+                resolved_text=text,
+            )
+        if text != selector.quote:
+            return SelectorResolutionV1(
+                selector=selector,
+                resolved=False,
+                reason="quote_mismatch",
+                entity_kind=entity_kind,
+                entity_digest=entity_digest,
+                resolved_text=text,
+            )
+    elif selector.quote_digest is not None and text_digest(text) != selector.quote_digest:
+        return SelectorResolutionV1(
+            selector=selector,
+            resolved=False,
+            reason="quote_digest_mismatch",
+            entity_kind=entity_kind,
+            entity_digest=entity_digest,
+            resolved_text=text,
+        )
+    return SelectorResolutionV1(
+        selector=selector,
+        resolved=True,
+        entity_kind=entity_kind,
+        entity_digest=entity_digest,
+        resolved_text=text,
+        detail={
+            "token_sequence": sequence_name,
+            "token_ids": list(selected),
+            "start": selector.range.start,
+            "end": selector.range.end,
+        },
+    )
+
+
 def _resolve_json_pointer(value: Any, pointer: str) -> tuple[bool, Any, str]:
     if pointer == "":
         return True, value, ""
@@ -352,6 +490,7 @@ __all__ = [
     "SelectorKind",
     "SelectorResolutionV1",
     "TextRangeV1",
+    "TokenSequence",
     "TraceSelectorV1",
     "resolve_selector",
     "selector_for",

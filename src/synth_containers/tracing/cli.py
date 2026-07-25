@@ -12,15 +12,21 @@ import json
 import os
 from pathlib import Path
 import sys
+from typing import Any
 
-from .canonical import readable_json
+from .canonical import content_digest, readable_json
 from .canonical import record_id, utc_now
 from .capture.spool import repair as repair_spool
+from .capture.redaction import redact_json_source_bytes
 from .projections.inspector import load_bundle, summarize
 from .projections.v4 import project_v4
 from .projections.derived import PROJECTIONS
 from .adapters.atif import export_atif
-from .models.projection import ProjectionLossV1, ProjectionManifestV1
+from .models.projection import (
+    ProjectionLossV1,
+    ProjectionManifestV1,
+    bind_projection_manifest,
+)
 from .store.bundle import LocalTraceBundle, rebuild_catalog
 from .validation.schema import all_schemas
 from .validation.validator import validate
@@ -28,7 +34,12 @@ from .adapters.legacy import import_legacy
 from .adapters.native import import_native_to_bundle, write_imported_document
 from .canonical import bytes_digest
 from .native_evaluation import attach_native_evaluation
-from .capture.binding import CaptureMode, Interception, WorkloadKind
+from .capture.binding import (
+    CaptureMode,
+    Interception,
+    TraceCaptureBindingV1,
+    WorkloadKind,
+)
 from .capture.runner import run_captured_command
 from .capture.supervisor import SupervisorConfig
 from .models.identity import TraceKind, TraceProvenanceV5
@@ -56,10 +67,34 @@ def main(argv: list[str] | None = None) -> int:
     archive.add_argument("bundle", type=Path)
     archive.add_argument("output", type=Path)
 
-    search = subparsers.add_parser("search", help="full-text search a rebuilt bundle catalog")
+    search = subparsers.add_parser(
+        "search",
+        help="full-text and structured search over a rebuilt bundle catalog",
+    )
     search.add_argument("bundle", type=Path)
-    search.add_argument("query")
+    search.add_argument("query", nargs="?")
+    search.add_argument("--trace-id")
     search.add_argument("--trace-digest")
+    search.add_argument("--task-id")
+    search.add_argument("--run-id")
+    search.add_argument("--correlation-id")
+    search.add_argument("--actor-id")
+    search.add_argument("--session-id")
+    search.add_argument("--provider")
+    search.add_argument("--model")
+    search.add_argument("--event-kind")
+    search.add_argument("--span-kind")
+    search.add_argument("--criterion-id")
+    search.add_argument("--annotation-id")
+    search.add_argument("--reward-id")
+    search.add_argument("--reward-min", type=float)
+    search.add_argument("--reward-max", type=float)
+    search.add_argument("--workflow-address")
+    search.add_argument("--started-after")
+    search.add_argument("--started-before")
+    search.add_argument("--completeness")
+    search.add_argument("--visibility")
+    search.add_argument("--digest")
     search.add_argument("--limit", type=int, default=100)
 
     import_parser = subparsers.add_parser(
@@ -203,6 +238,7 @@ def main(argv: list[str] | None = None) -> int:
         bundle = LocalTraceBundle(args.bundle)
         written = []
         for inspected in load_bundle(args.bundle):
+            binding = _projection_binding(bundle, trace=inspected.trace)
             if args.format == "v4":
                 trace, manifest = project_v4(inspected.trace)
                 payload = trace.to_dict()
@@ -235,6 +271,7 @@ def main(argv: list[str] | None = None) -> int:
                     created_at=utc_now(),
                     losses=losses,
                 )
+            manifest = bind_projection_manifest(manifest, binding)
             path, sealed = bundle.write_projection(manifest, payload, kind=kind)
             bundle.write_receipt(f"projection-{kind}", sealed)
             written.append({"path": str(path), "manifest": sealed.to_dict()})
@@ -252,9 +289,30 @@ def main(argv: list[str] | None = None) -> int:
         catalog = LocalTraceBundle(args.bundle).open_catalog()
         try:
             rows = list(
-                catalog.search(
-                    args.query,
+                catalog.query_traces(
+                    query=args.query,
+                    trace_id=args.trace_id,
                     trace_digest=args.trace_digest,
+                    task_id=args.task_id,
+                    run_id=args.run_id,
+                    correlation_id=args.correlation_id,
+                    actor_id=args.actor_id,
+                    session_id=args.session_id,
+                    provider=args.provider,
+                    model=args.model,
+                    event_kind=args.event_kind,
+                    span_kind=args.span_kind,
+                    criterion_id=args.criterion_id,
+                    annotation_id=args.annotation_id,
+                    reward_id=args.reward_id,
+                    reward_min=args.reward_min,
+                    reward_max=args.reward_max,
+                    workflow_address=args.workflow_address,
+                    started_after=args.started_after,
+                    started_before=args.started_before,
+                    completeness=args.completeness,
+                    visibility=args.visibility,
+                    digest=args.digest,
                     limit=args.limit,
                 )
             )
@@ -298,14 +356,15 @@ def main(argv: list[str] | None = None) -> int:
                         f"{args.format} is preserved as opaque input and has no "
                         "canonical assembler"
                     )
-                stored = bundle.blobs.put(source_bytes)
-                if stored != bytes_digest(source_bytes):
-                    raise SystemExit("source bytes changed while importing")
+                safe_source, source_redaction = redact_json_source_bytes(source_bytes)
+                stored = bundle.blobs.put(safe_source)
                 result = write_imported_document(
                     imported.canonical,
                     source_digest=imported.source_digest,
                     source_format=args.format,
                     bundle=bundle,
+                    stored_source_digest=stored,
+                    source_redaction=source_redaction,
                 )
                 result["coverage"] = imported.coverage
                 result["losses"] = list(imported.losses)
@@ -389,6 +448,33 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     raise SystemExit(f"unhandled command {args.command!r}")
+
+
+def _projection_binding(
+    bundle: LocalTraceBundle,
+    *,
+    trace: Any,
+) -> TraceCaptureBindingV1:
+    """Load and verify the exact capture authority for a bundle projection."""
+
+    from .validation.rehydrate import build
+
+    path = bundle.trace_root(trace.trace_id) / "binding.json"
+    if not path.is_file():
+        raise ValueError(f"projection source binding is missing for trace {trace.trace_id!r}")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    binding = build(TraceCaptureBindingV1, payload)
+    if not isinstance(binding, TraceCaptureBindingV1):
+        raise ValueError(f"projection source binding has the wrong schema at {path}")
+    if binding.trace_id != trace.trace_id:
+        raise ValueError("projection source binding trace_id does not match the trace")
+    if binding.binding_id != trace.capture.binding_id:
+        raise ValueError("projection source binding_id does not match the trace")
+    if binding.content_digest != trace.capture.binding_digest:
+        raise ValueError("projection source binding digest does not match the trace")
+    if binding.content_digest != content_digest(binding):
+        raise ValueError("projection source binding content digest is invalid")
+    return binding
 
 
 if __name__ == "__main__":

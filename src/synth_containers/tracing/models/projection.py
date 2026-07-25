@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING, Any
 
 from synth_containers.serde import JsonDataclassMixin
 
 from ..canonical import seal_record
 from .actors import Visibility
+
+if TYPE_CHECKING:
+    from ..capture.binding import TraceCaptureBindingV1
 
 
 PROJECTION_MANIFEST_SCHEMA_VERSION = "synth.projection-manifest.v1"
@@ -33,8 +36,13 @@ class ProjectionManifestV1(JsonDataclassMixin):
     producer_version: str
     created_at: str
     config_digest: str | None = None
+    source_binding_id: str | None = None
+    source_binding_digest: str | None = None
+    capture_policy: dict[str, Any] = field(default_factory=dict)
+    capture_policy_digest: str | None = None
     requested_view: dict[str, Any] = field(default_factory=dict)
-    redaction_profile: str = "default"
+    redaction_profile: str = "unknown"
+    redaction_provenance: str = "unknown"
     included_layers: tuple[str, ...] = ()
     omitted_layers: tuple[str, ...] = ()
     losses: tuple[ProjectionLossV1, ...] = ()
@@ -48,8 +56,28 @@ class ProjectionManifestV1(JsonDataclassMixin):
         return seal_record(self)
 
 
+def bind_projection_manifest(
+    manifest: ProjectionManifestV1,
+    binding: "TraceCaptureBindingV1",
+) -> ProjectionManifestV1:
+    """Attach the exact, non-secret capture authority used for this projection."""
+
+    return replace(
+        manifest,
+        config_digest=binding.capture.proxy_config_digest,
+        source_binding_id=binding.binding_id,
+        source_binding_digest=binding.content_digest,
+        capture_policy=binding.policy.to_dict(),
+        capture_policy_digest=binding.policy.digest(),
+        redaction_profile=binding.policy.redaction_profile,
+        redaction_provenance="source_capture_binding.policy.redaction_profile",
+        content_digest="",
+    )
+
+
 __all__ = [
     "PROJECTION_MANIFEST_SCHEMA_VERSION",
     "ProjectionLossV1",
     "ProjectionManifestV1",
+    "bind_projection_manifest",
 ]
