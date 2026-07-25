@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-import os
 from pathlib import Path
 import signal
 import subprocess
 import time
-from typing import Any, Sequence
+from typing import Any
 
 from ..canonical import bytes_digest, canonical_bytes, utc_now
 from ..models.completeness import TerminationV5, TraceStatus
@@ -28,11 +28,21 @@ def run_captured_command(
     config: SupervisorConfig,
     command: Sequence[str],
     *,
+    environ: Mapping[str, str],
     timeout_seconds: float | None = None,
     projections: tuple[str, ...] = ("v4",),
-    environ: dict[str, str] | None = None,
 ) -> CapturedCommandResult:
-    """Capture one child process, seal on every terminal path, and preserve its RC."""
+    """Capture one child process, seal on every terminal path, and preserve its RC.
+
+    ``environ`` is the exact caller-approved baseline for the child. This function
+    never inherits ``os.environ`` implicitly; callers that need ambient values must
+    select their names explicitly before crossing this boundary. The supervisor's
+    ephemeral capture variables are overlaid after that selection.
+
+    Capture is observability, not sandboxing. A child that shares the supervisor's
+    user or process namespace may still inspect parent state through operating-system
+    facilities, irrespective of this environment boundary.
+    """
 
     argv = tuple(str(item) for item in command)
     if not argv:
@@ -63,7 +73,7 @@ def run_captured_command(
 
     if startup_ok:
         try:
-            child_environment = dict(os.environ if environ is None else environ)
+            child_environment = dict(environ)
             child_environment.update(supervisor.environment())
             process = subprocess.Popen(argv, env=child_environment)
             try:

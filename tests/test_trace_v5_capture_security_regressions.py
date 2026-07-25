@@ -29,7 +29,10 @@ from synth_containers.tracing.canonical import (
     canonical_text,
     content_digest,
 )
-from synth_containers.tracing.cli import main as trace_cli_main
+from synth_containers.tracing.cli import (
+    _allowlisted_environment,
+    main as trace_cli_main,
+)
 from synth_containers.tracing.capture.binding import (
     BindingCaptureV1,
     BindingWorkloadV1,
@@ -1905,7 +1908,9 @@ def test_finalizer_rejects_local_child_record_after_terminal_fact(
 
 def test_generic_runner_honors_external_binding_and_materializes_projections(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("TRACE_V5_AMBIENT_SENTINEL", "must-not-cross")
     binding = mint_binding(
         trace_id="trace_external_runner",
         capture_id="capture_external_runner",
@@ -1934,9 +1939,13 @@ def test_generic_runner_honors_external_binding_and_materializes_projections(
                 "import os,sys;"
                 "required=('OPENAI_BASE_URL','SYNTH_TRACE_BINDING_PATH',"
                 "'SYNTH_TRACE_COLLECTOR_URL','SYNTH_TRACE_ID');"
-                "sys.exit(0 if all(os.environ.get(k) for k in required) else 9)"
+                "explicit=os.environ.get('TRACE_V5_EXPLICIT_SENTINEL')=='selected';"
+                "ambient='TRACE_V5_AMBIENT_SENTINEL' in os.environ;"
+                "sys.exit(0 if all(os.environ.get(k) for k in required) "
+                "and explicit and not ambient else 9)"
             ),
         ),
+        environ={"TRACE_V5_EXPLICIT_SENTINEL": "selected"},
         projections=("v4", "atif"),
     )
     bundle = LocalTraceBundle(bundle_root)
@@ -1953,6 +1962,23 @@ def test_generic_runner_honors_external_binding_and_materializes_projections(
     assert bundle.verify_self_contained() == (True, ())
     manifest = bundle.read_manifest()
     assert len(manifest["projection_digests"]) == 2
+
+
+def test_cli_environment_allowlist_fails_when_requested_name_is_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TRACE_V5_SELECTED_ENV", "selected")
+    monkeypatch.setenv("TRACE_V5_UNRELATED_ENV", "must-not-cross")
+    monkeypatch.delenv("TRACE_V5_MISSING_ENV", raising=False)
+
+    assert _allowlisted_environment(["TRACE_V5_SELECTED_ENV"]) == {
+        "TRACE_V5_SELECTED_ENV": "selected"
+    }
+    with pytest.raises(
+        SystemExit,
+        match="requested unset variable 'TRACE_V5_MISSING_ENV'",
+    ):
+        _allowlisted_environment(["TRACE_V5_MISSING_ENV"])
 
 
 def test_responses_websocket_relay_redacts_and_preserves_per_call_order(
