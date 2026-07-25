@@ -68,6 +68,7 @@ class _PendingRequest:
     headers: list[tuple[str, str]]
     deadline_ms: int
     connection_generation: int
+    received_monotonic: float
     body: bytearray = field(default_factory=bytearray)
 
 
@@ -312,6 +313,9 @@ class SynthTunnelRelayAgent:
                 websocket = _connect_websocket(
                     self._url,
                     headers={"Authorization": f"Bearer {self._agent_token}"},
+                    max_message_bytes=_websocket_message_limit(
+                        self._max_request_body_bytes
+                    ),
                 )
                 with self._connection_lock:
                     self._connection_generation += 1
@@ -387,6 +391,7 @@ class SynthTunnelRelayAgent:
                     headers=_header_pairs(payload.get("headers")),
                     deadline_ms=max(1000, int(payload.get("deadline_ms") or 120000)),
                     connection_generation=connection_generation,
+                    received_monotonic=time.monotonic(),
                 )
             return
         if message_type == "REQ_BODY":
@@ -435,7 +440,8 @@ class SynthTunnelRelayAgent:
 
     def _serve_request(self, request_id: str, request: _PendingRequest) -> None:
         try:
-            timeout = max(1.0, min(120.0, request.deadline_ms / 1000.0))
+            elapsed = time.monotonic() - request.received_monotonic
+            timeout = max(1.0, request.deadline_ms / 1000.0 - elapsed)
             upstream_url = _local_upstream_url(
                 self._local_target,
                 request.path,
@@ -453,7 +459,7 @@ class SynthTunnelRelayAgent:
                     headers=headers,
                     method=request.method,
                 )
-                with urllib.request.urlopen(upstream_request, timeout=timeout) as response:
+                with _open_upstream(upstream_request, timeout=timeout) as response:
                     self._send_response(
                         request_id,
                         response.status,
@@ -555,7 +561,12 @@ class SynthTunnelRelayAgent:
             websocket.send(json.dumps(dict(payload)))
 
 
-def _connect_websocket(url: str, *, headers: Mapping[str, str]) -> Any:
+def _connect_websocket(
+    url: str,
+    *,
+    headers: Mapping[str, str],
+    max_message_bytes: int,
+) -> Any:
     from websockets.sync.client import connect
 
     if urlparse(url).scheme not in {"ws", "wss"}:
@@ -565,6 +576,31 @@ def _connect_websocket(url: str, *, headers: Mapping[str, str]) -> Any:
         additional_headers=dict(headers),
         open_timeout=10,
         close_timeout=5,
+        max_size=max_message_bytes,
+    )
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(
+        self,
+        request: urllib.request.Request,
+        file_pointer: Any,
+        code: int,
+        message: str,
+        headers: Mapping[str, str],
+        new_url: str,
+    ) -> None:
+        return None
+
+
+def _open_upstream(
+    request: urllib.request.Request,
+    *,
+    timeout: float,
+) -> Any:
+    return urllib.request.build_opener(_NoRedirectHandler()).open(
+        request,
+        timeout=timeout,
     )
 
 
@@ -659,3 +695,8 @@ def _decode_bytes(data: str) -> bytes:
         return base64.b64decode(data.encode("ascii"), validate=True)
     except (ValueError, UnicodeEncodeError) as error:
         raise ValueError("invalid base64 request body") from error
+
+
+def _websocket_message_limit(max_request_body_bytes: int) -> int:
+    base64_bytes = ((max_request_body_bytes + 2) // 3) * 4
+    return max(1024 * 1024, base64_bytes + 64 * 1024)
