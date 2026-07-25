@@ -492,6 +492,190 @@ class SqliteCatalogStore:
         params.append(limit)
         return [dict(row) for row in self._connection.execute(sql, params).fetchall()]
 
+    def query_traces(
+        self,
+        *,
+        query: str | None = None,
+        trace_id: str | None = None,
+        trace_digest: str | None = None,
+        task_id: str | None = None,
+        run_id: str | None = None,
+        correlation_id: str | None = None,
+        actor_id: str | None = None,
+        session_id: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        event_kind: str | None = None,
+        span_kind: str | None = None,
+        criterion_id: str | None = None,
+        annotation_id: str | None = None,
+        reward_id: str | None = None,
+        workflow_address: str | None = None,
+        started_after: str | None = None,
+        started_before: str | None = None,
+        completeness: str | None = None,
+        visibility: str | None = None,
+        digest: str | None = None,
+        reward_min: float | None = None,
+        reward_max: float | None = None,
+        limit: int = 100,
+    ) -> Iterable[dict[str, Any]]:
+        """Return trace rows satisfying an exact conjunction of local filters.
+
+        Immutable trace/evidence bodies remain authoritative; this method uses only
+        their disposable catalog projection. Every entity/evidence predicate is an
+        independent ``EXISTS`` clause, so compound filters require all cited facts
+        to occur in the same trace without accidentally requiring one row to carry
+        unrelated actor, event, and reward fields.
+        """
+
+        clauses: list[str] = []
+        params: list[Any] = []
+
+        def exact(column: str, value: str | None) -> None:
+            if value is not None:
+                clauses.append(f"d.{column} = ?")
+                params.append(value)
+
+        exact("trace_id", trace_id)
+        exact("trace_digest", trace_digest)
+        exact("task_id", task_id)
+        exact("run_id", run_id)
+        exact("correlation_id", correlation_id)
+        exact("capture_status", completeness)
+        if query:
+            clauses.append(
+                "d.trace_digest IN ("
+                "SELECT trace_digest FROM trace_search WHERE trace_search MATCH ?"
+                ")"
+            )
+            params.append(query)
+        if actor_id:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM trace_entities e "
+                "WHERE e.trace_digest = d.trace_digest AND e.owner_actor_id = ?)"
+            )
+            params.append(actor_id)
+        if session_id:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM trace_entities e "
+                "WHERE e.trace_digest = d.trace_digest AND e.owner_session_id = ?)"
+            )
+            params.append(session_id)
+        if provider:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM trace_entities e "
+                "WHERE e.trace_digest = d.trace_digest AND "
+                "json_extract(e.facts, '$.provider') = ?)"
+            )
+            params.append(provider)
+        if model:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM trace_entities e "
+                "WHERE e.trace_digest = d.trace_digest AND "
+                "json_extract(e.facts, '$.model') = ?)"
+            )
+            params.append(model)
+        if event_kind:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM trace_entities e "
+                "WHERE e.trace_digest = d.trace_digest AND e.kind = 'event' "
+                "AND json_extract(e.facts, '$.event_type') = ?)"
+            )
+            params.append(event_kind)
+        if span_kind:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM trace_entities e "
+                "WHERE e.trace_digest = d.trace_digest AND e.kind = 'span' "
+                "AND json_extract(e.facts, '$.span_kind') = ?)"
+            )
+            params.append(span_kind)
+        if criterion_id:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM evidence_records er, "
+                "json_each(json_extract(er.facts, '$.criterion_results')) cr "
+                "WHERE er.trace_digest = d.trace_digest "
+                "AND json_extract(cr.value, '$.criterion_id') = ?)"
+            )
+            params.append(criterion_id)
+        if annotation_id:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM evidence_records er "
+                "WHERE er.trace_digest = d.trace_digest "
+                "AND er.record_kind = 'annotation' AND er.record_id = ?)"
+            )
+            params.append(annotation_id)
+        if reward_id:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM evidence_records er "
+                "WHERE er.trace_digest = d.trace_digest "
+                "AND er.record_kind IN ('reward_record', 'reward_aggregation') "
+                "AND er.definition_id = ?)"
+            )
+            params.append(reward_id)
+        if reward_min is not None:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM evidence_records er "
+                "WHERE er.trace_digest = d.trace_digest "
+                "AND er.record_kind IN ('reward_record', 'reward_aggregation') "
+                "AND er.value >= ?)"
+            )
+            params.append(float(reward_min))
+        if reward_max is not None:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM evidence_records er "
+                "WHERE er.trace_digest = d.trace_digest "
+                "AND er.record_kind IN ('reward_record', 'reward_aggregation') "
+                "AND er.value <= ?)"
+            )
+            params.append(float(reward_max))
+        if workflow_address:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM trace_aliases a "
+                "WHERE a.trace_digest = d.trace_digest "
+                "AND a.namespace = 'workflow_address' AND a.value = ?)"
+            )
+            params.append(workflow_address)
+        if started_after:
+            clauses.append("julianday(d.started_at) >= julianday(?)")
+            params.append(started_after)
+        if started_before:
+            clauses.append("julianday(d.started_at) <= julianday(?)")
+            params.append(started_before)
+        if visibility:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM trace_entities e "
+                "WHERE e.trace_digest = d.trace_digest "
+                "AND json_extract(e.facts, '$.trace_visibility') = ?)"
+            )
+            params.append(visibility)
+        if digest:
+            clauses.append(
+                "(d.trace_digest = ? OR EXISTS ("
+                "SELECT 1 FROM trace_entities e "
+                "WHERE e.trace_digest = d.trace_digest AND e.content_digest = ?"
+                "))"
+            )
+            params.extend((digest, digest))
+        if int(limit) <= 0:
+            raise ValueError("search limit must be positive")
+        if (
+            reward_min is not None
+            and reward_max is not None
+            and float(reward_min) > float(reward_max)
+        ):
+            raise ValueError("reward_min must not exceed reward_max")
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(int(limit))
+        return [
+            dict(row)
+            for row in self._connection.execute(
+                f"SELECT d.* FROM trace_documents d {where} "
+                "ORDER BY d.started_at, d.trace_digest LIMIT ?",
+                params,
+            ).fetchall()
+        ]
+
     def entities(
         self,
         *,

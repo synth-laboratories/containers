@@ -22,6 +22,7 @@ from ..capture.collector import LocalCollector
 from ..capture.coverage import CaptureScope, new_coverage_receipt
 from ..capture.envelope import RawRecordType
 from ..capture.finalizer import TraceFinalizer, application_event_id
+from ..capture.redaction import RedactionReportV1, redact_json_source_bytes
 from ..capture.session import CaptureSession
 from ..capture.spool import RawSpool
 from ..models.identity import (
@@ -53,16 +54,30 @@ def import_native_to_bundle(
 
     source = Path(source)
     normalized = source_format.lower().strip().replace("-", "_")
+    supported = {
+        "codex",
+        "codex_jsonl",
+        "codex_stdout_jsonl",
+        "react",
+        "craftax_react",
+        "gamebench_react",
+        "jesterky",
+        "jesterky_manifest",
+    }
+    if normalized not in supported:
+        raise ValueError(f"unsupported native trace format: {source_format}")
     source_bytes = source.read_bytes()
     source_digest = bytes_digest(source_bytes)
-    stored_source_digest = bundle.blobs.put(source_bytes)
-    if stored_source_digest != source_digest:
-        raise ValueError("native source blob digest changed while importing")
+    safe_source, redaction = redact_json_source_bytes(
+        source_bytes,
+        json_lines=normalized in {"codex", "codex_jsonl", "codex_stdout_jsonl"},
+    )
+    stored_source_digest = bundle.blobs.put(safe_source)
     if normalized in {"codex", "codex_jsonl", "codex_stdout_jsonl"}:
-        return _import_codex(source, source_digest=source_digest, bundle=bundle)
-    if normalized in {"react", "craftax_react", "gamebench_react"}:
+        result = _import_codex(source, source_digest=source_digest, bundle=bundle)
+    elif normalized in {"react", "craftax_react", "gamebench_react"}:
         payload = _json_object(source_bytes)
-        return _import_events(
+        result = _import_events(
             payload,
             source_digest=source_digest,
             source_format="gamebench.react-native-events.v1",
@@ -73,10 +88,10 @@ def import_native_to_bundle(
                 correlation_id=str(payload.get("trace_correlation_id") or "") or None,
             ),
         )
-    if normalized in {"jesterky", "jesterky_manifest"}:
+    else:
         payload = _json_object(source_bytes)
         run_id = str(payload.get("run_id") or "")
-        return _import_events(
+        result = _import_events(
             payload,
             source_digest=source_digest,
             source_format=str(payload.get("schema_version") or "jesterky.run-manifest.v1"),
@@ -86,7 +101,27 @@ def import_native_to_bundle(
             identity=TraceIdentityV5(run_id=run_id or None, correlation_id=run_id or None),
             trace_kind=TraceKind.WORKFLOW_RUN,
         )
-    raise ValueError(f"unsupported native trace format: {source_format}")
+    bundle.write_receipt(
+        "native-import-source",
+        {
+            "source_digest": source_digest,
+            "stored_source_digest": stored_source_digest,
+            "source_format": source_format,
+            "redaction": redaction.to_dict(),
+        },
+    )
+    bundle.write_manifest(
+        metadata={
+            "imported_source_digest": source_digest,
+            "imported_stored_source_digest": stored_source_digest,
+            "imported_source_format": source_format,
+        }
+    )
+    return {
+        **result,
+        "stored_source_digest": stored_source_digest,
+        "source_redaction": redaction.to_dict(),
+    }
 
 
 def write_imported_document(
@@ -95,6 +130,8 @@ def write_imported_document(
     source_digest: str,
     source_format: str,
     bundle: LocalTraceBundle,
+    stored_source_digest: str | None = None,
+    source_redaction: RedactionReportV1 | None = None,
 ) -> dict[str, Any]:
     """Bind a foreign canonical document to a portable local bundle."""
 
@@ -144,14 +181,17 @@ def write_imported_document(
         "foreign-import",
         {
             "source_digest": source_digest,
+            "stored_source_digest": stored_source_digest,
             "source_format": source_format,
             "trace_id": rebound.trace_id,
             "trace_digest": rebound.content_digest,
+            "redaction": source_redaction.to_dict() if source_redaction else None,
         },
     )
     bundle.write_manifest(
         metadata={
             "imported_source_digest": source_digest,
+            "imported_stored_source_digest": stored_source_digest,
             "imported_source_format": source_format,
         }
     )
@@ -160,6 +200,7 @@ def write_imported_document(
         "trace_digest": rebound.content_digest,
         "capture_id": capture_id,
         "source_digest": source_digest,
+        "stored_source_digest": stored_source_digest,
         "source_format": source_format,
     }
 

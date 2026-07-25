@@ -10,9 +10,11 @@ from synth_containers.tracing.canonical import content_digest, text_digest
 from synth_containers.tracing.evidence_ops import attach, new_evidence_bundle
 from synth_containers.tracing.models.identity import AliasV1
 from synth_containers.tracing.models.messages import BranchV5
+from synth_containers.tracing.models.events import EventOrderV1, EventV5
 from synth_containers.tracing.models.selectors import (
     SelectorKind,
     TextRangeV1,
+    TokenSequence,
     TraceSelectorV1,
     resolve_selector,
 )
@@ -39,6 +41,12 @@ from synth_containers.tracing.models.standards import (
     VerifierKind,
     VerifierResultV2,
     aggregate_rubric_score,
+)
+from synth_containers.tracing.models.spans import SpanKind, SpanV5
+from synth_containers.tracing.models.tokens import (
+    TokenCaptureProvenance,
+    TokenCaptureV5,
+    TokenSequenceRefV1,
 )
 from synth_containers.tracing.models.evidence import (
     TraceEvidenceBundleV5,
@@ -553,6 +561,84 @@ def test_selectors_enforce_pointer_range_quote_and_every_entity_digest() -> None
     ).reason == "entity_digest_mismatch"
 
 
+def test_model_call_token_range_selectors_resolve_inline_and_fail_closed_for_artifacts() -> None:
+    trace = _trace()
+    span = SpanV5(
+        span_id="span-token-call",
+        span_kind=SpanKind.MODEL_CALL,
+        actor_id=trace.actors[0].actor_id,
+        session_id=trace.sessions[0].session_id,
+        started_at="2026-01-01T00:00:00Z",
+        token_capture=TokenCaptureV5(
+            provenance=TokenCaptureProvenance.IMPORTED,
+            level="full_training",
+            prompt=TokenSequenceRefV1(token_ids=(7, 11, 12, 19), count=4),
+            completion=TokenSequenceRefV1(token_ids=(23, 29), count=2),
+        ),
+    ).sealed()
+    trace = replace(trace, spans=(span,), content_digest="").sealed()
+    selector = TraceSelectorV1(
+        trace_id=trace.trace_id,
+        trace_digest=trace.content_digest,
+        kind=SelectorKind.SPAN,
+        entity_id=span.span_id,
+        entity_digest=span.content_digest,
+        token_sequence=TokenSequence.PROMPT,
+        range=TextRangeV1(1, 3, unit="token"),
+    )
+
+    resolution = resolve_selector(trace, selector)
+    assert resolution.resolved is True
+    assert resolution.detail == {
+        "token_sequence": "prompt",
+        "token_ids": [11, 12],
+        "start": 1,
+        "end": 3,
+    }
+    assert resolve_selector(
+        trace,
+        replace(
+            selector,
+            token_sequence=TokenSequence.COMPLETION,
+            range=TextRangeV1(1, 2, unit="token"),
+        ),
+    ).detail["token_ids"] == [29]
+    assert resolve_selector(
+        trace,
+        replace(selector, range=TextRangeV1(3, 5, unit="token")),
+    ).reason == "range_invalid"
+    assert resolve_selector(
+        trace,
+        replace(selector, token_sequence=None),
+    ).reason == "token_sequence_required"
+
+    artifact_span = replace(
+        span,
+        token_capture=replace(
+            span.token_capture,
+            prompt=TokenSequenceRefV1(
+                artifact_id="artifact-prompt-tokens",
+                count=4,
+                digest=(
+                    "sha256:"
+                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                ),
+            ),
+        ),
+        content_digest="",
+    ).sealed()
+    artifact_trace = replace(trace, spans=(artifact_span,), content_digest="").sealed()
+    artifact_selector = replace(
+        selector,
+        trace_digest=artifact_trace.content_digest,
+        entity_digest=artifact_span.content_digest,
+    )
+    artifact_resolution = resolve_selector(artifact_trace, artifact_selector)
+    assert artifact_resolution.resolved is False
+    assert artifact_resolution.reason == "token_sequence_artifact_backed"
+    assert artifact_resolution.detail == {"artifact_id": "artifact-prompt-tokens"}
+
+
 def test_schema_does_not_require_omitted_no_default_nullable_fields() -> None:
     branch_schema = json_schema(BranchV5)
     criterion_result_schema = json_schema(CriterionResultV1)
@@ -594,5 +680,90 @@ def test_sqlite_rows_exactly_match_public_projection_with_nested_aliases(
         assert {"nested_actor", "nested_session", "nested_message"} <= {
             row["namespace"] for row in catalog.aliases()
         }
+    finally:
+        catalog.close()
+
+
+def test_structured_catalog_search_compounds_trace_entity_and_evidence_filters(
+    tmp_path: Path,
+) -> None:
+    original = _trace()
+    actor = replace(
+        original.actors[0],
+        provider="openai",
+        model="gpt-5.4",
+        task_id="task-search",
+        workflow_id="workflow-search",
+        content_digest="",
+    ).sealed()
+    session = original.sessions[0]
+    span = SpanV5(
+        span_id="span-search",
+        span_kind=SpanKind.MODEL_CALL,
+        actor_id=actor.actor_id,
+        session_id=session.session_id,
+        started_at="1970-01-01T00:00:00Z",
+        workflow_address="workflow-search/map/0",
+        detail={"model": "gpt-5.4", "provider": "openai"},
+    ).sealed()
+    event = EventV5(
+        event_id="event-search",
+        event_type="environment.reward",
+        actor_id=actor.actor_id,
+        session_id=session.session_id,
+        occurred_at="1970-01-01T00:00:00Z",
+        order=EventOrderV1(chronological_sequence=1),
+        payload={"reward": 1.0},
+    ).sealed()
+    trace = replace(
+        original,
+        identity=replace(
+            original.identity,
+            task_id="task-search",
+            run_id="run-search",
+            correlation_id="correlation-search",
+        ),
+        actors=(actor, *original.actors[1:]),
+        spans=(span,),
+        events=(event,),
+        content_digest="",
+    ).sealed()
+    evidence = _valid_evidence(trace)
+    catalog = SqliteCatalogStore(tmp_path / "catalog.sqlite3")
+    try:
+        catalog.index_trace(trace)
+        catalog.index_evidence(evidence)
+
+        rows = list(
+            catalog.query_traces(
+                query="hello",
+                trace_id=trace.trace_id,
+                trace_digest=trace.content_digest,
+                task_id="task-search",
+                run_id="run-search",
+                correlation_id="correlation-search",
+                actor_id=actor.actor_id,
+                session_id=session.session_id,
+                provider="openai",
+                model="gpt-5.4",
+                event_kind="environment.reward",
+                span_kind="model_call",
+                criterion_id="gate",
+                annotation_id="annotation",
+                reward_id="source-reward",
+                reward_min=1.0,
+                reward_max=1.0,
+                workflow_address="workflow-search/map/0",
+                started_after="1969-01-01T00:00:00Z",
+                started_before="1971-01-01T00:00:00Z",
+                completeness=str(trace.completeness.capture_status),
+                visibility=str(trace.visibility),
+                digest=span.content_digest,
+            )
+        )
+        assert [row["trace_digest"] for row in rows] == [trace.content_digest]
+        assert list(catalog.query_traces(reward_max=0.5)) == []
+        with pytest.raises(ValueError, match="reward_min"):
+            list(catalog.query_traces(reward_min=2.0, reward_max=1.0))
     finally:
         catalog.close()

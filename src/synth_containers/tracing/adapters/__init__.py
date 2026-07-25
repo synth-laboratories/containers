@@ -19,6 +19,7 @@ from .openai_chat import (
     usage_from_provider,
 )
 from .openai_responses import OpenAIResponsesAdapter
+from .optimizer_event_history import import_optimizer_event_history
 from .v4 import import_rollout_trace_v4
 
 
@@ -46,6 +47,7 @@ __all__ = [
     "import_codex_jsonl",
     "import_atif",
     "import_experiments_trace_v4",
+    "import_optimizer_event_history",
     "import_rollout_trace_v4",
     "inspect_atif_import",
     "normalize_request_messages",

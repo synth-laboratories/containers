@@ -101,8 +101,11 @@ def _trace_projection(document: TraceDocumentV5) -> dict[str, Any]:
                 "role": actor.role,
                 "subtype": actor.subtype,
                 "model": actor.model,
+                "provider": actor.provider,
                 "task_id": actor.task_id,
                 "workflow_id": actor.workflow_id,
+                "visibility": str(actor.visibility),
+                "trace_visibility": str(document.visibility),
             },
         )
         if actor.parent_actor_id:
@@ -124,6 +127,8 @@ def _trace_projection(document: TraceDocumentV5) -> dict[str, Any]:
                 "attempt_id": session.attempt_id,
                 "thread_id": session.thread_id,
                 "workflow_id": session.workflow_id,
+                "provider": session.provider,
+                "trace_visibility": str(document.visibility),
             },
         )
         relationship(session.actor_id, "owns_session", session.session_id)
@@ -147,8 +152,14 @@ def _trace_projection(document: TraceDocumentV5) -> dict[str, Any]:
                 "turn_id": span.turn_id,
                 "branch_id": span.branch_id,
                 "workflow_address": span.workflow_address,
+                "model": span.detail.get("model"),
+                "provider": (
+                    span.detail.get("provider")
+                    or span.detail.get("provider_adapter")
+                ),
                 "detail": span.detail,
                 "usage": span.usage.to_dict() if span.usage else None,
+                "trace_visibility": str(document.visibility),
             },
         )
         if span.parent_span_id:
@@ -189,6 +200,7 @@ def _trace_projection(document: TraceDocumentV5) -> dict[str, Any]:
                 "event_type": str(event.event_type),
                 "status": str(event.status),
                 "payload": event.payload,
+                "trace_visibility": str(document.visibility),
             },
         )
         for parent in event.caused_by_event_ids:
@@ -217,6 +229,8 @@ def _trace_projection(document: TraceDocumentV5) -> dict[str, Any]:
                 "text_preview": message.text()[:512],
                 "turn_id": message.turn_id,
                 "thread_id": message.thread_id,
+                "visibility": str(message.visibility),
+                "trace_visibility": str(document.visibility),
             },
         )
         for predecessor in message.predecessor_message_ids:
@@ -241,6 +255,7 @@ def _trace_projection(document: TraceDocumentV5) -> dict[str, Any]:
                 "reason": str(branch.reason),
                 "head_message_id": branch.head_message_id,
                 "fork_point_message_id": branch.fork_point_message_id,
+                "trace_visibility": str(document.visibility),
             },
         )
         if branch.parent_branch_id:
@@ -262,6 +277,8 @@ def _trace_projection(document: TraceDocumentV5) -> dict[str, Any]:
                 "logical_name": artifact.logical_name,
                 "uri": artifact.uri,
                 "completeness": str(artifact.completeness),
+                "visibility": str(artifact.visibility),
+                "trace_visibility": str(document.visibility),
             },
         )
 
@@ -280,6 +297,7 @@ def _trace_projection(document: TraceDocumentV5) -> dict[str, Any]:
                 "message": error.message,
                 "retryable": error.retryable,
                 "terminal": error.terminal,
+                "trace_visibility": str(document.visibility),
             },
         )
         if error.caused_by_error_id:

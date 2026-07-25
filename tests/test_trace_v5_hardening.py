@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import io
 import json
 from pathlib import Path
+import subprocess
+import sys
+from urllib.parse import urlsplit
 import zipfile
 from types import SimpleNamespace
 
@@ -11,9 +15,13 @@ import pytest
 
 from synth_containers.tracing.adapters.atif import export_atif, import_atif
 from synth_containers.tracing.adapters.codex_jsonl import import_codex_jsonl
-from synth_containers.tracing.adapters.native import import_native_to_bundle
+from synth_containers.tracing.adapters.native import (
+    import_native_to_bundle,
+    write_imported_document,
+)
 from synth_containers.tracing.adapters.legacy import import_legacy
-from synth_containers.tracing.canonical import canonical_bytes
+from synth_containers.tracing.canonical import bytes_digest, canonical_bytes
+from synth_containers.tracing.projections.v4 import project_v4
 from synth_containers.tracing.models.identity import TraceContextV1
 from synth_containers.tracing.models.identity import TraceProvenanceV5
 from synth_containers.tracing.models.evidence import TraceEvidenceBundleV5, TraceRefV5
@@ -36,6 +44,26 @@ from synth_containers.tracing.models.standards import (
     RubricDefinitionV2,
     aggregate_rubric_score,
 )
+
+
+def test_top_level_tracing_import_has_no_adapter_capture_cycle() -> None:
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from synth_containers.tracing import TraceContextV1;"
+                "from synth_containers.tracing.adapters import "
+                "import_optimizer_event_history, provider_adapters;"
+                "assert TraceContextV1 and import_optimizer_event_history;"
+                "assert provider_adapters()"
+            ),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_canonical_rejects_unordered_containers() -> None:
@@ -82,6 +110,157 @@ def test_atif_import_is_deterministic_and_exports_17() -> None:
     exported = export_atif(first)
     assert exported["schema_version"] == "ATIF-v1.7"
     assert exported["trajectory_id"] == first.trace_id
+
+
+def test_optimizer_event_history_import_preserves_model_and_application_events(
+    tmp_path: Path,
+) -> None:
+    payload = {
+        "rollout_id": "optimizer-rollout-1",
+        "metadata": {"trace_correlation_id": "corr-optimizer-1"},
+        "event_history": [
+            {
+                "type": "lm_call",
+                "span_id": "native-call-1",
+                "sequence_index": 0,
+                "occurred_at": "2026-07-25T01:02:03Z",
+                "llm_request": {
+                    "model": "test-model",
+                    "messages": [{"role": "user", "content": "hello"}],
+                },
+                "llm_response": {
+                    "message": {"role": "assistant", "content": "world"},
+                    "usage": {"prompt_tokens": 3, "completion_tokens": 2},
+                },
+                "metadata": {"optimizer_step": 7},
+            },
+            {
+                "event_id": "reward-1",
+                "event_type": "environment.reward",
+                "occurred_at": "2026-07-25T01:02:04Z",
+                "reward": 0.75,
+                "api_key": "sk-test-secret-value",
+                "metadata": {"source": "task"},
+            },
+        ],
+    }
+    first = import_legacy(payload, source_format="optimizer.event_history")
+    second = import_legacy(payload, source_format="optimizer.event_history")
+
+    assert first.canonical is not None
+    assert second.canonical is not None
+    assert first.canonical.content_digest == second.canonical.content_digest
+    assert first.coverage == "partial_model_and_application_events"
+    assert first.canonical.completeness.capture_status == "partial"
+    assert first.canonical.completeness.model_calls == "partial"
+    assert first.canonical.completeness.environment_events == "partial"
+    assert first.canonical.completeness.usage == "aggregate_only"
+    assert first.canonical.usage.provenance == "derived"
+    assert first.canonical.usage.total_tokens == 5
+    assert first.canonical.completeness.expected_record_count == 2
+    assert first.canonical.completeness.captured_record_count == 2
+    assert first.canonical.lifecycle.started_at == "2026-07-25T01:02:03Z"
+    assert first.canonical.lifecycle.ended_at == "2026-07-25T01:02:04Z"
+    assert first.canonical.sessions[0].started_at == "2026-07-25T01:02:03Z"
+    assert first.canonical.sessions[0].ended_at == "2026-07-25T01:02:04Z"
+    assert len(first.canonical.spans_of_kind("model_call")) == 1
+    assert [str(item.event_type) for item in first.canonical.events] == [
+        "model_call.finished",
+        "environment.reward",
+    ]
+    assert first.canonical.events[0].payload["native_event"]["metadata"] == {
+        "optimizer_step": 7
+    }
+    assert first.canonical.events[1].payload["native_event"]["reward"] == 0.75
+    assert first.canonical.events[1].payload["native_event"]["api_key"] == REDACTED
+
+    source = tmp_path / "event-history.json"
+    source.write_text(json.dumps(payload), encoding="utf-8")
+    bundle = LocalTraceBundle(tmp_path / "event-history-bundle")
+    assert trace_cli_main(
+        [
+            "import",
+            str(source),
+            "--format",
+            "optimizer.event_history",
+            "--bundle",
+            str(bundle.root),
+        ]
+    ) == 0
+    manifest = bundle.read_manifest()
+    imported = bundle.read_trace(manifest["traces"][0]["trace_digest"])
+    assert imported["provenance"]["source_format"] == "optimizer.event_history"
+    assert len(imported["spans"]) == 1
+    assert len(imported["events"]) == 2
+
+    missing_usage = import_legacy(
+        {
+            "event_history": [
+                {
+                    "type": "lm_call",
+                    "llm_request": {"messages": []},
+                    "llm_response": {"message": {"role": "assistant", "content": ""}},
+                }
+            ]
+        },
+        source_format="optimizer.event_history",
+    ).canonical
+    assert missing_usage is not None
+    assert missing_usage.completeness.usage == "unavailable"
+    assert missing_usage.usage.provenance == "unavailable"
+    assert missing_usage.usage.total_tokens is None
+
+
+def test_projection_manifest_uses_unknowns_standalone_and_binding_in_bundle(
+    tmp_path: Path,
+) -> None:
+    standalone = import_atif(
+        {
+            "schema_version": "ATIF-v1.7",
+            "trajectory_id": "projection-standalone",
+            "agent": {"name": "agent", "version": "1"},
+            "steps": [{"step_id": 1, "source": "user", "message": "hello"}],
+        }
+    )
+    _, standalone_manifest = project_v4(standalone)
+    assert standalone_manifest.source_binding_id is None
+    assert standalone_manifest.source_binding_digest is None
+    assert standalone_manifest.capture_policy == {}
+    assert standalone_manifest.capture_policy_digest is None
+    assert standalone_manifest.redaction_profile == "unknown"
+    assert standalone_manifest.redaction_provenance == "unknown"
+
+    config = SupervisorConfig(
+        bundle_root=tmp_path / "projected",
+        trace_key={"task": "projection-policy"},
+        upstream_base_url="https://api.openai.com/v1",
+        provenance=TraceProvenanceV5(producer="test", producer_version="1"),
+    )
+    with CaptureSupervisor(config) as supervisor:
+        supervisor.collector.event(event_type="application.smoke", payload={"ok": True})
+    supervisor.materialize_projection("v4")
+    assert trace_cli_main(["project", str(config.bundle_root), "--format", "atif"]) == 0
+
+    projection_records = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted((config.bundle_root / "projections").glob("*/*.json"))
+    ]
+    assert {item["manifest"]["producer"] for item in projection_records} == {
+        "synth_containers.tracing.projections.v4",
+        "synth_containers.tracing.cli",
+    }
+    for record in projection_records:
+        manifest = record["manifest"]
+        assert manifest["source_binding_id"] == supervisor.binding.binding_id
+        assert manifest["source_binding_digest"] == supervisor.binding.content_digest
+        assert manifest["capture_policy"] == supervisor.binding.policy.to_dict()
+        assert manifest["capture_policy_digest"] == supervisor.binding.policy.digest()
+        assert manifest["redaction_profile"] == (
+            supervisor.binding.policy.redaction_profile
+        )
+        assert manifest["redaction_provenance"] == (
+            "source_capture_binding.policy.redaction_profile"
+        )
 
 
 def test_bundle_archive_extracts_and_verifies(tmp_path: Path) -> None:
@@ -153,6 +332,52 @@ def test_fts_indexes_imported_trace(tmp_path: Path) -> None:
         assert list(catalog.search("needle"))[0]["kind"] == "message"
     finally:
         catalog.close()
+
+
+def test_cli_structured_search_accepts_full_text_and_exact_filters(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    original = import_atif(
+        {
+            "schema_version": "ATIF-v1.7",
+            "trajectory_id": "structured-search",
+            "agent": {"name": "agent", "version": "1"},
+            "steps": [{"step_id": 1, "source": "user", "message": "needle"}],
+        }
+    )
+    trace = replace(
+        original,
+        identity=replace(original.identity, task_id="task-structured-search"),
+        content_digest="",
+    ).sealed()
+    bundle = LocalTraceBundle(tmp_path / "bundle")
+    imported = write_imported_document(
+        trace,
+        source_digest=bytes_digest(b"structured-search-source"),
+        source_format="atif",
+        bundle=bundle,
+    )
+
+    assert trace_cli_main(["rebuild", str(bundle.root)]) == 0
+    capsys.readouterr()
+    assert (
+        trace_cli_main(
+            [
+                "search",
+                str(bundle.root),
+                "needle",
+                "--task-id",
+                "task-structured-search",
+                "--trace-digest",
+                imported["trace_digest"],
+            ]
+        )
+        == 0
+    )
+    output = capsys.readouterr().out
+    assert imported["trace_digest"] in output
+    assert "task-structured-search" in output
 
 
 def test_catalog_projection_matches_managed_store_rows() -> None:
@@ -324,7 +549,10 @@ def test_supervisor_secret_descriptor_and_container_paths(tmp_path: Path) -> Non
         assert secret_env["SYNTH_TRACE_COLLECTOR_TOKEN"] not in json.dumps(descriptor)
         assert descriptor["collector_token"] == "present"
         assert secret_env["SYNTH_TRACE_BINDING_PATH"] == "/trace/binding.json"
-        assert secret_env["OPENAI_RESPONSES_WEBSOCKET_URL"].endswith("/v1/responses")
+        assert (
+            urlsplit(secret_env["OPENAI_RESPONSES_WEBSOCKET_URL"]).path
+            == "/v1/responses"
+        )
 
 
 def test_supervisor_routes_responses_websocket_to_configured_upstream(
