@@ -11,6 +11,7 @@ import pytest
 
 from synth_containers.tracing.adapters.atif import export_atif, import_atif
 from synth_containers.tracing.adapters.codex_jsonl import import_codex_jsonl
+from synth_containers.tracing.adapters.native import import_native_to_bundle
 from synth_containers.tracing.adapters.legacy import import_legacy
 from synth_containers.tracing.canonical import canonical_bytes
 from synth_containers.tracing.models.identity import TraceContextV1
@@ -324,6 +325,67 @@ def test_supervisor_secret_descriptor_and_container_paths(tmp_path: Path) -> Non
         assert descriptor["collector_token"] == "present"
         assert secret_env["SYNTH_TRACE_BINDING_PATH"] == "/trace/binding.json"
         assert secret_env["OPENAI_RESPONSES_WEBSOCKET_URL"].endswith("/v1/responses")
+
+
+def test_supervisor_routes_responses_websocket_to_configured_upstream(
+    tmp_path: Path,
+) -> None:
+    supervisor = CaptureSupervisor(
+        SupervisorConfig(
+            bundle_root=tmp_path / "bundle",
+            trace_key={"task": "custom-responses-websocket"},
+            upstream_base_url="https://chatgpt.com/backend-api/codex",
+            provenance=TraceProvenanceV5(producer="test", producer_version="1"),
+            responses_websocket=True,
+        )
+    )
+
+    assert supervisor.websocket_server is not None
+    assert (
+        supervisor.websocket_server.relay.upstream_url
+        == "wss://chatgpt.com/backend-api/codex/responses"
+    )
+
+
+def test_native_import_terminal_timestamp_and_coverage_receipt_are_reachable(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "react.json"
+    source.write_text(
+        json.dumps(
+            {
+                "events": [
+                    {
+                        "event_id": "step-1",
+                        "event_type": "react.step",
+                        "occurred_at": "2026-07-25T01:02:03Z",
+                        "payload": {"action": "wait"},
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    bundle = LocalTraceBundle(tmp_path / "native-bundle")
+
+    imported = import_native_to_bundle(
+        source,
+        source_format="react",
+        bundle=bundle,
+    )
+    trace = bundle.read_trace(imported["trace_digest"])
+    manifest = bundle.read_manifest()
+    coverage_paths = [
+        bundle.root / path
+        for path in manifest["receipt_paths"]
+        if Path(path).name.startswith("capture-coverage-")
+    ]
+
+    assert trace["lifecycle"]["started_at"] == "2026-07-25T01:02:03Z"
+    assert trace["lifecycle"]["ended_at"] == "2026-07-25T01:02:03Z"
+    assert len(coverage_paths) == 1
+    coverage = json.loads(coverage_paths[0].read_text(encoding="utf-8"))
+    assert coverage["receipt_id"] == trace["capture"]["coverage_receipt_id"]
 
 
 def test_responses_websocket_handshake_falls_back_to_http(tmp_path: Path) -> None:

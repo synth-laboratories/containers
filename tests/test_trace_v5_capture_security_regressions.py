@@ -668,7 +668,7 @@ def test_responses_websocket_relay_redacts_and_preserves_per_call_order(
     assert downstream.sent == [terminal]
     assert started["actor_id"] == "actor_ws_child"
     assert started["session_id"] == "session_ws_child"
-    assert started["payload"]["call_index"] == 0
+    assert started["payload"]["call_index"] == 1
     assert (
         started["payload"]["request_body"]["response"]["api_key"]
         == REDACTED
@@ -684,6 +684,25 @@ def test_responses_websocket_relay_redacts_and_preserves_per_call_order(
     assert isinstance(forwarded, dict)
     assert forwarded["authorization"] == "Bearer downstream-memory-only-token"
     assert "x-synth-trace-id" not in forwarded
+
+
+def test_capture_session_allocates_unique_call_ids_across_concurrent_transports(
+    tmp_path: Path,
+) -> None:
+    session = _session(tmp_path, capture_id="capture_concurrent_calls")
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        allocated = list(
+            pool.map(
+                lambda kind: session.mint_call(kind=kind),
+                ("model_call", "responses_websocket") * 16,
+            )
+        )
+
+    call_ids = [call_id for call_id, _ in allocated]
+    call_indices = [call_index for _, call_index in allocated]
+    assert len(call_ids) == len(set(call_ids))
+    assert sorted(call_indices) == list(range(1, len(allocated) + 1))
 
 
 def test_responses_websocket_server_rejects_missing_capture_context() -> None:

@@ -143,7 +143,6 @@ class CaptureProxy:
         self.request_timeout = request_timeout
         self.context_resolver = context_resolver
         self._lock = threading.Lock()
-        self._call_index = 0
         self._call_contexts: dict[str, tuple[str, str]] = {}
         # This client is the registered upstream boundary. It must never inherit
         # child-facing HTTP_PROXY/HTTPS_PROXY settings, especially when the scoped
@@ -249,10 +248,7 @@ class CaptureProxy:
         )
 
     def _next_call(self) -> tuple[str, int]:
-        with self._lock:
-            self._call_index += 1
-            index = self._call_index
-        return self.session.mint("call", kind="model_call", key=index), index
+        return self.session.mint_call(kind="model_call")
 
     def _bounded(self, payload: bytes) -> tuple[Any, bool]:
         """Return an inline-safe body plus whether it was truncated."""

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -290,6 +291,7 @@ def _assemble_events(
     session = CaptureSession(binding=binding, spool=spool, blobs=bundle.blobs)
     collector = LocalCollector(session)
     envelope_ids: dict[str, str] = {}
+    event_timestamps: list[str] = []
     for index, item in enumerate(events):
         source_id = str(item.get("source_id") or index)
         caused_by = tuple(
@@ -297,21 +299,23 @@ def _assemble_events(
             for parent in item.get("caused_by") or ()
             if parent in envelope_ids
         )
+        occurred_at = str(item.get("occurred_at") or IMPORTED_AT)
         envelope_id = collector.event(
             event_type=str(item["event_type"]),
             payload={
                 **dict(item.get("payload") or {}),
                 "native_source_id": source_id,
             },
-            occurred_at=str(item.get("occurred_at") or IMPORTED_AT),
+            occurred_at=occurred_at,
             caused_by=caused_by,
             structural=item.get("structural"),
         )
         envelope_ids[source_id] = envelope_id
+        event_timestamps.append(occurred_at)
     session.append(
         RawRecordType.CAPTURE_FINISHED,
         payload={"reason": "native_import", "source_digest": source_digest},
-        occurred_at=IMPORTED_AT,
+        occurred_at=_latest_timestamp((IMPORTED_AT, *event_timestamps)),
         producer_version="synth-trace-native-import/1",
     )
     spool.close()
@@ -361,6 +365,7 @@ def _assemble_events(
     if usage is not None:
         document = replace(document, usage=usage, content_digest="").sealed()
     bundle.write_trace(document, binding=binding, segments=sealed.segments)
+    bundle.write_receipt("capture-coverage", sealed.coverage)
     bundle.write_receipt(
         "native-import",
         {
@@ -387,6 +392,18 @@ def _assemble_events(
         "source_digest": source_digest,
         "source_format": source_format,
     }
+
+
+def _latest_timestamp(values: tuple[str, ...]) -> str:
+    """Return the latest RFC3339 timestamp while preserving its source spelling."""
+
+    def parsed(value: str) -> datetime:
+        moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if moment.utcoffset() is None:
+            raise ValueError(f"native event timestamp must include a timezone: {value!r}")
+        return moment.astimezone(UTC)
+
+    return max(values, key=parsed)
 
 
 def _react_events(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
