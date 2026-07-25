@@ -1726,6 +1726,60 @@ def test_registered_parent_remote_finish_uses_complete_declared_topology(
     assert str(sealed.document.session(descendant.session_id).status) == "completed"
 
 
+def test_remote_finish_during_finalization_returns_conflict_response(
+    tmp_path: Path,
+) -> None:
+    supervisor = CaptureSupervisor(
+        _supervisor_config(tmp_path / "remote-finish-finalization-race")
+    )
+    supervisor.collector_server.start()
+    root = supervisor.binding.context_for_child()
+    child = TraceContextV1(
+        trace_id=supervisor.binding.trace_id,
+        capture_id="capture_finish_finalization_race",
+        actor_id="actor_finish_finalization_race",
+        actor_session_id="session_finish_finalization_race",
+        parent_actor_id=root.actor_id,
+        parent_actor_session_id=root.actor_session_id,
+        delegation_id="delegation_finish_finalization_race",
+    )
+    child_token = supervisor.register_child_context(
+        child,
+        actor=ActorV5(
+            actor_id=child.actor_id,
+            kind=ActorKind.AGENT,
+            display_name="finalization race child",
+            parent_actor_id=root.actor_id,
+        ),
+        session=SessionV5(
+            session_id=child.actor_session_id,
+            actor_id=child.actor_id,
+            started_at="2026-07-25T00:00:00Z",
+            parent_session_id=root.actor_session_id,
+        ),
+    )
+
+    with TraceEmitter(
+        supervisor.collector_server.base_url,
+        child,
+        collector_token=child_token,
+    ) as emitter:
+        supervisor._finalization_started = True
+        try:
+            with pytest.raises(httpx.HTTPStatusError) as finishing:
+                emitter.finish(ended_at="2026-07-25T00:01:00Z")
+            assert finishing.value.response.status_code == 409
+            assert supervisor.collector_server.terminal_context_fact(child.capture_id) is None
+        finally:
+            supervisor._finalization_started = False
+
+        emitter.finish(ended_at="2026-07-25T00:01:00Z")
+
+    sealed = supervisor.finalize()
+
+    assert str(sealed.document.session(child.actor_session_id).status) == "completed"
+
+
 def test_unfinished_child_is_interrupted_and_makes_capture_partial(
     tmp_path: Path,
 ) -> None:

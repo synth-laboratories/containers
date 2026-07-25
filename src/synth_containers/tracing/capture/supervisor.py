@@ -64,7 +64,7 @@ from .binding import (
     mint_binding,
 )
 from .collector import LocalCollector
-from .collector_server import CollectorServer
+from .collector_server import CollectorServer, SessionActivityError
 from .coverage import (
     CaptureFinalizationV1,
     finalization_from_dict,
@@ -1486,7 +1486,10 @@ class CaptureSupervisor:
         """Finish an HTTP child under the supervisor's complete topology lock."""
 
         with self._lifecycle_lock:
-            self._assert_capture_mutable()
+            try:
+                self._assert_capture_mutable()
+            except RuntimeError as exc:
+                raise SessionActivityError(str(exc)) from exc
             return self._finish_registered_context(
                 context,
                 status=status,
