@@ -32,9 +32,14 @@ def build(record_type: type, payload: Any) -> Any:
     hints = get_type_hints(record_type)
     kwargs: dict[str, Any] = {}
     for field_info in fields(record_type):
-        if field_info.name not in payload:
+        annotation = hints[field_info.name]
+        if field_info.name in payload:
+            kwargs[field_info.name] = _convert(annotation, payload[field_info.name])
             continue
-        kwargs[field_info.name] = _convert(hints[field_info.name], payload[field_info.name])
+        # Canonical serialization drops nulls, so an absent nullable field means None.
+        # A field that has no default and cannot be None is genuinely missing.
+        if _allows_none(annotation):
+            kwargs[field_info.name] = None
     missing = [
         field_info.name
         for field_info in fields(record_type)
@@ -47,6 +52,10 @@ def build(record_type: type, payload: Any) -> Any:
             f"{record_type.__name__} payload is missing required fields: {', '.join(missing)}"
         )
     return record_type(**kwargs)
+
+
+def _allows_none(annotation: Any) -> bool:
+    return get_origin(annotation) in (Union, types.UnionType) and type(None) in get_args(annotation)
 
 
 def _convert(annotation: Any, value: Any) -> Any:
