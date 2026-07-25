@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field, replace
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -162,6 +163,7 @@ class TraceFinalizer:
         started_at = records[0]["occurred_at"] if records else utc_now()
         ended_at = records[-1]["occurred_at"] if records else started_at
         application_records: list[Mapping[str, Any]] = []
+        session_finish_records: list[Mapping[str, Any]] = []
         terminal_capture_record = False
 
         for record in records:
@@ -252,9 +254,20 @@ class TraceFinalizer:
                 artifacts.append(_artifact_from_payload(payload, occurred_at=record["occurred_at"]))
             elif record_type == RawRecordType.APPLICATION_EVENT:
                 application_records.append(record)
+            elif record_type == RawRecordType.SESSION_FINISHED:
+                session_finish_records.append(record)
+                application_records.append(record)
             elif record_type == RawRecordType.CAPTURE_FINISHED:
                 terminal_capture_record = True
 
+        extra_sessions, lifecycle_diagnostics = _resolve_extra_session_lifecycle(
+            extra_sessions,
+            finish_records=tuple(session_finish_records),
+            records=tuple(records),
+            parent_ended_at=ended_at,
+            root_session_id=self.binding.workload.actor_session_id,
+        )
+        diagnostics.extend(lifecycle_diagnostics)
         diagnostics.extend(
             self._correlate_provider_calls(
                 calls,
@@ -1008,6 +1021,197 @@ def _call_coverage(
         else CoverageState.PARTIAL
     )
     return model_calls, usage, raw_provider
+
+
+def _resolve_extra_session_lifecycle(
+    sessions: tuple[SessionV5, ...],
+    *,
+    finish_records: tuple[Mapping[str, Any], ...],
+    records: tuple[Mapping[str, Any], ...],
+    parent_ended_at: str,
+    root_session_id: str,
+) -> tuple[tuple[SessionV5, ...], tuple[str, ...]]:
+    """Apply durable child terminal facts and interrupt unclosed children."""
+
+    by_id = {session.session_id: session for session in sessions}
+    if len(by_id) != len(sessions):
+        raise FinalizationError("extra sessions contain duplicate session ids")
+    terminal_statuses = {
+        str(SessionStatus.COMPLETED),
+        str(SessionStatus.FAILED),
+        str(SessionStatus.INTERRUPTED),
+    }
+    facts: dict[str, tuple[str, str, int]] = {}
+    for record in finish_records:
+        session_id = str(record.get("session_id") or "")
+        if not session_id or session_id == root_session_id:
+            raise FinalizationError(
+                "session.finished must identify a non-root child session"
+            )
+        session = by_id.get(session_id)
+        if session is None:
+            raise FinalizationError(
+                f"session.finished references unknown child session {session_id}"
+            )
+        if str(record.get("actor_id") or "") != session.actor_id:
+            raise FinalizationError(
+                f"session.finished actor does not own child session {session_id}"
+            )
+        payload = record.get("payload")
+        if not isinstance(payload, Mapping) or str(payload.get("event_type")) != str(
+            EventType.SESSION_FINISHED
+        ):
+            raise FinalizationError("invalid session.finished raw payload")
+        body = payload.get("body")
+        if not isinstance(body, Mapping):
+            raise FinalizationError("session.finished body is required")
+        terminal_status = str(body.get("status") or "")
+        if terminal_status not in terminal_statuses:
+            raise FinalizationError(
+                f"session.finished has non-terminal status {terminal_status!r}"
+            )
+        terminal_at = str(body.get("ended_at") or "")
+        if not terminal_at or terminal_at != str(record.get("occurred_at") or ""):
+            raise FinalizationError(
+                "session.finished ended_at must equal its raw occurrence timestamp"
+            )
+        _parse_lifecycle_timestamp(terminal_at, field="session.finished ended_at")
+        if session_id in facts:
+            raise FinalizationError(
+                f"child session {session_id} has duplicate terminal facts"
+            )
+        facts[session_id] = (
+            terminal_status,
+            terminal_at,
+            int(record["ordinal"]),
+        )
+
+    for record in records:
+        session_id = str(record.get("session_id") or "")
+        fact = facts.get(session_id)
+        if fact is not None and int(record["ordinal"]) > fact[2]:
+            raise FinalizationError(
+                f"child session {session_id} emitted a record after session.finished"
+            )
+
+    diagnostics: list[str] = []
+    resolved: list[SessionV5] = []
+    parent_end = _parse_lifecycle_timestamp(
+        parent_ended_at,
+        field="parent ended_at",
+    )
+    for session in sessions:
+        started = _parse_lifecycle_timestamp(
+            session.started_at,
+            field=f"session {session.session_id} started_at",
+        )
+        current_status = str(session.status)
+        fact = facts.get(session.session_id)
+        if current_status == str(SessionStatus.RUNNING):
+            if session.ended_at is not None:
+                raise FinalizationError(
+                    f"running child session {session.session_id} has ended_at"
+                )
+            if fact is not None:
+                status, terminal_at, _ = fact
+                ended = _parse_lifecycle_timestamp(
+                    terminal_at,
+                    field=f"session {session.session_id} ended_at",
+                )
+                if ended < started:
+                    raise FinalizationError(
+                        f"child session {session.session_id} ended before it started"
+                    )
+                if ended > parent_end:
+                    raise FinalizationError(
+                        f"child session {session.session_id} ended after its parent trace"
+                    )
+                resolved.append(
+                    replace(
+                        session,
+                        status=status,
+                        ended_at=terminal_at,
+                        content_digest="",
+                    ).sealed()
+                )
+                continue
+            if parent_end < started:
+                raise FinalizationError(
+                    f"parent ended before child session {session.session_id} started"
+                )
+            diagnostics.append(
+                f"child_session_not_finished:{session.session_id}"
+            )
+            resolved.append(
+                replace(
+                    session,
+                    status=SessionStatus.INTERRUPTED,
+                    ended_at=parent_ended_at,
+                    coverage=replace(
+                        session.coverage,
+                        reasons=tuple(
+                            dict.fromkeys(
+                                (
+                                    *session.coverage.reasons,
+                                    "child_session_not_finished",
+                                )
+                            )
+                        ),
+                    ),
+                    content_digest="",
+                ).sealed()
+            )
+            continue
+        if current_status not in terminal_statuses:
+            raise FinalizationError(
+                f"child session {session.session_id} has unknown status "
+                f"{current_status!r}"
+            )
+        terminal_at = session.ended_at
+        if fact is not None:
+            fact_status, fact_ended_at, _ = fact
+            if fact_status != current_status or (
+                terminal_at is not None and terminal_at != fact_ended_at
+            ):
+                raise FinalizationError(
+                    f"child session {session.session_id} terminal declaration "
+                    "conflicts with its raw fact"
+                )
+            terminal_at = fact_ended_at
+        if terminal_at is None:
+            raise FinalizationError(
+                f"terminal child session {session.session_id} has no ended_at"
+            )
+        ended = _parse_lifecycle_timestamp(
+            terminal_at,
+            field=f"session {session.session_id} ended_at",
+        )
+        if ended < started:
+            raise FinalizationError(
+                f"child session {session.session_id} ended before it started"
+            )
+        if ended > parent_end:
+            raise FinalizationError(
+                f"child session {session.session_id} ended after its parent trace"
+            )
+        resolved.append(
+            replace(
+                session,
+                ended_at=terminal_at,
+                content_digest="",
+            ).sealed()
+        )
+    return tuple(resolved), tuple(diagnostics)
+
+
+def _parse_lifecycle_timestamp(value: str, *, field: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise FinalizationError(f"{field} must be an RFC3339 timestamp") from exc
+    if parsed.tzinfo is None:
+        raise FinalizationError(f"{field} must include a timezone")
+    return parsed
 
 
 def _with_observed_session_coverage(

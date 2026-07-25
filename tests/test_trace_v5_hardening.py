@@ -452,6 +452,7 @@ def test_registered_child_can_emit_real_event() -> None:
         context_for_child=lambda: root_context,
     )
     received: list[dict[str, object]] = []
+    finished: list[dict[str, object]] = []
 
     class Collector:
         def __init__(self) -> None:
@@ -460,6 +461,10 @@ def test_registered_child_can_emit_real_event() -> None:
         def event(self, **kwargs: object) -> str:
             received.append(dict(kwargs))
             return "envelope-child"
+
+        def finish_session(self, **kwargs: object) -> tuple[str, str]:
+            finished.append(dict(kwargs))
+            return "envelope-finished", str(kwargs["ended_at"])
 
     registrations: list[tuple[TraceContextV1, dict[str, object], dict[str, object]]] = []
     server = CollectorServer(
@@ -489,10 +494,54 @@ def test_registered_child_can_emit_real_event() -> None:
             )
         with TraceEmitter(server.base_url, child, collector_token="secret") as emitter:
             assert emitter.event("agent.child", {"ok": True}) == "envelope-child"
+            assert (
+                emitter.finish(ended_at="2026-07-25T01:02:03Z")
+                == "envelope-finished"
+            )
+            assert emitter.finish() == "envelope-finished"
+            with pytest.raises(httpx.HTTPStatusError) as conflicting:
+                emitter.finish(status="failed")
+            assert conflicting.value.response.status_code == 400
+            with pytest.raises(httpx.HTTPStatusError) as late_event:
+                emitter.event("agent.child", {"too_late": True})
+            assert late_event.value.response.status_code == 409
+            with pytest.raises(httpx.HTTPStatusError) as late_artifact:
+                emitter.artifact(
+                    "output",
+                    "text/plain",
+                    b"too late",
+                    "late.txt",
+                )
+            assert late_artifact.value.response.status_code == 409
+        with TraceEmitter(
+            server.base_url,
+            child,
+            collector_token="wrong",
+        ) as unauthorized:
+            with pytest.raises(httpx.HTTPStatusError) as unauthorized_finish:
+                unauthorized.finish()
+            assert unauthorized_finish.value.response.status_code == 403
+        with TraceEmitter(
+            server.base_url,
+            root_context,
+            collector_token="secret",
+        ) as root:
+            with pytest.raises(httpx.HTTPStatusError) as root_finish:
+                root.finish()
+            assert root_finish.value.response.status_code == 400
     finally:
         server.stop()
     assert received[0]["actor_id"] == "child"
+    assert received[0]["session_id"] == "child-session"
     assert registrations[0][0] == child
+    assert finished == [
+        {
+            "status": "completed",
+            "actor_id": "child",
+            "session_id": "child-session",
+            "ended_at": "2026-07-25T01:02:03Z",
+        }
+    ]
 
 
 def test_rubric_required_missing_fails_and_ranges_normalize() -> None:

@@ -195,6 +195,8 @@ def import_rollout_trace_v4(
         session_id=session_id,
         actor_id=actor_id,
         started_at=imported_at,
+        ended_at=imported_at,
+        status="completed",
         coverage=SessionCoverageV5(
             model_calls=CoverageState.PARTIAL,
             usage=CoverageState.AGGREGATE_ONLY,
@@ -210,7 +212,11 @@ def import_rollout_trace_v4(
             rollout_id=rollout_id or None,
             correlation_id=str(correlation) if correlation else None,
         ),
-        lifecycle=TraceLifecycleV5(status=TraceStatus.COMPLETED, started_at=imported_at),
+        lifecycle=TraceLifecycleV5(
+            status=TraceStatus.COMPLETED,
+            started_at=imported_at,
+            ended_at=imported_at,
+        ),
         capture=TraceCaptureSummaryV5(
             capture_id=record_id(
                 "cap", kind="imported", scope=(resolved_trace_id,), key=source_digest

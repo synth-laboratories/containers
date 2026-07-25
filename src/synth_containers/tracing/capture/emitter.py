@@ -8,6 +8,7 @@ from typing import Any
 
 import httpx
 
+from ..models.actors import SessionStatus
 from ..models.identity import TraceContextV1
 
 
@@ -131,6 +132,37 @@ class TraceEmitter:
         )
         response.raise_for_status()
         return str(response.json()["capture_id"])
+
+    def finish(
+        self,
+        *,
+        status: SessionStatus | str = SessionStatus.COMPLETED,
+        ended_at: str | None = None,
+    ) -> str:
+        """Durably finish this delegated child session.
+
+        Root-session lifecycle remains owned by ``CaptureSupervisor.finalize``.
+        Repeating the same terminal fact is idempotent; a conflicting terminal
+        status fails at the collector authority.
+        """
+
+        response = self._client.post(
+            f"{self.base_url}/v1/sessions/finish",
+            headers=self._headers(),
+            json={"status": str(status), "ended_at": ended_at},
+        )
+        response.raise_for_status()
+        return str(response.json()["envelope_id"])
+
+    def finish_session(
+        self,
+        *,
+        status: SessionStatus | str = SessionStatus.COMPLETED,
+        ended_at: str | None = None,
+    ) -> str:
+        """Compatibility spelling for ``finish``."""
+
+        return self.finish(status=status, ended_at=ended_at)
 
     def flush(self) -> None:
         """The synchronous transport has no buffered writes."""

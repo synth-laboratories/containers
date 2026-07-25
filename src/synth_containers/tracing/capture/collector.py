@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..canonical import record_id, utc_now
+from ..models.actors import SessionStatus
+from ..models.events import EventType
 from .envelope import RawRecordType
 from .redaction import RedactionReportV1, assert_no_secrets, redact_payload, scrub_text
 from .session import CaptureSession
@@ -28,6 +30,7 @@ COLLECTOR_VERSION = "synth-trace-collector/1"
 class CollectorStats:
     application_events: int = 0
     artifacts: int = 0
+    sessions_finished: int = 0
 
 
 class LocalCollector:
@@ -121,6 +124,50 @@ class LocalCollector:
         )
         self.stats.artifacts += 1
         return artifact_id
+
+    def finish_session(
+        self,
+        *,
+        status: SessionStatus | str,
+        actor_id: str,
+        session_id: str,
+        ended_at: str | None = None,
+    ) -> tuple[str, str]:
+        """Append one durable terminal child-session fact.
+
+        The collector server owns idempotency and ordering against later child
+        writes. This append point owns the raw fact from which the finalizer derives
+        the immutable ``SessionV5`` lifecycle and canonical ``session.finished``
+        event.
+        """
+
+        normalized = str(status)
+        if normalized not in {
+            str(SessionStatus.COMPLETED),
+            str(SessionStatus.FAILED),
+            str(SessionStatus.INTERRUPTED),
+        }:
+            raise ValueError("child session status must be terminal")
+        terminal_at = ended_at or utc_now()
+        envelope = self.session.append(
+            RawRecordType.SESSION_FINISHED,
+            payload={
+                "event_type": str(EventType.SESSION_FINISHED),
+                "body": {
+                    "status": normalized,
+                    "ended_at": terminal_at,
+                },
+                "caused_by": [],
+                "structural": None,
+                "redaction": RedactionReportV1().to_dict(),
+            },
+            actor_id=actor_id,
+            session_id=session_id,
+            occurred_at=terminal_at,
+            producer_version=COLLECTOR_VERSION,
+        )
+        self.stats.sessions_finished += 1
+        return envelope.envelope_id, terminal_at
 
 
 def _redact_artifact(content: bytes, *, media_type: str) -> tuple[bytes, RedactionReportV1]:

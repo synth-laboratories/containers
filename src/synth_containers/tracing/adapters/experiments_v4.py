@@ -197,6 +197,7 @@ def import_experiments_trace_v4(
                 actor_id=agent_actor_id,
                 started_at=started_at,
                 ended_at=ended_at,
+                status="completed",
                 coverage=coverage,
             ).sealed(),
             SessionV5(
@@ -204,6 +205,7 @@ def import_experiments_trace_v4(
                 actor_id=env_actor_id,
                 started_at=started_at,
                 ended_at=ended_at,
+                status="completed",
                 coverage=coverage,
             ).sealed(),
         ),

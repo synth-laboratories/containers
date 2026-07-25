@@ -28,7 +28,13 @@ import uuid
 import httpx
 
 from ..canonical import content_digest, utc_now
-from ..models.actors import ActorKind, ActorV5, SessionCoverageV5, SessionV5
+from ..models.actors import (
+    ActorKind,
+    ActorV5,
+    SessionCoverageV5,
+    SessionStatus,
+    SessionV5,
+)
 from ..models.completeness import TerminationV5, TraceStatus
 from ..models.identity import (
     AliasV1,
@@ -305,6 +311,7 @@ class CaptureSupervisor:
         self.sealed: SealedCapture | None = None
         self._extra_actors: list[ActorV5] = []
         self._extra_sessions: list[SessionV5] = []
+        self._declared_session_terminals: dict[str, tuple[str, str, str]] = {}
         self._aliases: list[AliasV1] = []
         self._capture_operational = False
         self._startup_failure: str | None = None
@@ -322,6 +329,8 @@ class CaptureSupervisor:
             return None
         context = self._contexts.get(capture_id)
         if context is None:
+            return None
+        if self.collector_server.is_context_terminal(capture_id):
             return None
         expected = {
             "x-synth-trace-id": context.trace_id,
@@ -731,12 +740,118 @@ class CaptureSupervisor:
             raise ValueError("child actor/session do not match trace context")
         if session.actor_id != actor.actor_id:
             raise ValueError("child session must belong to child actor")
+        parent_contexts = [
+            item
+            for item in self._contexts.values()
+            if item.actor_id == context.parent_actor_id
+            and context.parent_actor_session_id
+            in {None, item.actor_session_id}
+        ]
+        if len(parent_contexts) != 1:
+            raise ValueError("child context must identify one registered parent session")
+        parent_context = parent_contexts[0]
+        if self.collector_server.is_context_terminal(parent_context.capture_id):
+            raise ValueError("terminal child session cannot register another child")
+        if actor.parent_actor_id not in {None, parent_context.actor_id}:
+            raise ValueError("child actor parent does not match trace context")
+        if session.parent_session_id not in {
+            None,
+            parent_context.actor_session_id,
+        }:
+            raise ValueError("child session parent does not match trace context")
+        if str(session.status) != str(SessionStatus.RUNNING) or session.ended_at is not None:
+            raise ValueError("registered child session must start in running state")
+        if session.capture_id not in {None, context.capture_id}:
+            raise ValueError("child session capture_id must match trace context")
+        actor = replace(
+            actor,
+            parent_actor_id=parent_context.actor_id,
+            content_digest="",
+        )
+        session = replace(
+            session,
+            capture_id=context.capture_id,
+            parent_session_id=parent_context.actor_session_id,
+            content_digest="",
+        )
+        self.collector_server.register_context(context, started_at=session.started_at)
         self._contexts[context.capture_id] = context
-        self.collector_server.register_context(context)
         if not any(item.actor_id == actor.actor_id for item in self._extra_actors):
             self.declare_actor(actor, session)
         elif not any(item.session_id == session.session_id for item in self._extra_sessions):
             self._extra_sessions.append(session.sealed())
+
+    def finish_child_session(
+        self,
+        capture_or_session_id: str,
+        *,
+        status: SessionStatus | str = SessionStatus.COMPLETED,
+        ended_at: str | None = None,
+    ) -> str:
+        """Durably finish one registered or declaratively observed child session."""
+
+        if capture_or_session_id in {
+            self.binding.capture_id,
+            self.binding.workload.actor_session_id,
+        }:
+            raise ValueError(
+                "root session lifecycle is owned by CaptureSupervisor.finalize"
+            )
+        matching_contexts = [
+            context
+            for context in self._contexts.values()
+            if capture_or_session_id
+            in {context.capture_id, context.actor_session_id}
+            and context.capture_id != self.binding.capture_id
+        ]
+        if len(matching_contexts) > 1:
+            raise ValueError("child session identifier is ambiguous")
+        if matching_contexts:
+            envelope_id, _, _ = self.collector_server.finish_context(
+                matching_contexts[0],
+                status=status,
+                ended_at=ended_at,
+            )
+            return envelope_id
+
+        matching_sessions = [
+            session
+            for session in self._extra_sessions
+            if capture_or_session_id
+            in {session.session_id, session.capture_id}
+        ]
+        if len(matching_sessions) != 1:
+            raise ValueError("child session is not registered or declared")
+        session = matching_sessions[0]
+        normalized = str(status)
+        if normalized not in {
+            str(SessionStatus.COMPLETED),
+            str(SessionStatus.FAILED),
+            str(SessionStatus.INTERRUPTED),
+        }:
+            raise ValueError("child session status must be terminal")
+        existing = self._declared_session_terminals.get(session.session_id)
+        if existing is not None:
+            prior_status, prior_ended_at, envelope_id = existing
+            if prior_status != normalized or (
+                ended_at is not None and prior_ended_at != ended_at
+            ):
+                raise ValueError(
+                    "child session is already finished with a conflicting terminal fact"
+                )
+            return envelope_id
+        envelope_id, terminal_at = self.collector.finish_session(
+            status=normalized,
+            actor_id=session.actor_id,
+            session_id=session.session_id,
+            ended_at=ended_at,
+        )
+        self._declared_session_terminals[session.session_id] = (
+            normalized,
+            terminal_at,
+            envelope_id,
+        )
+        return envelope_id
 
     # -- sealing ------------------------------------------------------------------
 

@@ -39,8 +39,10 @@ from synth_containers.tracing.capture.binding import (
 )
 from synth_containers.tracing.capture.collector import LocalCollector
 from synth_containers.tracing.capture.collector_server import CollectorServer
+from synth_containers.tracing.capture.emitter import TraceEmitter
 from synth_containers.tracing.capture.egress import EgressAssertion
 from synth_containers.tracing.capture.envelope import RawRecordType, make_envelope
+from synth_containers.tracing.capture.finalizer import FinalizationError
 from synth_containers.tracing.capture.proxy import (
     CaptureProxy,
     _StreamingContentDecoder,
@@ -637,6 +639,7 @@ def test_codex_prompt_cache_key_exactly_attributes_provider_call_to_native_child
             },
         },
     )
+    supervisor.finish_child_session(child_session.session_id)
     supervisor.session.append(
         RawRecordType.CAPTURE_FINISHED,
         payload={"reason": "test"},
@@ -672,6 +675,190 @@ def test_codex_prompt_cache_key_exactly_attributes_provider_call_to_native_child
     assert sessions[supervisor.binding.workload.actor_session_id].coverage.model_calls == (
         "not_captured"
     )
+
+
+def test_supervisor_finishes_registered_child_by_capture_or_session_id(
+    tmp_path: Path,
+) -> None:
+    with CaptureSupervisor(
+        _supervisor_config(tmp_path / "registered-child-lifecycle")
+    ) as supervisor:
+        child = TraceContextV1(
+            trace_id=supervisor.binding.trace_id,
+            capture_id="capture_registered_child",
+            actor_id="actor_registered_child",
+            actor_session_id="session_registered_child",
+            parent_actor_id=supervisor.binding.workload.root_actor_id,
+            parent_actor_session_id=supervisor.binding.workload.actor_session_id,
+            delegation_id="delegation_registered_child",
+        )
+        actor = ActorV5(
+            actor_id=child.actor_id,
+            kind=ActorKind.AGENT,
+            display_name="registered child",
+            parent_actor_id=child.parent_actor_id,
+        )
+        session = SessionV5(
+            session_id=child.actor_session_id,
+            actor_id=child.actor_id,
+            started_at="2026-07-25T00:00:00Z",
+            parent_session_id=child.parent_actor_session_id,
+        )
+        supervisor.register_child_context(child, actor=actor, session=session)
+
+        first = supervisor.finish_child_session(
+            child.capture_id,
+            ended_at="2026-07-25T00:01:00Z",
+        )
+        assert supervisor.finish_child_session(child.actor_session_id) == first
+        with pytest.raises(ValueError, match="conflicting"):
+            supervisor.finish_child_session(
+                child.actor_session_id,
+                status="failed",
+            )
+        with pytest.raises(ValueError, match="not registered or declared"):
+            supervisor.finish_child_session("session_unknown")
+        with pytest.raises(ValueError, match="root session lifecycle"):
+            supervisor.finish_child_session(
+                supervisor.binding.workload.actor_session_id
+            )
+
+        emitter = TraceEmitter(
+            supervisor.collector_server.base_url,
+            child,
+            collector_token=supervisor._collector_token,
+        )
+        try:
+            with pytest.raises(httpx.HTTPStatusError) as late_event:
+                emitter.event("agent.after_finish", {"late": True})
+            assert late_event.value.response.status_code == 409
+            assert supervisor._resolve_provider_context(
+                emitter.provider_headers()
+            ) is None
+        finally:
+            emitter.close()
+
+    assert supervisor.sealed is not None
+    child_session = supervisor.sealed.document.session(child.actor_session_id)
+    assert child_session is not None
+    assert str(child_session.status) == "completed"
+    assert child_session.ended_at == "2026-07-25T00:01:00Z"
+    assert str(supervisor.sealed.document.completeness.capture_status) == "complete"
+    assert not {
+        "session_non_terminal_in_sealed_trace",
+        "terminal_session_missing_ended_at",
+    } & {finding.code for finding in validate_trace(supervisor.sealed.document)}
+
+
+def test_unfinished_child_is_interrupted_and_makes_capture_partial(
+    tmp_path: Path,
+) -> None:
+    with CaptureSupervisor(
+        _supervisor_config(tmp_path / "unfinished-child-lifecycle")
+    ) as supervisor:
+        child = TraceContextV1(
+            trace_id=supervisor.binding.trace_id,
+            capture_id="capture_unfinished_child",
+            actor_id="actor_unfinished_child",
+            actor_session_id="session_unfinished_child",
+            parent_actor_id=supervisor.binding.workload.root_actor_id,
+            parent_actor_session_id=supervisor.binding.workload.actor_session_id,
+            delegation_id="delegation_unfinished_child",
+        )
+        supervisor.register_child_context(
+            child,
+            actor=ActorV5(
+                actor_id=child.actor_id,
+                kind=ActorKind.AGENT,
+                display_name="unfinished child",
+                parent_actor_id=child.parent_actor_id,
+            ),
+            session=SessionV5(
+                session_id=child.actor_session_id,
+                actor_id=child.actor_id,
+                started_at="2026-07-25T00:00:00Z",
+                parent_session_id=child.parent_actor_session_id,
+            ),
+        )
+
+    assert supervisor.sealed is not None
+    document = supervisor.sealed.document
+    child_session = document.session(child.actor_session_id)
+    assert child_session is not None
+    assert str(child_session.status) == "interrupted"
+    assert child_session.ended_at is not None
+    assert "child_session_not_finished" in child_session.coverage.reasons
+    assert str(document.completeness.capture_status) == "partial"
+    assert f"child_session_not_finished:{child.actor_session_id}" in (
+        document.completeness.reasons
+    )
+    assert str(supervisor.sealed.coverage.completeness) == "partial"
+
+    lifecycle_findings = {
+        finding.code for finding in validate_trace(document)
+    }
+    assert "session_non_terminal_in_sealed_trace" not in lifecycle_findings
+    forged_sessions = tuple(
+        (
+            replace(
+                session,
+                status="running",
+                ended_at=None,
+                content_digest="",
+            ).sealed()
+            if session.session_id == child.actor_session_id
+            else session
+        )
+        for session in document.sessions
+    )
+    forged = replace(
+        document,
+        sessions=forged_sessions,
+        content_digest="",
+    ).sealed()
+    forged_findings = validate_trace(forged)
+    assert any(
+        finding.code == "session_non_terminal_in_sealed_trace"
+        and finding.entity_id == child.actor_session_id
+        for finding in forged_findings
+    )
+
+
+def test_finalizer_rejects_local_child_record_after_terminal_fact(
+    tmp_path: Path,
+) -> None:
+    supervisor = CaptureSupervisor(
+        _supervisor_config(tmp_path / "late-local-child-record")
+    )
+    child_actor = ActorV5(
+        actor_id="actor_late_local_child",
+        kind=ActorKind.ENVIRONMENT,
+        display_name="local environment child",
+    )
+    child_session = SessionV5(
+        session_id="session_late_local_child",
+        actor_id=child_actor.actor_id,
+        started_at="2026-07-25T00:00:00Z",
+    )
+    supervisor.declare_actor(child_actor, child_session)
+    supervisor.finish_child_session(
+        child_session.session_id,
+        ended_at="2026-07-25T00:01:00Z",
+    )
+    supervisor.collector.event(
+        event_type="environment.after_finish",
+        payload={"late": True},
+        actor_id=child_actor.actor_id,
+        session_id=child_session.session_id,
+        occurred_at="2026-07-25T00:02:00Z",
+    )
+    supervisor.session.append(
+        RawRecordType.CAPTURE_FINISHED,
+        payload={"reason": "test"},
+    )
+
+    with pytest.raises(FinalizationError, match="after session.finished"):
+        supervisor.finalize()
 
 
 def test_generic_runner_honors_external_binding_and_materializes_projections(

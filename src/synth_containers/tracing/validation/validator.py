@@ -73,6 +73,7 @@ _CHECKS = (
     "event_order",
     "tool_result_pairing",
     "usage_consistency",
+    "session_lifecycle",
     "completeness_consistency",
     "evidence_selectors",
     "evidence_definitions",
@@ -111,6 +112,7 @@ def validate_trace(document: TraceDocumentV5) -> list[ValidationFindingV1]:
     findings.extend(_check_event_order(document))
     findings.extend(_check_tool_results(document))
     findings.extend(_check_usage(document))
+    findings.extend(_check_session_lifecycle(document))
     findings.extend(_check_completeness(document))
     return findings
 
@@ -159,6 +161,16 @@ def _check_references(document: TraceDocumentV5) -> list[ValidationFindingV1]:
     messages = {item.message_id for item in document.messages}
     artifacts = {item.artifact_id for item in document.artifacts}
 
+    for actor in document.actors:
+        if actor.parent_actor_id and actor.parent_actor_id not in actors:
+            findings.append(
+                ValidationFindingV1(
+                    code="dangling_parent_actor_ref",
+                    severity=Severity.ERROR,
+                    message="actor references an unknown parent actor",
+                    entity_id=actor.actor_id,
+                )
+            )
     for session in document.sessions:
         if session.actor_id not in actors:
             findings.append(
@@ -166,6 +178,18 @@ def _check_references(document: TraceDocumentV5) -> list[ValidationFindingV1]:
                     code="dangling_actor_ref",
                     severity=Severity.ERROR,
                     message="session references an unknown actor",
+                    entity_id=session.session_id,
+                )
+            )
+        if (
+            session.parent_session_id
+            and session.parent_session_id not in sessions
+        ):
+            findings.append(
+                ValidationFindingV1(
+                    code="dangling_parent_session_ref",
+                    severity=Severity.ERROR,
+                    message="session references an unknown parent session",
                     entity_id=session.session_id,
                 )
             )
@@ -210,6 +234,24 @@ def _check_references(document: TraceDocumentV5) -> list[ValidationFindingV1]:
                     )
                 )
     for event in document.events:
+        if event.actor_id not in actors:
+            findings.append(
+                ValidationFindingV1(
+                    code="dangling_actor_ref",
+                    severity=Severity.ERROR,
+                    message="event references an unknown actor",
+                    entity_id=event.event_id,
+                )
+            )
+        if event.session_id not in sessions:
+            findings.append(
+                ValidationFindingV1(
+                    code="dangling_session_ref",
+                    severity=Severity.ERROR,
+                    message="event references an unknown session",
+                    entity_id=event.event_id,
+                )
+            )
         if event.span_id and event.span_id not in spans:
             findings.append(
                 ValidationFindingV1(
@@ -227,9 +269,28 @@ def _check_references(document: TraceDocumentV5) -> list[ValidationFindingV1]:
                         severity=Severity.ERROR,
                         message="event causal parent is not in this trace",
                         entity_id=event.event_id,
-                        detail={"caused_by": parent},
-                    )
+                    detail={"caused_by": parent},
                 )
+            )
+    for message in document.messages:
+        if message.sender_actor_id and message.sender_actor_id not in actors:
+            findings.append(
+                ValidationFindingV1(
+                    code="dangling_actor_ref",
+                    severity=Severity.ERROR,
+                    message="message references an unknown sender actor",
+                    entity_id=message.message_id,
+                )
+            )
+        if message.session_id and message.session_id not in sessions:
+            findings.append(
+                ValidationFindingV1(
+                    code="dangling_session_ref",
+                    severity=Severity.ERROR,
+                    message="message references an unknown session",
+                    entity_id=message.message_id,
+                )
+            )
     return findings
 
 
@@ -406,6 +467,57 @@ def _check_usage(document: TraceDocumentV5) -> list[ValidationFindingV1]:
                     severity=Severity.ERROR,
                     message="root completion tokens do not equal the sum of observed span usage",
                     detail={"root": root.completion_tokens, "spans": total_completion},
+                )
+            )
+    return findings
+
+
+def _check_session_lifecycle(
+    document: TraceDocumentV5,
+) -> list[ValidationFindingV1]:
+    findings: list[ValidationFindingV1] = []
+    trace_terminal = str(document.lifecycle.status) in {
+        "completed",
+        "failed",
+        "interrupted",
+    }
+    terminal_session_statuses = {"completed", "failed", "interrupted"}
+    if trace_terminal and document.lifecycle.ended_at is None:
+        findings.append(
+            ValidationFindingV1(
+                code="terminal_trace_missing_ended_at",
+                severity=Severity.ERROR,
+                message="terminal trace has no ended_at timestamp",
+                entity_id=document.trace_id,
+            )
+        )
+    for session in document.sessions:
+        status = str(session.status)
+        if trace_terminal and status == "running":
+            findings.append(
+                ValidationFindingV1(
+                    code="session_non_terminal_in_sealed_trace",
+                    severity=Severity.ERROR,
+                    message="terminal trace contains a running session",
+                    entity_id=session.session_id,
+                )
+            )
+        if status == "running" and session.ended_at is not None:
+            findings.append(
+                ValidationFindingV1(
+                    code="running_session_has_ended_at",
+                    severity=Severity.ERROR,
+                    message="running session carries a terminal timestamp",
+                    entity_id=session.session_id,
+                )
+            )
+        if status in terminal_session_statuses and session.ended_at is None:
+            findings.append(
+                ValidationFindingV1(
+                    code="terminal_session_missing_ended_at",
+                    severity=Severity.ERROR,
+                    message="terminal session has no ended_at timestamp",
+                    entity_id=session.session_id,
                 )
             )
     return findings

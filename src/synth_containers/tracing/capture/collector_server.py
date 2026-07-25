@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from datetime import datetime
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -11,7 +12,14 @@ from urllib.parse import urlparse
 import ipaddress
 
 from .collector import LocalCollector
+from ..canonical import utc_now
+from ..models.actors import SessionStatus
+from ..models.events import EventType
 from ..models.identity import TraceContextV1
+
+
+class SessionTerminalError(RuntimeError):
+    """Raised when a delegated session writes after terminalization."""
 
 
 class CollectorServer:
@@ -49,6 +57,9 @@ class CollectorServer:
         self._contexts: dict[str, TraceContextV1] = {
             binding.capture_id: binding.context_for_child()
         }
+        self._context_started_at: dict[str, str] = {}
+        self._terminal_contexts: dict[str, tuple[str, str, str]] = {}
+        self._state_lock = threading.RLock()
 
     @property
     def base_url(self) -> str:
@@ -75,15 +86,130 @@ class CollectorServer:
             self._server.shutdown()
         self._server.server_close()
 
-    def register_context(self, context: TraceContextV1) -> None:
+    def register_context(
+        self,
+        context: TraceContextV1,
+        *,
+        started_at: str | None = None,
+    ) -> None:
         if context.trace_id != self.collector.binding.trace_id:
             raise ValueError("child context must join the collector trace")
         if not context.parent_actor_id or not context.delegation_id:
             raise ValueError("child context requires parent_actor_id and delegation_id")
-        existing = self._contexts.get(context.capture_id)
-        if existing is not None and existing != context:
-            raise ValueError("child capture_id is already registered with different context")
-        self._contexts[context.capture_id] = context
+        with self._state_lock:
+            existing = self._contexts.get(context.capture_id)
+            if existing is not None and existing != context:
+                raise ValueError(
+                    "child capture_id is already registered with different context"
+                )
+            prior_started_at = self._context_started_at.get(context.capture_id)
+            if (
+                prior_started_at is not None
+                and started_at is not None
+                and prior_started_at != started_at
+            ):
+                raise ValueError(
+                    "child capture_id is already registered with a different "
+                    "session start"
+                )
+            self._contexts[context.capture_id] = context
+            if started_at is not None:
+                _parse_timestamp(started_at, field="started_at")
+                self._context_started_at[context.capture_id] = started_at
+
+    def is_context_terminal(self, capture_id: str) -> bool:
+        with self._state_lock:
+            return capture_id in self._terminal_contexts
+
+    def finish_context(
+        self,
+        context: TraceContextV1,
+        *,
+        status: SessionStatus | str,
+        ended_at: str | None = None,
+    ) -> tuple[str, str, str]:
+        """Append or replay one authenticated terminal child-session fact."""
+
+        normalized = str(status)
+        if normalized not in {
+            str(SessionStatus.COMPLETED),
+            str(SessionStatus.FAILED),
+            str(SessionStatus.INTERRUPTED),
+        }:
+            raise ValueError("child session status must be terminal")
+        with self._state_lock:
+            registered = self._contexts.get(context.capture_id)
+            if registered != context:
+                raise ValueError("child context is not registered")
+            if context.capture_id == self.collector.binding.capture_id:
+                raise ValueError(
+                    "root session lifecycle is owned by CaptureSupervisor.finalize"
+                )
+            existing = self._terminal_contexts.get(context.capture_id)
+            if existing is not None:
+                prior_status, prior_ended_at, envelope_id = existing
+                if prior_status != normalized or (
+                    ended_at is not None and prior_ended_at != ended_at
+                ):
+                    raise ValueError(
+                        "child session is already finished with a conflicting "
+                        "terminal fact"
+                    )
+                return envelope_id, prior_status, prior_ended_at
+            terminal_at = ended_at or utc_now()
+            terminal_moment = _parse_timestamp(terminal_at, field="ended_at")
+            started_at = self._context_started_at.get(context.capture_id)
+            if started_at is not None and terminal_moment < _parse_timestamp(
+                started_at,
+                field="started_at",
+            ):
+                raise ValueError("child session ended_at precedes started_at")
+            envelope_id, terminal_at = self.collector.finish_session(
+                status=normalized,
+                actor_id=context.actor_id,
+                session_id=context.actor_session_id,
+                ended_at=terminal_at,
+            )
+            self._terminal_contexts[context.capture_id] = (
+                normalized,
+                terminal_at,
+                envelope_id,
+            )
+            return envelope_id, normalized, terminal_at
+
+    def event(self, context: TraceContextV1, **values: Any) -> str:
+        with self._state_lock:
+            self._assert_context_open(context)
+            return self.collector.event(
+                **values,
+                actor_id=context.actor_id,
+                session_id=context.actor_session_id,
+            )
+
+    def artifact(self, context: TraceContextV1, **values: Any) -> str:
+        with self._state_lock:
+            self._assert_context_open(context)
+            return self.collector.artifact(
+                **values,
+                actor_id=context.actor_id,
+                session_id=context.actor_session_id,
+            )
+
+    def _assert_context_open(self, context: TraceContextV1) -> None:
+        if self._contexts.get(context.capture_id) != context:
+            raise ValueError("child context is not registered")
+        if context.capture_id in self._terminal_contexts:
+            raise SessionTerminalError("child session is already terminal")
+
+
+def _parse_timestamp(value: str, *, field: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"{field} must be an RFC3339 timestamp") from exc
+    if parsed.tzinfo is None:
+        raise ValueError(f"{field} must include a timezone")
+    return parsed
 
 
 def _handler(server: CollectorServer) -> type[BaseHTTPRequestHandler]:
@@ -155,9 +281,23 @@ def _handler(server: CollectorServer) -> type[BaseHTTPRequestHandler]:
                         )
                     actor = dict(payload["actor"])
                     session = dict(payload["session"])
-                    if server.on_register_context is not None:
-                        server.on_register_context(context, actor, session)
-                    server.register_context(context)
+                    with server._state_lock:
+                        if requester is None:
+                            raise ValueError("registering context is not available")
+                        server._assert_context_open(requester)
+                        if server.on_register_context is not None:
+                            server.on_register_context(context, actor, session)
+                        server.register_context(
+                            context,
+                            started_at=(
+                                str(session["started_at"])
+                                if session.get("started_at") is not None
+                                else None
+                            ),
+                        )
+                except SessionTerminalError as exc:
+                    self._json(409, {"error": "session_terminal", "message": str(exc)})
+                    return
                 except (KeyError, TypeError, ValueError) as exc:
                     self._json(400, {"error": "invalid_child_context", "message": str(exc)})
                     return
@@ -173,12 +313,35 @@ def _handler(server: CollectorServer) -> type[BaseHTTPRequestHandler]:
                 self._json(403, {"error": "child_identity_mismatch"})
                 return
             try:
+                if path == "/v1/sessions/finish":
+                    envelope_id, status, ended_at = server.finish_context(
+                        context,
+                        status=str(payload["status"]),
+                        ended_at=(
+                            str(payload["ended_at"])
+                            if payload.get("ended_at") is not None
+                            else None
+                        ),
+                    )
+                    self._json(
+                        200,
+                        {
+                            "envelope_id": envelope_id,
+                            "session_id": context.actor_session_id,
+                            "status": status,
+                            "ended_at": ended_at,
+                        },
+                    )
+                    return
                 if path == "/v1/events":
-                    envelope_id = server.collector.event(
+                    if str(payload["event_type"]) == str(EventType.SESSION_FINISHED):
+                        raise ValueError(
+                            "session.finished must use /v1/sessions/finish"
+                        )
+                    envelope_id = server.event(
+                        context,
                         event_type=str(payload["event_type"]),
                         payload=dict(payload.get("payload") or {}),
-                        actor_id=payload.get("actor_id"),
-                        session_id=payload.get("session_id"),
                         occurred_at=payload.get("occurred_at"),
                         caused_by=tuple(payload.get("caused_by") or ()),
                         structural=payload.get("structural"),
@@ -187,17 +350,19 @@ def _handler(server: CollectorServer) -> type[BaseHTTPRequestHandler]:
                     return
                 if path == "/v1/artifacts":
                     content = base64.b64decode(str(payload["content_base64"]), validate=True)
-                    artifact_id = server.collector.artifact(
+                    artifact_id = server.artifact(
+                        context,
                         role=str(payload["role"]),
                         media_type=str(payload["media_type"]),
                         content=content,
                         logical_name=str(payload["logical_name"]),
                         visibility=str(payload.get("visibility") or "private"),
-                        actor_id=payload.get("actor_id"),
-                        session_id=payload.get("session_id"),
                     )
                     self._json(200, {"artifact_id": artifact_id})
                     return
+            except SessionTerminalError as exc:
+                self._json(409, {"error": "session_terminal", "message": str(exc)})
+                return
             except (KeyError, TypeError, ValueError) as exc:
                 self._json(400, {"error": "invalid_payload", "message": str(exc)})
                 return
@@ -206,4 +371,4 @@ def _handler(server: CollectorServer) -> type[BaseHTTPRequestHandler]:
     return Handler
 
 
-__all__ = ["CollectorServer"]
+__all__ = ["CollectorServer", "SessionTerminalError"]

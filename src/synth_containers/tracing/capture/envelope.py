@@ -22,6 +22,7 @@ RAW_ENVELOPE_SCHEMA_VERSION = "synth.capture.raw.v1"
 class RawRecordType(StrEnum):
     CAPTURE_STARTED = "capture.started"
     CAPTURE_FINISHED = "capture.finished"
+    SESSION_FINISHED = "session.finished"
     MODEL_CALL_STARTED = "model_call.started"
     UPSTREAM_ATTEMPT_STARTED = "upstream_attempt.started"
     UPSTREAM_ATTEMPT_FINISHED = "upstream_attempt.finished"
