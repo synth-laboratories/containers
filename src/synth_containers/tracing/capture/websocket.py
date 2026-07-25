@@ -9,6 +9,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 import websockets.asyncio.client
+import websockets.asyncio.server
 
 from ..canonical import bytes_digest, canonical_bytes, canonical_text
 from ..models.capture_data import CapturedBodyRefV1, RawCaptureDisposition
@@ -256,9 +257,9 @@ class ResponsesWebSocketServer:
         self,
         relay: ResponsesWebSocketRelay,
         *,
+        context_resolver: Callable[[Any], TraceContextV1 | None],
         host: str = "127.0.0.1",
         port: int = 0,
-        context_resolver: Callable[[Any], TraceContextV1 | None] | None = None,
     ) -> None:
         self.relay = relay
         self.host = host
@@ -274,33 +275,30 @@ class ResponsesWebSocketServer:
         asyncio.set_event_loop(self._loop)
 
         async def start() -> None:
-            from websockets.asyncio.server import serve
-
-            async def handler(connection: Any) -> None:
-                if connection.request.path != "/v1/responses":
-                    await connection.close(code=1008, reason="unsupported path")
-                    return
-                context = (
-                    self.context_resolver(connection.request.headers)
-                    if self.context_resolver is not None
-                    else None
-                )
-                await self.relay.relay(
-                    connection,
-                    actor_id=context.actor_id if context is not None else None,
-                    session_id=(
-                        context.actor_session_id
-                        if context is not None
-                        else None
-                    ),
-                )
-
-            self._server = await serve(handler, self.host, self.requested_port)
+            self._server = await websockets.asyncio.server.serve(
+                self._handle_connection,
+                self.host,
+                self.requested_port,
+            )
             self.port = int(self._server.sockets[0].getsockname()[1])
             self._ready.set()
 
         self._loop.run_until_complete(start())
         self._loop.run_forever()
+
+    async def _handle_connection(self, connection: Any) -> None:
+        if connection.request.path != "/v1/responses":
+            await connection.close(code=1008, reason="unsupported path")
+            return
+        context = self.context_resolver(connection.request.headers)
+        if context is None:
+            await connection.close(code=1008, reason="capture context required")
+            return
+        await self.relay.relay(
+            connection,
+            actor_id=context.actor_id,
+            session_id=context.actor_session_id,
+        )
 
     def start(self) -> "ResponsesWebSocketServer":
         self._thread.start()

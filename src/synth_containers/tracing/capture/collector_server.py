@@ -124,7 +124,7 @@ def _handler(server: CollectorServer) -> type[BaseHTTPRequestHandler]:
             if server.is_loopback or self._authorized():
                 self._json(200, {"ok": True})
                 return
-            self._json(200, {"ok": True})
+            self._json(403, {"error": "capture_binding_mismatch"})
 
         def do_POST(self) -> None:  # noqa: N802
             if not self._authorized():

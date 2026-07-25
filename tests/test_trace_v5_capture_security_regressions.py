@@ -56,7 +56,10 @@ from synth_containers.tracing.capture.supervisor import (
     CaptureSupervisor,
     SupervisorConfig,
 )
-from synth_containers.tracing.capture.websocket import ResponsesWebSocketRelay
+from synth_containers.tracing.capture.websocket import (
+    ResponsesWebSocketRelay,
+    ResponsesWebSocketServer,
+)
 from synth_containers.tracing.models.actors import ActorKind, ActorV5, SessionV5
 from synth_containers.tracing.models.completeness import CaptureStatus, TraceStatus
 from synth_containers.tracing.models.identity import (
@@ -158,6 +161,35 @@ def test_proxy_and_collector_stop_before_start_return_and_are_idempotent(
     proxy.stop(reason="already_stopped")
     collector.stop()
     session.spool.close()
+
+
+def test_non_loopback_collector_health_requires_registered_capture_auth(
+    tmp_path: Path,
+) -> None:
+    session = _session(tmp_path)
+    collector = CollectorServer(
+        LocalCollector(session),
+        host="0.0.0.0",
+        collector_token="collector-secret",
+    )
+    collector.start()
+    health_url = f"http://127.0.0.1:{collector.port}/healthz"
+    try:
+        with httpx.Client(trust_env=False) as client:
+            unauthenticated = client.get(health_url)
+            authenticated = client.get(
+                health_url,
+                headers={
+                    "authorization": "Bearer collector-secret",
+                    "x-synth-trace-id": session.binding.trace_id,
+                    "x-synth-capture-id": session.binding.capture_id,
+                },
+            )
+    finally:
+        collector.stop()
+
+    assert unauthenticated.status_code == 403
+    assert authenticated.status_code == 200
 
 
 def test_best_effort_unknown_route_passthrough_is_same_upstream_only(
@@ -652,6 +684,38 @@ def test_responses_websocket_relay_redacts_and_preserves_per_call_order(
     assert isinstance(forwarded, dict)
     assert forwarded["authorization"] == "Bearer downstream-memory-only-token"
     assert "x-synth-trace-id" not in forwarded
+
+
+def test_responses_websocket_server_rejects_missing_capture_context() -> None:
+    class FakeRelay:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def relay(self, *_: object, **__: object) -> None:
+            self.calls += 1
+
+    class FakeConnection:
+        request = SimpleNamespace(path="/v1/responses", headers={})
+
+        def __init__(self) -> None:
+            self.closed: tuple[int, str] | None = None
+
+        async def close(self, *, code: int, reason: str) -> None:
+            self.closed = (code, reason)
+
+    relay = FakeRelay()
+    server = ResponsesWebSocketServer(
+        relay,
+        context_resolver=lambda _headers: None,
+    )
+    connection = FakeConnection()
+    try:
+        asyncio.run(server._handle_connection(connection))
+    finally:
+        server._loop.close()
+
+    assert connection.closed == (1008, "capture context required")
+    assert relay.calls == 0
 
 
 def test_raw_repair_does_not_promote_complete_logically_forged_envelope(
