@@ -7,6 +7,7 @@ import asyncio
 import threading
 from collections.abc import Callable, Mapping
 from typing import Any
+from urllib.parse import urlsplit
 
 import websockets.asyncio.client
 import websockets.asyncio.server
@@ -87,7 +88,9 @@ class ResponsesWebSocketRelay:
                     call_id=call_id,
                     payload={
                         "call_index": call_index,
-                        "route": RESPONSES_WEBSOCKET_URL,
+                        "route": "/v1/responses",
+                        "upstream_host": urlsplit(self.upstream_url).netloc,
+                        "upstream_path": urlsplit(self.upstream_url).path,
                         "provider_adapter": "openai_responses",
                         "stream": True,
                         "model": response.get("model"),

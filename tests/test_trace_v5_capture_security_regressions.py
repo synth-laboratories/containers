@@ -669,6 +669,9 @@ def test_responses_websocket_relay_redacts_and_preserves_per_call_order(
     assert started["actor_id"] == "actor_ws_child"
     assert started["session_id"] == "session_ws_child"
     assert started["payload"]["call_index"] == 1
+    assert started["payload"]["route"] == "/v1/responses"
+    assert started["payload"]["upstream_host"] == "api.openai.com"
+    assert started["payload"]["upstream_path"] == "/v1/responses"
     assert (
         started["payload"]["request_body"]["response"]["api_key"]
         == REDACTED
