@@ -83,17 +83,76 @@ class AttachedSynthTunnelLease:
     connector_mode: str
     _control_plane: SynthTunnelControlPlane = field(repr=False)
     _agent: "SynthTunnelRelayAgent" = field(repr=False)
+    _local_health_url: str = field(repr=False)
+    _attach_timeout_seconds: float = field(repr=False)
+    _ready_timeout_seconds: float = field(repr=False)
     route_token: str | None = None
     diagnostics_hint: str | None = None
     _close_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    _ready_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    _closing: threading.Event = field(default_factory=threading.Event, repr=False)
+    _local_ready: bool = field(default=False, repr=False)
+    _agent_started: bool = field(default=False, repr=False)
     _agent_stopped: bool = field(default=False, repr=False)
     _control_plane_closed: bool = field(default=False, repr=False)
     _closed: bool = field(default=False, repr=False)
 
+    def wait_ready(self, timeout_seconds: float | None = None) -> None:
+        ready_timeout = (
+            self._ready_timeout_seconds
+            if timeout_seconds is None
+            else timeout_seconds
+        )
+        if ready_timeout <= 0:
+            raise ValueError("SynthTunnel readiness timeout must be positive")
+        attach_timeout = (
+            self._attach_timeout_seconds
+            if timeout_seconds is None
+            else min(self._attach_timeout_seconds, ready_timeout)
+        )
+        with self._ready_lock:
+            if self._closed or self._closing.is_set():
+                raise SynthTunnelRelayError("SynthTunnel lease is closed")
+            local_ready = self._local_ready
+        if not local_ready:
+            _wait_for_http_ok(
+                self._local_health_url,
+                timeout_seconds=min(10.0, ready_timeout),
+                cancel_event=self._closing,
+            )
+            with self._ready_lock:
+                if self._closed or self._closing.is_set():
+                    raise SynthTunnelRelayError("SynthTunnel lease is closed")
+                self._local_ready = True
+        with self._ready_lock:
+            if self._closed or self._closing.is_set():
+                raise SynthTunnelRelayError("SynthTunnel lease is closed")
+            agent_started = self._agent_started
+        if not agent_started:
+            self._agent.start(
+                timeout_seconds=attach_timeout,
+                cancel_event=self._closing,
+            )
+            with self._ready_lock:
+                if self._closed or self._closing.is_set():
+                    raise SynthTunnelRelayError("SynthTunnel lease is closed")
+                self._agent_started = True
+        _wait_for_http_ok(
+            _join_health_url(self.public_url),
+            headers={"Authorization": f"Bearer {self.worker_token}"},
+            timeout_seconds=ready_timeout,
+            cancel_event=self._closing,
+        )
+        with self._ready_lock:
+            if self._closed or self._closing.is_set():
+                raise SynthTunnelRelayError("SynthTunnel lease is closed")
+
     def close(self) -> None:
+        self._closing.set()
         with self._close_lock:
-            if self._closed:
-                return
+            with self._ready_lock:
+                if self._closed:
+                    return
             errors: list[Exception] = []
             if not self._agent_stopped:
                 try:
@@ -109,7 +168,8 @@ class AttachedSynthTunnelLease:
                     errors.append(error)
                 else:
                     self._control_plane_closed = True
-            self._closed = self._agent_stopped and self._control_plane_closed
+            with self._ready_lock:
+                self._closed = self._agent_stopped and self._control_plane_closed
             if errors:
                 raise SynthTunnelRelayError(
                     "SynthTunnel lease cleanup failed: "
@@ -152,12 +212,15 @@ class SynthTunnelProvider:
         requested_ttl_seconds: int,
         metadata: Mapping[str, object],
         capabilities: Mapping[str, object],
+        wait_ready: bool = True,
     ) -> AttachedSynthTunnelLease:
         target = _parse_local_target(local_url)
-        _wait_for_http_ok(
-            _join_health_url(target.base_url),
-            timeout_seconds=min(10.0, self._ready_timeout_seconds),
-        )
+        local_health_url = _join_health_url(target.base_url)
+        if wait_ready:
+            _wait_for_http_ok(
+                local_health_url,
+                timeout_seconds=min(10.0, self._ready_timeout_seconds),
+            )
         response = self._control_plane.create_synth_lease(
             client_instance_id=self._client_instance_id,
             local_host=target.host,
@@ -198,27 +261,27 @@ class SynthTunnelProvider:
             expires_at=_optional_text(response.get("expires_at")),
             connector_mode=_optional_text(response.get("connector_mode"))
             or "synth_tunnel_agent",
+            _local_health_url=local_health_url,
+            _attach_timeout_seconds=self._attach_timeout_seconds,
+            _ready_timeout_seconds=self._ready_timeout_seconds,
+            _local_ready=wait_ready,
             route_token=_optional_text(response.get("route_token")),
             diagnostics_hint=_optional_text(response.get("diagnostics_hint")),
             _control_plane=self._control_plane,
             _agent=agent,
         )
-        try:
-            agent.start(timeout_seconds=self._attach_timeout_seconds)
-            _wait_for_http_ok(
-                _join_health_url(public_url),
-                headers={"Authorization": f"Bearer {worker_token}"},
-                timeout_seconds=self._ready_timeout_seconds,
-            )
-        except Exception as startup_error:
+        if wait_ready:
             try:
-                lease.close()
-            except Exception as cleanup_error:
-                raise SynthTunnelRelayError(
-                    "SynthTunnel startup failed and its lease cleanup also failed: "
-                    f"{type(startup_error).__name__}; {type(cleanup_error).__name__}"
-                ) from startup_error
-            raise
+                lease.wait_ready()
+            except Exception as startup_error:
+                try:
+                    lease.close()
+                except Exception as cleanup_error:
+                    raise SynthTunnelRelayError(
+                        "SynthTunnel startup failed and its lease cleanup also failed: "
+                        f"{type(startup_error).__name__}; {type(cleanup_error).__name__}"
+                    ) from startup_error
+                raise
         return lease
 
 
@@ -256,56 +319,85 @@ class SynthTunnelRelayAgent:
         self._send_lock = threading.Lock()
         self._requests_lock = threading.Lock()
         self._connection_lock = threading.Lock()
+        self._lifecycle_lock = threading.Lock()
+        self._start_lock = threading.Lock()
         self._requests: dict[str, _PendingRequest] = {}
         self._thread: threading.Thread | None = None
         self._websocket: Any | None = None
         self._connection_generation = 0
         self._startup_error: str | None = None
 
-    def start(self, *, timeout_seconds: float) -> None:
-        if self._thread is not None and self._thread.is_alive():
-            return
-        self._stop.clear()
-        self._ready.clear()
-        self._fatal.clear()
-        self._startup_error = None
-        self._thread = threading.Thread(
-            target=self._run,
-            name="synth-containers-tunnel-agent",
-            daemon=True,
-        )
-        self._thread.start()
+    def start(
+        self,
+        *,
+        timeout_seconds: float,
+        cancel_event: threading.Event | None = None,
+    ) -> None:
         deadline = time.monotonic() + max(1.0, timeout_seconds)
-        while time.monotonic() < deadline:
-            if self._ready.wait(timeout=0.05):
-                return
-            if self._fatal.is_set():
-                break
-            if self._thread is None or not self._thread.is_alive():
-                break
-        detail = self._startup_error or "agent did not attach before the readiness deadline"
-        self.stop()
-        raise SynthTunnelRelayError(f"SynthTunnel agent attach failed: {detail}")
+        if not self._start_lock.acquire(timeout=max(0.0, deadline - time.monotonic())):
+            raise SynthTunnelRelayError(
+                "SynthTunnel agent attach wait exceeded its deadline"
+            )
+        try:
+            if cancel_event is not None and cancel_event.is_set():
+                raise SynthTunnelRelayError("SynthTunnel agent attach was cancelled")
+            with self._lifecycle_lock:
+                if cancel_event is not None and cancel_event.is_set():
+                    raise SynthTunnelRelayError(
+                        "SynthTunnel agent attach was cancelled"
+                    )
+                if self._thread is None or not self._thread.is_alive():
+                    self._stop.clear()
+                    self._ready.clear()
+                    self._fatal.clear()
+                    self._startup_error = None
+                    self._thread = threading.Thread(
+                        target=self._run,
+                        name="synth-containers-tunnel-agent",
+                        daemon=True,
+                    )
+                    self._thread.start()
+            while time.monotonic() < deadline:
+                if self._ready.wait(timeout=0.05):
+                    return
+                if cancel_event is not None and cancel_event.is_set():
+                    self.stop()
+                    raise SynthTunnelRelayError("SynthTunnel agent attach was cancelled")
+                if self._fatal.is_set():
+                    break
+                if self._thread is None or not self._thread.is_alive():
+                    break
+            detail = (
+                self._startup_error
+                or "agent did not attach before the readiness deadline"
+            )
+            self.stop()
+            raise SynthTunnelRelayError(f"SynthTunnel agent attach failed: {detail}")
+        finally:
+            self._start_lock.release()
 
     def stop(self) -> None:
-        self._stop.set()
-        with self._connection_lock:
-            websocket = self._websocket
+        with self._lifecycle_lock:
+            self._stop.set()
+            with self._connection_lock:
+                websocket = self._websocket
+            thread = self._thread
         if websocket is not None:
             try:
                 websocket.close()
             except Exception:
                 pass
-        thread = self._thread
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout=5.0)
             if thread.is_alive():
                 raise SynthTunnelRelayError(
                     "SynthTunnel agent thread did not stop within five seconds"
                 )
-        self._thread = None
-        with self._connection_lock:
-            self._websocket = None
+        with self._lifecycle_lock:
+            if self._thread is thread:
+                self._thread = None
+            with self._connection_lock:
+                self._websocket = None
         with self._requests_lock:
             self._requests.clear()
 
@@ -631,13 +723,17 @@ def _wait_for_http_ok(
     *,
     headers: Mapping[str, str] | None = None,
     timeout_seconds: float,
+    cancel_event: threading.Event | None = None,
 ) -> None:
     deadline = time.monotonic() + timeout_seconds
     last_error = "not ready"
     while time.monotonic() < deadline:
+        if cancel_event is not None and cancel_event.is_set():
+            raise SynthTunnelRelayError("SynthTunnel readiness wait was cancelled")
         request = urllib.request.Request(url, headers=dict(headers or {}), method="GET")
         try:
-            with urllib.request.urlopen(request, timeout=5.0) as response:
+            request_timeout = min(5.0, max(0.05, deadline - time.monotonic()))
+            with urllib.request.urlopen(request, timeout=request_timeout) as response:
                 if 200 <= response.status < 300:
                     return
                 last_error = f"HTTP {response.status}"
@@ -647,7 +743,13 @@ def _wait_for_http_ok(
             last_error = f"HTTP {error.code}"
         except urllib.error.URLError as error:
             last_error = type(error.reason).__name__
-        time.sleep(0.25)
+        except TimeoutError:
+            last_error = "TimeoutError"
+        if cancel_event is not None:
+            if cancel_event.wait(0.25):
+                raise SynthTunnelRelayError("SynthTunnel readiness wait was cancelled")
+        else:
+            time.sleep(0.25)
     raise SynthTunnelRelayError(f"timed out waiting for tunnel health: {last_error}")
 
 
