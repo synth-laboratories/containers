@@ -152,7 +152,13 @@ class SupervisorConfig:
 
 
 class CaptureSupervisor:
-    """Context manager that runs one capture session and seals one bundle."""
+    """Context manager that runs one capture session and seals one bundle.
+
+    This is an observability lifecycle owner, not a security sandbox. It can scope
+    proxy and collector capabilities, but it cannot isolate a child that shares its
+    user, filesystem, or process namespace. Run adversarial workloads behind a
+    separate UID, container, or stronger execution boundary.
+    """
 
     def __init__(self, config: SupervisorConfig) -> None:
         self.config = config

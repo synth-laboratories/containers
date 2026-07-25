@@ -166,6 +166,16 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--trace-key", default="{}")
     run.add_argument("--timeout-seconds", type=float)
     run.add_argument(
+        "--inherit-env",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help=(
+            "copy exactly this named variable from the parent into the child; "
+            "repeat for each required variable"
+        ),
+    )
+    run.add_argument(
         "--project",
         action="append",
         choices=["v4", "atif"],
@@ -211,6 +221,7 @@ def main(argv: list[str] | None = None) -> int:
                 binding_path=args.binding,
             ),
             child_command,
+            environ=_allowlisted_environment(args.inherit_env),
             timeout_seconds=args.timeout_seconds,
             projections=tuple(args.projections or ("v4",)),
         )
@@ -448,6 +459,17 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     raise SystemExit(f"unhandled command {args.command!r}")
+
+
+def _allowlisted_environment(names: list[str]) -> dict[str, str]:
+    selected: dict[str, str] = {}
+    for name in names:
+        if not name or "=" in name or "\x00" in name:
+            raise SystemExit("--inherit-env requires an environment variable name")
+        if name not in os.environ:
+            raise SystemExit(f"--inherit-env requested unset variable {name!r}")
+        selected[name] = os.environ[name]
+    return selected
 
 
 def _projection_binding(
