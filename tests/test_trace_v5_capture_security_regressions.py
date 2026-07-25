@@ -1588,6 +1588,144 @@ def test_supervisor_finishes_registered_child_by_capture_or_session_id(
     } & {finding.code for finding in validate_trace(supervisor.sealed.document)}
 
 
+def test_registered_parent_cannot_finish_before_declared_descendant_locally(
+    tmp_path: Path,
+) -> None:
+    supervisor = CaptureSupervisor(
+        _supervisor_config(tmp_path / "mixed-child-local-finish")
+    )
+    root = supervisor.binding.context_for_child()
+    parent = TraceContextV1(
+        trace_id=supervisor.binding.trace_id,
+        capture_id="capture_mixed_parent_local",
+        actor_id="actor_mixed_parent_local",
+        actor_session_id="session_mixed_parent_local",
+        parent_actor_id=root.actor_id,
+        parent_actor_session_id=root.actor_session_id,
+        delegation_id="delegation_mixed_parent_local",
+    )
+    supervisor.register_child_context(
+        parent,
+        actor=ActorV5(
+            actor_id=parent.actor_id,
+            kind=ActorKind.AGENT,
+            display_name="mixed parent local",
+            parent_actor_id=root.actor_id,
+        ),
+        session=SessionV5(
+            session_id=parent.actor_session_id,
+            actor_id=parent.actor_id,
+            started_at="2026-07-25T00:00:00Z",
+            parent_session_id=root.actor_session_id,
+        ),
+    )
+    descendant = SessionV5(
+        session_id="session_mixed_declared_local",
+        actor_id="actor_mixed_declared_local",
+        started_at="2026-07-25T00:01:00Z",
+        parent_session_id=parent.actor_session_id,
+    )
+    supervisor.declare_actor(
+        ActorV5(
+            actor_id=descendant.actor_id,
+            kind=ActorKind.AGENT,
+            display_name="mixed declared local",
+            parent_actor_id=parent.actor_id,
+        ),
+        descendant,
+    )
+
+    with pytest.raises(ValueError, match="unterminated descendants"):
+        supervisor.finish_child_session(
+            parent.capture_id,
+            ended_at="2026-07-25T00:03:00Z",
+        )
+    assert supervisor.collector_server.terminal_context_fact(parent.capture_id) is None
+
+    supervisor.finish_child_session(
+        descendant.session_id,
+        ended_at="2026-07-25T00:02:00Z",
+    )
+    supervisor.finish_child_session(
+        parent.capture_id,
+        ended_at="2026-07-25T00:03:00Z",
+    )
+    sealed = supervisor.finalize()
+
+    assert str(sealed.document.session(parent.actor_session_id).status) == "completed"
+    assert str(sealed.document.session(descendant.session_id).status) == "completed"
+
+
+def test_registered_parent_remote_finish_uses_complete_declared_topology(
+    tmp_path: Path,
+) -> None:
+    supervisor = CaptureSupervisor(
+        _supervisor_config(tmp_path / "mixed-child-remote-finish")
+    )
+    supervisor.collector_server.start()
+    root = supervisor.binding.context_for_child()
+    parent = TraceContextV1(
+        trace_id=supervisor.binding.trace_id,
+        capture_id="capture_mixed_parent_remote",
+        actor_id="actor_mixed_parent_remote",
+        actor_session_id="session_mixed_parent_remote",
+        parent_actor_id=root.actor_id,
+        parent_actor_session_id=root.actor_session_id,
+        delegation_id="delegation_mixed_parent_remote",
+    )
+    parent_token = supervisor.register_child_context(
+        parent,
+        actor=ActorV5(
+            actor_id=parent.actor_id,
+            kind=ActorKind.AGENT,
+            display_name="mixed parent remote",
+            parent_actor_id=root.actor_id,
+        ),
+        session=SessionV5(
+            session_id=parent.actor_session_id,
+            actor_id=parent.actor_id,
+            started_at="2026-07-25T00:00:00Z",
+            parent_session_id=root.actor_session_id,
+        ),
+    )
+    descendant = SessionV5(
+        session_id="session_mixed_declared_remote",
+        actor_id="actor_mixed_declared_remote",
+        started_at="2026-07-25T00:01:00Z",
+        parent_session_id=parent.actor_session_id,
+    )
+    supervisor.declare_actor(
+        ActorV5(
+            actor_id=descendant.actor_id,
+            kind=ActorKind.AGENT,
+            display_name="mixed declared remote",
+            parent_actor_id=parent.actor_id,
+        ),
+        descendant,
+    )
+
+    with TraceEmitter(
+        supervisor.collector_server.base_url,
+        parent,
+        collector_token=parent_token,
+    ) as emitter:
+        with pytest.raises(httpx.HTTPStatusError) as premature:
+            emitter.finish(ended_at="2026-07-25T00:03:00Z")
+        assert premature.value.response.status_code == 400
+        assert supervisor.collector_server.terminal_context_fact(parent.capture_id) is None
+
+        supervisor.finish_child_session(
+            descendant.session_id,
+            ended_at="2026-07-25T00:02:00Z",
+        )
+        emitter.finish(ended_at="2026-07-25T00:03:00Z")
+
+    sealed = supervisor.finalize()
+
+    assert str(sealed.document.session(parent.actor_session_id).status) == "completed"
+    assert str(sealed.document.session(descendant.session_id).status) == "completed"
+
+
 def test_unfinished_child_is_interrupted_and_makes_capture_partial(
     tmp_path: Path,
 ) -> None:

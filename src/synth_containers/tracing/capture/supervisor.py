@@ -369,6 +369,7 @@ class CaptureSupervisor:
             port=0 if self._terminal_resume_candidate else config.collector_port,
             collector_token=self._collector_token,
             on_register_context=self._register_remote_context,
+            on_finish_context=self._finish_remote_context,
         )
         interception = str(self.binding.capture.interception)
         mode = str(self.binding.capture.mode)
@@ -1427,7 +1428,7 @@ class CaptureSupervisor:
             if len(matching_contexts) > 1:
                 raise ValueError("child session identifier is ambiguous")
             if matching_contexts:
-                envelope_id, _, _ = self.collector_server.finish_context(
+                envelope_id, _, _ = self._finish_registered_context(
                     matching_contexts[0],
                     status=status,
                     ended_at=ended_at,
@@ -1475,6 +1476,73 @@ class CaptureSupervisor:
                 envelope_id,
             )
             return envelope_id
+
+    def _finish_remote_context(
+        self,
+        context: TraceContextV1,
+        status: SessionStatus | str,
+        ended_at: str | None,
+    ) -> tuple[str, str, str]:
+        """Finish an HTTP child under the supervisor's complete topology lock."""
+
+        with self._lifecycle_lock:
+            self._assert_capture_mutable()
+            return self._finish_registered_context(
+                context,
+                status=status,
+                ended_at=ended_at,
+            )
+
+    def _finish_registered_context(
+        self,
+        context: TraceContextV1,
+        *,
+        status: SessionStatus | str,
+        ended_at: str | None,
+    ) -> tuple[str, str, str]:
+        if context.capture_id == self.binding.capture_id:
+            raise ValueError(
+                "root session lifecycle is owned by CaptureSupervisor.finalize"
+            )
+        if self._contexts.get(context.capture_id) != context:
+            raise ValueError("child context is not registered")
+        session = next(
+            (
+                item
+                for item in self._extra_sessions
+                if item.session_id == context.actor_session_id
+            ),
+            None,
+        )
+        if session is None:
+            raise ValueError("registered child session identity is missing")
+        normalized = str(status)
+        if normalized not in {
+            str(SessionStatus.COMPLETED),
+            str(SessionStatus.FAILED),
+            str(SessionStatus.INTERRUPTED),
+        }:
+            raise ValueError("child session status must be terminal")
+        existing = self.collector_server.terminal_context_fact(
+            context.capture_id
+        )
+        if existing is not None:
+            prior_status, prior_ended_at, envelope_id = existing
+            if prior_status != normalized or (
+                ended_at is not None and prior_ended_at != ended_at
+            ):
+                raise ValueError(
+                    "child session is already finished with a conflicting "
+                    "terminal fact"
+                )
+            return envelope_id, prior_status, prior_ended_at
+        terminal_at = ended_at or utc_now()
+        self._validate_declared_terminal_time(session, terminal_at)
+        return self.collector_server.finish_context(
+            context,
+            status=normalized,
+            ended_at=terminal_at,
+        )
 
     def _install_child_identity(
         self,

@@ -41,11 +41,17 @@ class CollectorServer:
             str | None,
         ]
         | None = None,
+        on_finish_context: Callable[
+            [TraceContextV1, SessionStatus | str, str | None],
+            tuple[str, str, str],
+        ]
+        | None = None,
     ) -> None:
         self.collector = collector
         self.max_request_bytes = max_request_bytes
         self.collector_token = collector_token
         self.on_register_context = on_register_context
+        self.on_finish_context = on_finish_context
         try:
             is_loopback = ipaddress.ip_address(host).is_loopback
         except ValueError:
@@ -579,15 +585,24 @@ def _handler(server: CollectorServer) -> type[BaseHTTPRequestHandler]:
                 return
             try:
                 if path == "/v1/sessions/finish":
-                    envelope_id, status, ended_at = server.finish_context(
-                        context,
-                        status=str(payload["status"]),
-                        ended_at=(
-                            str(payload["ended_at"])
-                            if payload.get("ended_at") is not None
-                            else None
-                        ),
+                    requested_status = str(payload["status"])
+                    requested_ended_at = (
+                        str(payload["ended_at"])
+                        if payload.get("ended_at") is not None
+                        else None
                     )
+                    if server.on_finish_context is not None:
+                        envelope_id, status, ended_at = server.on_finish_context(
+                            context,
+                            requested_status,
+                            requested_ended_at,
+                        )
+                    else:
+                        envelope_id, status, ended_at = server.finish_context(
+                            context,
+                            status=requested_status,
+                            ended_at=requested_ended_at,
+                        )
                     self._json(
                         200,
                         {
