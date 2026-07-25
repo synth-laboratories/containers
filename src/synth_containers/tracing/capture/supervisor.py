@@ -155,6 +155,11 @@ class CaptureSupervisor:
     # -- lifecycle ---------------------------------------------------------------
 
     def __enter__(self) -> "CaptureSupervisor":
+        return self.start_capture()
+
+    def start_capture(self) -> "CaptureSupervisor":
+        """Start the proxy and prove readiness. Required modes fail closed here."""
+
         self.proxy.start()
         readiness = self._probe()
         self.receipt = replace(

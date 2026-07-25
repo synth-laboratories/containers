@@ -11,7 +11,7 @@ Nothing here invents facts: a call with no observed provider usage yields
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -56,6 +56,7 @@ from ..models.spans import (
 from .binding import TraceCaptureBindingV1
 from .coverage import CaptureCoverageReceiptV1, CaptureScope, Completeness
 from .envelope import RawRecordType
+from .redaction import CORRELATION_HEADER_PREFIXES, CORRELATION_HEADERS
 from .spool import TraceSegmentManifestV1, read_segments
 
 
@@ -73,9 +74,12 @@ class _CallState:
     request_body: dict[str, Any]
     request_digest: str
     frames: list[str]
+    request_headers: dict[str, str] = field(default_factory=dict)
     response_body: dict[str, Any] | None = None
     response_truncated: bool = False
     http_status: int | None = None
+    started_ordinal: int = 0
+    finished_ordinal: int = 0
     ended_at: str | None = None
     usage_payload: dict[str, Any] | None = None
     usage_observed: bool = False
@@ -138,7 +142,7 @@ class TraceFinalizer:
         application_events = 0
         started_at = records[0]["occurred_at"] if records else utc_now()
         ended_at = records[-1]["occurred_at"] if records else started_at
-        sequence = 0
+        application_records: list[Mapping[str, Any]] = []
 
         for record in records:
             record_type = str(record.get("record_type") or "")
@@ -154,6 +158,11 @@ class TraceFinalizer:
                     request_body=dict(payload.get("request_body") or {}),
                     request_digest=str(payload.get("request_digest") or ""),
                     frames=[],
+                    request_headers={
+                        str(key): str(value)
+                        for key, value in (payload.get("request_headers") or {}).items()
+                    },
+                    started_ordinal=int(record["ordinal"]),
                 )
                 order.append(str(call_id))
             elif record_type == RawRecordType.RESPONSE_FRAME and call_id in calls:
@@ -173,29 +182,41 @@ class TraceFinalizer:
                     dict(usage_payload) if isinstance(usage_payload, Mapping) else None
                 )
                 state.usage_observed = bool(payload.get("usage_observed"))
+                state.finished_ordinal = int(record["ordinal"])
             elif record_type == RawRecordType.ARTIFACT:
                 artifacts.append(_artifact_from_payload(payload, occurred_at=record["occurred_at"]))
             elif record_type == RawRecordType.APPLICATION_EVENT:
-                sequence += 1
-                application_events += 1
-                event = self._application_event(
-                    record, payload, sequence=sequence, envelope_to_event=envelope_to_event
-                )
-                envelope_to_event[str(record["envelope_id"])] = event.event_id
-                events.append(event)
+                application_records.append(record)
 
+        # Model calls are built first so an application event may cite the call that
+        # produced it. Chronological sequence is the raw capture ordinal throughout,
+        # which keeps model calls and application events in one replayable order.
         total_usage = UsageV5(provenance=UsageProvenance.DERIVED, requests=0)
+        call_index_to_event: dict[int, str] = {}
         for call_id in order:
             state = calls[call_id]
-            sequence += 1
-            built = self._build_call(state, sequence=sequence)
+            built = self._build_call(state)
             spans.append(built.span)
             events.extend(built.events)
             messages.extend(built.messages)
             transformations.append(built.transformation)
             diagnostics.extend(built.diagnostics)
             call_index_to_span[state.call_index] = built.span.span_id
+            call_index_to_event[state.call_index] = built.events[-1].event_id
             total_usage = total_usage.merged(built.usage)
+
+        for record in application_records:
+            application_events += 1
+            event = self._application_event(
+                record,
+                record.get("payload") or {},
+                sequence=int(record["ordinal"]),
+                envelope_to_event=envelope_to_event,
+                call_index_to_event=call_index_to_event,
+                call_index_to_span=call_index_to_span,
+            )
+            envelope_to_event[str(record["envelope_id"])] = event.event_id
+            events.append(event)
 
         if not order:
             total_usage = UsageV5(
@@ -354,7 +375,7 @@ class TraceFinalizer:
 
     # -- per-call normalization --------------------------------------------------
 
-    def _build_call(self, state: _CallState, *, sequence: int) -> "_BuiltCall":
+    def _build_call(self, state: _CallState) -> "_BuiltCall":
         trace_id = self.binding.trace_id
         actor_id = self.binding.workload.root_actor_id
         session_id = self.binding.workload.actor_session_id
@@ -432,6 +453,7 @@ class TraceFinalizer:
                 "http_status": state.http_status,
                 "request_digest": state.request_digest,
                 "finish_reason": response.finish_reason if response else None,
+                "correlation_headers": _correlation_headers(state.request_headers),
             },
             input_message_ids=tuple(input_ids),
             output_message_ids=tuple(output_ids),
@@ -457,7 +479,9 @@ class TraceFinalizer:
             session_id=session_id,
             occurred_at=state.started_at,
             span_id=span_id,
-            order=EventOrderV1(chronological_sequence=sequence, source_order_id=state.call_id),
+            order=EventOrderV1(
+                chronological_sequence=state.started_ordinal, source_order_id=state.call_id
+            ),
             payload={"call_index": state.call_index, "model": state.model},
         ).sealed()
         finished_event = EventV5(
@@ -469,7 +493,10 @@ class TraceFinalizer:
             session_id=session_id,
             occurred_at=state.ended_at or state.started_at,
             span_id=span_id,
-            order=EventOrderV1(chronological_sequence=sequence, source_order_id=state.call_id),
+            order=EventOrderV1(
+                chronological_sequence=state.finished_ordinal or state.started_ordinal,
+                source_order_id=state.call_id,
+            ),
             caused_by_event_ids=(started_event.event_id,),
             status=EventStatus.OK if status == SpanStatus.OK else EventStatus.ERROR,
             payload={
@@ -495,28 +522,41 @@ class TraceFinalizer:
         *,
         sequence: int,
         envelope_to_event: Mapping[str, str],
+        call_index_to_event: Mapping[int, str],
+        call_index_to_span: Mapping[int, str],
     ) -> EventV5:
         trace_id = self.binding.trace_id
         envelope_id = str(record["envelope_id"])
         structural = payload.get("structural")
-        caused_by = tuple(
+        body = dict(payload.get("body") or {})
+        caused_by = [
             envelope_to_event[item]
             for item in list(payload.get("caused_by") or [])
             if item in envelope_to_event
-        )
+        ]
+        # A producer may cite the model call that generated this event by its capture
+        # ordinal. The linkage is recorded as declared, not observed, because the proxy
+        # cannot see which local action a response caused.
+        span_id = None
+        declared_index = _int(body.get("model_call_index"))
+        if declared_index is not None and declared_index in call_index_to_event:
+            caused_by.append(call_index_to_event[declared_index])
+            span_id = call_index_to_span.get(declared_index)
+            body["model_call_link_basis"] = "declared_by_producer"
         return EventV5(
-            event_id=record_id("evt", kind="application", scope=(trace_id,), key=envelope_id),
+            event_id=application_event_id(trace_id=trace_id, envelope_id=envelope_id),
             event_type=str(payload.get("event_type") or EventType.APPLICATION),
             actor_id=str(record.get("actor_id") or self.binding.workload.root_actor_id),
             session_id=str(record.get("session_id") or self.binding.workload.actor_session_id),
             occurred_at=str(record["occurred_at"]),
+            span_id=span_id,
             order=EventOrderV1(
                 chronological_sequence=sequence,
                 source_order_id=envelope_id,
                 structural=_structural(structural),
             ),
-            caused_by_event_ids=caused_by,
-            payload=dict(payload.get("body") or {}),
+            caused_by_event_ids=tuple(caused_by),
+            payload=body,
             raw_source_ref=envelope_id,
         ).sealed()
 
@@ -592,6 +632,26 @@ def _structural(value: Any) -> Any:
     )
 
 
+def application_event_id(*, trace_id: str, envelope_id: str) -> str:
+    """The event id sealing will assign to an application event.
+
+    Deterministic and computable before sealing, so a producer can attach aliases and
+    cross-references to an event it has only just appended.
+    """
+
+    return record_id("evt", kind="application", scope=(trace_id,), key=envelope_id)
+
+
+def _correlation_headers(headers: Mapping[str, str]) -> dict[str, str]:
+    """Correlation headers the caller declared, preserved as span-level topology."""
+
+    return {
+        key: value
+        for key, value in headers.items()
+        if key in CORRELATION_HEADERS or key.startswith(CORRELATION_HEADER_PREFIXES)
+    }
+
+
 def _int(value: Any) -> int | None:
     if value is None:
         return None
@@ -613,4 +673,5 @@ __all__ = [
     "SealedCapture",
     "TraceFinalizer",
     "alias",
+    "application_event_id",
 ]

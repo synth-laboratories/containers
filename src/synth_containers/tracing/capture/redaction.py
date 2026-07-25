@@ -48,6 +48,11 @@ ALLOWED_HEADERS = frozenset(
     }
 )
 
+# Correlation headers carry execution topology, never credentials, so they survive
+# redaction. Any denied header still wins: `x-reb-evaluator-token` is dropped.
+CORRELATION_HEADER_PREFIXES = ("x-synth-trace-", "x-reb-score-")
+CORRELATION_HEADERS = frozenset({"traceparent", "tracestate", "baggage"})
+
 DENIED_BODY_KEYS = frozenset(
     {
         "api_key",
@@ -107,11 +112,19 @@ def redact_headers(headers: Mapping[str, str]) -> tuple[dict[str, str], Redactio
     removed: list[str] = []
     for name, value in headers.items():
         lowered = name.lower()
-        if lowered in DENIED_HEADERS or lowered not in ALLOWED_HEADERS:
+        if lowered in DENIED_HEADERS or not _header_allowed(lowered):
             removed.append(lowered)
             continue
         kept[lowered] = value
     return kept, RedactionReportV1(removed_headers=tuple(sorted(set(removed))))
+
+
+def _header_allowed(lowered: str) -> bool:
+    return (
+        lowered in ALLOWED_HEADERS
+        or lowered in CORRELATION_HEADERS
+        or lowered.startswith(CORRELATION_HEADER_PREFIXES)
+    )
 
 
 def scrub_text(text: str) -> tuple[str, tuple[str, ...]]:
@@ -179,6 +192,8 @@ def assert_no_secrets(value: Any, *, where: str) -> None:
 
 __all__ = [
     "ALLOWED_HEADERS",
+    "CORRELATION_HEADERS",
+    "CORRELATION_HEADER_PREFIXES",
     "DENIED_BODY_KEYS",
     "DENIED_HEADERS",
     "REDACTED",

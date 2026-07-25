@@ -21,7 +21,7 @@ from .coverage import (
     new_coverage_receipt,
 )
 from .envelope import RawCaptureEnvelopeV1, RawRecordType, make_envelope
-from .finalizer import SealedCapture, TraceFinalizer
+from .finalizer import SealedCapture, TraceFinalizer, application_event_id
 from .proxy import CaptureProxy, UnsupportedProtocol
 from .redaction import RedactionError, RedactionReportV1, redact_headers, redact_payload
 from .session import CaptureSession
@@ -66,6 +66,7 @@ __all__ = [
     "TraceSegmentManifestV1",
     "UnsupportedProtocol",
     "WorkloadKind",
+    "application_event_id",
     "make_envelope",
     "mint_binding",
     "new_coverage_receipt",
