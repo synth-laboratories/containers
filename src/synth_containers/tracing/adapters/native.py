@@ -385,6 +385,7 @@ def _assemble_events(
         resolved_mode=CaptureMode.DISABLED,
         interception="none",
         proxy_config_digest=binding.capture.proxy_config_digest or "",
+        started_at=IMPORTED_AT,
     )
     finalizer = TraceFinalizer(
         binding=binding,

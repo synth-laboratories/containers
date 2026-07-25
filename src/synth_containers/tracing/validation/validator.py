@@ -8,6 +8,7 @@ report everything wrong with a bundle at once.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from datetime import datetime
 from enum import StrEnum
 import math
 from typing import Any
@@ -68,6 +69,7 @@ _CHECKS = (
     "sealed_digest",
     "unique_ids",
     "cross_references",
+    "alias_integrity",
     "message_graph",
     "span_graph",
     "event_order",
@@ -107,6 +109,7 @@ def validate_trace(document: TraceDocumentV5) -> list[ValidationFindingV1]:
 
     findings.extend(_check_unique(document))
     findings.extend(_check_references(document))
+    findings.extend(validate_alias_integrity(document))
     findings.extend(_check_message_graph(document))
     findings.extend(_check_span_graph(document))
     findings.extend(_check_event_order(document))
@@ -114,6 +117,113 @@ def validate_trace(document: TraceDocumentV5) -> list[ValidationFindingV1]:
     findings.extend(_check_usage(document))
     findings.extend(_check_session_lifecycle(document))
     findings.extend(_check_completeness(document))
+    return findings
+
+
+_LOCAL_ALIAS_TARGET_KINDS = frozenset(
+    {
+        "trace",
+        "actor",
+        "session",
+        "span",
+        "event",
+        "message",
+        "part",
+        "artifact",
+        "branch",
+        "error",
+    }
+)
+_EXTERNAL_ALIAS_TARGET_KINDS = frozenset({"external_trace"})
+
+
+def validate_alias_integrity(
+    document: TraceDocumentV5,
+) -> list[ValidationFindingV1]:
+    """Validate every alias target against the canonical entity inventory."""
+
+    targets = {
+        "trace": {document.trace_id},
+        "actor": {item.actor_id for item in document.actors},
+        "session": {item.session_id for item in document.sessions},
+        "span": {item.span_id for item in document.spans},
+        "event": {item.event_id for item in document.events},
+        "message": {item.message_id for item in document.messages},
+        "part": {
+            part.part_id
+            for message in document.messages
+            for part in message.parts
+        },
+        "artifact": {item.artifact_id for item in document.artifacts},
+        "branch": {item.branch_id for item in document.branches},
+        "error": {item.error_id for item in document.errors},
+    }
+    alias_groups = [
+        ("trace", document.trace_id, document.aliases),
+        ("provenance", document.trace_id, document.provenance.aliases),
+        *(
+            ("actor", item.actor_id, item.aliases)
+            for item in document.actors
+        ),
+        *(
+            ("session", item.session_id, item.aliases)
+            for item in document.sessions
+        ),
+        *(
+            ("span", item.span_id, item.aliases)
+            for item in document.spans
+        ),
+        *(
+            ("event", item.event_id, item.aliases)
+            for item in document.events
+        ),
+        *(
+            ("message", item.message_id, item.aliases)
+            for item in document.messages
+        ),
+    ]
+    supported = _LOCAL_ALIAS_TARGET_KINDS | _EXTERNAL_ALIAS_TARGET_KINDS
+    findings: list[ValidationFindingV1] = []
+    for owner_kind, owner_id, aliases in alias_groups:
+        for alias_item in aliases:
+            target_kind = str(alias_item.target_kind)
+            detail = {
+                "alias_namespace": str(alias_item.namespace),
+                "alias_value": alias_item.value,
+                "owner_kind": owner_kind,
+                "target_kind": target_kind,
+                "target_id": alias_item.target_id,
+            }
+            if target_kind not in supported:
+                findings.append(
+                    ValidationFindingV1(
+                        code="unsupported_alias_target_kind",
+                        severity=Severity.ERROR,
+                        message=(
+                            "alias target_kind is not a supported canonical "
+                            f"entity kind: {target_kind!r}"
+                        ),
+                        entity_id=owner_id,
+                        detail=detail,
+                    )
+                )
+                continue
+            if not alias_item.target_id or (
+                target_kind in _LOCAL_ALIAS_TARGET_KINDS
+                and alias_item.target_id not in targets[target_kind]
+            ):
+                findings.append(
+                    ValidationFindingV1(
+                        code="dangling_alias_target",
+                        severity=Severity.ERROR,
+                        message=(
+                            f"alias target {target_kind}:{alias_item.target_id} "
+                            "is not present in the trace"
+                        ),
+                        entity_id=owner_id,
+                        detail=detail,
+                    )
+                )
     return findings
 
 
@@ -476,12 +586,58 @@ def _check_session_lifecycle(
     document: TraceDocumentV5,
 ) -> list[ValidationFindingV1]:
     findings: list[ValidationFindingV1] = []
-    trace_terminal = str(document.lifecycle.status) in {
+    trace_status = str(document.lifecycle.status)
+    terminal_trace_statuses = {
         "completed",
         "failed",
         "interrupted",
     }
+    trace_terminal = trace_status in terminal_trace_statuses
     terminal_session_statuses = {"completed", "failed", "interrupted"}
+    if trace_status not in {
+        "live",
+        "sealing",
+        *terminal_trace_statuses,
+    }:
+        findings.append(
+            ValidationFindingV1(
+                code="unknown_trace_status",
+                severity=Severity.ERROR,
+                message=f"unknown trace lifecycle status {trace_status!r}",
+                entity_id=document.trace_id,
+            )
+        )
+    trace_started = _validated_timestamp(
+        document.lifecycle.started_at,
+        code="invalid_trace_timestamp",
+        entity_id=document.trace_id,
+        field="started_at",
+        findings=findings,
+    )
+    trace_ended = (
+        _validated_timestamp(
+            document.lifecycle.ended_at,
+            code="invalid_trace_timestamp",
+            entity_id=document.trace_id,
+            field="ended_at",
+            findings=findings,
+        )
+        if document.lifecycle.ended_at is not None
+        else None
+    )
+    if (
+        trace_started is not None
+        and trace_ended is not None
+        and trace_ended < trace_started
+    ):
+        findings.append(
+            ValidationFindingV1(
+                code="trace_lifecycle_order_invalid",
+                severity=Severity.ERROR,
+                message="trace ended_at precedes started_at",
+                entity_id=document.trace_id,
+            )
+        )
     if trace_terminal and document.lifecycle.ended_at is None:
         findings.append(
             ValidationFindingV1(
@@ -491,8 +647,73 @@ def _check_session_lifecycle(
                 entity_id=document.trace_id,
             )
         )
+    parsed_sessions: dict[str, tuple[datetime | None, datetime | None]] = {}
     for session in document.sessions:
         status = str(session.status)
+        if status not in {"running", *terminal_session_statuses}:
+            findings.append(
+                ValidationFindingV1(
+                    code="unknown_session_status",
+                    severity=Severity.ERROR,
+                    message=f"unknown session lifecycle status {status!r}",
+                    entity_id=session.session_id,
+                )
+            )
+        started = _validated_timestamp(
+            session.started_at,
+            code="invalid_session_timestamp",
+            entity_id=session.session_id,
+            field="started_at",
+            findings=findings,
+        )
+        ended = (
+            _validated_timestamp(
+                session.ended_at,
+                code="invalid_session_timestamp",
+                entity_id=session.session_id,
+                field="ended_at",
+                findings=findings,
+            )
+            if session.ended_at is not None
+            else None
+        )
+        parsed_sessions[session.session_id] = (started, ended)
+        if started is not None and ended is not None and ended < started:
+            findings.append(
+                ValidationFindingV1(
+                    code="session_lifecycle_order_invalid",
+                    severity=Severity.ERROR,
+                    message="session ended_at precedes started_at",
+                    entity_id=session.session_id,
+                )
+            )
+        if started is not None and trace_started is not None and started < trace_started:
+            findings.append(
+                ValidationFindingV1(
+                    code="session_starts_before_trace",
+                    severity=Severity.ERROR,
+                    message="session started_at is before trace started_at",
+                    entity_id=session.session_id,
+                )
+            )
+        if started is not None and trace_ended is not None and started > trace_ended:
+            findings.append(
+                ValidationFindingV1(
+                    code="session_starts_after_trace",
+                    severity=Severity.ERROR,
+                    message="session started_at is after trace ended_at",
+                    entity_id=session.session_id,
+                )
+            )
+        if ended is not None and trace_ended is not None and ended > trace_ended:
+            findings.append(
+                ValidationFindingV1(
+                    code="session_outlives_trace",
+                    severity=Severity.ERROR,
+                    message="session ended_at is after trace ended_at",
+                    entity_id=session.session_id,
+                )
+            )
         if trace_terminal and status == "running":
             findings.append(
                 ValidationFindingV1(
@@ -520,7 +741,123 @@ def _check_session_lifecycle(
                     entity_id=session.session_id,
                 )
             )
+    sessions_by_id = {session.session_id: session for session in document.sessions}
+    actors_by_id = {actor.actor_id: actor for actor in document.actors}
+    for child in document.sessions:
+        if not child.parent_session_id:
+            continue
+        parent = sessions_by_id.get(child.parent_session_id)
+        if parent is None:
+            continue
+        child_actor = actors_by_id.get(child.actor_id)
+        if (
+            child_actor is not None
+            and child_actor.parent_actor_id != parent.actor_id
+        ):
+            findings.append(
+                ValidationFindingV1(
+                    code="actor_session_parent_disagreement",
+                    severity=Severity.ERROR,
+                    message=(
+                        "child actor parent does not match the parent session actor"
+                    ),
+                    entity_id=child.session_id,
+                    detail={
+                        "actor_parent_id": child_actor.parent_actor_id,
+                        "parent_session_actor_id": parent.actor_id,
+                    },
+                )
+            )
+        if (
+            str(parent.status) in terminal_session_statuses
+            and str(child.status) == "running"
+        ):
+            findings.append(
+                ValidationFindingV1(
+                    code="live_child_of_terminal_parent",
+                    severity=Severity.ERROR,
+                    message="running child session has a terminal parent",
+                    entity_id=child.session_id,
+                    detail={"parent_session_id": parent.session_id},
+                )
+            )
+        child_started, child_ended = parsed_sessions[child.session_id]
+        parent_started, parent_ended = parsed_sessions[parent.session_id]
+        if (
+            child_started is not None
+            and parent_started is not None
+            and child_started < parent_started
+        ):
+            findings.append(
+                ValidationFindingV1(
+                    code="child_session_starts_before_parent",
+                    severity=Severity.ERROR,
+                    message="child session starts before its parent session",
+                    entity_id=child.session_id,
+                    detail={"parent_session_id": parent.session_id},
+                )
+            )
+        if (
+            child_ended is not None
+            and parent_ended is not None
+            and child_ended > parent_ended
+        ):
+            findings.append(
+                ValidationFindingV1(
+                    code="child_session_outlives_parent",
+                    severity=Severity.ERROR,
+                    message="child session ends after its parent session",
+                    entity_id=child.session_id,
+                    detail={"parent_session_id": parent.session_id},
+                )
+            )
+    parents = {
+        session.session_id: session.parent_session_id
+        for session in document.sessions
+    }
+    for session_id in parents:
+        seen: set[str] = set()
+        current: str | None = session_id
+        while current is not None and current in parents:
+            if current in seen:
+                findings.append(
+                    ValidationFindingV1(
+                        code="session_parent_cycle",
+                        severity=Severity.ERROR,
+                        message="session parent chain contains a cycle",
+                        entity_id=session_id,
+                    )
+                )
+                break
+            seen.add(current)
+            current = parents[current]
     return findings
+
+
+def _validated_timestamp(
+    value: Any,
+    *,
+    code: str,
+    entity_id: str,
+    field: str,
+    findings: list[ValidationFindingV1],
+) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (AttributeError, TypeError, ValueError):
+        parsed = None
+    if parsed is None or parsed.tzinfo is None:
+        findings.append(
+            ValidationFindingV1(
+                code=code,
+                severity=Severity.ERROR,
+                message=f"{field} must be an RFC3339 timestamp with timezone",
+                entity_id=entity_id,
+                detail={"field": field, "value": value},
+            )
+        )
+        return None
+    return parsed
 
 
 def _check_completeness(document: TraceDocumentV5) -> list[ValidationFindingV1]:
@@ -1998,6 +2335,7 @@ __all__ = [
     "ValidationFindingV1",
     "ValidationReceiptV1",
     "validate",
+    "validate_alias_integrity",
     "validate_evidence",
     "validate_trace",
 ]

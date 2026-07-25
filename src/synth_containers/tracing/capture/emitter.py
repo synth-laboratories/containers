@@ -26,6 +26,7 @@ class TraceEmitter:
         self.context = context
         self.collector_token = collector_token
         self._client = httpx.Client(timeout=timeout)
+        self._registered_context_tokens: dict[str, str] = {}
 
     @classmethod
     def from_environment(cls, *, timeout: float = 10.0) -> "TraceEmitter":
@@ -45,6 +46,8 @@ class TraceEmitter:
         headers = {
             "x-synth-trace-id": self.context.trace_id,
             "x-synth-capture-id": self.context.capture_id,
+            "x-synth-actor-id": self.context.actor_id,
+            "x-synth-session-id": self.context.actor_session_id,
             "content-type": "application/json",
         }
         if self.collector_token:
@@ -131,7 +134,40 @@ class TraceEmitter:
             json={"context": child.to_dict(), "actor": actor, "session": session},
         )
         response.raise_for_status()
-        return str(response.json()["capture_id"])
+        receipt = response.json()
+        capture_id = str(receipt["capture_id"])
+        collector_token = str(receipt.get("collector_token") or "")
+        if not collector_token:
+            raise RuntimeError("child registration did not return a collector capability")
+        self._registered_context_tokens[capture_id] = collector_token
+        return capture_id
+
+    def registered_context_token(
+        self,
+        child: TraceContextV1 | str,
+    ) -> str:
+        """Return the ephemeral capability minted by ``register_context``."""
+
+        capture_id = child.capture_id if isinstance(child, TraceContextV1) else child
+        try:
+            return self._registered_context_tokens[capture_id]
+        except KeyError as exc:
+            raise ValueError("child context was not registered by this emitter") from exc
+
+    def emitter_for_registered_context(
+        self,
+        child: TraceContextV1,
+        *,
+        timeout: float = 10.0,
+    ) -> "TraceEmitter":
+        """Create a child emitter with only that child's scoped capability."""
+
+        return TraceEmitter(
+            self.base_url,
+            child,
+            timeout=timeout,
+            collector_token=self.registered_context_token(child),
+        )
 
     def finish(
         self,

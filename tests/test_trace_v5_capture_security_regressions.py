@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import stat
 import sys
+import threading
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 import zipfile
@@ -39,12 +40,15 @@ from synth_containers.tracing.capture.binding import (
 )
 from synth_containers.tracing.capture.collector import LocalCollector
 from synth_containers.tracing.capture.collector_server import CollectorServer
+from synth_containers.tracing.capture.coverage import finalization_from_dict
 from synth_containers.tracing.capture.emitter import TraceEmitter
 from synth_containers.tracing.capture.egress import EgressAssertion
 from synth_containers.tracing.capture.envelope import RawRecordType, make_envelope
-from synth_containers.tracing.capture.finalizer import FinalizationError
+from synth_containers.tracing.capture.finalizer import FinalizationError, TraceFinalizer
 from synth_containers.tracing.capture.proxy import (
+    CaptureClosedError,
     CaptureProxy,
+    ProxyStats,
     _StreamingContentDecoder,
     _decode_request_body,
     _forward_headers,
@@ -67,11 +71,16 @@ from synth_containers.tracing.capture.websocket import (
     ResponsesWebSocketServer,
 )
 from synth_containers.tracing.models.actors import ActorKind, ActorV5, SessionV5
-from synth_containers.tracing.models.completeness import CaptureStatus, TraceStatus
+from synth_containers.tracing.models.completeness import (
+    CaptureStatus,
+    TerminationV5,
+    TraceStatus,
+)
 from synth_containers.tracing.models.identity import (
     AliasNamespace,
     AliasV1,
     TraceContextV1,
+    TraceIdentityV5,
     TraceProvenanceV5,
 )
 from synth_containers.tracing.models.spans import SpanKind
@@ -157,6 +166,69 @@ def test_capture_session_concurrent_append_allocates_contiguous_ordinals(
     assert {record["payload"]["index"] for record in records} == set(range(64))
 
 
+def test_shared_http_websocket_stats_increment_atomically() -> None:
+    stats = ProxyStats()
+
+    def record_transport_completion(_: int) -> None:
+        stats.increment(
+            calls_accepted=1,
+            calls_completed=1,
+            calls_normalized=1,
+            frames=2,
+        )
+
+    with ThreadPoolExecutor(max_workers=32) as pool:
+        tuple(pool.map(record_transport_completion, range(1024)))
+
+    assert stats.snapshot() == {
+        "calls_accepted": 1024,
+        "calls_completed": 1024,
+        "calls_errored": 0,
+        "calls_normalized": 1024,
+        "upstream_retries": 0,
+        "truncated_records": 0,
+        "redacted_headers": (),
+        "unsupported_routes": (),
+        "frames": 2048,
+    }
+
+
+def test_proxy_stats_restore_reconstructs_errors_and_retry_high_water() -> None:
+    stats = ProxyStats()
+
+    stats.restore(
+        (
+            {
+                "record_type": str(RawRecordType.ERROR),
+                "call_id": "call_parse",
+                "payload": {"stage": "request_parse"},
+            },
+            {
+                "record_type": str(RawRecordType.MODEL_CALL_STARTED),
+                "call_id": "call_upstream",
+                "payload": {},
+            },
+            *(
+                {
+                    "record_type": str(RawRecordType.UPSTREAM_ATTEMPT_STARTED),
+                    "call_id": "call_upstream",
+                    "payload": {"attempt": attempt},
+                }
+                for attempt in (1, 2, 3)
+            ),
+            {
+                "record_type": str(RawRecordType.ERROR),
+                "call_id": "call_upstream",
+                "payload": {"stage": "upstream_request"},
+            },
+        )
+    )
+
+    assert stats.calls_accepted == 2
+    assert stats.calls_errored == 2
+    assert stats.upstream_retries == 2
+
+
 def test_proxy_and_collector_stop_before_start_return_and_are_idempotent(
     tmp_path: Path,
 ) -> None:
@@ -178,6 +250,7 @@ def test_non_loopback_collector_health_requires_registered_capture_auth(
     tmp_path: Path,
 ) -> None:
     session = _session(tmp_path)
+    root_context = session.binding.context_for_child()
     collector = CollectorServer(
         LocalCollector(session),
         host="0.0.0.0",
@@ -194,6 +267,8 @@ def test_non_loopback_collector_health_requires_registered_capture_auth(
                     "authorization": "Bearer collector-secret",
                     "x-synth-trace-id": session.binding.trace_id,
                     "x-synth-capture-id": session.binding.capture_id,
+                    "x-synth-actor-id": root_context.actor_id,
+                    "x-synth-session-id": root_context.actor_session_id,
                 },
             )
     finally:
@@ -201,6 +276,48 @@ def test_non_loopback_collector_health_requires_registered_capture_auth(
 
     assert unauthenticated.status_code == 403
     assert authenticated.status_code == 200
+
+
+def test_collector_infers_registered_identity_for_legacy_bearer_emitter(
+    tmp_path: Path,
+) -> None:
+    session = _session(tmp_path, capture_id="capture_legacy_emitter")
+    collector = CollectorServer(
+        LocalCollector(session),
+        collector_token="legacy-collector-secret",
+    ).start()
+    headers = {
+        "authorization": "Bearer legacy-collector-secret",
+        "x-synth-trace-id": session.binding.trace_id,
+        "x-synth-capture-id": session.binding.capture_id,
+    }
+    try:
+        with httpx.Client(trust_env=False) as client:
+            accepted = client.post(
+                f"{collector.base_url}/v1/events",
+                headers=headers,
+                json={
+                    "event_type": "legacy.emitter",
+                    "payload": {"ok": True},
+                },
+            )
+            partial_identity = client.post(
+                f"{collector.base_url}/v1/events",
+                headers={
+                    **headers,
+                    "x-synth-actor-id": session.binding.workload.root_actor_id,
+                },
+                json={
+                    "event_type": "legacy.emitter",
+                    "payload": {"must_fail": True},
+                },
+            )
+    finally:
+        collector.stop()
+        session.spool.close()
+
+    assert accepted.status_code == 200
+    assert partial_identity.status_code == 403
 
 
 def test_best_effort_unknown_route_passthrough_is_same_upstream_only(
@@ -426,6 +543,20 @@ def test_supervisor_resume_loads_exact_binding_and_continues_high_water(
 ) -> None:
     bundle_root = tmp_path / "resume-bundle"
     first = CaptureSupervisor(_supervisor_config(bundle_root))
+    standalone_actor = ActorV5(
+        actor_id="actor_resume_environment",
+        kind=ActorKind.ENVIRONMENT,
+        display_name="resumed environment",
+        parent_actor_id=first.binding.workload.root_actor_id,
+    )
+    durable_alias = AliasV1(
+        namespace=AliasNamespace.CORRELATION,
+        value="resume-environment",
+        target_id=standalone_actor.actor_id,
+        target_kind="actor",
+    )
+    first.declare_actor(standalone_actor)
+    first.declare_alias(durable_alias)
     first_envelope = first.session.append(
         RawRecordType.APPLICATION_EVENT,
         payload={"phase": "first"},
@@ -446,6 +577,8 @@ def test_supervisor_resume_loads_exact_binding_and_continues_high_water(
         assert resumed.binding_path == first.binding_path
         assert resumed.binding.to_dict() == first.binding.to_dict()
         assert resumed.spool.high_water_ordinal == first_envelope.ordinal
+        assert resumed._extra_actors == [standalone_actor.sealed()]
+        assert resumed._aliases == [durable_alias]
 
         resumed_envelope = resumed.session.append(
             RawRecordType.APPLICATION_EVENT,
@@ -454,10 +587,716 @@ def test_supervisor_resume_loads_exact_binding_and_continues_high_water(
         resumed.spool.close()
 
         assert resumed_envelope.ordinal == first_envelope.ordinal + 1
-        assert [record["ordinal"] for record in resumed.spool.records()] == [0, 1]
+        assert [record["ordinal"] for record in resumed.spool.records()] == [
+            0,
+            1,
+            2,
+            3,
+        ]
     finally:
         resumed.proxy.stop(reason="not_started")
         resumed.collector_server.stop()
+
+
+def test_resume_rotates_child_capability_and_concurrent_finish_is_once(
+    tmp_path: Path,
+) -> None:
+    bundle_root = tmp_path / "resume-child-capability"
+    first = CaptureSupervisor(_supervisor_config(bundle_root))
+    root = first.binding.context_for_child()
+    child_context = TraceContextV1(
+        trace_id=first.binding.trace_id,
+        capture_id="capture_resume_child",
+        actor_id="actor_resume_child",
+        actor_session_id="session_resume_child",
+        parent_actor_id=root.actor_id,
+        parent_actor_session_id=root.actor_session_id,
+        delegation_id="delegation_resume_child",
+    )
+    child_actor = ActorV5(
+        actor_id=child_context.actor_id,
+        kind=ActorKind.AGENT,
+        display_name="resumed child",
+        parent_actor_id=root.actor_id,
+    )
+    child_session = SessionV5(
+        session_id=child_context.actor_session_id,
+        actor_id=child_actor.actor_id,
+        started_at="2026-07-25T00:00:00Z",
+        capture_id=child_context.capture_id,
+        parent_session_id=root.actor_session_id,
+    )
+    first_token = first.register_child_context(
+        child_context,
+        actor=child_actor,
+        session=child_session,
+    )
+    first.spool.close()
+    first.proxy.stop(reason="not_started")
+    first.collector_server.stop()
+
+    resumed = CaptureSupervisor(
+        _supervisor_config(
+            bundle_root,
+            resume=True,
+            trace_id=first.binding.trace_id,
+            capture_id=first.binding.capture_id,
+        )
+    )
+    rotated_token = resumed.collector_server.context_token(
+        child_context.capture_id
+    )
+
+    assert rotated_token != first_token
+    assert not resumed.collector_server.token_authorizes(
+        child_context.capture_id,
+        first_token,
+    )
+    assert resumed.collector_server.token_authorizes(
+        child_context.capture_id,
+        rotated_token,
+    )
+    assert first_token not in json.dumps(tuple(resumed.spool.records()))
+
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        envelope_ids = tuple(
+            pool.map(
+                lambda _: resumed.finish_child_session(
+                    child_context.capture_id,
+                    ended_at="2026-07-25T01:00:00Z",
+                ),
+                range(64),
+            )
+        )
+
+    assert len(set(envelope_ids)) == 1
+    resumed.finalize()
+    assert len(
+        [
+            record
+            for record in resumed.spool.records()
+            if record["record_type"] == str(RawRecordType.SESSION_FINISHED)
+        ]
+    ) == 1
+
+
+def test_nonterminal_resume_rebuilds_durable_provider_counters(
+    tmp_path: Path,
+) -> None:
+    bundle_root = tmp_path / "resume-provider-counters"
+    first = CaptureSupervisor(_supervisor_config(bundle_root))
+    first.session.append(
+        RawRecordType.MODEL_CALL_STARTED,
+        call_id="call_before_resume",
+        payload={
+            "call_index": 1,
+            "provider_adapter": "openai_responses",
+            "provider_adapter_version": "1",
+            "route": "/v1/responses",
+            "stream": False,
+            "request_digest": "sha256:request",
+            "request_body": {
+                "model": "gpt-5.4",
+                "input": "persist counters",
+            },
+        },
+    )
+    first.session.append(
+        RawRecordType.RESPONSE_BODY,
+        call_id="call_before_resume",
+        payload={
+            "http_status": 200,
+            "response_body": {
+                "id": "response-before-resume",
+                "status": "completed",
+                "output": [],
+                "usage": {
+                    "input_tokens": 2,
+                    "output_tokens": 1,
+                    "total_tokens": 3,
+                },
+            },
+        },
+    )
+    first.session.append(
+        RawRecordType.MODEL_CALL_FINISHED,
+        call_id="call_before_resume",
+        payload={
+            "http_status": 200,
+            "provider_adapter": "openai_responses",
+            "usage_observed": True,
+            "usage": {
+                "input_tokens": 2,
+                "output_tokens": 1,
+                "total_tokens": 3,
+            },
+        },
+    )
+    first_seen = first.session.first_observed_at
+    last_seen = first.session.last_observed_at
+    first.spool.close()
+    first.proxy.stop(reason="not_started")
+    first.collector_server.stop()
+
+    resumed = CaptureSupervisor(
+        _supervisor_config(
+            bundle_root,
+            resume=True,
+            trace_id=first.binding.trace_id,
+            capture_id=first.binding.capture_id,
+        )
+    )
+    assert resumed.session.first_observed_at == first_seen
+    assert resumed.session.last_observed_at == last_seen
+    assert resumed.proxy.stats.snapshot()["calls_accepted"] == 1
+    assert resumed.proxy.stats.snapshot()["calls_completed"] == 1
+    assert resumed.proxy.stats.snapshot()["calls_normalized"] == 1
+
+    sealed = resumed.finalize()
+
+    assert sealed.coverage.calls_accepted == 1
+    assert sealed.coverage.calls_completed == 1
+    assert sealed.coverage.calls_normalized == 1
+
+
+def test_terminal_resume_reseals_identical_trace_and_coverage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle_root = tmp_path / "terminal-resume"
+    provenance_alias = AliasV1(
+        namespace=AliasNamespace.CORRELATION,
+        value="terminal-provenance",
+        target_id="external-terminal-source",
+        target_kind="external_trace",
+    )
+    initial_provenance = TraceProvenanceV5(
+        producer="terminal-resume-producer",
+        producer_version="7",
+        producer_commit="abc123",
+        model="gpt-5.4",
+        provider="openai",
+        harness="terminal-resume-harness",
+        aliases=(provenance_alias,),
+        extra={"stable": "provenance"},
+    )
+    initial_identity = TraceIdentityV5(
+        run_id="run-terminal-resume",
+        task_id="task-terminal-resume",
+        benchmark="trace-v5",
+        seed=17,
+    )
+    first = CaptureSupervisor(
+        _supervisor_config(
+            bundle_root,
+            provenance=initial_provenance,
+            identity=initial_identity,
+            root_actor_name="terminal orchestrator",
+            root_actor_kind=ActorKind.ORCHESTRATOR,
+        )
+    )
+    standalone_before = ActorV5(
+        actor_id="actor_terminal_standalone_before",
+        kind=ActorKind.ENVIRONMENT,
+        display_name="standalone before child",
+        parent_actor_id=first.binding.workload.root_actor_id,
+    )
+    child_actor = ActorV5(
+        actor_id="actor_terminal_child",
+        kind=ActorKind.AGENT,
+        display_name="terminal child",
+        parent_actor_id=first.binding.workload.root_actor_id,
+    )
+    child_session = SessionV5(
+        session_id="session_terminal_child",
+        actor_id=child_actor.actor_id,
+        started_at="2026-07-25T00:00:00Z",
+        parent_session_id=first.binding.workload.actor_session_id,
+    )
+    standalone_after = ActorV5(
+        actor_id="actor_terminal_standalone_after",
+        kind=ActorKind.VERIFIER,
+        display_name="standalone after child",
+        parent_actor_id=first.binding.workload.root_actor_id,
+    )
+    first.declare_actor(standalone_before)
+    first.declare_actor(child_actor, child_session)
+    first.declare_actor(standalone_after)
+    durable_alias = AliasV1(
+        namespace=AliasNamespace.CORRELATION,
+        value="terminal-resume-correlation",
+        target_id=first.binding.trace_id,
+        target_kind="trace",
+    )
+    first.declare_alias(durable_alias)
+
+    def upstream(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "application/json"},
+            json={
+                "id": "resp_terminal_resume",
+                "object": "response",
+                "status": "completed",
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [
+                            {"type": "output_text", "text": "captured"}
+                        ],
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 4,
+                    "output_tokens": 1,
+                    "total_tokens": 5,
+                },
+            },
+        )
+
+    first.proxy._client.close()
+    first.proxy._client = httpx.Client(
+        transport=httpx.MockTransport(upstream),
+        trust_env=False,
+    )
+    response = first.proxy.handle_provider_request(
+        path="/v1/responses",
+        headers={"content-type": "application/json"},
+        body=canonical_bytes(
+            {
+                "model": "gpt-5.4",
+                "input": "preserve this call",
+            }
+        ),
+    )
+    assert response.status_code == 200
+    termination = TerminationV5(
+        reason="child_exit",
+        exit_code=17,
+        detail="deterministic terminal resume",
+    )
+    original = first.finalize(
+        status=TraceStatus.FAILED,
+        termination=termination,
+        child_exit_code=17,
+    )
+    records = tuple(first.spool.records())
+    terminal_records = tuple(
+        record
+        for record in records
+        if record["record_type"] == str(RawRecordType.CAPTURE_FINISHED)
+    )
+
+    assert len(terminal_records) == 1
+    assert terminal_records[0] == records[-1]
+    assert terminal_records[0]["payload"]["schema_version"] == (
+        "synth.capture-finalization.v1"
+    )
+    assert original.coverage.calls_accepted == 1
+    assert original.coverage.calls_completed == 1
+    assert original.coverage.calls_normalized == 1
+    assert original.coverage.ended_at == terminal_records[0]["occurred_at"]
+    original_coverage_digest = original.coverage.content_digest
+    first.materialize_projection("v4")
+    assert first.sealed is not None
+    assert first.sealed.coverage.content_digest == original_coverage_digest
+    assert first._terminal_finalization is not None
+    cyclic_seed = json.loads(
+        json.dumps(first._terminal_finalization.to_dict())
+    )
+    cyclic_seed["coverage_seed"]["segment_count"] = 1
+    cyclic_seed["coverage_seed"]["content_digest"] = content_digest(
+        cyclic_seed["coverage_seed"]
+    )
+    cyclic_seed["content_digest"] = content_digest(cyclic_seed)
+    with pytest.raises(ValueError, match="derived bundle facts"):
+        finalization_from_dict(cyclic_seed)
+    malformed_alias = json.loads(
+        json.dumps(first._terminal_finalization.to_dict())
+    )
+    malformed_alias["aliases"] = [17]
+    malformed_alias["content_digest"] = content_digest(malformed_alias)
+    with pytest.raises(ValueError, match="non-object alias"):
+        finalization_from_dict(malformed_alias)
+    with pytest.raises(FinalizationError, match="provenance disagrees"):
+        TraceFinalizer(
+            binding=first.binding,
+            spool_root=first.bundle.trace_root(first.binding.trace_id),
+            segments=first.spool.segments,
+            provenance=TraceProvenanceV5(
+                producer="unauthorized-reseal",
+                producer_version="1",
+                captured_at=first._terminal_finalization.captured_at,
+            ),
+            identity=initial_identity,
+            root_actor_name="terminal orchestrator",
+            root_actor_kind=ActorKind.ORCHESTRATOR,
+        ).seal(
+            coverage=first._terminal_finalization.coverage_seed,
+            status=TraceStatus.FAILED,
+            termination=termination,
+            extra_actors=tuple(first._extra_actors),
+            extra_sessions=tuple(first._extra_sessions),
+            aliases=(durable_alias,),
+        )
+    import synth_containers.tracing.capture.finalizer as finalizer_module
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            finalizer_module,
+            "FINALIZER_VERSION",
+            "incompatible-finalizer",
+        )
+        with pytest.raises(FinalizationError, match="different finalizer version"):
+            TraceFinalizer(
+                binding=first.binding,
+                spool_root=first.bundle.trace_root(first.binding.trace_id),
+                segments=first.spool.segments,
+                provenance=first._terminal_finalization.provenance,
+                identity=initial_identity,
+                root_actor_name="terminal orchestrator",
+                root_actor_kind=ActorKind.ORCHESTRATOR,
+            ).seal(
+                coverage=first._terminal_finalization.coverage_seed,
+                status=TraceStatus.FAILED,
+                termination=termination,
+                extra_actors=tuple(first._extra_actors),
+                extra_sessions=tuple(first._extra_sessions),
+                aliases=(durable_alias,),
+            )
+
+    resealed = []
+    for _ in range(2):
+        resumed = CaptureSupervisor(
+            _supervisor_config(
+                bundle_root,
+                resume=True,
+                trace_id=first.binding.trace_id,
+                capture_id=first.binding.capture_id,
+                provenance=TraceProvenanceV5(
+                    producer="changed-resume-config",
+                    producer_version="999",
+                ),
+                identity=TraceIdentityV5(
+                    benchmark="changed-resume-config",
+                ),
+                root_actor_name="changed resume root",
+                root_actor_kind=ActorKind.TOOL,
+                upstream_base_url="not-a-live-provider-url",
+                proxy_host="terminal-resume-must-not-bind.invalid",
+                proxy_port=70000,
+                collector_host="terminal-resume-must-not-bind.invalid",
+                collector_port=70001,
+                websocket_host="terminal-resume-must-not-bind.invalid",
+                websocket_port=70002,
+                responses_websocket=True,
+                provider_endpoints=(
+                    ProviderEndpointConfig(
+                        route="/v1/responses",
+                        adapter_name="not-installed-on-resume",
+                        upstream_base_url="not-a-live-provider-url",
+                        auth_kind=UpstreamAuthKind.NONE,
+                    ),
+                ),
+            )
+        )
+        assert resumed.proxy._stopped is True
+        assert resumed.collector_server._stopped is True
+        with pytest.raises(RuntimeError, match="terminal capture cannot resume"):
+            resumed.start_capture()
+        with pytest.raises(RuntimeError, match="frozen"):
+            resumed.collector.event(
+                event_type="application.after-terminal",
+                payload={"forbidden": True},
+            )
+        resealed.append(resumed.finalize())
+
+    for candidate in resealed:
+        assert candidate.document.content_digest == original.document.content_digest
+        assert candidate.coverage.content_digest == original.coverage.content_digest
+        assert candidate.coverage.calls_accepted == 1
+        assert candidate.coverage.calls_completed == 1
+        assert candidate.coverage.calls_normalized == 1
+        assert candidate.document.lifecycle.status == TraceStatus.FAILED
+        assert candidate.document.lifecycle.termination == termination
+        assert candidate.document.identity == initial_identity
+        assert candidate.document.provenance.producer == (
+            initial_provenance.producer
+        )
+        assert candidate.document.provenance.producer_commit == "abc123"
+        assert candidate.document.provenance.aliases == (provenance_alias,)
+        assert candidate.document.provenance.captured_at == (
+            terminal_records[0]["occurred_at"]
+        )
+        assert candidate.document.aliases == (durable_alias,)
+        assert candidate.document.actors[0].display_name == "terminal orchestrator"
+        assert candidate.document.actors[0].kind == ActorKind.ORCHESTRATOR
+        assert tuple(
+            actor.actor_id for actor in candidate.document.actors[1:]
+        ) == (
+            standalone_before.actor_id,
+            child_actor.actor_id,
+            standalone_after.actor_id,
+        )
+
+
+def test_publication_retry_reuses_identical_terminal_candidate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    supervisor = CaptureSupervisor(
+        _supervisor_config(tmp_path / "publication-retry")
+    )
+    supervisor.collector.event(
+        event_type="application.before-publication-retry",
+        payload={"attempt": 1},
+    )
+    candidates: list[tuple[str, str]] = []
+    original_seal = TraceFinalizer.seal
+    original_write_trace = supervisor.bundle.write_trace
+    write_attempts = 0
+
+    def recording_seal(
+        finalizer: TraceFinalizer,
+        **kwargs: object,
+    ) -> object:
+        candidate = original_seal(finalizer, **kwargs)
+        candidates.append(
+            (
+                candidate.document.content_digest,
+                candidate.coverage.content_digest,
+            )
+        )
+        return candidate
+
+    def fail_first_write(*args: object, **kwargs: object) -> object:
+        nonlocal write_attempts
+        write_attempts += 1
+        if write_attempts == 1:
+            raise OSError("injected trace publication failure")
+        return original_write_trace(*args, **kwargs)
+
+    monkeypatch.setattr(TraceFinalizer, "seal", recording_seal)
+    monkeypatch.setattr(supervisor.bundle, "write_trace", fail_first_write)
+
+    with pytest.raises(OSError, match="injected trace publication failure"):
+        supervisor.finalize()
+    sealed = supervisor.finalize()
+
+    assert len(candidates) == 2
+    assert candidates[0] == candidates[1]
+    assert candidates[-1] == (
+        sealed.document.content_digest,
+        sealed.coverage.content_digest,
+    )
+    assert len(
+        [
+            record
+            for record in supervisor.spool.records()
+            if record["record_type"] == str(RawRecordType.CAPTURE_FINISHED)
+        ]
+    ) == 1
+
+
+def test_finalizer_rejects_provider_adapter_version_drift(
+    tmp_path: Path,
+) -> None:
+    supervisor = CaptureSupervisor(
+        _supervisor_config(tmp_path / "adapter-version-drift")
+    )
+    supervisor.session.append(
+        RawRecordType.MODEL_CALL_STARTED,
+        call_id="call_adapter_version_drift",
+        payload={
+            "call_index": 1,
+            "provider_adapter": "openai_responses",
+            "provider_adapter_version": "999",
+            "route": "/v1/responses",
+            "stream": False,
+            "request_digest": "sha256:request",
+            "request_body": {
+                "model": "gpt-5.4",
+                "input": "reject changed normalizer",
+            },
+        },
+    )
+    supervisor.session.append(
+        RawRecordType.MODEL_CALL_FINISHED,
+        call_id="call_adapter_version_drift",
+        payload={
+            "http_status": 200,
+            "provider_adapter": "openai_responses",
+            "usage_observed": False,
+        },
+    )
+
+    with pytest.raises(
+        FinalizationError,
+        match="does not match installed openai_responses@1",
+    ):
+        supervisor.finalize()
+
+
+def test_finalize_waits_for_accepted_direct_provider_call(
+    tmp_path: Path,
+) -> None:
+    supervisor = CaptureSupervisor(
+        _supervisor_config(tmp_path / "direct-call-drain")
+    )
+    upstream_entered = threading.Event()
+    release_upstream = threading.Event()
+
+    def upstream(_: httpx.Request) -> httpx.Response:
+        upstream_entered.set()
+        assert release_upstream.wait(timeout=10.0)
+        return httpx.Response(
+            200,
+            headers={"content-type": "application/json"},
+            json={
+                "id": "resp_drain",
+                "object": "response",
+                "status": "completed",
+                "output": [],
+                "usage": {
+                    "input_tokens": 1,
+                    "output_tokens": 0,
+                    "total_tokens": 1,
+                },
+            },
+        )
+
+    supervisor.proxy._client.close()
+    supervisor.proxy._client = httpx.Client(
+        transport=httpx.MockTransport(upstream),
+        trust_env=False,
+    )
+
+    def call_provider() -> object:
+        return supervisor.proxy.handle_provider_request(
+            path="/v1/responses",
+            headers={"content-type": "application/json"},
+            body=canonical_bytes(
+                {"model": "gpt-5.4", "input": "drain before terminal"}
+            ),
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        call_future = pool.submit(call_provider)
+        assert upstream_entered.wait(timeout=10.0)
+        finalize_future = pool.submit(supervisor.finalize)
+        assert not finalize_future.done()
+        release_upstream.set()
+        response = call_future.result(timeout=10.0)
+        sealed = finalize_future.result(timeout=10.0)
+
+    assert response.status_code == 200
+    assert sealed.coverage.calls_accepted == 1
+    assert sealed.coverage.calls_completed == 1
+    records = tuple(supervisor.spool.records())
+    assert records[-1]["record_type"] == str(RawRecordType.CAPTURE_FINISHED)
+    assert next(
+        record["ordinal"]
+        for record in records
+        if record["record_type"] == str(RawRecordType.MODEL_CALL_FINISHED)
+    ) < records[-1]["ordinal"]
+    with pytest.raises(CaptureClosedError):
+        call_provider()
+
+
+def test_finalize_waits_for_models_passthrough(
+    tmp_path: Path,
+) -> None:
+    supervisor = CaptureSupervisor(
+        _supervisor_config(tmp_path / "models-call-drain")
+    )
+    upstream_entered = threading.Event()
+    release_upstream = threading.Event()
+
+    def upstream(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/models"
+        upstream_entered.set()
+        assert release_upstream.wait(timeout=10.0)
+        return httpx.Response(200, json={"object": "list", "data": []})
+
+    supervisor.proxy._client.close()
+    supervisor.proxy._client = httpx.Client(
+        transport=httpx.MockTransport(upstream),
+        trust_env=False,
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        models_future = pool.submit(
+            supervisor.proxy.handle_models,
+            headers={},
+        )
+        assert upstream_entered.wait(timeout=10.0)
+        finalize_future = pool.submit(supervisor.finalize)
+        assert not finalize_future.done()
+        release_upstream.set()
+        response = models_future.result(timeout=10.0)
+        sealed = finalize_future.result(timeout=10.0)
+
+    assert response.status_code == 200
+    assert sealed.coverage.calls_accepted == 0
+    assert tuple(supervisor.spool.records())[-1]["record_type"] == str(
+        RawRecordType.CAPTURE_FINISHED
+    )
+    with pytest.raises(CaptureClosedError):
+        supervisor.proxy.handle_models(headers={})
+
+
+def test_upstream_error_fact_restores_live_proxy_counters(
+    tmp_path: Path,
+) -> None:
+    session = _session(tmp_path, capture_id="capture_upstream_error")
+    proxy = CaptureProxy(
+        session,
+        upstream_base_url="https://api.openai.com/v1",
+    )
+
+    def upstream(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("provider unavailable", request=request)
+
+    proxy._client.close()
+    proxy._client = httpx.Client(
+        transport=httpx.MockTransport(upstream),
+        trust_env=False,
+    )
+
+    with pytest.raises(httpx.ConnectError):
+        proxy.handle_chat_completions(
+            headers={"content-type": "application/json"},
+            body=canonical_bytes({"model": "gpt-5.4", "messages": []}),
+        )
+
+    session.spool.close()
+    restored = ProxyStats()
+    restored.restore(tuple(session.spool.records()))
+    assert proxy.stats.calls_accepted == restored.calls_accepted == 1
+    assert proxy.stats.calls_errored == restored.calls_errored == 1
+
+
+def test_capture_service_shutdown_error_never_writes_terminal_fact(
+    tmp_path: Path,
+) -> None:
+    supervisor = CaptureSupervisor(
+        _supervisor_config(tmp_path / "shutdown-fail-closed")
+    )
+
+    class BrokenWebSocketServer:
+        def stop(self) -> None:
+            raise RuntimeError("relay still active")
+
+    supervisor.websocket_server = BrokenWebSocketServer()
+
+    with pytest.raises(CaptureNotReady, match="websocket=RuntimeError"):
+        supervisor.finalize()
+
+    assert not any(
+        record["record_type"] == str(RawRecordType.CAPTURE_FINISHED)
+        for record in supervisor.spool.records()
+    )
 
 
 def test_configured_auth_case_insensitively_replaces_caller_auth() -> None:
@@ -640,11 +1479,6 @@ def test_codex_prompt_cache_key_exactly_attributes_provider_call_to_native_child
         },
     )
     supervisor.finish_child_session(child_session.session_id)
-    supervisor.session.append(
-        RawRecordType.CAPTURE_FINISHED,
-        payload={"reason": "test"},
-    )
-
     sealed = supervisor.finalize()
     call_span = next(
         span
@@ -704,7 +1538,11 @@ def test_supervisor_finishes_registered_child_by_capture_or_session_id(
             started_at="2026-07-25T00:00:00Z",
             parent_session_id=child.parent_actor_session_id,
         )
-        supervisor.register_child_context(child, actor=actor, session=session)
+        child_token = supervisor.register_child_context(
+            child,
+            actor=actor,
+            session=session,
+        )
 
         first = supervisor.finish_child_session(
             child.capture_id,
@@ -726,7 +1564,7 @@ def test_supervisor_finishes_registered_child_by_capture_or_session_id(
         emitter = TraceEmitter(
             supervisor.collector_server.base_url,
             child,
-            collector_token=supervisor._collector_token,
+            collector_token=child_token,
         )
         try:
             with pytest.raises(httpx.HTTPStatusError) as late_event:
@@ -856,9 +1694,21 @@ def test_finalizer_rejects_local_child_record_after_terminal_fact(
         RawRecordType.CAPTURE_FINISHED,
         payload={"reason": "test"},
     )
+    supervisor.session.close()
+    finalizer = TraceFinalizer(
+        binding=supervisor.binding,
+        spool_root=supervisor.bundle.trace_root(supervisor.binding.trace_id),
+        segments=supervisor.spool.segments,
+        provenance=supervisor.config.provenance,
+        identity=supervisor.config.identity,
+    )
 
     with pytest.raises(FinalizationError, match="after session.finished"):
-        supervisor.finalize()
+        finalizer.seal(
+            coverage=supervisor.receipt,
+            extra_actors=tuple(supervisor._extra_actors),
+            extra_sessions=tuple(supervisor._extra_sessions),
+        )
 
 
 def test_generic_runner_honors_external_binding_and_materializes_projections(
@@ -999,7 +1849,8 @@ def test_responses_websocket_relay_redacts_and_preserves_per_call_order(
 
     monkeypatch.setattr(websockets.asyncio.client, "connect", fake_connect)
     downstream = FakeDownstream()
-    relay = ResponsesWebSocketRelay(session)
+    stats = ProxyStats()
+    relay = ResponsesWebSocketRelay(session, stats=stats)
 
     with pytest.raises(StopAsyncIteration):
         asyncio.run(
@@ -1035,6 +1886,7 @@ def test_responses_websocket_relay_redacts_and_preserves_per_call_order(
     assert started["payload"]["route"] == "/v1/responses"
     assert started["payload"]["upstream_host"] == "api.openai.com"
     assert started["payload"]["upstream_path"] == "/v1/responses"
+    assert started["payload"]["provider_adapter_version"] == "1"
     assert (
         started["payload"]["request_body"]["response"]["api_key"]
         == REDACTED
@@ -1046,6 +1898,11 @@ def test_responses_websocket_relay_redacts_and_preserves_per_call_order(
     assert "sk-websocket-response-secret" not in frame["payload"]["frame"]
     assert finished["payload"]["frames"] == 1
     assert finished["payload"]["usage_observed"] is True
+    assert stats.calls_accepted == 1
+    assert stats.calls_completed == 1
+    assert stats.calls_errored == 0
+    assert stats.calls_normalized == 1
+    assert stats.frames == 1
     forwarded = connect_arguments["additional_headers"]
     assert isinstance(forwarded, dict)
     assert forwarded["authorization"] == "Bearer downstream-memory-only-token"
@@ -1180,6 +2037,83 @@ def test_responses_websocket_server_accepts_capability_without_custom_headers() 
 
     assert connection.closed is None
     assert relay.received == ("actor_runner_ws", "session_runner_ws")
+
+
+def test_responses_websocket_stop_aborts_hung_upstream_before_returning(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import websockets.asyncio.client
+
+    real_connect = websockets.asyncio.client.connect
+    upstream_waiting = threading.Event()
+    upstream_closed = threading.Event()
+
+    class HungUpstream:
+        async def __aenter__(self) -> "HungUpstream":
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            upstream_closed.set()
+
+        async def send(self, _message: str) -> None:
+            return None
+
+        def __aiter__(self) -> "HungUpstream":
+            return self
+
+        async def __anext__(self) -> str:
+            upstream_waiting.set()
+            await asyncio.Future()
+            raise AssertionError("hung upstream unexpectedly resumed")
+
+    monkeypatch.setattr(
+        websockets.asyncio.client,
+        "connect",
+        lambda *_args, **_kwargs: HungUpstream(),
+    )
+    session = _session(tmp_path, capture_id="capture_hung_websocket")
+    context = session.binding.context_for_child()
+    stats = ProxyStats()
+    server = ResponsesWebSocketServer(
+        ResponsesWebSocketRelay(session, stats=stats),
+        context_resolver=lambda _headers: context,
+    ).start()
+
+    async def client() -> None:
+        async with real_connect(server.url) as connection:
+            await connection.send(
+                json.dumps(
+                    {
+                        "type": "response.create",
+                        "response": {
+                            "model": "gpt-5.4",
+                            "input": "wait forever",
+                        },
+                    }
+                )
+            )
+            await connection.wait_closed()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        client_future = pool.submit(asyncio.run, client())
+        assert upstream_waiting.wait(timeout=10.0)
+        server.stop()
+        client_future.result(timeout=10.0)
+
+    session.spool.close()
+    records = tuple(session.spool.records())
+    finished = next(
+        record
+        for record in records
+        if record["record_type"] == str(RawRecordType.MODEL_CALL_FINISHED)
+    )
+    assert upstream_closed.wait(timeout=1.0)
+    assert not server._thread.is_alive()
+    assert finished["payload"]["provider_status"] == "capture_shutdown"
+    assert stats.calls_accepted == 1
+    assert stats.calls_errored == 1
+    assert stats.calls_normalized == 1
 
 
 def test_raw_repair_does_not_promote_complete_logically_forged_envelope(

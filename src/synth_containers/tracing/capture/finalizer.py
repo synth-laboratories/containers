@@ -38,7 +38,13 @@ from ..models.completeness import (
 )
 from ..models.document import TraceCaptureSummaryV5, TraceDocumentV5
 from ..models.events import EventOrderV1, EventStatus, EventType, EventV5
-from ..models.identity import AliasNamespace, AliasV1, TraceIdentityV5, TraceProvenanceV5
+from ..models.identity import (
+    AliasNamespace,
+    AliasV1,
+    TraceContextV1,
+    TraceIdentityV5,
+    TraceProvenanceV5,
+)
 from ..models.messages import MessageNodeV5
 from ..models.spans import (
     SpanKind,
@@ -51,7 +57,12 @@ from ..models.spans import (
 from ..models.tokens import TokenCaptureV5
 from ..store.filesystem import FilesystemBlobStore
 from .binding import TraceCaptureBindingV1
-from .coverage import CaptureCoverageReceiptV1, CaptureScope, Completeness
+from .coverage import (
+    CaptureCoverageReceiptV1,
+    CaptureScope,
+    Completeness,
+    finalization_from_dict,
+)
 from .envelope import RawRecordType
 from .redaction import CORRELATION_HEADER_PREFIXES, CORRELATION_HEADERS
 from .spool import TraceSegmentManifestV1, read_segments
@@ -64,11 +75,32 @@ FINALIZER_VERSION = "1"
 _CALL_RECORD_TYPES = frozenset(
     {
         RawRecordType.MODEL_CALL_STARTED,
+        RawRecordType.UPSTREAM_ATTEMPT_STARTED,
+        RawRecordType.UPSTREAM_ATTEMPT_FINISHED,
         RawRecordType.RESPONSE_FRAME,
         RawRecordType.RESPONSE_BODY,
         RawRecordType.MODEL_CALL_FINISHED,
     }
 )
+_CALL_FOLLOWUP_RECORD_TYPES = _CALL_RECORD_TYPES - {
+    RawRecordType.MODEL_CALL_STARTED,
+}
+
+_LOCAL_ALIAS_TARGET_KINDS = frozenset(
+    {
+        "trace",
+        "actor",
+        "session",
+        "span",
+        "event",
+        "message",
+        "part",
+        "artifact",
+        "branch",
+        "error",
+    }
+)
+_EXTERNAL_ALIAS_TARGET_KINDS = frozenset({"external_trace"})
 
 
 class FinalizationError(RuntimeError):
@@ -90,6 +122,7 @@ class _CallState:
     request_headers: dict[str, str] = field(default_factory=dict)
     response_body: dict[str, Any] | None = None
     response_truncated: bool = False
+    response_body_ordinal: int = 0
     http_status: int | None = None
     started_ordinal: int = 0
     finished_ordinal: int = 0
@@ -102,6 +135,8 @@ class _CallState:
     request_body_ref: dict[str, Any] | None = None
     response_body_ref: dict[str, Any] | None = None
     native_correlation: dict[str, str] | None = None
+    upstream_attempts: dict[str, int] = field(default_factory=dict)
+    finished_upstream_attempts: set[str] = field(default_factory=set)
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,6 +183,13 @@ class TraceFinalizer:
         extra_sessions: tuple[SessionV5, ...] = (),
         aliases: tuple[AliasV1, ...] = (),
     ) -> SealedCapture:
+        normalized_status = str(status)
+        if normalized_status not in {
+            str(TraceStatus.COMPLETED),
+            str(TraceStatus.FAILED),
+            str(TraceStatus.INTERRUPTED),
+        }:
+            raise FinalizationError("sealed trace status must be terminal")
         records = list(read_segments(self.spool_root, self.segments))
         calls: dict[str, _CallState] = {}
         order: list[str] = []
@@ -163,8 +205,12 @@ class TraceFinalizer:
         started_at = records[0]["occurred_at"] if records else utc_now()
         ended_at = records[-1]["occurred_at"] if records else started_at
         application_records: list[Mapping[str, Any]] = []
+        actor_declaration_records: list[Mapping[str, Any]] = []
+        alias_declaration_records: list[Mapping[str, Any]] = []
+        child_registration_records: list[Mapping[str, Any]] = []
         session_finish_records: list[Mapping[str, Any]] = []
-        terminal_capture_record = False
+        capture_finish_records: list[Mapping[str, Any]] = []
+        terminal_finalization = None
 
         for record in records:
             record_type = str(record.get("record_type") or "")
@@ -178,8 +224,30 @@ class TraceFinalizer:
                     f"capture record {record_type!r} is missing call_id at ordinal "
                     f"{record.get('ordinal')!r}"
                 )
-            call_id = str(raw_call_id)
+            call_id = str(raw_call_id) if raw_call_id is not None else ""
+            raw_attempt_id = record.get("upstream_attempt_id")
+            if (
+                raw_attempt_id is None
+                and record_type
+                in {
+                    RawRecordType.UPSTREAM_ATTEMPT_STARTED,
+                    RawRecordType.UPSTREAM_ATTEMPT_FINISHED,
+                }
+            ):
+                raise FinalizationError(
+                    f"capture record {record_type!r} is missing "
+                    f"upstream_attempt_id at ordinal {record.get('ordinal')!r}"
+                )
+            attempt_id = (
+                str(raw_attempt_id)
+                if raw_attempt_id is not None
+                else ""
+            )
             if record_type == RawRecordType.MODEL_CALL_STARTED:
+                if call_id in calls:
+                    raise FinalizationError(
+                        f"call {call_id!r} has duplicate model_call.started records"
+                    )
                 calls[call_id] = _CallState(
                     call_id=call_id,
                     call_index=int(payload.get("call_index") or 0),
@@ -218,14 +286,65 @@ class TraceFinalizer:
                 if not started.request_body and started.request_body_ref:
                     started.request_body = self._load_body_ref(started.request_body_ref)
                 order.append(str(call_id))
-            elif record_type == RawRecordType.RESPONSE_FRAME and call_id in calls:
+            elif record_type in _CALL_FOLLOWUP_RECORD_TYPES:
+                state = calls.get(call_id)
+                if state is None:
+                    raise FinalizationError(
+                        f"capture record {record_type!r} for call {call_id!r} "
+                        "precedes model_call.started"
+                    )
+                if state.finished_ordinal:
+                    if record_type == RawRecordType.MODEL_CALL_FINISHED:
+                        raise FinalizationError(
+                            f"call {call_id!r} has duplicate model_call.finished records"
+                        )
+                    raise FinalizationError(
+                        f"capture record {record_type!r} for call {call_id!r} "
+                        "follows model_call.finished"
+                    )
+            if record_type == RawRecordType.UPSTREAM_ATTEMPT_STARTED:
+                state = calls[call_id]
+                if attempt_id in state.upstream_attempts:
+                    raise FinalizationError(
+                        f"call {call_id!r} has duplicate upstream attempt "
+                        f"{attempt_id!r}"
+                    )
+                attempt = int(payload.get("attempt") or 0)
+                if attempt <= 0:
+                    raise FinalizationError(
+                        f"call {call_id!r} has invalid upstream attempt number"
+                    )
+                state.upstream_attempts[attempt_id] = attempt
+            elif record_type == RawRecordType.UPSTREAM_ATTEMPT_FINISHED:
+                state = calls[call_id]
+                if attempt_id not in state.upstream_attempts:
+                    raise FinalizationError(
+                        f"call {call_id!r} finishes unknown upstream attempt "
+                        f"{attempt_id!r}"
+                    )
+                if attempt_id in state.finished_upstream_attempts:
+                    raise FinalizationError(
+                        f"call {call_id!r} has duplicate upstream attempt finish "
+                        f"{attempt_id!r}"
+                    )
+                if int(payload.get("attempt") or 0) != state.upstream_attempts[attempt_id]:
+                    raise FinalizationError(
+                        f"call {call_id!r} upstream attempt number changed"
+                    )
+                state.finished_upstream_attempts.add(attempt_id)
+            elif record_type == RawRecordType.RESPONSE_FRAME:
                 frame = str(payload.get("frame") or "")
                 frame_ref = payload.get("frame_ref")
                 if not frame and isinstance(frame_ref, Mapping):
                     frame = self._load_frame_ref(dict(frame_ref))
                 calls[call_id].frames.append(frame)
-            elif record_type == RawRecordType.RESPONSE_BODY and call_id in calls:
+            elif record_type == RawRecordType.RESPONSE_BODY:
                 state = calls[call_id]
+                if state.response_body_ordinal:
+                    raise FinalizationError(
+                        f"call {call_id!r} has duplicate response.body records"
+                    )
+                state.response_body_ordinal = int(record["ordinal"]) + 1
                 body = payload.get("response_body")
                 state.response_body = dict(body) if isinstance(body, Mapping) else None
                 state.response_body_ref = (
@@ -237,8 +356,17 @@ class TraceFinalizer:
                     state.response_body = self._load_body_ref(state.response_body_ref)
                 state.response_truncated = bool(payload.get("truncated"))
                 state.http_status = _int(payload.get("http_status"))
-            elif record_type == RawRecordType.MODEL_CALL_FINISHED and call_id in calls:
+            elif record_type == RawRecordType.MODEL_CALL_FINISHED:
                 state = calls[call_id]
+                unfinished_attempts = (
+                    set(state.upstream_attempts)
+                    - state.finished_upstream_attempts
+                )
+                if unfinished_attempts:
+                    raise FinalizationError(
+                        f"call {call_id!r} finished before upstream attempts: "
+                        + ", ".join(sorted(unfinished_attempts))
+                    )
                 state.ended_at = str(payload.get("ended_at") or record["occurred_at"])
                 state.http_status = _int(payload.get("http_status")) or state.http_status
                 usage_payload = payload.get("usage")
@@ -254,12 +382,150 @@ class TraceFinalizer:
                 artifacts.append(_artifact_from_payload(payload, occurred_at=record["occurred_at"]))
             elif record_type == RawRecordType.APPLICATION_EVENT:
                 application_records.append(record)
+            elif record_type == RawRecordType.ACTOR_DECLARED:
+                actor_declaration_records.append(record)
+            elif record_type == RawRecordType.ALIAS_DECLARED:
+                alias_declaration_records.append(record)
+            elif record_type == RawRecordType.CHILD_REGISTERED:
+                child_registration_records.append(record)
             elif record_type == RawRecordType.SESSION_FINISHED:
                 session_finish_records.append(record)
                 application_records.append(record)
             elif record_type == RawRecordType.CAPTURE_FINISHED:
-                terminal_capture_record = True
+                capture_finish_records.append(record)
 
+        if len(capture_finish_records) > 1:
+            raise FinalizationError("capture has duplicate capture.finished records")
+        if capture_finish_records and (
+            not records
+            or int(capture_finish_records[0]["ordinal"])
+            != int(records[-1]["ordinal"])
+        ):
+            raise FinalizationError("capture.finished must be the final raw record")
+        terminal_capture_record = bool(capture_finish_records)
+        if capture_finish_records:
+            terminal_record = capture_finish_records[0]
+            terminal_payload = terminal_record.get("payload")
+            if (
+                isinstance(terminal_payload, Mapping)
+                and terminal_payload.get("schema_version")
+            ):
+                try:
+                    finalization = finalization_from_dict(dict(terminal_payload))
+                except (TypeError, ValueError) as exc:
+                    raise FinalizationError(
+                        f"capture.finished snapshot is invalid: {exc}"
+                    ) from exc
+                terminal_occurred_at = str(
+                    terminal_record.get("occurred_at") or ""
+                )
+                if finalization.captured_at != terminal_occurred_at:
+                    raise FinalizationError(
+                        "capture.finished captured_at must equal record occurrence"
+                    )
+                if str(finalization.status) != normalized_status:
+                    raise FinalizationError(
+                        "capture.finished status disagrees with finalizer input"
+                    )
+                if finalization.termination != termination:
+                    raise FinalizationError(
+                        "capture.finished termination disagrees with finalizer input"
+                    )
+                if (
+                    finalization.coverage_seed.content_digest
+                    != coverage.content_digest
+                ):
+                    raise FinalizationError(
+                        "capture.finished coverage disagrees with finalizer input"
+                    )
+                if (
+                    finalization.coverage_seed.capture_id
+                    != self.binding.capture_id
+                    or finalization.coverage_seed.binding_id
+                    != self.binding.binding_id
+                    or finalization.coverage_seed.binding_digest
+                    != self.binding.content_digest
+                ):
+                    raise FinalizationError(
+                        "capture.finished coverage does not match the binding"
+                    )
+                if (
+                    finalization.finalizer_name != FINALIZER_NAME
+                    or finalization.finalizer_version != FINALIZER_VERSION
+                ):
+                    raise FinalizationError(
+                        "capture.finished requires a different finalizer version"
+                    )
+                if finalization.provenance != self.provenance:
+                    raise FinalizationError(
+                        "capture.finished provenance disagrees with finalizer input"
+                    )
+                if finalization.identity != self.identity:
+                    raise FinalizationError(
+                        "capture.finished identity disagrees with finalizer input"
+                    )
+                if finalization.root_actor_name != self.root_actor_name:
+                    raise FinalizationError(
+                        "capture.finished root actor name disagrees with finalizer input"
+                    )
+                if str(finalization.root_actor_kind) != str(self.root_actor_kind):
+                    raise FinalizationError(
+                        "capture.finished root actor kind disagrees with finalizer input"
+                    )
+                terminal_finalization = finalization
+                ended_at = terminal_occurred_at
+
+        extra_actors = _resolve_actor_declarations(
+            tuple(actor_declaration_records),
+            extra_actors=extra_actors,
+            root_actor_id=self.binding.workload.root_actor_id,
+            root_session_id=self.binding.workload.actor_session_id,
+        )
+        aliases = _resolve_alias_declarations(
+            tuple(alias_declaration_records),
+            aliases=aliases,
+            root_actor_id=self.binding.workload.root_actor_id,
+            root_session_id=self.binding.workload.actor_session_id,
+        )
+        extra_actors, extra_sessions = _resolve_child_registrations(
+            tuple(child_registration_records),
+            extra_actors=extra_actors,
+            extra_sessions=extra_sessions,
+            trace_id=self.binding.trace_id,
+            root_actor_id=self.binding.workload.root_actor_id,
+            root_session_id=self.binding.workload.actor_session_id,
+            root_capture_id=self.binding.capture_id,
+        )
+        if terminal_finalization is not None:
+            expected_actor_ids, expected_session_ids = _declared_identity_order(
+                tuple(records)
+            )
+            if tuple(actor.actor_id for actor in extra_actors) != expected_actor_ids:
+                raise FinalizationError(
+                    "typed capture finalization actors disagree with raw declarations"
+                )
+            if (
+                tuple(session.session_id for session in extra_sessions)
+                != expected_session_ids
+            ):
+                raise FinalizationError(
+                    "typed capture finalization sessions disagree with raw declarations"
+                )
+            if aliases != _declared_aliases(tuple(alias_declaration_records)):
+                raise FinalizationError(
+                    "typed capture finalization aliases disagree with raw declarations"
+                )
+            if aliases != terminal_finalization.aliases:
+                raise FinalizationError(
+                    "typed capture finalization aliases disagree with its snapshot"
+                )
+        started_at = min(
+            (started_at, *(session.started_at for session in extra_sessions)),
+            key=lambda value: _parse_lifecycle_timestamp(
+                value,
+                field="trace/session started_at",
+            ),
+        )
         extra_sessions, lifecycle_diagnostics = _resolve_extra_session_lifecycle(
             extra_sessions,
             finish_records=tuple(session_finish_records),
@@ -430,7 +696,7 @@ class TraceFinalizer:
             ),
             completeness_reasons=tuple(sorted(set(diagnostics))),
             finalization_status="sealed",
-            ended_at=utc_now(),
+            ended_at=ended_at,
         ).sealed()
 
         completeness = TraceCompletenessV5(
@@ -462,6 +728,38 @@ class TraceFinalizer:
             reasons=tuple(sorted(set(diagnostics))),
         )
 
+        all_actors = (root_actor, *extra_actors)
+        all_sessions = (root_session, *attributed_extra_sessions)
+        actors_by_id = {actor.actor_id: actor for actor in all_actors}
+        sessions_by_id = {session.session_id: session for session in all_sessions}
+        if len(actors_by_id) != len(all_actors):
+            raise FinalizationError("trace actor identities are not unique")
+        if len(sessions_by_id) != len(all_sessions):
+            raise FinalizationError("trace session identities are not unique")
+        for actor in extra_actors:
+            if (
+                actor.parent_actor_id is not None
+                and actor.parent_actor_id not in actors_by_id
+            ):
+                raise FinalizationError(
+                    f"child actor {actor.actor_id} references unknown parent"
+                )
+        for child in attributed_extra_sessions:
+            if child.actor_id not in actors_by_id:
+                raise FinalizationError(
+                    f"child session {child.session_id} references unknown actor"
+                )
+            if child.parent_session_id:
+                parent = sessions_by_id.get(child.parent_session_id)
+                if parent is None:
+                    raise FinalizationError(
+                        f"child session {child.session_id} references unknown parent"
+                    )
+                if actors_by_id[child.actor_id].parent_actor_id != parent.actor_id:
+                    raise FinalizationError(
+                        "child actor parent disagrees with session topology"
+                    )
+
         document = TraceDocumentV5(
             trace_id=self.binding.trace_id,
             trace_kind=self.binding.trace_kind,
@@ -488,19 +786,31 @@ class TraceFinalizer:
             provenance=replace(
                 self.provenance,
                 transformation_chain=tuple(
-                    sorted({f"{item.name}@{item.version}" for item in transformations})
+                    dict.fromkeys(
+                        (
+                            *self.provenance.transformation_chain,
+                            *sorted(
+                                {
+                                    f"{item.name}@{item.version}"
+                                    for item in transformations
+                                }
+                            ),
+                        )
+                    )
                 ),
             ),
             completeness=completeness,
-            actors=(root_actor, *extra_actors),
-            sessions=(root_session, *attributed_extra_sessions),
+            actors=all_actors,
+            sessions=all_sessions,
             messages=tuple(messages),
             spans=tuple(spans),
             events=tuple(sorted(events, key=lambda item: item.order.chronological_sequence or 0)),
             artifacts=tuple(artifacts),
             usage=total_usage,
             aliases=aliases,
-        ).sealed()
+        )
+        _validate_alias_integrity(document)
+        document = document.sealed()
 
         return SealedCapture(
             document=document,
@@ -664,6 +974,12 @@ class TraceFinalizer:
         if adapter is None:
             raise FinalizationError(
                 f"capture names unsupported provider adapter {state.provider_adapter!r}"
+            )
+        if state.provider_adapter_version != adapter.version:
+            raise FinalizationError(
+                "capture provider adapter version "
+                f"{state.provider_adapter_version!r} does not match installed "
+                f"{adapter.name}@{adapter.version}"
             )
 
         request_messages = adapter.normalize_request(state.request_body)
@@ -1023,6 +1339,301 @@ def _call_coverage(
     return model_calls, usage, raw_provider
 
 
+def _declared_identity_order(
+    records: tuple[Mapping[str, Any], ...],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    actor_ids: list[str] = []
+    session_ids: list[str] = []
+    for record in records:
+        record_type = str(record.get("record_type") or "")
+        payload = record.get("payload")
+        if not isinstance(payload, Mapping):
+            continue
+        if record_type == str(RawRecordType.ACTOR_DECLARED):
+            actor_payload = payload.get("actor")
+            if not isinstance(actor_payload, Mapping):
+                raise FinalizationError("actor.declared payload is invalid")
+            actor = _registered_actor(actor_payload)
+            if actor.actor_id not in actor_ids:
+                actor_ids.append(actor.actor_id)
+        elif record_type == str(RawRecordType.CHILD_REGISTERED):
+            actor_payload = payload.get("actor")
+            session_payload = payload.get("session")
+            if not isinstance(actor_payload, Mapping) or not isinstance(
+                session_payload,
+                Mapping,
+            ):
+                raise FinalizationError("child.registered identity is invalid")
+            actor = _registered_actor(actor_payload)
+            session = _registered_session(session_payload)
+            if actor.actor_id not in actor_ids:
+                actor_ids.append(actor.actor_id)
+            session_ids.append(session.session_id)
+    return tuple(actor_ids), tuple(session_ids)
+
+
+def _declared_aliases(
+    records: tuple[Mapping[str, Any], ...],
+) -> tuple[AliasV1, ...]:
+    aliases: list[AliasV1] = []
+    for record in records:
+        payload = record.get("payload")
+        alias_payload = (
+            payload.get("alias") if isinstance(payload, Mapping) else None
+        )
+        if not isinstance(alias_payload, Mapping):
+            raise FinalizationError("alias.declared payload is invalid")
+        try:
+            aliases.append(AliasV1(**dict(alias_payload)))
+        except (TypeError, ValueError) as exc:
+            raise FinalizationError(
+                f"alias.declared payload is invalid: {exc}"
+            ) from exc
+    return tuple(aliases)
+
+
+def _resolve_actor_declarations(
+    records: tuple[Mapping[str, Any], ...],
+    *,
+    extra_actors: tuple[ActorV5, ...],
+    root_actor_id: str,
+    root_session_id: str,
+) -> tuple[ActorV5, ...]:
+    actors = {actor.actor_id: actor for actor in extra_actors}
+    if len(actors) != len(extra_actors):
+        raise FinalizationError("extra actors contain duplicate actor ids")
+    declared: set[str] = set()
+    for record in records:
+        if (
+            str(record.get("actor_id") or "") != root_actor_id
+            or str(record.get("session_id") or "") != root_session_id
+        ):
+            raise FinalizationError(
+                "actor.declared must belong to the root session"
+            )
+        payload = record.get("payload")
+        actor_payload = (
+            payload.get("actor") if isinstance(payload, Mapping) else None
+        )
+        if not isinstance(actor_payload, Mapping):
+            raise FinalizationError("actor.declared payload is invalid")
+        actor = _registered_actor(actor_payload)
+        if actor.actor_id == root_actor_id:
+            raise FinalizationError("actor.declared collides with the root actor")
+        if actor.parent_actor_id == actor.actor_id:
+            raise FinalizationError("actor.declared contains a parent cycle")
+        if actor.actor_id in declared:
+            raise FinalizationError(
+                f"actor {actor.actor_id} has duplicate declarations"
+            )
+        prior = actors.get(actor.actor_id)
+        if prior is not None and prior.content_digest != actor.content_digest:
+            raise FinalizationError(
+                f"actor {actor.actor_id} declaration conflicts with supplied facts"
+            )
+        actors[actor.actor_id] = actor
+        declared.add(actor.actor_id)
+    return tuple(actors.values())
+
+
+def _resolve_alias_declarations(
+    records: tuple[Mapping[str, Any], ...],
+    *,
+    aliases: tuple[AliasV1, ...],
+    root_actor_id: str,
+    root_session_id: str,
+) -> tuple[AliasV1, ...]:
+    by_key = {
+        (str(alias.namespace), alias.value, alias.target_kind): alias
+        for alias in aliases
+    }
+    if len(by_key) != len(aliases):
+        raise FinalizationError("aliases contain duplicate identities")
+    declared: set[tuple[str, str, str]] = set()
+    for record in records:
+        if (
+            str(record.get("actor_id") or "") != root_actor_id
+            or str(record.get("session_id") or "") != root_session_id
+        ):
+            raise FinalizationError(
+                "alias.declared must belong to the root session"
+            )
+        payload = record.get("payload")
+        alias_payload = (
+            payload.get("alias") if isinstance(payload, Mapping) else None
+        )
+        if not isinstance(alias_payload, Mapping):
+            raise FinalizationError("alias.declared payload is invalid")
+        try:
+            alias = AliasV1(**dict(alias_payload))
+        except (TypeError, ValueError) as exc:
+            raise FinalizationError(
+                f"alias.declared payload is invalid: {exc}"
+            ) from exc
+        key = (str(alias.namespace), alias.value, alias.target_kind)
+        if key in declared:
+            raise FinalizationError(
+                f"alias {alias.namespace}:{alias.value} has duplicate declarations"
+            )
+        prior = by_key.get(key)
+        if prior is not None and prior != alias:
+            raise FinalizationError(
+                "alias.declared conflicts with supplied alias facts"
+            )
+        by_key[key] = alias
+        declared.add(key)
+    return tuple(by_key.values())
+
+
+def _resolve_child_registrations(
+    records: tuple[Mapping[str, Any], ...],
+    *,
+    extra_actors: tuple[ActorV5, ...],
+    extra_sessions: tuple[SessionV5, ...],
+    trace_id: str,
+    root_actor_id: str,
+    root_session_id: str,
+    root_capture_id: str,
+) -> tuple[tuple[ActorV5, ...], tuple[SessionV5, ...]]:
+    actors = {actor.actor_id: actor for actor in extra_actors}
+    sessions = {session.session_id: session for session in extra_sessions}
+    if len(actors) != len(extra_actors) or len(sessions) != len(extra_sessions):
+        raise FinalizationError("extra child identities contain duplicate ids")
+    registered_sessions: set[str] = set()
+    registered_captures: set[str] = set()
+    session_actors = {root_session_id: root_actor_id}
+    for record in records:
+        payload = record.get("payload")
+        if not isinstance(payload, Mapping):
+            raise FinalizationError("child.registered payload is invalid")
+        actor_payload = payload.get("actor")
+        session_payload = payload.get("session")
+        if not isinstance(actor_payload, Mapping) or not isinstance(
+            session_payload,
+            Mapping,
+        ):
+            raise FinalizationError("child.registered identity is invalid")
+        actor = _registered_actor(actor_payload)
+        session = _registered_session(session_payload)
+        if session.session_id in registered_sessions:
+            raise FinalizationError(
+                f"child session {session.session_id} has duplicate registrations"
+            )
+        if actor.actor_id == root_actor_id or session.session_id == root_session_id:
+            raise FinalizationError("child registration collides with root identity")
+        if (
+            actor.parent_actor_id == actor.actor_id
+            or session.parent_session_id == session.session_id
+        ):
+            raise FinalizationError("child registration contains a parent cycle")
+        if actor.actor_id != str(record.get("actor_id") or ""):
+            raise FinalizationError("child.registered envelope actor mismatch")
+        if (
+            session.session_id != str(record.get("session_id") or "")
+            or session.actor_id != actor.actor_id
+        ):
+            raise FinalizationError("child.registered envelope session mismatch")
+        context_payload = payload.get("context")
+        if context_payload is not None:
+            if not isinstance(context_payload, Mapping):
+                raise FinalizationError("child.registered context is invalid")
+            try:
+                context = TraceContextV1(**dict(context_payload))
+            except (TypeError, ValueError) as exc:
+                raise FinalizationError(
+                    f"child.registered context is invalid: {exc}"
+                ) from exc
+            if (
+                context.trace_id != trace_id
+                or context.capture_id == root_capture_id
+                or context.capture_id in registered_captures
+                or context.parent_actor_session_id is None
+                or context.actor_id != actor.actor_id
+                or context.actor_session_id != session.session_id
+                or session.capture_id != context.capture_id
+                or actor.parent_actor_id != context.parent_actor_id
+                or session.parent_session_id
+                != context.parent_actor_session_id
+            ):
+                raise FinalizationError(
+                    "child.registered context does not match actor/session topology"
+                )
+            registered_captures.add(context.capture_id)
+        parent_session_id = session.parent_session_id
+        if (
+            parent_session_id is not None
+            and parent_session_id not in session_actors
+        ):
+            raise FinalizationError(
+                "child.registered parent session must be registered first"
+            )
+        if parent_session_id is not None:
+            parent_actor_id = session_actors[parent_session_id]
+            if actor.parent_actor_id != parent_actor_id:
+                raise FinalizationError(
+                    "child.registered actor parent disagrees with session parent"
+                )
+        prior_actor = actors.get(actor.actor_id)
+        if (
+            prior_actor is not None
+            and prior_actor.content_digest != actor.content_digest
+        ):
+            raise FinalizationError(
+                f"child actor {actor.actor_id} has conflicting registrations"
+            )
+        prior_session = sessions.get(session.session_id)
+        if (
+            prior_session is not None
+            and prior_session.content_digest != session.content_digest
+        ):
+            raise FinalizationError(
+                f"child session {session.session_id} has conflicting registrations"
+            )
+        actors[actor.actor_id] = actor
+        sessions[session.session_id] = session
+        registered_sessions.add(session.session_id)
+        session_actors[session.session_id] = session.actor_id
+    return tuple(actors.values()), tuple(sessions.values())
+
+
+def _registered_actor(payload: Mapping[str, Any]) -> ActorV5:
+    values = dict(payload)
+    values["external_trace_refs"] = tuple(
+        values.get("external_trace_refs") or ()
+    )
+    values["aliases"] = tuple(
+        AliasV1(**item) if isinstance(item, Mapping) else item
+        for item in values.get("aliases") or ()
+    )
+    try:
+        return replace(
+            ActorV5(**values),
+            content_digest="",
+        ).sealed()
+    except (TypeError, ValueError) as exc:
+        raise FinalizationError(f"child.registered actor is invalid: {exc}") from exc
+
+
+def _registered_session(payload: Mapping[str, Any]) -> SessionV5:
+    values = dict(payload)
+    coverage = values.get("coverage")
+    if isinstance(coverage, Mapping):
+        coverage_values = dict(coverage)
+        coverage_values["reasons"] = tuple(coverage_values.get("reasons") or ())
+        values["coverage"] = SessionCoverageV5(**coverage_values)
+    values["aliases"] = tuple(
+        AliasV1(**item) if isinstance(item, Mapping) else item
+        for item in values.get("aliases") or ()
+    )
+    try:
+        return replace(
+            SessionV5(**values),
+            content_digest="",
+        ).sealed()
+    except (TypeError, ValueError) as exc:
+        raise FinalizationError(f"child.registered session is invalid: {exc}") from exc
+
+
 def _resolve_extra_session_lifecycle(
     sessions: tuple[SessionV5, ...],
     *,
@@ -1036,6 +1647,26 @@ def _resolve_extra_session_lifecycle(
     by_id = {session.session_id: session for session in sessions}
     if len(by_id) != len(sessions):
         raise FinalizationError("extra sessions contain duplicate session ids")
+    for session in sessions:
+        if (
+            session.parent_session_id
+            and session.parent_session_id != root_session_id
+            and session.parent_session_id not in by_id
+        ):
+            raise FinalizationError(
+                f"child session {session.session_id} references unknown parent "
+                f"{session.parent_session_id}"
+            )
+        seen: set[str] = set()
+        current: str | None = session.session_id
+        while current is not None and current != root_session_id:
+            if current in seen:
+                raise FinalizationError("child session topology contains a cycle")
+            seen.add(current)
+            current_session = by_id.get(current)
+            if current_session is None:
+                break
+            current = current_session.parent_session_id
     terminal_statuses = {
         str(SessionStatus.COMPLETED),
         str(SessionStatus.FAILED),
@@ -1201,13 +1832,47 @@ def _resolve_extra_session_lifecycle(
                 content_digest="",
             ).sealed()
         )
+    resolved_by_id = {session.session_id: session for session in resolved}
+    for child in resolved:
+        if not child.parent_session_id:
+            continue
+        parent = resolved_by_id.get(child.parent_session_id)
+        if parent is None:
+            continue
+        parent_started = _parse_lifecycle_timestamp(
+            parent.started_at,
+            field=f"parent session {parent.session_id} started_at",
+        )
+        child_started = _parse_lifecycle_timestamp(
+            child.started_at,
+            field=f"child session {child.session_id} started_at",
+        )
+        if child_started < parent_started:
+            raise FinalizationError(
+                f"child session {child.session_id} started before parent "
+                f"{parent.session_id}"
+            )
+        if child.ended_at is not None and parent.ended_at is not None:
+            child_ended = _parse_lifecycle_timestamp(
+                child.ended_at,
+                field=f"child session {child.session_id} ended_at",
+            )
+            parent_ended = _parse_lifecycle_timestamp(
+                parent.ended_at,
+                field=f"parent session {parent.session_id} ended_at",
+            )
+            if child_ended > parent_ended:
+                raise FinalizationError(
+                    f"child session {child.session_id} ended after parent "
+                    f"{parent.session_id}"
+                )
     return tuple(resolved), tuple(diagnostics)
 
 
 def _parse_lifecycle_timestamp(value: str, *, field: str) -> datetime:
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError as exc:
+    except (AttributeError, TypeError, ValueError) as exc:
         raise FinalizationError(f"{field} must be an RFC3339 timestamp") from exc
     if parsed.tzinfo is None:
         raise FinalizationError(f"{field} must include a timezone")
@@ -1265,6 +1930,62 @@ def _with_observed_session_coverage(
         ),
         content_digest="",
     ).sealed()
+
+
+def _validate_alias_integrity(document: TraceDocumentV5) -> None:
+    """Reject aliases that cannot resolve to a declared canonical entity."""
+
+    targets = {
+        "trace": {document.trace_id},
+        "actor": {item.actor_id for item in document.actors},
+        "session": {item.session_id for item in document.sessions},
+        "span": {item.span_id for item in document.spans},
+        "event": {item.event_id for item in document.events},
+        "message": {item.message_id for item in document.messages},
+        "part": {
+            part.part_id
+            for message in document.messages
+            for part in message.parts
+        },
+        "artifact": {item.artifact_id for item in document.artifacts},
+        "branch": {item.branch_id for item in document.branches},
+        "error": {item.error_id for item in document.errors},
+    }
+    aliases: list[AliasV1] = [
+        *document.aliases,
+        *document.provenance.aliases,
+    ]
+    for collection in (
+        document.actors,
+        document.sessions,
+        document.spans,
+        document.events,
+        document.messages,
+    ):
+        for item in collection:
+            aliases.extend(item.aliases)
+
+    supported = _LOCAL_ALIAS_TARGET_KINDS | _EXTERNAL_ALIAS_TARGET_KINDS
+    for alias_item in aliases:
+        target_kind = str(alias_item.target_kind)
+        if target_kind not in supported:
+            raise FinalizationError(
+                "alias has unsupported target_kind "
+                f"{alias_item.target_kind!r}: {alias_item.namespace}:{alias_item.value}"
+            )
+        if not alias_item.target_id:
+            raise FinalizationError(
+                "alias has dangling target_id: "
+                f"{alias_item.namespace}:{alias_item.value}"
+            )
+        if (
+            target_kind in _LOCAL_ALIAS_TARGET_KINDS
+            and alias_item.target_id not in targets[target_kind]
+        ):
+            raise FinalizationError(
+                f"alias target {target_kind}:{alias_item.target_id} "
+                "is not present in the trace"
+            )
 
 
 def _int(value: Any) -> int | None:
