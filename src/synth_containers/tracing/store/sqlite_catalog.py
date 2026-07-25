@@ -17,9 +17,10 @@ from typing import Any, Iterable
 from ..canonical import canonical_text
 from ..models.document import TraceDocumentV5
 from ..models.evidence import TraceEvidenceBundleV5
+from .projection import catalog_projection
 
 
-CATALOG_SCHEMA_VERSION = 1
+CATALOG_SCHEMA_VERSION = 2
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS catalog_meta (
@@ -93,6 +94,9 @@ CREATE INDEX IF NOT EXISTS idx_entities_actor ON trace_entities (trace_digest, o
 CREATE INDEX IF NOT EXISTS idx_relationships ON trace_relationships (trace_digest, relation);
 CREATE INDEX IF NOT EXISTS idx_aliases ON trace_aliases (namespace, value);
 CREATE INDEX IF NOT EXISTS idx_evidence_kind ON evidence_records (trace_digest, record_kind);
+CREATE VIRTUAL TABLE IF NOT EXISTS trace_search USING fts5(
+    trace_digest UNINDEXED, entity_id UNINDEXED, kind UNINDEXED, text
+);
 """
 
 
@@ -121,6 +125,7 @@ class SqliteCatalogStore:
             "trace_relationships",
             "trace_aliases",
             "evidence_records",
+            "trace_search",
         ):
             self._connection.execute(f"DELETE FROM {table}")
         self._connection.commit()
@@ -131,36 +136,39 @@ class SqliteCatalogStore:
         if not document.content_digest:
             raise ValueError("only sealed trace documents can be indexed")
         digest = document.content_digest
+        projected = catalog_projection(document)
+        projected_document = projected["documents"][0]
         self._connection.execute("DELETE FROM trace_documents WHERE trace_digest = ?", (digest,))
         for table in ("trace_entities", "trace_relationships", "trace_aliases"):
             self._connection.execute(f"DELETE FROM {table} WHERE trace_digest = ?", (digest,))
+        self._connection.execute("DELETE FROM trace_search WHERE trace_digest = ?", (digest,))
         self._connection.execute(
             """
             INSERT INTO trace_documents VALUES
             (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
-                document.trace_id,
-                digest,
-                document.schema_version,
-                str(document.trace_kind),
-                document.capture.capture_id,
-                document.capture.binding_digest,
-                str(document.lifecycle.status),
-                str(document.completeness.capture_status),
-                document.lifecycle.started_at,
-                document.lifecycle.ended_at,
-                len(document.actors),
-                len(document.spans),
-                len(document.events),
-                len(document.messages),
-                len(document.artifacts),
-                document.usage.prompt_tokens,
-                document.usage.completion_tokens,
-                str(document.usage.provenance),
-                document.identity.task_id,
-                document.identity.run_id,
-                document.identity.correlation_id,
+                projected_document["trace_id"],
+                projected_document["trace_digest"],
+                projected_document["schema_version"],
+                projected_document["trace_kind"],
+                projected_document["capture_id"],
+                projected_document["binding_digest"],
+                projected_document["lifecycle_status"],
+                projected_document["capture_status"],
+                projected_document["started_at"],
+                projected_document["ended_at"],
+                projected_document["actor_count"],
+                projected_document["span_count"],
+                projected_document["event_count"],
+                projected_document["message_count"],
+                projected_document["artifact_count"],
+                projected_document["prompt_tokens"],
+                projected_document["completion_tokens"],
+                projected_document["usage_provenance"],
+                projected_document["task_id"],
+                projected_document["run_id"],
+                projected_document["correlation_id"],
             ),
         )
         rows: list[tuple[Any, ...]] = []
@@ -292,27 +300,56 @@ class SqliteCatalogStore:
                     ),
                 )
             )
+        rows = [
+            (
+                row["trace_digest"],
+                row["entity_id"],
+                row["kind"],
+                row["owner_actor_id"],
+                row["owner_session_id"],
+                row["source_order"],
+                row["occurred_at"],
+                row["content_digest"],
+                row["facts"],
+            )
+            for row in projected["entities"]
+        ]
+        edges = [
+            (
+                row["trace_digest"],
+                row["source_entity_id"],
+                row["relation"],
+                row["target_entity_id"],
+                row["source_order"],
+            )
+            for row in projected["relationships"]
+        ]
         self._connection.executemany(
             "INSERT OR REPLACE INTO trace_entities VALUES (?,?,?,?,?,?,?,?,?)", rows
+        )
+        self._connection.executemany(
+            "INSERT INTO trace_search (trace_digest, entity_id, kind, text) VALUES (?,?,?,?)",
+            ((row[0], row[1], row[2], row[8]) for row in rows),
         )
         self._connection.executemany("INSERT INTO trace_relationships VALUES (?,?,?,?,?)", edges)
         self._connection.executemany(
             "INSERT INTO trace_aliases VALUES (?,?,?,?,?)",
             [
                 (
-                    digest,
-                    str(item.namespace),
-                    item.value,
-                    item.target_id,
-                    item.target_kind,
+                    row["trace_digest"],
+                    row["namespace"],
+                    row["value"],
+                    row["target_id"],
+                    row["target_kind"],
                 )
-                for item in document.aliases
+                for row in projected["aliases"]
             ],
         )
         self._connection.commit()
 
     def index_evidence(self, bundle: TraceEvidenceBundleV5) -> None:
         digest = bundle.trace_ref.content_digest
+        projected = catalog_projection(bundle)
         self._connection.execute(
             "DELETE FROM evidence_records WHERE bundle_id = ?", (bundle.bundle_id,)
         )
@@ -413,6 +450,21 @@ class SqliteCatalogStore:
                     canonical_text({"failure_reasons": list(verdict.failure_reasons)}),
                 )
             )
+        rows = [
+            (
+                row["trace_digest"],
+                row["bundle_id"],
+                row["record_kind"],
+                row["record_id"],
+                row["definition_id"],
+                row["subject_entity_id"],
+                row["grounding"],
+                row["value"],
+                row["verdict"],
+                row["facts"],
+            )
+            for row in projected["evidence"]
+        ]
         self._connection.executemany(
             "INSERT OR REPLACE INTO evidence_records VALUES (?,?,?,?,?,?,?,?,?,?)", rows
         )
@@ -423,6 +475,22 @@ class SqliteCatalogStore:
     def traces(self) -> Iterable[dict[str, Any]]:
         cursor = self._connection.execute("SELECT * FROM trace_documents ORDER BY started_at")
         return [dict(row) for row in cursor.fetchall()]
+
+    def search(
+        self, query: str, *, trace_digest: str | None = None, limit: int = 100
+    ) -> Iterable[dict[str, Any]]:
+        sql = (
+            "SELECT trace_digest, entity_id, kind, "
+            "snippet(trace_search, 3, '[', ']', '…', 16) AS snippet "
+            "FROM trace_search WHERE trace_search MATCH ?"
+        )
+        params: list[Any] = [query]
+        if trace_digest:
+            sql += " AND trace_digest = ?"
+            params.append(trace_digest)
+        sql += " ORDER BY rank LIMIT ?"
+        params.append(limit)
+        return [dict(row) for row in self._connection.execute(sql, params).fetchall()]
 
     def entities(
         self,

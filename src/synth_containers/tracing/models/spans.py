@@ -10,6 +10,7 @@ from synth_containers.serde import JsonDataclassMixin
 
 from ..canonical import seal_record
 from .identity import AliasV1
+from .tokens import TokenCaptureV5
 
 
 class SpanKind(StrEnum):
@@ -56,9 +57,11 @@ class UsageV5(JsonDataclassMixin):
     completion_tokens: int | None = None
     reasoning_tokens: int | None = None
     cached_tokens: int | None = None
+    cache_write_tokens: int | None = None
     total_tokens: int | None = None
     requests: int | None = None
     wall_time_seconds: float | None = None
+    cost_usd: float | None = None
     unavailable_fields: tuple[str, ...] = ()
     source_refs: tuple[str, ...] = ()
 
@@ -79,12 +82,18 @@ class UsageV5(JsonDataclassMixin):
             completion_tokens=add(self.completion_tokens, other.completion_tokens),
             reasoning_tokens=add(self.reasoning_tokens, other.reasoning_tokens),
             cached_tokens=add(self.cached_tokens, other.cached_tokens),
+            cache_write_tokens=add(self.cache_write_tokens, other.cache_write_tokens),
             total_tokens=add(self.total_tokens, other.total_tokens),
             requests=add(self.requests, other.requests),
             wall_time_seconds=(
                 None
                 if self.wall_time_seconds is None and other.wall_time_seconds is None
                 else float(self.wall_time_seconds or 0.0) + float(other.wall_time_seconds or 0.0)
+            ),
+            cost_usd=(
+                None
+                if self.cost_usd is None and other.cost_usd is None
+                else float(self.cost_usd or 0.0) + float(other.cost_usd or 0.0)
             ),
             unavailable_fields=tuple(
                 sorted(set(self.unavailable_fields) | set(other.unavailable_fields))
@@ -128,6 +137,7 @@ class SpanV5(JsonDataclassMixin):
     output_message_ids: tuple[str, ...] = ()
     artifact_ids: tuple[str, ...] = ()
     usage: UsageV5 | None = None
+    token_capture: TokenCaptureV5 | None = None
     transformations: tuple[TransformationRecordV1, ...] = ()
     aliases: tuple[AliasV1, ...] = ()
     metadata: dict[str, Any] = field(default_factory=dict)

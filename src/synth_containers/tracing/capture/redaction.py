@@ -51,7 +51,9 @@ ALLOWED_HEADERS = frozenset(
 # Correlation headers carry execution topology, never credentials, so they survive
 # redaction. Any denied header still wins: `x-reb-evaluator-token` is dropped.
 CORRELATION_HEADER_PREFIXES = ("x-synth-trace-", "x-reb-score-")
-CORRELATION_HEADERS = frozenset({"traceparent", "tracestate", "baggage"})
+CORRELATION_HEADERS = frozenset(
+    {"traceparent", "tracestate", "baggage", "x-synth-call-correlation-id"}
+)
 
 DENIED_BODY_KEYS = frozenset(
     {
@@ -67,6 +69,20 @@ DENIED_BODY_KEYS = frozenset(
         "token",
         "bearer",
     }
+)
+
+_DENIED_BODY_KEY_SUFFIXES = (
+    "_access_token",
+    "_refresh_token",
+    "_client_secret",
+    "_api_key",
+    "_apikey",
+    "_authorization",
+    "_password",
+    "_secret",
+    "_token",
+    "_bearer",
+    "_cookie",
 )
 
 _SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
@@ -149,8 +165,9 @@ def redact_payload(value: Any) -> tuple[Any, RedactionReportV1]:
         if isinstance(node, Mapping):
             output: dict[str, Any] = {}
             for key, item in node.items():
-                if str(key).lower() in DENIED_BODY_KEYS:
-                    keys.append(str(key).lower())
+                normalized_key = _normalize_body_key(str(key))
+                if _body_key_denied(normalized_key):
+                    keys.append(normalized_key)
                     output[str(key)] = REDACTED
                 else:
                     output[str(key)] = visit(item)
@@ -169,6 +186,17 @@ def redact_payload(value: Any) -> tuple[Any, RedactionReportV1]:
         matched_patterns=tuple(sorted(set(patterns))),
     )
     return redacted, report
+
+
+def _normalize_body_key(key: str) -> str:
+    snake_case = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", key)
+    return re.sub(r"[^a-z0-9]+", "_", snake_case.lower()).strip("_")
+
+
+def _body_key_denied(normalized_key: str) -> bool:
+    return normalized_key in DENIED_BODY_KEYS or normalized_key.endswith(
+        _DENIED_BODY_KEY_SUFFIXES
+    )
 
 
 def assert_no_secrets(value: Any, *, where: str) -> None:

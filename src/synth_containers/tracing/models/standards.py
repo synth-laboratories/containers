@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
+import math
 from typing import Any
 
 from synth_containers.serde import JsonDataclassMixin
@@ -478,32 +479,292 @@ def aggregate_rubric_score(
     """
 
     policy = rubric.aggregation
+    ids = [item.criterion_id for item in results]
+    if len(ids) != len(set(ids)):
+        raise ValueError("duplicate criterion results are not allowed")
+    known = {item.criterion_id for item in rubric.criteria}
+    unknown = sorted(set(ids) - known)
+    if unknown:
+        raise ValueError(f"unknown criterion results: {unknown}")
     by_id = {item.criterion_id: item for item in results}
-    numerator = 0.0
-    denominator = 0.0
+    scored: list[tuple[float, float]] = []
     failures: list[str] = []
+
+    def add_missing(
+        criterion: CriterionDefinitionV1,
+        *,
+        behavior: str,
+        reason: str,
+    ) -> None:
+        normalized_behavior = str(behavior).strip().lower()
+        if normalized_behavior not in {
+            "exclude",
+            "omit",
+            "treat_as_missing",
+            "zero",
+            "treat_as_zero",
+            "fail",
+        }:
+            raise ValueError(
+                f"unsupported rubric {reason} policy: {behavior!r}"
+            )
+        if normalized_behavior in {"zero", "treat_as_zero", "fail"}:
+            scored.append((0.0, max(0.0, float(criterion.weight))))
+        if normalized_behavior == "fail":
+            failures.append(f"{reason}:{criterion.criterion_id}")
+
     for criterion in rubric.criteria:
+        if criterion.max_score <= criterion.min_score:
+            raise ValueError(f"invalid criterion score range: {criterion.criterion_id}")
+        if criterion.weight < 0.0:
+            raise ValueError(f"negative criterion weight: {criterion.criterion_id}")
         result = by_id.get(criterion.criterion_id)
         if result is None:
             if str(criterion.role) in {CriterionRole.GATING, CriterionRole.REQUIRED}:
                 failures.append(f"missing:{criterion.criterion_id}")
+            add_missing(
+                criterion,
+                behavior=policy.missing_criterion,
+                reason="missing",
+            )
             continue
-        if result.verdict == "not_applicable" and policy.not_applicable_criterion == "exclude":
+        verdict = str(result.verdict).lower()
+        if verdict == "not_applicable":
+            if policy.not_applicable_criterion == "exclude":
+                continue
+            add_missing(
+                criterion,
+                behavior=policy.not_applicable_criterion,
+                reason="not_applicable",
+            )
+            continue
+        if verdict in {"invalid", "inconclusive", "abstain", "abstained"}:
+            status = "inconclusive" if verdict in {"abstain", "abstained"} else verdict
+            behavior = (
+                policy.invalid_criterion
+                if status == "invalid"
+                else policy.inconclusive_criterion
+            )
+            if str(criterion.role) in {CriterionRole.GATING, CriterionRole.REQUIRED}:
+                failures.append(f"{status}:{criterion.criterion_id}")
+            add_missing(criterion, behavior=behavior, reason=status)
             continue
         if result.score is None:
             if str(criterion.role) in {CriterionRole.GATING, CriterionRole.REQUIRED}:
                 failures.append(f"unscored:{criterion.criterion_id}")
+            add_missing(
+                criterion,
+                behavior=policy.missing_criterion,
+                reason="unscored",
+            )
             continue
         weight = max(0.0, float(criterion.weight))
-        numerator += float(result.score) * weight
-        denominator += weight
-        if str(criterion.role) == CriterionRole.GATING and result.passed is False:
+        bounded = min(criterion.max_score, max(criterion.min_score, float(result.score)))
+        normalized = (bounded - criterion.min_score) / (
+            criterion.max_score - criterion.min_score
+        )
+        if not criterion.higher_is_better:
+            normalized = 1.0 - normalized
+        scored.append((normalized, weight))
+        threshold_failed = (
+            bounded < criterion.pass_threshold
+            if criterion.higher_is_better
+            else bounded > criterion.pass_threshold
+        )
+        criterion_failed = (
+            threshold_failed
+            or result.passed is False
+            or verdict in {"fail", "failed", "failure"}
+        )
+        if str(criterion.role) == CriterionRole.GATING and criterion_failed:
             failures.append(f"gate_failed:{criterion.criterion_id}")
-    score = (numerator / denominator) if denominator > 0.0 else None
-    passed = score is not None and score >= policy.pass_threshold
-    if failures and policy.gates_override_score:
+        if str(criterion.role) == CriterionRole.REQUIRED and criterion_failed:
+            failures.append(f"required_failed:{criterion.criterion_id}")
+
+    strategy = str(policy.strategy).strip().lower()
+    if not scored:
+        score = None
+    elif strategy in {"weighted_mean", "gates_only"}:
+        denominator = sum(weight for _, weight in scored)
+        score = (
+            sum(value * weight for value, weight in scored) / denominator
+            if denominator > 0.0
+            else None
+        )
+    elif strategy == "weighted_sum":
+        score = sum(value * weight for value, weight in scored)
+    elif strategy in {"mean", "arithmetic_mean"}:
+        score = sum(value for value, _ in scored) / len(scored)
+    elif strategy == "sum":
+        score = sum(value for value, _ in scored)
+    elif strategy == "min":
+        score = min(value for value, _ in scored)
+    elif strategy == "max":
+        score = max(value for value, _ in scored)
+    else:
+        raise ValueError(f"unsupported rubric aggregation strategy: {policy.strategy!r}")
+
+    score = _round_aggregate(score, policy.rounding)
+    tie_break = str(policy.tie_break).strip().lower()
+    if tie_break not in {"fail_closed", "pass_closed"}:
+        raise ValueError(f"unsupported rubric tie-break policy: {policy.tie_break!r}")
+    passed = score is not None and (
+        score > policy.pass_threshold
+        if tie_break == "fail_closed" and strategy != "gates_only"
+        else score >= policy.pass_threshold
+    )
+    if any(
+        item.startswith(
+            (
+                "missing:",
+                "unscored:",
+                "invalid:",
+                "inconclusive:",
+                "required_failed:",
+            )
+        )
+        for item in failures
+    ):
+        passed = False
+    if policy.gates_override_score and any(item.startswith("gate_failed:") for item in failures):
         passed = False
     return score, passed, tuple(failures)
+
+
+def aggregate_reward_values(
+    definition: RewardDefinitionV1,
+    records: tuple[RewardRecordV1, ...],
+    aggregation: RewardAggregationV1,
+) -> tuple[float | None, dict[str, float]]:
+    """Recompute a reward aggregation from its declared ordered inputs.
+
+    The calculation language is intentionally finite. Arbitrary expressions would
+    make a sealed calculation receipt dependent on an unstated interpreter.
+    """
+
+    calculation = (
+        str(aggregation.calculation).strip().lower()
+        or str(definition.aggregation_expression).strip().lower()
+        or ("identity" if len(records) == 1 else "sum")
+    )
+    missing = (
+        str(aggregation.missing_component_handling).strip().lower()
+        or str(definition.missing_behavior).strip().lower()
+        or "omit"
+    )
+    values = _reward_inputs(
+        tuple(
+            record.value if str(record.validity).lower() == "valid" else None
+            for record in records
+        ),
+        missing=missing,
+    )
+    value = _aggregate_reward_sequence(
+        values,
+        calculation=calculation,
+        discount=aggregation.discount,
+    )
+
+    component_names = {
+        *definition.vector_components,
+        *aggregation.components,
+        *(key for record in records for key in record.components),
+    }
+    components: dict[str, float] = {}
+    for component in sorted(component_names):
+        component_values = _reward_inputs(
+            tuple(
+                (
+                    record.components.get(component)
+                    if str(record.validity).lower() == "valid"
+                    else None
+                )
+                for record in records
+            ),
+            missing=missing,
+        )
+        component_value = _aggregate_reward_sequence(
+            component_values,
+            calculation=calculation,
+            discount=aggregation.discount,
+        )
+        if component_value is not None:
+            components[component] = component_value
+    return value, components
+
+
+def _round_aggregate(value: float | None, policy: str) -> float | None:
+    if value is None:
+        return None
+    normalized = str(policy).strip().lower()
+    if normalized in {"", "none"}:
+        return value
+    if normalized in {"integer", "nearest_integer"}:
+        return float(round(value))
+    if normalized == "floor":
+        return float(math.floor(value))
+    if normalized == "ceil":
+        return float(math.ceil(value))
+    if normalized.startswith("decimal:"):
+        digits = normalized.removeprefix("decimal:")
+        if digits.isdigit():
+            return round(value, int(digits))
+    raise ValueError(f"unsupported rubric rounding policy: {policy!r}")
+
+
+def _reward_inputs(
+    values: tuple[float | None, ...],
+    *,
+    missing: str,
+) -> tuple[float, ...]:
+    if missing not in {"omit", "zero", "treat_as_zero", "fail"}:
+        raise ValueError(f"unsupported reward missing-component policy: {missing!r}")
+    if missing == "fail" and any(value is None for value in values):
+        raise ValueError("reward aggregation has a missing or invalid input")
+    return tuple(
+        0.0 if value is None else float(value)
+        for value in values
+        if value is not None or missing in {"zero", "treat_as_zero"}
+    )
+
+
+def _aggregate_reward_sequence(
+    values: tuple[float, ...],
+    *,
+    calculation: str,
+    discount: float | None,
+) -> float | None:
+    aliases = {
+        "average": "mean",
+        "arithmetic_mean": "mean",
+        "total": "sum",
+    }
+    normalized = aliases.get(calculation, calculation)
+    if not values:
+        return None
+    if discount is not None and not 0.0 <= float(discount) <= 1.0:
+        raise ValueError("reward aggregation discount must be between zero and one")
+    if normalized == "identity":
+        if len(values) != 1:
+            raise ValueError("identity reward aggregation requires exactly one input")
+        return values[0]
+    if normalized in {"sum", "discounted_sum"}:
+        if normalized == "discounted_sum" and discount is None:
+            raise ValueError("discounted_sum reward aggregation requires a discount")
+        if discount is None:
+            return sum(values)
+        return sum(value * (float(discount) ** index) for index, value in enumerate(values))
+    if discount is not None:
+        raise ValueError(
+            f"reward discount is unsupported for {normalized!r} aggregation"
+        )
+    if normalized == "mean":
+        return sum(values) / len(values)
+    if normalized == "min":
+        return min(values)
+    if normalized == "max":
+        return max(values)
+    raise ValueError(f"unsupported reward aggregation calculation: {calculation!r}")
 
 
 __all__ = [
@@ -541,5 +802,6 @@ __all__ = [
     "VerifierDefinitionV1",
     "VerifierKind",
     "VerifierResultV2",
+    "aggregate_reward_values",
     "aggregate_rubric_score",
 ]

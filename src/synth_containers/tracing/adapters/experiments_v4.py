@@ -43,6 +43,7 @@ def import_experiments_trace_v4(
     payload: Mapping[str, Any],
     *,
     producer: str = "synth_containers.tracing.adapters.experiments_v4",
+    imported_at: str = "1970-01-01T00:00:00Z",
 ) -> TraceDocumentV5:
     """Build a sealed V5 document from an ``experiments.trace.v4`` payload."""
 
@@ -62,7 +63,7 @@ def import_experiments_trace_v4(
     spans: list[SpanV5] = []
     events: list[EventV5] = []
     sequence = 0
-    started_at = str(timestamps.get("started_at") or utc_now())
+    started_at = str(timestamps.get("started_at") or imported_at)
     ended_at = str(timestamps.get("completed_at") or started_at)
 
     turns = [
@@ -174,13 +175,14 @@ def import_experiments_trace_v4(
             producer_version=IMPORTER_VERSION,
             source_format="experiments.trace.v4",
             container_image_digest=str(environment.get("react_image_id") or "") or None,
-            captured_at=utc_now(),
+            captured_at=imported_at,
             transformation_chain=(f"{IMPORTER_NAME}@{IMPORTER_VERSION}",),
             extra={"source_digest": source_digest},
         ),
         completeness=TraceCompletenessV5(
             capture_status=CaptureStatus.PARTIAL,
-            terminal_event_observed=False,
+            # A completed V4 execution record is itself the terminal source fact.
+            terminal_event_observed=True,
             model_calls=CoverageState.NOT_CAPTURED,
             raw_provider=CoverageState.UNAVAILABLE,
             agent_events=CoverageState.PARTIAL,
