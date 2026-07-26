@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
+from ..models.coordination import InteractionKind, coordination_event_type
 from ..models.identity import AliasNamespace, AliasV1
 
 
@@ -48,6 +49,12 @@ _EVENT_TYPE_BY_ITEM = {
     ("web_search", "started"): "codex.tool_call_started",
     ("web_search", "completed"): "codex.tool_call_finished",
 }
+_CODEX_INTERACTION_EDGE_KINDS = frozenset(
+    {
+        "interaction_edge",
+        "rollout.interaction_edge",
+    }
+)
 
 
 @dataclass(slots=True)
@@ -113,6 +120,38 @@ def import_codex_jsonl(source: Path | bytes, *, target_id: str) -> CodexImport:
             if item is not None
             else {key: value for key, value in message.items() if key != "type"}
         )
+        if kind in _CODEX_INTERACTION_EDGE_KINDS:
+            interaction = message.get("interaction")
+            if not isinstance(interaction, Mapping):
+                result.malformed_lines += 1
+                continue
+            raw_interaction_kind = interaction.get("kind")
+            try:
+                interaction_kind = InteractionKind(str(raw_interaction_kind))
+            except ValueError:
+                result.unknown_kinds[
+                    f"{kind}:{raw_interaction_kind}"
+                ] = result.unknown_kinds.get(
+                    f"{kind}:{raw_interaction_kind}",
+                    0,
+                ) + 1
+                continue
+            source = interaction.get("source")
+            target = interaction.get("target")
+            if (
+                isinstance(source, Mapping)
+                and source.get("basis") == "raw_source"
+                and isinstance(target, Mapping)
+                and target.get("basis") == "raw_source"
+            ):
+                event_type = coordination_event_type(interaction_kind)
+                body = {"interaction": dict(interaction)}
+            else:
+                event_type = "codex.interaction_edge"
+                body = {
+                    "interaction": dict(interaction),
+                    "coordination_projection": "native_identifiers_unresolved",
+                }
         codex_id = str(
             (item or {}).get("id")
             or record.get("id")

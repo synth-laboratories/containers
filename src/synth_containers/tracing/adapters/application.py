@@ -5,6 +5,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Mapping
 
+from ..models.coordination import (
+    ACTOR_GROUP_DECLARED_EVENT,
+    CONTEXT_EPOCH_OBSERVED_EVENT,
+    JOINT_TURN_OBSERVED_EVENT,
+    ActorGroupV1,
+    ContextEpochV1,
+    InteractionEdgeV1,
+    JointTurnV1,
+    coordination_event_type,
+)
+
 if TYPE_CHECKING:
     from ..capture.collector import LocalCollector
 
@@ -61,6 +72,42 @@ class ApplicationTraceAssembler:
             }
         )
         return self.emit(ApplicationEvent("agent.delegated", body, **identity))
+
+    def actor_group(self, group: ActorGroupV1) -> str:
+        return self.emit(
+            ApplicationEvent(
+                ACTOR_GROUP_DECLARED_EVENT,
+                {"actor_group": group.to_dict()},
+            )
+        )
+
+    def interaction(self, interaction: InteractionEdgeV1) -> str:
+        return self.emit(
+            ApplicationEvent(
+                coordination_event_type(interaction.kind),
+                {"interaction": interaction.to_dict()},
+            )
+        )
+
+    def context_epoch(self, context_epoch: ContextEpochV1) -> str:
+        return self.emit(
+            ApplicationEvent(
+                CONTEXT_EPOCH_OBSERVED_EVENT,
+                {"context_epoch": context_epoch.to_dict()},
+                actor_id=context_epoch.actor_id,
+                session_id=context_epoch.session_id,
+            )
+        )
+
+    def joint_turn(self, joint_turn: JointTurnV1) -> str:
+        return self.emit(
+            ApplicationEvent(
+                JOINT_TURN_OBSERVED_EVENT,
+                {"joint_turn": joint_turn.to_dict()},
+                actor_id=joint_turn.environment_actor_id,
+                session_id=joint_turn.environment_session_id,
+            )
+        )
 
 
 __all__ = ["ApplicationEvent", "ApplicationTraceAssembler"]

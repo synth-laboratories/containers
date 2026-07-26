@@ -278,6 +278,8 @@ def summarize(inspected: InspectedBundle) -> dict[str, Any]:
                 "kind": str(item.kind),
                 "display_name": item.display_name,
                 "role": item.role,
+                "actor_path": item.actor_path,
+                "origin_interaction_id": item.origin_interaction_id,
             }
             for item in document.actors
         ],
@@ -286,6 +288,8 @@ def summarize(inspected: InspectedBundle) -> dict[str, Any]:
                 "session_id": item.session_id,
                 "actor_id": item.actor_id,
                 "status": str(item.status),
+                "started_sequence": item.started_sequence,
+                "ended_sequence": item.ended_sequence,
                 "coverage": item.coverage.to_dict(),
             }
             for item in document.sessions
@@ -298,6 +302,7 @@ def summarize(inspected: InspectedBundle) -> dict[str, Any]:
                 "streaming": item.detail.get("streaming"),
                 "http_status": item.detail.get("http_status"),
                 "status": str(item.status),
+                "context_epoch_id": item.context_epoch_id,
                 "usage": item.usage.to_dict() if item.usage else None,
                 "input_messages": len(item.input_message_ids),
                 "output_messages": len(item.output_message_ids),
@@ -335,6 +340,81 @@ def summarize(inspected: InspectedBundle) -> dict[str, Any]:
             {"namespace": str(item.namespace), "value": item.value, "target": item.target_id}
             for item in document.aliases
         ],
+        "coordination": (
+            {
+                "schema_version": document.coordination.schema_version,
+                "content_digest": document.coordination.content_digest,
+                "actor_groups": [
+                    {
+                        "group_id": item.group_id,
+                        "kind": str(item.kind),
+                        "display_name": item.display_name,
+                        "member_actor_ids": list(item.member_actor_ids),
+                        "leader_actor_ids": list(item.leader_actor_ids),
+                        "environment_actor_id": item.environment_actor_id,
+                        "formed_sequence": item.formed_sequence,
+                        "dissolved_sequence": item.dissolved_sequence,
+                    }
+                    for item in document.coordination.actor_groups
+                ],
+                "interactions": [
+                    {
+                        "interaction_id": item.interaction_id,
+                        "kind": str(item.kind),
+                        "status": str(item.status),
+                        "source": item.source.to_dict(),
+                        "target": item.target.to_dict(),
+                        "started_sequence": item.started_sequence,
+                        "ended_sequence": item.ended_sequence,
+                        "correlation_id": item.correlation_id,
+                        "transport": item.transport,
+                        "carried_message_ids": list(item.carried_message_ids),
+                        "carried_artifact_ids": list(item.carried_artifact_ids),
+                        "evidence_basis": str(item.evidence_basis),
+                    }
+                    for item in document.coordination.interaction_edges
+                ],
+                "context_epochs": [
+                    {
+                        "context_epoch_id": item.context_epoch_id,
+                        "actor_id": item.actor_id,
+                        "session_id": item.session_id,
+                        "started_sequence": item.started_sequence,
+                        "ended_sequence": item.ended_sequence,
+                        "model_visible_message_ids": list(
+                            item.model_visible_message_ids
+                        ),
+                        "model_call_span_ids": list(item.model_call_span_ids),
+                        "runtime_evidence_event_ids": list(
+                            item.runtime_evidence_event_ids
+                        ),
+                        "parent_context_epoch_id": item.parent_context_epoch_id,
+                        "transfer_interaction_id": item.transfer_interaction_id,
+                        "evidence_basis": str(item.evidence_basis),
+                        "losses": list(item.losses),
+                    }
+                    for item in document.coordination.context_epochs
+                ],
+                "joint_turns": [
+                    {
+                        "joint_turn_id": item.joint_turn_id,
+                        "actor_group_id": item.actor_group_id,
+                        "environment_actor_id": item.environment_actor_id,
+                        "environment_step": item.environment_step,
+                        "started_sequence": item.started_sequence,
+                        "ended_sequence": item.ended_sequence,
+                        "status": str(item.status),
+                        "participants": [
+                            participant.to_dict()
+                            for participant in item.participants
+                        ],
+                    }
+                    for item in document.coordination.joint_turns
+                ],
+            }
+            if document.coordination is not None
+            else None
+        ),
     }
 
     if evidence is None:

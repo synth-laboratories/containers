@@ -63,6 +63,7 @@ from .coverage import (
     Completeness,
     finalization_from_dict,
 )
+from .coordination_reducer import reduce_coordination
 from .envelope import RawRecordType
 from .redaction import CORRELATION_HEADER_PREFIXES, CORRELATION_HEADERS
 from .spool import TraceSegmentManifestV1, read_segments
@@ -98,6 +99,10 @@ _LOCAL_ALIAS_TARGET_KINDS = frozenset(
         "artifact",
         "branch",
         "error",
+        "actor_group",
+        "interaction",
+        "context_epoch",
+        "joint_turn",
     }
 )
 _EXTERNAL_ALIAS_TARGET_KINDS = frozenset({"external_trace"})
@@ -760,6 +765,23 @@ class TraceFinalizer:
                         "child actor parent disagrees with session topology"
                     )
 
+        try:
+            coordination = reduce_coordination(
+                trace_id=self.binding.trace_id,
+                records=tuple(records),
+                actors=all_actors,
+                sessions=all_sessions,
+                messages=tuple(messages),
+                spans=tuple(spans),
+                events=tuple(events),
+                artifacts=tuple(artifacts),
+            )
+        except ValueError as exc:
+            raise FinalizationError(f"coordination reduction failed: {exc}") from exc
+        all_actors = coordination.actors
+        all_sessions = coordination.sessions
+        spans = list(coordination.spans)
+
         document = TraceDocumentV5(
             trace_id=self.binding.trace_id,
             trace_kind=self.binding.trace_kind,
@@ -808,6 +830,7 @@ class TraceFinalizer:
             artifacts=tuple(artifacts),
             usage=total_usage,
             aliases=aliases,
+            coordination=coordination.graph,
         )
         _validate_alias_integrity(document)
         document = document.sealed()
@@ -1950,6 +1973,38 @@ def _validate_alias_integrity(document: TraceDocumentV5) -> None:
         "artifact": {item.artifact_id for item in document.artifacts},
         "branch": {item.branch_id for item in document.branches},
         "error": {item.error_id for item in document.errors},
+        "actor_group": (
+            {
+                item.group_id
+                for item in document.coordination.actor_groups
+            }
+            if document.coordination is not None
+            else set()
+        ),
+        "interaction": (
+            {
+                item.interaction_id
+                for item in document.coordination.interaction_edges
+            }
+            if document.coordination is not None
+            else set()
+        ),
+        "context_epoch": (
+            {
+                item.context_epoch_id
+                for item in document.coordination.context_epochs
+            }
+            if document.coordination is not None
+            else set()
+        ),
+        "joint_turn": (
+            {
+                item.joint_turn_id
+                for item in document.coordination.joint_turns
+            }
+            if document.coordination is not None
+            else set()
+        ),
     }
     aliases: list[AliasV1] = [
         *document.aliases,
@@ -1964,6 +2019,9 @@ def _validate_alias_integrity(document: TraceDocumentV5) -> None:
     ):
         for item in collection:
             aliases.extend(item.aliases)
+    if document.coordination is not None:
+        for group in document.coordination.actor_groups:
+            aliases.extend(group.aliases)
 
     supported = _LOCAL_ALIAS_TARGET_KINDS | _EXTERNAL_ALIAS_TARGET_KINDS
     for alias_item in aliases:

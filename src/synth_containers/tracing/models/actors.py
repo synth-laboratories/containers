@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import Any, Optional
 
 from synth_containers.serde import JsonDataclassMixin
 
@@ -56,6 +56,8 @@ class ActorV5(JsonDataclassMixin):
     role: str = ""
     subtype: str = ""
     parent_actor_id: str | None = None
+    actor_path: Optional[str] = None
+    origin_interaction_id: Optional[str] = None
     harness: str | None = None
     runtime: str | None = None
     model: str | None = None
@@ -97,6 +99,8 @@ class SessionV5(JsonDataclassMixin):
     capture_id: str | None = None
     parent_session_id: str | None = None
     branch_head_id: str | None = None
+    started_sequence: Optional[int] = None
+    ended_sequence: Optional[int] = None
     status: SessionStatus | str = SessionStatus.RUNNING
     ended_at: str | None = None
     harness: str | None = None

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import Any, Optional
 
 from synth_containers.serde import JsonDataclassMixin
 
@@ -11,6 +11,13 @@ from ..canonical import content_digest
 from .actors import ActorV5, SessionV5, Visibility
 from .artifacts import ArtifactRefV5
 from .completeness import TraceCompletenessV5, TraceLifecycleV5
+from .coordination import (
+    ActorGroupV1,
+    ContextEpochV1,
+    CoordinationGraphV1,
+    InteractionEdgeV1,
+    JointTurnV1,
+)
 from .events import EventV5, TraceErrorV1
 from .identity import (
     TRACE_SCHEMA_VERSION,
@@ -73,6 +80,7 @@ class TraceDocumentV5(JsonDataclassMixin):
     usage: UsageV5 = field(default_factory=UsageV5)
     aliases: tuple[AliasV1, ...] = ()
     links: tuple[TraceLinkV5, ...] = ()
+    coordination: Optional[CoordinationGraphV1] = None
     visibility: Visibility | str = Visibility.PRIVATE
     extensions: dict[str, Any] = field(default_factory=dict)
     schema_version: str = TRACE_SCHEMA_VERSION
@@ -100,6 +108,43 @@ class TraceDocumentV5(JsonDataclassMixin):
 
     def artifact(self, artifact_id: str) -> ArtifactRefV5 | None:
         return next((item for item in self.artifacts if item.artifact_id == artifact_id), None)
+
+    def actor_group(self, group_id: str) -> Optional[ActorGroupV1]:
+        if self.coordination is None:
+            return None
+        return next(
+            (item for item in self.coordination.actor_groups if item.group_id == group_id),
+            None,
+        )
+
+    def interaction(self, interaction_id: str) -> Optional[InteractionEdgeV1]:
+        if self.coordination is None:
+            return None
+        return self.coordination.interaction(interaction_id)
+
+    def context_epoch(self, context_epoch_id: str) -> Optional[ContextEpochV1]:
+        if self.coordination is None:
+            return None
+        return next(
+            (
+                item
+                for item in self.coordination.context_epochs
+                if item.context_epoch_id == context_epoch_id
+            ),
+            None,
+        )
+
+    def joint_turn(self, joint_turn_id: str) -> Optional[JointTurnV1]:
+        if self.coordination is None:
+            return None
+        return next(
+            (
+                item
+                for item in self.coordination.joint_turns
+                if item.joint_turn_id == joint_turn_id
+            ),
+            None,
+        )
 
     def events_of_type(self, event_type: str) -> tuple[EventV5, ...]:
         return tuple(item for item in self.events if str(item.event_type) == str(event_type))
