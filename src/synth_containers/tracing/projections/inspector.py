@@ -342,6 +342,10 @@ def summarize(inspected: InspectedBundle) -> dict[str, Any]:
         return summary
 
     resolutions = [resolve_selector(document, selector) for selector in evidence.selectors()]
+    unavailable_resolutions = [
+        resolve_selector(document, selector)
+        for selector in evidence.unavailable_selectors()
+    ]
     summary["evidence"] = {
         "bundle_id": evidence.bundle_id,
         "bundle_digest": evidence.content_digest,
@@ -391,12 +395,99 @@ def summarize(inspected: InspectedBundle) -> dict[str, Any]:
             }
             for item in evidence.reward_aggregations
         ],
+        "annotator_definitions": [
+            {
+                "annotator_id": item.annotator_id,
+                "name": item.name,
+                "version": item.version,
+                "purpose": item.purpose,
+                "taxonomy": list(item.taxonomy),
+                "grounding_requirement": str(item.grounding_requirement),
+                "unavailable_evidence_behavior": str(
+                    item.unavailable_evidence_behavior
+                ),
+                "confidence_semantics": str(item.confidence_semantics),
+                "task_kind": (
+                    str(item.output_contract.task_kind)
+                    if item.output_contract is not None
+                    else None
+                ),
+                "annotation_types": (
+                    list(item.output_contract.annotation_types)
+                    if item.output_contract is not None
+                    else []
+                ),
+            }
+            for item in evidence.annotator_definitions
+        ],
         "annotations": [
             {
                 "annotation_id": item.annotation_id,
                 "annotator_id": item.annotator_id,
+                "annotation_type": item.annotation_type,
                 "labels": list(item.labels),
                 "grounding": str(item.grounding),
+                "confidence": item.confidence,
+                "status": (
+                    str(item.status) if item.status is not None else None
+                ),
+                "review_state": (
+                    str(item.review_state)
+                    if item.review_state is not None
+                    else None
+                ),
+                "producer": {
+                    "kind": str(item.producer.kind),
+                    "name": item.producer.name,
+                    "version": item.producer.version,
+                    "model": item.producer.model,
+                    "config_digest": item.producer.config_digest,
+                },
+                "trace_body_read": (
+                    item.inspection.trace_body_read
+                    if item.inspection is not None
+                    else None
+                ),
+                "inspected_projection": (
+                    item.inspection.projection_id
+                    if item.inspection is not None
+                    else item.inspected_projection
+                ),
+                "projection_losses": (
+                    len(item.inspection.losses)
+                    if item.inspection is not None
+                    else 0
+                ),
+                "annotator_execution_trace": (
+                    {
+                        "trace_id": item.annotator_execution_trace_id,
+                        "trace_digest": item.annotator_execution_trace_digest,
+                    }
+                    if item.annotator_execution_trace_id is not None
+                    else None
+                ),
+                "evidence_gaps": (
+                    len(item.unavailable_evidence.gaps)
+                    if item.unavailable_evidence is not None
+                    else 0
+                ),
+                "derivation": (
+                    {
+                        "kind": str(item.derivation.kind),
+                        "method": item.derivation.method,
+                        "source_annotation_ids": list(
+                            item.derivation.source_annotation_ids
+                        ),
+                        "agreement": item.derivation.agreement,
+                        "dissenting_annotation_ids": list(
+                            item.derivation.dissenting_annotation_ids
+                        ),
+                    }
+                    if item.derivation is not None
+                    else None
+                ),
+                "revision": item.revision,
+                "supersedes_id": item.supersedes_id,
                 "target": {
                     "kind": str(item.target.kind),
                     "entity_id": item.target.entity_id,
@@ -415,6 +506,10 @@ def summarize(inspected: InspectedBundle) -> dict[str, Any]:
         ],
         "selectors_resolved": sum(1 for item in resolutions if item.resolved),
         "selectors_failed": sum(1 for item in resolutions if not item.resolved),
+        "unavailable_selectors": len(unavailable_resolutions),
+        "unavailable_selectors_now_resolved": sum(
+            1 for item in unavailable_resolutions if item.resolved
+        ),
     }
     return summary
 

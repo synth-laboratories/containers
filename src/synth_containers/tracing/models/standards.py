@@ -10,13 +10,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 import math
-from typing import Any
+from typing import Any, Optional
 
-from synth_containers.serde import JsonDataclassMixin
+from synth_containers.serde import JsonDataclassMixin, JsonValue
 
 from ..canonical import seal_record
 from .actors import Visibility
 from .artifacts import ArtifactRefV5
+from .projection import ProjectionLossV1
 from .selectors import GroundingStatus, TraceSelectorV1
 
 
@@ -62,6 +63,76 @@ class VerifierKind(StrEnum):
     COMPOSITE = "composite"
 
 
+class ProducerKind(StrEnum):
+    DETERMINISTIC = "deterministic"
+    MODEL = "model"
+    AGENTIC = "agentic"
+    HUMAN = "human"
+    COMPOSITE = "composite"
+
+
+class AnnotationTaskKind(StrEnum):
+    CLASSIFY = "classify"
+    EXTRACT = "extract"
+    DESCRIBE = "describe"
+    LABEL_SPAN = "label_span"
+    RELATE_ENTITIES = "relate_entities"
+
+
+class AnnotationValueKind(StrEnum):
+    STRING = "string"
+    INTEGER = "integer"
+    NUMBER = "number"
+    BOOLEAN = "boolean"
+    OBJECT = "object"
+    ARRAY = "array"
+
+
+class AnnotationStatus(StrEnum):
+    APPLIED = "applied"
+    ABSTAINED = "abstained"
+    SOURCE_UNAVAILABLE = "source_unavailable"
+
+
+class AnnotationReviewState(StrEnum):
+    UNREVIEWED = "unreviewed"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    NEEDS_REVIEW = "needs_review"
+    DISPUTED = "disputed"
+
+
+class AnnotationDerivationKind(StrEnum):
+    CONSENSUS = "consensus"
+    ADJUDICATION = "adjudication"
+
+
+class AnnotationInspectionSource(StrEnum):
+    TRACE_AUTHORITY = "trace_authority"
+    PROJECTION = "projection"
+
+
+class AnnotatorGroundingRequirement(StrEnum):
+    EXACT_SELECTOR = "exact_selector"
+    SELECTOR = "selector"
+    SUMMARY_ALLOWED = "summary_allowed"
+    NONE = "none"
+
+
+class UnavailableEvidenceBehavior(StrEnum):
+    ABSTAIN = "abstain"
+    EMIT_UNAVAILABLE = "emit_unavailable"
+    FAIL = "fail"
+
+
+class ConfidenceSemantics(StrEnum):
+    NONE = "none"
+    SELF_REPORTED = "self_reported"
+    CALIBRATED_PROBABILITY = "calibrated_probability"
+    INTER_ANNOTATOR_AGREEMENT = "inter_annotator_agreement"
+    DETERMINISTIC = "deterministic"
+
+
 class RewardSourceKind(StrEnum):
     ENVIRONMENT = "environment"
     DETERMINISTIC_METRIC = "deterministic_metric"
@@ -90,7 +161,7 @@ class RecordState(StrEnum):
 class ProducerRefV1(JsonDataclassMixin):
     """Who or what produced a result; credentials appear only as a profile name."""
 
-    kind: str
+    kind: ProducerKind | str
     name: str
     version: str = ""
     model: str | None = None
@@ -247,7 +318,91 @@ class VerifierResultV2(JsonDataclassMixin):
 
 
 @dataclass(frozen=True, slots=True)
+class AnnotationTaxonV1(JsonDataclassMixin):
+    """One canonical annotation label and its optional hierarchy."""
+
+    label: str
+    description: str = ""
+    parent_label: Optional[str] = None
+    aliases: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class AnnotationPayloadFieldV1(JsonDataclassMixin):
+    """One typed top-level field in an annotator's structured output."""
+
+    field_name: str
+    value_kind: AnnotationValueKind | str
+    required: bool = False
+    description: str = ""
+    allowed_values: tuple[JsonValue, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class AnnotationPayloadSchemaV1(JsonDataclassMixin):
+    """A compact, portable schema for the structured annotation payload."""
+
+    schema_id: str
+    version: str
+    fields: tuple[AnnotationPayloadFieldV1, ...]
+    additional_fields_allowed: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class AnnotationOutputContractV1(JsonDataclassMixin):
+    """Typed output vocabulary layered over the legacy flat taxonomy."""
+
+    task_kind: AnnotationTaskKind | str
+    annotation_types: tuple[str, ...]
+    taxonomy: tuple[AnnotationTaxonV1, ...] = ()
+    payload_schema: Optional[AnnotationPayloadSchemaV1] = None
+    allowed_producer_kinds: tuple[ProducerKind | str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class UnavailableAnnotationEvidenceV1(JsonDataclassMixin):
+    """One required source that could not be inspected."""
+
+    requirement: str
+    reason: str
+    attempted_selector: Optional[TraceSelectorV1] = None
+    source_projection: Optional[str] = None
+
+
+@dataclass(frozen=True, slots=True)
+class AnnotationEvidenceGapsV1(JsonDataclassMixin):
+    """Typed, intentionally unresolved evidence; not a successful citation."""
+
+    gaps: tuple[UnavailableAnnotationEvidenceV1, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class AnnotationInspectionV1(JsonDataclassMixin):
+    """What authority or lossy projection the annotator actually inspected."""
+
+    source: AnnotationInspectionSource | str
+    trace_body_read: bool
+    projection_id: Optional[str] = None
+    projection_digest: Optional[str] = None
+    projection_manifest_digest: Optional[str] = None
+    losses: tuple[ProjectionLossV1, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class AnnotationDerivationV1(JsonDataclassMixin):
+    """Consensus or adjudication lineage over immutable source annotations."""
+
+    kind: AnnotationDerivationKind | str
+    source_annotation_ids: tuple[str, ...]
+    method: str
+    agreement: Optional[float] = None
+    dissenting_annotation_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class TraceAnnotatorDefinitionV1(JsonDataclassMixin):
+    """Versioned descriptive/extractive contract, never a criterion judgment."""
+
     annotator_id: str
     name: str
     purpose: str
@@ -256,12 +411,18 @@ class TraceAnnotatorDefinitionV1(JsonDataclassMixin):
     supported_trace_schemas: tuple[str, ...] = ("synth.trace.v5",)
     required_subject_scope: str = "trace"
     reasoning_policy: str = "not_captured"
-    grounding_requirement: str = "exact_selector"
+    grounding_requirement: AnnotatorGroundingRequirement | str = (
+        AnnotatorGroundingRequirement.EXACT_SELECTOR
+    )
     minimum_evidence: int = 1
     program_ref: str | None = None
     model: str | None = None
-    unavailable_evidence_behavior: str = "abstain"
-    confidence_semantics: str = "self_reported"
+    unavailable_evidence_behavior: UnavailableEvidenceBehavior | str = (
+        UnavailableEvidenceBehavior.ABSTAIN
+    )
+    confidence_semantics: ConfidenceSemantics | str = ConfidenceSemantics.SELF_REPORTED
+    output_contract: Optional[AnnotationOutputContractV1] = None
+    confidence_calibration_ref: Optional[str] = None
     schema_version: str = ANNOTATOR_SCHEMA_VERSION
     metadata: dict[str, Any] = field(default_factory=dict)
     content_digest: str = ""
@@ -272,6 +433,8 @@ class TraceAnnotatorDefinitionV1(JsonDataclassMixin):
 
 @dataclass(frozen=True, slots=True)
 class AnnotationV1(JsonDataclassMixin):
+    """A descriptive, extractive, or classificatory claim about exact trace evidence."""
+
     annotation_id: str
     annotator_id: str
     annotator_version: str
@@ -279,7 +442,7 @@ class AnnotationV1(JsonDataclassMixin):
     target: TraceSelectorV1
     annotation_type: str
     labels: tuple[str, ...]
-    author_kind: str
+    author_kind: ProducerKind | str
     producer: ProducerRefV1
     created_at: str
     grounding: GroundingStatus | str = GroundingStatus.UNINSPECTED
@@ -291,6 +454,14 @@ class AnnotationV1(JsonDataclassMixin):
     inspected_projection: str | None = None
     revision: int = 1
     supersedes_id: str | None = None
+    status: Optional[AnnotationStatus | str] = None
+    review_state: Optional[AnnotationReviewState | str] = None
+    abstention_reason: Optional[str] = None
+    unavailable_evidence: Optional[AnnotationEvidenceGapsV1] = None
+    inspection: Optional[AnnotationInspectionV1] = None
+    derivation: Optional[AnnotationDerivationV1] = None
+    annotator_execution_trace_id: Optional[str] = None
+    annotator_execution_trace_digest: Optional[str] = None
     schema_version: str = ANNOTATION_SCHEMA_VERSION
     content_digest: str = ""
 
@@ -780,13 +951,29 @@ __all__ = [
     "RUBRIC_SCHEMA_VERSION",
     "VERIFIER_DEFINITION_SCHEMA_VERSION",
     "VERIFIER_RESULT_SCHEMA_VERSION",
+    "AnnotationDerivationKind",
+    "AnnotationDerivationV1",
+    "AnnotationEvidenceGapsV1",
+    "AnnotationInspectionSource",
+    "AnnotationInspectionV1",
+    "AnnotationOutputContractV1",
+    "AnnotationPayloadFieldV1",
+    "AnnotationPayloadSchemaV1",
+    "AnnotationReviewState",
+    "AnnotationStatus",
+    "AnnotationTaskKind",
+    "AnnotationTaxonV1",
+    "AnnotationValueKind",
     "AnnotationV1",
+    "AnnotatorGroundingRequirement",
     "BenchmarkVerdictV1",
+    "ConfidenceSemantics",
     "CriterionDefinitionV1",
     "CriterionResultV1",
     "CriterionRole",
     "EvaluationResultV1",
     "ExecutionStatus",
+    "ProducerKind",
     "ProducerRefV1",
     "ReceiptV1",
     "RecordState",
@@ -798,6 +985,8 @@ __all__ = [
     "RubricAggregationV1",
     "RubricDefinitionV2",
     "TraceAnnotatorDefinitionV1",
+    "UnavailableAnnotationEvidenceV1",
+    "UnavailableEvidenceBehavior",
     "VerificationStatus",
     "VerifierDefinitionV1",
     "VerifierKind",
