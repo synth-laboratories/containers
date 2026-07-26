@@ -479,6 +479,56 @@ def _evidence_projection(bundle: TraceEvidenceBundleV5) -> dict[str, Any]:
                 "failure_modes": list(result.failure_modes),
             },
         )
+        for judgment in result.judgments:
+            if judgment.judgment_id is None:
+                continue
+            if judgment.subject is None:
+                raise ValueError(
+                    f"judgment {judgment.judgment_id!r} has no canonical subject"
+                )
+            evidence(
+                "judgment",
+                judgment.judgment_id,
+                definition_id=judgment.criterion_id,
+                subject_entity_id=judgment.subject.entity_id,
+                grounding=str(judgment.grounding),
+                value=judgment.score,
+                verdict=judgment.verdict,
+                facts={
+                    "verifier_result_id": result.verifier_result_id,
+                    "criterion_version": judgment.criterion_version,
+                    "criterion_digest": judgment.criterion_digest,
+                    "status": (
+                        str(judgment.status)
+                        if judgment.status is not None
+                        else None
+                    ),
+                    "passed": judgment.passed,
+                    "confidence": judgment.confidence,
+                    "rationale": judgment.rationale,
+                    "failure_modes": list(judgment.failure_modes),
+                    "evidence": [item.to_dict() for item in judgment.evidence],
+                    "producer": (
+                        judgment.producer.to_dict()
+                        if judgment.producer is not None
+                        else None
+                    ),
+                    "adjudication": (
+                        judgment.adjudication.to_dict()
+                        if judgment.adjudication is not None
+                        else None
+                    ),
+                    "revision": judgment.revision,
+                    "state": (
+                        str(judgment.state)
+                        if judgment.state is not None
+                        else None
+                    ),
+                    "supersedes_id": judgment.supersedes_id,
+                    "invalidation_reason": judgment.invalidation_reason,
+                    "produced_at": judgment.produced_at,
+                },
+            )
     for reward in bundle.reward_records:
         evidence(
             "reward_record",

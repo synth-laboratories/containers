@@ -22,6 +22,9 @@ from ..models.evidence import TraceEvidenceBundleV5
 from ..models.selectors import GroundingStatus, resolve_selector
 from ..models.spans import UsageProvenance
 from ..models.standards import (
+    JUDGMENT_ADJUDICATION_SCHEMA_VERSION,
+    JUDGMENT_SCHEMA_VERSION,
+    AdjudicationMethod,
     AnnotationDerivationKind,
     AnnotationInspectionSource,
     AnnotationReviewState,
@@ -31,10 +34,12 @@ from ..models.standards import (
     AnnotatorGroundingRequirement,
     ConfidenceSemantics,
     ExecutionStatus,
+    JudgmentStatus,
     ProducerKind,
     RecordState,
     UnavailableEvidenceBehavior,
     VerificationStatus,
+    VerifierKind,
     aggregate_reward_values,
     aggregate_rubric_score,
 )
@@ -994,6 +999,7 @@ def validate_evidence(
     def record_identity(record: Any) -> str:
         for attribute in (
             "criterion_id",
+            "judgment_id",
             "rubric_id",
             "verifier_id",
             "annotator_id",
@@ -1432,6 +1438,54 @@ def validate_evidence(
                     definition.verifier_id,
                 )
 
+    judgments_by_id: dict[str, Any] = {}
+    for result in bundle.verifier_results:
+        for judgment in result.judgments:
+            if judgment.schema_version is None:
+                extended_values = (
+                    judgment.judgment_id,
+                    judgment.criterion_version,
+                    judgment.criterion_digest,
+                    judgment.subject,
+                    judgment.status,
+                    judgment.producer,
+                    judgment.produced_at,
+                    judgment.adjudication,
+                    judgment.revision,
+                    judgment.state,
+                    judgment.supersedes_id,
+                    judgment.invalidation_reason,
+                    judgment.content_digest,
+                )
+                if any(value is not None for value in extended_values):
+                    finding(
+                        "judgment_schema_missing",
+                        "extended judgment fields require an explicit judgment schema",
+                        judgment.criterion_id,
+                    )
+                continue
+            if judgment.schema_version != JUDGMENT_SCHEMA_VERSION:
+                finding(
+                    "judgment_schema_unsupported",
+                    "judgment declares an unsupported schema version",
+                    judgment.judgment_id or judgment.criterion_id,
+                )
+            if not judgment.judgment_id:
+                finding(
+                    "judgment_id_missing",
+                    "canonical judgment must declare a judgment id",
+                    judgment.criterion_id,
+                )
+                continue
+            if judgment.judgment_id in judgments_by_id:
+                finding(
+                    "duplicate_judgment_id",
+                    "judgment id appears more than once in the evidence bundle",
+                    judgment.judgment_id,
+                )
+            judgments_by_id[judgment.judgment_id] = judgment
+            check_digest(judgment)
+
     for result in bundle.verifier_results:
         definition = verifier_definitions.get(result.verifier_id)
         if definition is None:
@@ -1534,10 +1588,238 @@ def validate_evidence(
                 result.verifier_result_id,
             )
         rubric_by_id = {item.criterion_id: item for item in rubric.criteria}
-        for criterion_result in result.criterion_results:
+        for criterion_result in result.judgments:
             criterion = rubric_by_id.get(criterion_result.criterion_id)
             if criterion is None:
                 continue
+            if criterion_result.schema_version == JUDGMENT_SCHEMA_VERSION:
+                judgment_id = criterion_result.judgment_id or criterion_result.criterion_id
+                if criterion_result.criterion_version != criterion.version:
+                    finding(
+                        "judgment_criterion_version_mismatch",
+                        "judgment cites a different criterion definition version",
+                        judgment_id,
+                    )
+                if criterion_result.criterion_digest != criterion.content_digest:
+                    finding(
+                        "judgment_criterion_digest_mismatch",
+                        "judgment cites a different criterion definition digest",
+                        judgment_id,
+                    )
+                if criterion_result.subject is None:
+                    finding(
+                        "judgment_subject_missing",
+                        "canonical judgment must identify its exact trace subject",
+                        judgment_id,
+                    )
+                elif criterion_result.subject != result.subject:
+                    finding(
+                        "judgment_subject_mismatch",
+                        "judgment subject differs from its verifier execution subject",
+                        judgment_id,
+                    )
+                if criterion_result.producer is None:
+                    finding(
+                        "judgment_producer_missing",
+                        "canonical judgment must identify its producer",
+                        judgment_id,
+                    )
+                elif str(criterion_result.producer.kind) not in {
+                    item.value for item in VerifierKind
+                }:
+                    finding(
+                        "judgment_producer_kind_invalid",
+                        "judgment producer must be deterministic, model, agentic, human, or composite",
+                        judgment_id,
+                    )
+                if criterion_result.produced_at is None:
+                    finding(
+                        "judgment_produced_at_missing",
+                        "canonical judgment must declare when it was produced",
+                        judgment_id,
+                    )
+                else:
+                    _validated_timestamp(
+                        criterion_result.produced_at,
+                        code="judgment_produced_at_invalid",
+                        entity_id=judgment_id,
+                        field="produced_at",
+                        findings=findings,
+                    )
+                judgment_status = (
+                    str(criterion_result.status).lower()
+                    if criterion_result.status is not None
+                    else ""
+                )
+                if judgment_status not in {item.value for item in JudgmentStatus}:
+                    finding(
+                        "judgment_status_invalid",
+                        "canonical judgment declares an unsupported status",
+                        judgment_id,
+                    )
+                if criterion_result.revision is None or criterion_result.revision < 1:
+                    finding(
+                        "judgment_revision_invalid",
+                        "canonical judgment revision must be a positive integer",
+                        judgment_id,
+                    )
+                if (
+                    criterion_result.state is None
+                    or str(criterion_result.state)
+                    not in {item.value for item in RecordState}
+                ):
+                    finding(
+                        "judgment_state_invalid",
+                        "canonical judgment declares an unsupported record state",
+                        judgment_id,
+                    )
+                if (
+                    str(criterion_result.state) == RecordState.INVALIDATED
+                    and not criterion_result.invalidation_reason
+                ):
+                    finding(
+                        "judgment_invalidation_reason_missing",
+                        "invalidated judgment must state why it was invalidated",
+                        judgment_id,
+                    )
+                if str(criterion_result.grounding) in {
+                    GroundingStatus.UNINSPECTED,
+                    GroundingStatus.SOURCE_UNAVAILABLE,
+                    GroundingStatus.INVALID,
+                }:
+                    finding(
+                        "judgment_grounding_insufficient",
+                        "canonical judgment must declare inspected trace grounding",
+                        judgment_id,
+                    )
+                if criterion.requires_citation and not criterion_result.evidence:
+                    finding(
+                        "judgment_evidence_missing",
+                        "criterion requires a judgment-level evidence citation",
+                        judgment_id,
+                    )
+                if judgment_status == JudgmentStatus.DECISIVE:
+                    if criterion_result.passed is None:
+                        finding(
+                            "judgment_decision_missing",
+                            "decisive judgment must carry an explicit pass decision",
+                            judgment_id,
+                        )
+                    if str(criterion_result.verdict).lower() not in {
+                        "pass",
+                        "passed",
+                        "fail",
+                        "failed",
+                        "failure",
+                    }:
+                        finding(
+                            "judgment_decisive_verdict_invalid",
+                            "decisive judgment verdict must be pass or fail",
+                            judgment_id,
+                        )
+                elif judgment_status in {
+                    JudgmentStatus.ABSTAINED,
+                    JudgmentStatus.NOT_APPLICABLE,
+                    JudgmentStatus.INCONCLUSIVE,
+                    JudgmentStatus.INVALID,
+                }:
+                    if (
+                        criterion_result.score is not None
+                        or criterion_result.passed is not None
+                    ):
+                        finding(
+                            "judgment_nondecisive_outcome_invalid",
+                            "non-decisive judgment cannot carry a score or pass decision",
+                            judgment_id,
+                        )
+                    expected_verdict = {
+                        JudgmentStatus.ABSTAINED: {"abstain", "abstained"},
+                        JudgmentStatus.NOT_APPLICABLE: {"not_applicable"},
+                        JudgmentStatus.INCONCLUSIVE: {"inconclusive"},
+                        JudgmentStatus.INVALID: {"invalid"},
+                    }[judgment_status]
+                    if str(criterion_result.verdict).lower() not in expected_verdict:
+                        finding(
+                            "judgment_status_verdict_mismatch",
+                            "judgment status disagrees with its verdict",
+                            judgment_id,
+                        )
+                adjudication = criterion_result.adjudication
+                if adjudication is not None:
+                    if (
+                        adjudication.schema_version
+                        != JUDGMENT_ADJUDICATION_SCHEMA_VERSION
+                    ):
+                        finding(
+                            "judgment_adjudication_schema_unsupported",
+                            "judgment adjudication declares an unsupported schema",
+                            judgment_id,
+                        )
+                    if str(adjudication.method) not in {
+                        item.value for item in AdjudicationMethod
+                    }:
+                        finding(
+                            "judgment_adjudication_method_invalid",
+                            "judgment adjudication declares an unsupported method",
+                            judgment_id,
+                        )
+                    if (
+                        not adjudication.input_judgment_ids
+                        or len(adjudication.input_judgment_ids)
+                        != len(set(adjudication.input_judgment_ids))
+                    ):
+                        finding(
+                            "judgment_adjudication_inputs_invalid",
+                            "judgment adjudication inputs must be non-empty and unique",
+                            judgment_id,
+                        )
+                    for input_judgment_id in adjudication.input_judgment_ids:
+                        if input_judgment_id == criterion_result.judgment_id:
+                            finding(
+                                "judgment_adjudication_self_input",
+                                "judgment adjudication cannot consume its own output",
+                                judgment_id,
+                            )
+                        elif input_judgment_id not in judgments_by_id:
+                            finding(
+                                "judgment_adjudication_input_missing",
+                                "judgment adjudication cites a judgment absent from the bundle",
+                                input_judgment_id,
+                            )
+                        else:
+                            input_judgment = judgments_by_id[input_judgment_id]
+                            if (
+                                input_judgment.criterion_id
+                                != criterion_result.criterion_id
+                                or input_judgment.subject
+                                != criterion_result.subject
+                            ):
+                                finding(
+                                    "judgment_adjudication_input_mismatch",
+                                    "adjudication input crosses criterion or subject identity",
+                                    input_judgment_id,
+                                )
+                    if adjudication.decision != criterion_result.verdict:
+                        finding(
+                            "judgment_adjudication_decision_mismatch",
+                            "adjudication decision disagrees with the resulting judgment",
+                            judgment_id,
+                        )
+                    if str(adjudication.producer.kind) not in {
+                        item.value for item in VerifierKind
+                    }:
+                        finding(
+                            "judgment_adjudication_producer_kind_invalid",
+                            "adjudication producer kind is unsupported",
+                            judgment_id,
+                        )
+                    _validated_timestamp(
+                        adjudication.produced_at,
+                        code="judgment_adjudication_produced_at_invalid",
+                        entity_id=judgment_id,
+                        field="adjudication.produced_at",
+                        findings=findings,
+                    )
             if criterion_result.confidence is not None and not (
                 math.isfinite(float(criterion_result.confidence))
                 and 0.0 <= criterion_result.confidence <= 1.0
@@ -3042,6 +3324,16 @@ def validate_evidence(
             item.annotator_id,
             item.target,
             item.annotation_type,
+        ),
+        revision_field="revision",
+    )
+    check_supersession_chain(
+        tuple(judgments_by_id.values()),
+        id_field="judgment_id",
+        kind="judgment",
+        logical_key=lambda item: (
+            item.criterion_id,
+            item.subject,
         ),
         revision_field="revision",
     )
