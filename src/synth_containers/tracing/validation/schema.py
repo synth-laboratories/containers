@@ -15,7 +15,8 @@ from typing import Any, Union, get_args, get_origin, get_type_hints
 from ..capture.binding import TraceCaptureBindingV1
 from ..capture.coverage import CaptureCoverageReceiptV1
 from ..capture.envelope import RawCaptureEnvelopeV1
-from ..capture.spool import TraceSegmentManifestV1
+from ..capture.live import LiveTracePageV1, LiveTraceStatusV1
+from ..capture.spool import RawSpoolSnapshotV1, TraceSegmentManifestV1
 from ..models.capture_data import CapturedBodyRefV1
 from ..models.coordination import (
     ActorGroupV1,
@@ -33,7 +34,17 @@ from ..store.bundle import (
 from ..models.document import TraceDocumentV5
 from ..models.evidence import TraceEvidenceBundleV5
 from ..models.projection import ProjectionManifestV1
+from ..models.reconciliation import (
+    LiveReconciliationEntryV1,
+    LiveReconciliationTargetV1,
+    TraceLiveReconciliationReceiptV1,
+)
 from ..models.selectors import TraceSelectorV1
+from ..models.visual import (
+    TraceVisualItemV1,
+    TraceVisualLaneV1,
+    TraceVisualProjectionV1,
+)
 from ..models.standards import (
     AnnotationDerivationV1,
     AnnotationEvidenceGapsV1,
@@ -66,6 +77,9 @@ SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema"
 PUBLIC_CONTRACTS: tuple[type, ...] = (
     TraceCaptureBindingV1,
     RawCaptureEnvelopeV1,
+    LiveTracePageV1,
+    LiveTraceStatusV1,
+    RawSpoolSnapshotV1,
     TraceSegmentManifestV1,
     CapturedBodyRefV1,
     CaptureCoverageReceiptV1,
@@ -105,6 +119,12 @@ PUBLIC_CONTRACTS: tuple[type, ...] = (
     RewardRecordV1,
     RewardAggregationV1,
     ProjectionManifestV1,
+    LiveReconciliationEntryV1,
+    LiveReconciliationTargetV1,
+    TraceLiveReconciliationReceiptV1,
+    TraceVisualItemV1,
+    TraceVisualLaneV1,
+    TraceVisualProjectionV1,
     ValidationReceiptV1,
 )
 

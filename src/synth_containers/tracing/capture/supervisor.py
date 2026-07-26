@@ -1952,6 +1952,10 @@ class CaptureSupervisor:
                 segments=candidate.segments,
             )
             self.bundle.write_receipt("capture-coverage", candidate.coverage)
+            self.bundle.write_receipt(
+                "trace-live-reconciliation",
+                candidate.reconciliation,
+            )
             self.bundle.write_manifest()
             with self._lifecycle_lock:
                 self.sealed = candidate
@@ -1974,12 +1978,38 @@ class CaptureSupervisor:
             bind_projection_manifest,
         )
         from ..projections.v4 import project_v4
+        from ..projections.visual import visual_from_sealed
         from ..canonical import record_id
 
         normalized = kind.lower().strip()
         if normalized == "v4":
             payload, manifest = project_v4(self.sealed.document)
             projection_payload: Any = payload.to_dict()
+        elif normalized == "visual":
+            visual = visual_from_sealed(self.sealed.document)
+            projection_payload = visual.to_dict()
+            manifest = ProjectionManifestV1(
+                projection_id=record_id(
+                    "proj",
+                    kind="visual",
+                    scope=(self.sealed.document.trace_id,),
+                    key=self.sealed.document.content_digest,
+                ),
+                format="visual",
+                source_trace_id=self.sealed.document.trace_id,
+                source_trace_digest=self.sealed.document.content_digest,
+                producer="synth_containers.tracing.capture.supervisor",
+                producer_version="1",
+                created_at=utc_now(),
+                losses=tuple(
+                    ProjectionLossV1(
+                        field_path="*",
+                        reason=item,
+                        record_count=0,
+                    )
+                    for item in visual.losses
+                ),
+            )
         elif normalized == "atif":
             projection_payload = export_atif(self.sealed.document)
             losses = tuple(

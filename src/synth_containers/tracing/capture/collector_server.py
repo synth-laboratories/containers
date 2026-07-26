@@ -8,11 +8,12 @@ import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 import ipaddress
 import secrets
 
 from .collector import LocalCollector
+from .live import page_from_spool, parse_live_cursor, sse_frame, status_from_spool
 from ..canonical import utc_now
 from ..models.actors import SessionStatus
 from ..models.events import EventType
@@ -60,6 +61,7 @@ class CollectorServer:
             raise ValueError("a collector token is required for non-loopback collector hosts")
         self.is_loopback = is_loopback
         self._server = ThreadingHTTPServer((host, port), _handler(self))
+        self._server.daemon_threads = True
         self._thread = threading.Thread(
             target=self._server.serve_forever,
             name=f"synth-trace-collector-{collector.binding.capture_id}",
@@ -100,6 +102,7 @@ class CollectorServer:
         if self._stopped:
             return
         self._stopped = True
+        self.collector.session.spool.wake_readers()
         # BaseServer.shutdown deadlocks when serve_forever was never started.
         if self._started:
             self._server.shutdown()
@@ -501,13 +504,86 @@ def _handler(server: CollectorServer) -> type[BaseHTTPRequestHandler]:
                 )
 
         def do_GET(self) -> None:  # noqa: N802
-            if urlparse(self.path).path != "/healthz":
+            parsed = urlparse(self.path)
+            if parsed.path == "/healthz":
+                if server.is_loopback or self._authorized():
+                    self._json(200, {"ok": True})
+                    return
+                self._json(403, {"error": "capture_binding_mismatch"})
+                return
+            if parsed.path not in {
+                "/v1/events",
+                "/v1/events/stream",
+                "/v1/live-manifest",
+            }:
                 self._json(404, {"error": "not_found"})
                 return
-            if server.is_loopback or self._authorized():
-                self._json(200, {"ok": True})
+            if not self._authorized():
+                self._json(403, {"error": "capture_binding_mismatch"})
                 return
-            self._json(403, {"error": "capture_binding_mismatch"})
+            query = parse_qs(parsed.query)
+            try:
+                cursor_value = (
+                    query.get("after_ordinal", [None])[0]
+                    or self.headers.get("last-event-id")
+                )
+                after_ordinal = parse_live_cursor(
+                    cursor_value,
+                    capture_id=server.collector.binding.capture_id,
+                )
+                limit = int(query.get("limit", ["256"])[0])
+                if limit < 1 or limit > 10_000:
+                    raise ValueError("limit must be between 1 and 10000")
+            except (TypeError, ValueError) as exc:
+                self._json(400, {"error": "invalid_live_cursor", "message": str(exc)})
+                return
+            spool = server.collector.session.spool
+            if parsed.path == "/v1/live-manifest":
+                self._json(200, status_from_spool(spool).to_dict())
+                return
+            if parsed.path == "/v1/events":
+                self._json(
+                    200,
+                    page_from_spool(
+                        spool,
+                        after_ordinal=after_ordinal,
+                        limit=limit,
+                    ).to_dict(),
+                )
+                return
+            self.send_response(200)
+            self.send_header("content-type", "text/event-stream")
+            self.send_header("cache-control", "no-cache")
+            self.send_header("connection", "keep-alive")
+            self.send_header("x-accel-buffering", "no")
+            self.end_headers()
+            cursor = after_ordinal
+            try:
+                while not server._stopped:
+                    page = page_from_spool(
+                        spool,
+                        after_ordinal=cursor,
+                        limit=limit,
+                    )
+                    for envelope in page.records:
+                        self.wfile.write(sse_frame(envelope))
+                        cursor = envelope.ordinal
+                    if page.records:
+                        self.wfile.flush()
+                    if page.closed and cursor >= page.high_water_ordinal:
+                        return
+                    snapshot = spool.wait_for_change(
+                        cursor,
+                        timeout_seconds=15.0,
+                    )
+                    if (
+                        snapshot.high_water_ordinal <= cursor
+                        and not snapshot.closed
+                    ):
+                        self.wfile.write(b": keepalive\n\n")
+                        self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                return
 
         def do_POST(self) -> None:  # noqa: N802
             if not self._authorized():

@@ -90,6 +90,20 @@ class LiveManifestPointerV1(JsonDataclassMixin):
     schema_version: str = "synth.trace-live-manifest-pointer.v1"
 
 
+@dataclass(frozen=True, slots=True)
+class RawSpoolSnapshotV1(JsonDataclassMixin):
+    """Atomic in-process view used by live readers."""
+
+    capture_id: str
+    generation: int
+    high_water_ordinal: int
+    sealed_record_count: int
+    open_record_count: int
+    open_partial: str | None
+    closed: bool
+    schema_version: str = "synth.trace-spool-snapshot.v1"
+
+
 class RawSpool:
     """Append-only raw record spool for one capture session."""
 
@@ -119,6 +133,7 @@ class RawSpool:
         self._latest_manifest: LiveManifestV1 | None = None
         self._closed_manifest: LiveManifestV1 | None = None
         self._lock = threading.RLock()
+        self._changed = threading.Condition(self._lock)
         self._resume()
 
     def _resume(self) -> None:
@@ -134,6 +149,8 @@ class RawSpool:
             return
         self._generation = manifest.generation
         self._latest_manifest = manifest
+        if manifest.metadata.get("closed") is True:
+            self._closed_manifest = manifest
         self._sealed = list(manifest.segments)
         self._sequence = max((item.sequence for item in manifest.segments), default=0)
         self._high_water = manifest.high_water_ordinal
@@ -175,6 +192,7 @@ class RawSpool:
             self._high_water = max(self._high_water, int(envelope.ordinal))
             if len(self._open_records) >= self.max_segment_records:
                 self.rotate()
+            self._changed.notify_all()
             return envelope
 
     def rotate(self) -> TraceSegmentManifestV1 | None:
@@ -206,11 +224,12 @@ class RawSpool:
             if self._closed_manifest is not None:
                 return self._closed_manifest
             self.rotate()
-            self._closed_manifest = self._publish_manifest()
+            self._closed_manifest = self._publish_manifest(closed=True)
+            self._changed.notify_all()
             return self._closed_manifest
 
     def freeze_existing(self) -> LiveManifestV1:
-        """Seal a resumed terminal authority without publishing a new generation."""
+        """Publish terminal state for a resumed capture with no open segment."""
 
         with self._lock:
             if self._closed_manifest is not None:
@@ -219,7 +238,8 @@ class RawSpool:
                 raise RuntimeError("cannot freeze a capture spool with an open segment")
             if self._latest_manifest is None:
                 raise RuntimeError("cannot freeze a capture spool without a manifest")
-            self._closed_manifest = self._latest_manifest
+            self._closed_manifest = self._publish_manifest(closed=True)
+            self._changed.notify_all()
             return self._closed_manifest
 
     def _open_segment(self) -> None:
@@ -255,7 +275,7 @@ class RawSpool:
         self._sealed.append(manifest)
         return manifest
 
-    def _publish_manifest(self) -> LiveManifestV1:
+    def _publish_manifest(self, *, closed: bool = False) -> LiveManifestV1:
         self._generation += 1
         manifest = LiveManifestV1(
             capture_id=self.capture_id,
@@ -264,6 +284,7 @@ class RawSpool:
             segments=tuple(self._sealed),
             high_water_ordinal=self._high_water,
             open_partial=self._open_path.name if self._open_path else None,
+            metadata={"closed": closed},
         ).sealed()
         manifests_dir = self.root / "manifests"
         manifests_dir.mkdir(parents=True, exist_ok=True)
@@ -304,6 +325,74 @@ class RawSpool:
 
     def records(self) -> Iterator[dict[str, Any]]:
         yield from read_segments(self.root, self.segments)
+
+    def snapshot(self) -> RawSpoolSnapshotV1:
+        """Return record counts and lifecycle state from one lock acquisition."""
+
+        with self._lock:
+            return RawSpoolSnapshotV1(
+                capture_id=self.capture_id,
+                generation=self._generation,
+                high_water_ordinal=self._high_water,
+                sealed_record_count=sum(item.record_count for item in self._sealed),
+                open_record_count=len(self._open_records),
+                open_partial=self._open_path.name if self._open_path else None,
+                closed=self._closed_manifest is not None,
+            )
+
+    def read_after(
+        self,
+        after_ordinal: int,
+        *,
+        limit: int,
+    ) -> tuple[RawCaptureEnvelopeV1, ...]:
+        """Read an exact, ordered page from durable and currently open records."""
+
+        normalized_limit = max(1, min(int(limit), 10_000))
+        with self._lock:
+            records: list[RawCaptureEnvelopeV1] = []
+            previous_ordinal = -1
+            for payload in read_segments(self.root, tuple(self._sealed)):
+                envelope = validate_envelope_payload(
+                    payload,
+                    expected_capture_id=self.capture_id,
+                    previous_ordinal=previous_ordinal,
+                )
+                previous_ordinal = envelope.ordinal
+                if envelope.ordinal > after_ordinal:
+                    records.append(envelope)
+                    if len(records) >= normalized_limit:
+                        return tuple(records)
+            for envelope in self._open_records:
+                if envelope.ordinal > after_ordinal:
+                    records.append(envelope)
+                    if len(records) >= normalized_limit:
+                        break
+            return tuple(records)
+
+    def wait_for_change(
+        self,
+        after_ordinal: int,
+        *,
+        timeout_seconds: float,
+    ) -> RawSpoolSnapshotV1:
+        """Wait until data advances, capture closes, or the timeout expires."""
+
+        with self._changed:
+            self._changed.wait_for(
+                lambda: (
+                    self._high_water > after_ordinal
+                    or self._closed_manifest is not None
+                ),
+                timeout=max(0.0, float(timeout_seconds)),
+            )
+            return self.snapshot()
+
+    def wake_readers(self) -> None:
+        """Wake live subscribers during collector shutdown."""
+
+        with self._changed:
+            self._changed.notify_all()
 
 
 def read_segments(

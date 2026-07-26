@@ -46,6 +46,7 @@ from ..models.identity import (
     TraceProvenanceV5,
 )
 from ..models.messages import MessageNodeV5
+from ..models.reconciliation import TraceLiveReconciliationReceiptV1
 from ..models.spans import (
     SpanKind,
     SpanStatus,
@@ -56,6 +57,7 @@ from ..models.spans import (
 )
 from ..models.tokens import TokenCaptureV5
 from ..store.filesystem import FilesystemBlobStore
+from ..projections.reconciliation import build_live_reconciliation
 from .binding import TraceCaptureBindingV1
 from .coverage import (
     CaptureCoverageReceiptV1,
@@ -153,6 +155,7 @@ class SealedCapture:
     segments: tuple[TraceSegmentManifestV1, ...]
     envelope_to_event: dict[str, str]
     call_index_to_span: dict[int, str]
+    reconciliation: TraceLiveReconciliationReceiptV1
 
 
 class TraceFinalizer:
@@ -835,12 +838,19 @@ class TraceFinalizer:
         _validate_alias_integrity(document)
         document = document.sealed()
 
+        reconciliation = build_live_reconciliation(
+            document,
+            records,
+            envelope_to_event=envelope_to_event,
+            call_index_to_span=call_index_to_span,
+        )
         return SealedCapture(
             document=document,
             coverage=sealed_coverage,
             segments=self.segments,
             envelope_to_event=envelope_to_event,
             call_index_to_span=call_index_to_span,
+            reconciliation=reconciliation,
         )
 
     def _correlate_provider_calls(

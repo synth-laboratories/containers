@@ -69,6 +69,13 @@ from .messages import (
     ReasoningAvailability,
 )
 from .projection import ProjectionLossV1, ProjectionManifestV1
+from .reconciliation import (
+    TRACE_LIVE_RECONCILIATION_SCHEMA_VERSION,
+    LiveReconciliationDisposition,
+    LiveReconciliationEntryV1,
+    LiveReconciliationTargetV1,
+    TraceLiveReconciliationReceiptV1,
+)
 from .selectors import (
     GroundingStatus,
     SelectorKind,
@@ -88,6 +95,13 @@ from .spans import (
     UsageV5,
 )
 from .tokens import TokenCaptureProvenance, TokenCaptureV5, TokenSequenceRefV1
+from .visual import (
+    TRACE_VISUAL_SCHEMA_VERSION,
+    TraceVisualItemV1,
+    TraceVisualLaneV1,
+    TraceVisualProjectionV1,
+    TraceVisualState,
+)
 from .capture_data import CapturedBodyRefV1, RawCaptureDisposition
 from .standards import (
     AdjudicationMethod,
@@ -206,8 +220,13 @@ __all__ = [
     "ProducerRefV1",
     "ProjectionLossV1",
     "ProjectionManifestV1",
+    "TRACE_LIVE_RECONCILIATION_SCHEMA_VERSION",
+    "TRACE_VISUAL_SCHEMA_VERSION",
     "ReasoningAvailability",
     "RawCaptureDisposition",
+    "LiveReconciliationDisposition",
+    "LiveReconciliationEntryV1",
+    "LiveReconciliationTargetV1",
     "ReceiptV1",
     "RecordState",
     "RewardAggregationV1",
@@ -241,10 +260,15 @@ __all__ = [
     "TraceKind",
     "TraceLifecycleV5",
     "TraceLinkV5",
+    "TraceLiveReconciliationReceiptV1",
     "TraceProvenanceV5",
     "TraceRefV5",
     "TraceSelectorV1",
     "TraceStatus",
+    "TraceVisualItemV1",
+    "TraceVisualLaneV1",
+    "TraceVisualProjectionV1",
+    "TraceVisualState",
     "TokenCaptureProvenance",
     "TokenCaptureV5",
     "TokenSequenceRefV1",

@@ -16,11 +16,13 @@ from typing import Any
 
 from .canonical import content_digest, readable_json
 from .canonical import record_id, utc_now
+from .capture.live import follow_live_pages, read_live_page
 from .capture.spool import repair as repair_spool
 from .capture.redaction import redact_json_source_bytes
 from .projections.inspector import load_bundle, summarize
 from .projections.v4 import project_v4
 from .projections.derived import PROJECTIONS
+from .projections.visual import visual_from_sealed
 from .adapters.atif import export_atif
 from .models.projection import (
     ProjectionLossV1,
@@ -60,7 +62,16 @@ def main(argv: list[str] | None = None) -> int:
     project.add_argument(
         "--format",
         default="v4",
-        choices=["v4", "atif", "transcript", "memory", "training", "logprobs", "event_history"],
+        choices=[
+            "v4",
+            "atif",
+            "visual",
+            "transcript",
+            "memory",
+            "training",
+            "logprobs",
+            "event_history",
+        ],
     )
 
     archive = subparsers.add_parser("archive", help="write a verified deterministic bundle ZIP")
@@ -128,6 +139,17 @@ def main(argv: list[str] | None = None) -> int:
     repair_parser.add_argument("capture_root", type=Path)
     repair_parser.add_argument("--capture-id", required=True)
 
+    tail = subparsers.add_parser(
+        "tail",
+        help="read exact raw capture envelopes from a durable live spool",
+    )
+    tail.add_argument("capture_root", type=Path)
+    tail.add_argument("--capture-id")
+    tail.add_argument("--after", "--after-ordinal", dest="after_ordinal", type=int, default=-1)
+    tail.add_argument("--limit", type=int, default=256)
+    tail.add_argument("--follow", action="store_true")
+    tail.add_argument("--poll-seconds", type=float, default=0.25)
+
     verify = subparsers.add_parser("verify", help="prove a bundle is self-contained")
     verify.add_argument("bundle", type=Path)
 
@@ -178,7 +200,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument(
         "--project",
         action="append",
-        choices=["v4", "atif"],
+        choices=["v4", "atif", "visual"],
         dest="projections",
     )
     run.add_argument("child_command", nargs=argparse.REMAINDER)
@@ -259,7 +281,14 @@ def main(argv: list[str] | None = None) -> int:
                 payload = (
                     export_atif(inspected.trace)
                     if kind == "atif"
-                    else PROJECTIONS[kind](inspected.trace)
+                    else (
+                        visual_from_sealed(
+                            inspected.trace,
+                            inspected.evidence,
+                        ).to_dict()
+                        if kind == "visual"
+                        else PROJECTIONS[kind](inspected.trace)
+                    )
                 )
                 losses = tuple(
                     ProjectionLossV1(field_path="*", reason=str(item), record_count=0)
@@ -438,6 +467,41 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "repair":
         result = repair_spool(args.capture_root, capture_id=args.capture_id)
         print(readable_json(result))
+        return 0
+
+    if args.command == "tail":
+        if args.follow:
+            for page in follow_live_pages(
+                args.capture_root,
+                expected_capture_id=args.capture_id,
+                after_ordinal=args.after_ordinal,
+                limit=args.limit,
+                poll_seconds=args.poll_seconds,
+            ):
+                for envelope in page.records:
+                    print(
+                        json.dumps(
+                            envelope.to_dict(),
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ),
+                        flush=True,
+                    )
+            return 0
+        page = read_live_page(
+            args.capture_root,
+            expected_capture_id=args.capture_id,
+            after_ordinal=args.after_ordinal,
+            limit=args.limit,
+        )
+        for envelope in page.records:
+            print(
+                json.dumps(
+                    envelope.to_dict(),
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            )
         return 0
 
     if args.command == "verify":

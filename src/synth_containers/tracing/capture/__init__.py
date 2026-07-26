@@ -29,8 +29,18 @@ from .finalizer import SealedCapture, TraceFinalizer, application_event_id
 from .proxy import CaptureProxy, UnsupportedProtocol
 from .redaction import RedactionError, RedactionReportV1, redact_headers, redact_payload
 from .session import CaptureSession
+from .live import (
+    LiveTracePageV1,
+    LiveTraceStatusV1,
+    follow_live_pages,
+    page_from_spool,
+    parse_live_cursor,
+    read_live_page,
+    status_from_spool,
+)
 from .spool import (
     LiveManifestV1,
+    RawSpoolSnapshotV1,
     RawSpool,
     SpoolRepairV1,
     TraceSegmentManifestV1,
@@ -69,6 +79,8 @@ __all__ = [
     "Completeness",
     "Interception",
     "LiveManifestV1",
+    "LiveTracePageV1",
+    "LiveTraceStatusV1",
     "LocalCollector",
     "MITM_LIFECYCLE_SCHEMA_VERSION",
     "MitmLifecycleReceiptV1",
@@ -78,6 +90,7 @@ __all__ = [
     "RawCaptureEnvelopeV1",
     "RawRecordType",
     "RawSpool",
+    "RawSpoolSnapshotV1",
     "ResponsesWebSocketRelay",
     "ScopedMitmProxy",
     "RedactionError",
@@ -94,13 +107,18 @@ __all__ = [
     "application_event_id",
     "assert_egress",
     "finalization_from_dict",
+    "follow_live_pages",
     "make_envelope",
     "mint_binding",
     "mitm_environment",
     "new_coverage_receipt",
+    "page_from_spool",
+    "parse_live_cursor",
     "read_segments",
+    "read_live_page",
     "redact_headers",
     "redact_payload",
     "repair",
     "run_captured_command",
+    "status_from_spool",
 ]
