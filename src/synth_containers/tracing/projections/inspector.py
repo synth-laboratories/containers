@@ -371,6 +371,51 @@ def summarize(inspected: InspectedBundle) -> dict[str, Any]:
             }
             for item in evidence.verifier_results
         ],
+        "judgments": [
+            {
+                "judgment_id": judgment.judgment_id,
+                "verifier_result_id": result.verifier_result_id,
+                "criterion_id": judgment.criterion_id,
+                "status": (
+                    str(judgment.status)
+                    if judgment.status is not None
+                    else None
+                ),
+                "score": judgment.score,
+                "verdict": judgment.verdict,
+                "passed": judgment.passed,
+                "confidence": judgment.confidence,
+                "grounding": str(judgment.grounding),
+                "subject": (
+                    {
+                        "kind": str(judgment.subject.kind),
+                        "entity_id": judgment.subject.entity_id,
+                    }
+                    if judgment.subject is not None
+                    else None
+                ),
+                "producer": (
+                    judgment.producer.to_dict()
+                    if judgment.producer is not None
+                    else None
+                ),
+                "evidence": len(judgment.evidence),
+                "revision": judgment.revision,
+                "state": (
+                    str(judgment.state)
+                    if judgment.state is not None
+                    else None
+                ),
+                "supersedes_id": judgment.supersedes_id,
+                "adjudication_id": (
+                    judgment.adjudication.adjudication_id
+                    if judgment.adjudication is not None
+                    else None
+                ),
+            }
+            for result in evidence.verifier_results
+            for judgment in result.judgments
+        ],
         "rewards": [
             {
                 "reward_record_id": item.reward_record_id,

@@ -74,6 +74,7 @@ from .spans import (
 from .tokens import TokenCaptureProvenance, TokenCaptureV5, TokenSequenceRefV1
 from .capture_data import CapturedBodyRefV1, RawCaptureDisposition
 from .standards import (
+    AdjudicationMethod,
     AnnotationV1,
     BenchmarkVerdictV1,
     CriterionDefinitionV1,
@@ -81,6 +82,9 @@ from .standards import (
     CriterionRole,
     EvaluationResultV1,
     ExecutionStatus,
+    JudgmentAdjudicationV1,
+    JudgmentStatus,
+    JudgmentV1,
     ProducerRefV1,
     ReceiptV1,
     RecordState,
@@ -106,6 +110,7 @@ __all__ = [
     "TRACE_SCHEMA_VERSION",
     "ActorKind",
     "ActorV5",
+    "AdjudicationMethod",
     "AliasNamespace",
     "AliasV1",
     "AnnotationV1",
@@ -127,6 +132,9 @@ __all__ = [
     "EventType",
     "EventV5",
     "ExecutionStatus",
+    "JudgmentAdjudicationV1",
+    "JudgmentStatus",
+    "JudgmentV1",
     "GroundingStatus",
     "MessageNodeV5",
     "MessagePartV5",
