@@ -61,7 +61,7 @@ class TraceEvidenceBundleV5(JsonDataclassMixin):
         return replace(self, content_digest=content_digest(self))
 
     def selectors(self) -> tuple[Any, ...]:
-        """Every selector this bundle cites, for validation against the sealed trace."""
+        """Every successful citation that must resolve against the sealed trace."""
 
         found: list[Any] = []
         for annotation in self.annotations:
@@ -70,13 +70,32 @@ class TraceEvidenceBundleV5(JsonDataclassMixin):
         for result in self.verifier_results:
             found.append(result.subject)
             found.extend(result.evidence)
-            for criterion in result.criterion_results:
-                found.extend(criterion.evidence)
+            for judgment in result.judgments:
+                if judgment.subject is not None:
+                    found.append(judgment.subject)
+                found.extend(judgment.evidence)
+                if judgment.adjudication is not None:
+                    found.extend(judgment.adjudication.evidence)
         for record in self.reward_records:
             found.append(record.subject)
             found.extend(record.evidence)
         for evaluation in self.evaluation_results:
             found.append(evaluation.subject)
+        return tuple(found)
+
+    def unavailable_selectors(self) -> tuple[Any, ...]:
+        """Attempted selectors retained specifically because they did not resolve."""
+
+        found: list[Any] = []
+        for annotation in self.annotations:
+            gaps = annotation.unavailable_evidence
+            if gaps is None:
+                continue
+            found.extend(
+                gap.attempted_selector
+                for gap in gaps.gaps
+                if gap.attempted_selector is not None
+            )
         return tuple(found)
 
 

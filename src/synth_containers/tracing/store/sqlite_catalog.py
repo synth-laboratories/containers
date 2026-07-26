@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Optional
 
 from ..canonical import canonical_text
 from ..models.document import TraceDocumentV5
@@ -20,7 +20,7 @@ from ..models.evidence import TraceEvidenceBundleV5
 from .projection import catalog_projection
 
 
-CATALOG_SCHEMA_VERSION = 2
+CATALOG_SCHEMA_VERSION = 3
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS catalog_meta (
@@ -97,6 +97,13 @@ CREATE INDEX IF NOT EXISTS idx_evidence_kind ON evidence_records (trace_digest, 
 CREATE VIRTUAL TABLE IF NOT EXISTS trace_search USING fts5(
     trace_digest UNINDEXED, entity_id UNINDEXED, kind UNINDEXED, text
 );
+CREATE VIRTUAL TABLE IF NOT EXISTS evidence_search USING fts5(
+    trace_digest UNINDEXED,
+    bundle_id UNINDEXED,
+    record_id UNINDEXED,
+    kind UNINDEXED,
+    text
+);
 """
 
 
@@ -126,6 +133,7 @@ class SqliteCatalogStore:
             "trace_aliases",
             "evidence_records",
             "trace_search",
+            "evidence_search",
         ):
             self._connection.execute(f"DELETE FROM {table}")
         self._connection.commit()
@@ -353,6 +361,9 @@ class SqliteCatalogStore:
         self._connection.execute(
             "DELETE FROM evidence_records WHERE bundle_id = ?", (bundle.bundle_id,)
         )
+        self._connection.execute(
+            "DELETE FROM evidence_search WHERE bundle_id = ?", (bundle.bundle_id,)
+        )
         rows: list[tuple[Any, ...]] = []
         for annotation in bundle.annotations:
             rows.append(
@@ -468,6 +479,27 @@ class SqliteCatalogStore:
         self._connection.executemany(
             "INSERT OR REPLACE INTO evidence_records VALUES (?,?,?,?,?,?,?,?,?,?)", rows
         )
+        self._connection.executemany(
+            "INSERT INTO evidence_search "
+            "(trace_digest, bundle_id, record_id, kind, text) VALUES (?,?,?,?,?)",
+            (
+                (
+                    row["trace_digest"],
+                    row["bundle_id"],
+                    row["record_id"],
+                    row["record_kind"],
+                    canonical_text(
+                        {
+                            "record_id": row["record_id"],
+                            "definition_id": row["definition_id"],
+                            "verdict": row["verdict"],
+                            "facts": json.loads(row["facts"]),
+                        }
+                    ),
+                )
+                for row in projected["evidence"]
+            ),
+        )
         self._connection.commit()
 
     # -- queries -----------------------------------------------------------------
@@ -492,6 +524,35 @@ class SqliteCatalogStore:
         params.append(limit)
         return [dict(row) for row in self._connection.execute(sql, params).fetchall()]
 
+    def search_evidence(
+        self,
+        query: str,
+        *,
+        trace_digest: Optional[str] = None,
+        record_kind: Optional[str] = None,
+        limit: int = 100,
+    ) -> Iterable[dict[str, Any]]:
+        if int(limit) <= 0:
+            raise ValueError("search limit must be positive")
+        sql = (
+            "SELECT DISTINCT trace_digest, record_id, kind, "
+            "snippet(evidence_search, 4, '[', ']', '…', 16) AS snippet "
+            "FROM evidence_search WHERE evidence_search MATCH ?"
+        )
+        params: list[Any] = [query]
+        if trace_digest is not None:
+            sql += " AND trace_digest = ?"
+            params.append(trace_digest)
+        if record_kind is not None:
+            sql += " AND kind = ?"
+            params.append(record_kind)
+        sql += " ORDER BY rank LIMIT ?"
+        params.append(int(limit))
+        return [
+            dict(row)
+            for row in self._connection.execute(sql, params).fetchall()
+        ]
+
     def query_traces(
         self,
         *,
@@ -508,7 +569,15 @@ class SqliteCatalogStore:
         event_kind: str | None = None,
         span_kind: str | None = None,
         criterion_id: str | None = None,
+        judgment_id: str | None = None,
         annotation_id: str | None = None,
+        annotator_id: Optional[str] = None,
+        annotation_type: Optional[str] = None,
+        annotation_label: Optional[str] = None,
+        annotation_status: Optional[str] = None,
+        annotation_review_state: Optional[str] = None,
+        annotation_confidence_min: Optional[float] = None,
+        annotation_confidence_max: Optional[float] = None,
         reward_id: str | None = None,
         workflow_address: str | None = None,
         started_after: str | None = None,
@@ -546,10 +615,12 @@ class SqliteCatalogStore:
         if query:
             clauses.append(
                 "d.trace_digest IN ("
-                "SELECT trace_digest FROM trace_search WHERE trace_search MATCH ?"
+                "SELECT trace_digest FROM trace_search WHERE trace_search MATCH ? "
+                "UNION "
+                "SELECT trace_digest FROM evidence_search WHERE evidence_search MATCH ?"
                 ")"
             )
-            params.append(query)
+            params.extend((query, query))
         if actor_id:
             clauses.append(
                 "EXISTS (SELECT 1 FROM trace_entities e "
@@ -592,12 +663,22 @@ class SqliteCatalogStore:
             params.append(span_kind)
         if criterion_id:
             clauses.append(
-                "EXISTS (SELECT 1 FROM evidence_records er, "
-                "json_each(json_extract(er.facts, '$.criterion_results')) cr "
-                "WHERE er.trace_digest = d.trace_digest "
-                "AND json_extract(cr.value, '$.criterion_id') = ?)"
+                "EXISTS (SELECT 1 FROM evidence_records er "
+                "WHERE er.trace_digest = d.trace_digest AND ("
+                "(er.record_kind = 'judgment' AND er.definition_id = ?) OR "
+                "(er.record_kind = 'verifier_result' AND EXISTS ("
+                "SELECT 1 FROM json_each("
+                "json_extract(er.facts, '$.criterion_results')) cr "
+                "WHERE json_extract(cr.value, '$.criterion_id') = ?))))"
             )
-            params.append(criterion_id)
+            params.extend((criterion_id, criterion_id))
+        if judgment_id:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM evidence_records er "
+                "WHERE er.trace_digest = d.trace_digest "
+                "AND er.record_kind = 'judgment' AND er.record_id = ?)"
+            )
+            params.append(judgment_id)
         if annotation_id:
             clauses.append(
                 "EXISTS (SELECT 1 FROM evidence_records er "
@@ -605,6 +686,47 @@ class SqliteCatalogStore:
                 "AND er.record_kind = 'annotation' AND er.record_id = ?)"
             )
             params.append(annotation_id)
+        annotation_filters: list[str] = [
+            "er.trace_digest = d.trace_digest",
+            "er.record_kind = 'annotation'",
+        ]
+        annotation_params: list[Any] = []
+        if annotator_id is not None:
+            annotation_filters.append("er.definition_id = ?")
+            annotation_params.append(annotator_id)
+        if annotation_type is not None:
+            annotation_filters.append(
+                "json_extract(er.facts, '$.annotation_type') = ?"
+            )
+            annotation_params.append(annotation_type)
+        if annotation_status is not None:
+            annotation_filters.append("json_extract(er.facts, '$.status') = ?")
+            annotation_params.append(annotation_status)
+        if annotation_review_state is not None:
+            annotation_filters.append(
+                "json_extract(er.facts, '$.review_state') = ?"
+            )
+            annotation_params.append(annotation_review_state)
+        if annotation_confidence_min is not None:
+            annotation_filters.append("er.value >= ?")
+            annotation_params.append(float(annotation_confidence_min))
+        if annotation_confidence_max is not None:
+            annotation_filters.append("er.value <= ?")
+            annotation_params.append(float(annotation_confidence_max))
+        if annotation_label is not None:
+            annotation_filters.append(
+                "EXISTS (SELECT 1 FROM json_each("
+                "json_extract(er.facts, '$.labels')) labels "
+                "WHERE labels.value = ?)"
+            )
+            annotation_params.append(annotation_label)
+        if len(annotation_filters) > 2:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM evidence_records er WHERE "
+                + " AND ".join(annotation_filters)
+                + ")"
+            )
+            params.extend(annotation_params)
         if reward_id or reward_min is not None or reward_max is not None:
             reward_predicates = [
                 "er.trace_digest = d.trace_digest",
@@ -662,6 +784,15 @@ class SqliteCatalogStore:
             and float(reward_min) > float(reward_max)
         ):
             raise ValueError("reward_min must not exceed reward_max")
+        if (
+            annotation_confidence_min is not None
+            and annotation_confidence_max is not None
+            and float(annotation_confidence_min)
+            > float(annotation_confidence_max)
+        ):
+            raise ValueError(
+                "annotation_confidence_min must not exceed annotation_confidence_max"
+            )
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         params.append(int(limit))
         return [
@@ -744,6 +875,84 @@ class SqliteCatalogStore:
             f"SELECT * FROM evidence_records {where} ORDER BY record_kind, record_id", params
         )
         return [dict(row) for row in cursor.fetchall()]
+
+    def annotation_facets(
+        self,
+        facet: str,
+        *,
+        trace_digest: Optional[str] = None,
+        annotator_id: Optional[str] = None,
+        annotation_type: Optional[str] = None,
+        include_superseded: bool = False,
+        limit: int = 100,
+    ) -> Iterable[dict[str, Any]]:
+        if int(limit) <= 0:
+            raise ValueError("facet limit must be positive")
+        clauses: list[str] = []
+        params: list[Any] = []
+        if trace_digest is not None:
+            clauses.append("a.trace_digest = ?")
+            params.append(trace_digest)
+        if annotator_id is not None:
+            clauses.append("a.definition_id = ?")
+            params.append(annotator_id)
+        if annotation_type is not None:
+            clauses.append("json_extract(a.facts, '$.annotation_type') = ?")
+            params.append(annotation_type)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        annotation_records = (
+            "WITH annotation_records AS ("
+            "SELECT DISTINCT trace_digest, record_id, definition_id, value, facts "
+            "FROM evidence_records WHERE record_kind = 'annotation'"
+        )
+        if include_superseded:
+            annotation_rows = annotation_records + (
+                "), annotations AS ("
+                "SELECT * FROM annotation_records) "
+            )
+        else:
+            annotation_rows = annotation_records + (
+                "), annotations AS ("
+                "SELECT current.* FROM annotation_records current "
+                "WHERE NOT EXISTS ("
+                "SELECT 1 FROM annotation_records successor "
+                "WHERE json_extract(successor.facts, '$.supersedes_id') "
+                "= current.record_id)) "
+            )
+        if facet == "label":
+            sql = (
+                annotation_rows
+                + "SELECT labels.value AS value, COUNT(*) AS count, "
+                "AVG(a.value) AS mean_confidence "
+                "FROM annotations a, "
+                "json_each(json_extract(a.facts, '$.labels')) labels "
+                f"{where} "
+                "GROUP BY labels.value ORDER BY count DESC, value LIMIT ?"
+            )
+        else:
+            expressions = {
+                "annotator": "a.definition_id",
+                "annotation_type": "json_extract(a.facts, '$.annotation_type')",
+                "status": "json_extract(a.facts, '$.status')",
+                "review_state": "json_extract(a.facts, '$.review_state')",
+                "producer_kind": "json_extract(a.facts, '$.producer.kind')",
+                "target_kind": "json_extract(a.facts, '$.target_kind')",
+            }
+            expression = expressions.get(facet)
+            if expression is None:
+                raise ValueError(f"unsupported annotation facet: {facet}")
+            sql = (
+                annotation_rows
+                + f"SELECT {expression} AS value, COUNT(*) AS count, "
+                "AVG(a.value) AS mean_confidence "
+                f"FROM annotations a {where} "
+                f"GROUP BY {expression} ORDER BY count DESC, value LIMIT ?"
+            )
+        params.append(int(limit))
+        return [
+            dict(row)
+            for row in self._connection.execute(sql, params).fetchall()
+        ]
 
 
 __all__ = ["CATALOG_SCHEMA_VERSION", "SqliteCatalogStore"]

@@ -14,7 +14,7 @@ from ..models.document import TraceDocumentV5
 from ..models.evidence import TraceEvidenceBundleV5
 
 
-CATALOG_PROJECTION_SCHEMA_VERSION = "synth.trace-catalog-projection.v1"
+CATALOG_PROJECTION_SCHEMA_VERSION = "synth.trace-catalog-projection.v2"
 
 
 def catalog_projection(
@@ -654,7 +654,42 @@ def _evidence_projection(bundle: TraceEvidenceBundleV5) -> dict[str, Any]:
             }
         )
 
+    for definition in bundle.annotator_definitions:
+        output_contract = definition.output_contract
+        evidence(
+            "annotator_definition",
+            definition.annotator_id,
+            definition_id=definition.annotator_id,
+            verdict=(
+                str(output_contract.task_kind)
+                if output_contract is not None
+                else None
+            ),
+            facts={
+                "name": definition.name,
+                "purpose": definition.purpose,
+                "version": definition.version,
+                "taxonomy": list(definition.taxonomy),
+                "supported_trace_schemas": list(
+                    definition.supported_trace_schemas
+                ),
+                "required_subject_scope": definition.required_subject_scope,
+                "grounding_requirement": str(definition.grounding_requirement),
+                "minimum_evidence": definition.minimum_evidence,
+                "unavailable_evidence_behavior": str(
+                    definition.unavailable_evidence_behavior
+                ),
+                "confidence_semantics": str(definition.confidence_semantics),
+                "output_contract": (
+                    output_contract.to_dict()
+                    if output_contract is not None
+                    else None
+                ),
+            },
+        )
     for annotation in bundle.annotations:
+        inspection = annotation.inspection
+        derivation = annotation.derivation
         evidence(
             "annotation",
             annotation.annotation_id,
@@ -665,9 +700,43 @@ def _evidence_projection(bundle: TraceEvidenceBundleV5) -> dict[str, Any]:
             verdict=",".join(annotation.labels),
             facts={
                 "annotation_type": annotation.annotation_type,
+                "target_kind": str(annotation.target.kind),
                 "labels": list(annotation.labels),
                 "payload": annotation.payload,
+                "rationale": annotation.rationale,
+                "status": (
+                    str(annotation.status)
+                    if annotation.status is not None
+                    else None
+                ),
+                "review_state": (
+                    str(annotation.review_state)
+                    if annotation.review_state is not None
+                    else None
+                ),
+                "author_kind": str(annotation.author_kind),
+                "producer": annotation.producer.to_dict(),
+                "visibility": str(annotation.visibility),
+                "abstention_reason": annotation.abstention_reason,
+                "unavailable_evidence": (
+                    annotation.unavailable_evidence.to_dict()
+                    if annotation.unavailable_evidence is not None
+                    else None
+                ),
+                "inspection": (
+                    inspection.to_dict() if inspection is not None else None
+                ),
+                "derivation": (
+                    derivation.to_dict() if derivation is not None else None
+                ),
+                "annotator_execution_trace_id": (
+                    annotation.annotator_execution_trace_id
+                ),
+                "annotator_execution_trace_digest": (
+                    annotation.annotator_execution_trace_digest
+                ),
                 "revision": annotation.revision,
+                "supersedes_id": annotation.supersedes_id,
             },
         )
     for result in bundle.verifier_results:
@@ -690,6 +759,56 @@ def _evidence_projection(bundle: TraceEvidenceBundleV5) -> dict[str, Any]:
                 "failure_modes": list(result.failure_modes),
             },
         )
+        for judgment in result.judgments:
+            if judgment.judgment_id is None:
+                continue
+            if judgment.subject is None:
+                raise ValueError(
+                    f"judgment {judgment.judgment_id!r} has no canonical subject"
+                )
+            evidence(
+                "judgment",
+                judgment.judgment_id,
+                definition_id=judgment.criterion_id,
+                subject_entity_id=judgment.subject.entity_id,
+                grounding=str(judgment.grounding),
+                value=judgment.score,
+                verdict=judgment.verdict,
+                facts={
+                    "verifier_result_id": result.verifier_result_id,
+                    "criterion_version": judgment.criterion_version,
+                    "criterion_digest": judgment.criterion_digest,
+                    "status": (
+                        str(judgment.status)
+                        if judgment.status is not None
+                        else None
+                    ),
+                    "passed": judgment.passed,
+                    "confidence": judgment.confidence,
+                    "rationale": judgment.rationale,
+                    "failure_modes": list(judgment.failure_modes),
+                    "evidence": [item.to_dict() for item in judgment.evidence],
+                    "producer": (
+                        judgment.producer.to_dict()
+                        if judgment.producer is not None
+                        else None
+                    ),
+                    "adjudication": (
+                        judgment.adjudication.to_dict()
+                        if judgment.adjudication is not None
+                        else None
+                    ),
+                    "revision": judgment.revision,
+                    "state": (
+                        str(judgment.state)
+                        if judgment.state is not None
+                        else None
+                    ),
+                    "supersedes_id": judgment.supersedes_id,
+                    "invalidation_reason": judgment.invalidation_reason,
+                    "produced_at": judgment.produced_at,
+                },
+            )
     for reward in bundle.reward_records:
         evidence(
             "reward_record",
