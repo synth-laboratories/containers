@@ -28,6 +28,13 @@ from ..models.evidence import TraceEvidenceBundleV5
 from ..models.projection import ProjectionManifestV1
 from ..models.selectors import TraceSelectorV1
 from ..models.standards import (
+    AnnotationDerivationV1,
+    AnnotationEvidenceGapsV1,
+    AnnotationInspectionV1,
+    AnnotationOutputContractV1,
+    AnnotationPayloadFieldV1,
+    AnnotationPayloadSchemaV1,
+    AnnotationTaxonV1,
     AnnotationV1,
     BenchmarkVerdictV1,
     CriterionDefinitionV1,
@@ -40,6 +47,7 @@ from ..models.standards import (
     RewardRecordV1,
     RubricDefinitionV2,
     TraceAnnotatorDefinitionV1,
+    UnavailableAnnotationEvidenceV1,
     VerifierDefinitionV1,
     VerifierResultV2,
 )
@@ -69,6 +77,14 @@ PUBLIC_CONTRACTS: tuple[type, ...] = (
     VerifierDefinitionV1,
     VerifierResultV2,
     TraceAnnotatorDefinitionV1,
+    AnnotationTaxonV1,
+    AnnotationPayloadFieldV1,
+    AnnotationPayloadSchemaV1,
+    AnnotationOutputContractV1,
+    UnavailableAnnotationEvidenceV1,
+    AnnotationEvidenceGapsV1,
+    AnnotationInspectionV1,
+    AnnotationDerivationV1,
     AnnotationV1,
     EvaluationResultV1,
     BenchmarkVerdictV1,

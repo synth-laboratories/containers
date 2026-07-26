@@ -8,7 +8,7 @@ content-addressed, and the catalog is a rebuildable projection of the manifests.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Protocol, runtime_checkable
+from typing import Any, Iterable, Optional, Protocol, runtime_checkable
 
 from synth_containers.serde import JsonDataclassMixin
 
@@ -73,6 +73,26 @@ class CatalogStore(Protocol):
     def index_evidence(self, bundle: TraceEvidenceBundleV5) -> None: ...
 
     def traces(self) -> Iterable[dict[str, Any]]: ...
+
+    def search_evidence(
+        self,
+        query: str,
+        *,
+        trace_digest: Optional[str] = None,
+        record_kind: Optional[str] = None,
+        limit: int = 100,
+    ) -> Iterable[dict[str, Any]]: ...
+
+    def annotation_facets(
+        self,
+        facet: str,
+        *,
+        trace_digest: Optional[str] = None,
+        annotator_id: Optional[str] = None,
+        annotation_type: Optional[str] = None,
+        include_superseded: bool = False,
+        limit: int = 100,
+    ) -> Iterable[dict[str, Any]]: ...
 
     def entities(
         self,

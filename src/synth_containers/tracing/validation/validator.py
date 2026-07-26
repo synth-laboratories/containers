@@ -16,6 +16,7 @@ from typing import Any
 from synth_containers.serde import JsonDataclassMixin
 
 from ..canonical import content_digest, record_id, utc_now
+from ..models.actors import Visibility
 from ..models.document import TraceDocumentV5
 from ..models.evidence import TraceEvidenceBundleV5
 from ..models.selectors import GroundingStatus, resolve_selector
@@ -24,9 +25,19 @@ from ..models.standards import (
     JUDGMENT_ADJUDICATION_SCHEMA_VERSION,
     JUDGMENT_SCHEMA_VERSION,
     AdjudicationMethod,
+    AnnotationDerivationKind,
+    AnnotationInspectionSource,
+    AnnotationReviewState,
+    AnnotationStatus,
+    AnnotationTaskKind,
+    AnnotationValueKind,
+    AnnotatorGroundingRequirement,
+    ConfidenceSemantics,
     ExecutionStatus,
     JudgmentStatus,
+    ProducerKind,
     RecordState,
+    UnavailableEvidenceBehavior,
     VerificationStatus,
     VerifierKind,
     aggregate_reward_values,
@@ -888,6 +899,26 @@ def _check_completeness(document: TraceDocumentV5) -> list[ValidationFindingV1]:
     return findings
 
 
+def _annotation_payload_value_matches(value: Any, value_kind: str) -> bool:
+    if value_kind == AnnotationValueKind.STRING:
+        return isinstance(value, str)
+    if value_kind == AnnotationValueKind.INTEGER:
+        return isinstance(value, int) and not isinstance(value, bool)
+    if value_kind == AnnotationValueKind.NUMBER:
+        return (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(float(value))
+        )
+    if value_kind == AnnotationValueKind.BOOLEAN:
+        return isinstance(value, bool)
+    if value_kind == AnnotationValueKind.OBJECT:
+        return isinstance(value, dict)
+    if value_kind == AnnotationValueKind.ARRAY:
+        return isinstance(value, list)
+    return False
+
+
 def validate_evidence(
     document: TraceDocumentV5,
     bundle: TraceEvidenceBundleV5,
@@ -1044,6 +1075,7 @@ def validate_evidence(
     annotator_definitions = index(
         bundle.annotator_definitions, "annotator_id", "annotator definition"
     )
+    annotations = index(bundle.annotations, "annotation_id", "annotation")
     reward_definitions = index(
         bundle.reward_definitions, "reward_id", "reward definition"
     )
@@ -1131,14 +1163,37 @@ def validate_evidence(
                 definition.annotator_id,
             )
         if str(definition.grounding_requirement).lower() not in {
-            "exact_selector",
-            "selector",
-            "summary_allowed",
-            "none",
+            str(value) for value in AnnotatorGroundingRequirement
         }:
             finding(
                 "annotator_grounding_requirement_invalid",
                 "annotator declares an unsupported grounding requirement",
+                definition.annotator_id,
+            )
+        if str(definition.unavailable_evidence_behavior).lower() not in {
+            str(value) for value in UnavailableEvidenceBehavior
+        }:
+            finding(
+                "annotator_unavailable_evidence_behavior_invalid",
+                "annotator declares an unsupported unavailable-evidence behavior",
+                definition.annotator_id,
+            )
+        if str(definition.confidence_semantics).lower() not in {
+            str(value) for value in ConfidenceSemantics
+        }:
+            finding(
+                "annotator_confidence_semantics_invalid",
+                "annotator declares unsupported confidence semantics",
+                definition.annotator_id,
+            )
+        if (
+            str(definition.confidence_semantics)
+            == ConfidenceSemantics.CALIBRATED_PROBABILITY
+            and not definition.confidence_calibration_ref
+        ):
+            finding(
+                "annotator_confidence_calibration_missing",
+                "calibrated probability confidence must cite a calibration reference",
                 definition.annotator_id,
             )
         if len(definition.taxonomy) != len(set(definition.taxonomy)):
@@ -1147,6 +1202,181 @@ def validate_evidence(
                 "annotator taxonomy contains a duplicate label",
                 definition.annotator_id,
             )
+        output_contract = definition.output_contract
+        if output_contract is None:
+            continue
+        if str(output_contract.task_kind).lower() not in {
+            str(value) for value in AnnotationTaskKind
+        }:
+            finding(
+                "annotator_task_kind_invalid",
+                "annotator output contract declares an unsupported task kind",
+                definition.annotator_id,
+            )
+        if not output_contract.annotation_types:
+            finding(
+                "annotator_annotation_types_missing",
+                "annotator output contract must declare at least one annotation type",
+                definition.annotator_id,
+            )
+        if any(not value for value in output_contract.annotation_types):
+            finding(
+                "annotator_annotation_type_empty",
+                "annotator output contract contains an empty annotation type",
+                definition.annotator_id,
+            )
+        if len(output_contract.annotation_types) != len(
+            set(output_contract.annotation_types)
+        ):
+            finding(
+                "annotator_annotation_type_duplicate",
+                "annotator output contract contains a duplicate annotation type",
+                definition.annotator_id,
+            )
+        producer_kinds = tuple(
+            str(value).lower() for value in output_contract.allowed_producer_kinds
+        )
+        if len(producer_kinds) != len(set(producer_kinds)):
+            finding(
+                "annotator_producer_kind_duplicate",
+                "annotator output contract contains a duplicate producer kind",
+                definition.annotator_id,
+            )
+        if any(
+            value not in {str(kind) for kind in ProducerKind}
+            for value in producer_kinds
+        ):
+            finding(
+                "annotator_producer_kind_invalid",
+                "annotator output contract contains an unsupported producer kind",
+                definition.annotator_id,
+            )
+        taxonomy_labels = tuple(item.label for item in output_contract.taxonomy)
+        if any(not label for label in taxonomy_labels):
+            finding(
+                "annotator_typed_taxonomy_empty_label",
+                "annotator typed taxonomy contains an empty canonical label",
+                definition.annotator_id,
+            )
+        if len(taxonomy_labels) != len(set(taxonomy_labels)):
+            finding(
+                "annotator_typed_taxonomy_duplicate_label",
+                "annotator typed taxonomy contains a duplicate canonical label",
+                definition.annotator_id,
+            )
+        if output_contract.taxonomy and set(taxonomy_labels) != set(
+            definition.taxonomy
+        ):
+            finding(
+                "annotator_typed_taxonomy_mismatch",
+                "annotator typed taxonomy must describe every flat taxonomy label exactly",
+                definition.annotator_id,
+            )
+        taxonomy_label_set = set(taxonomy_labels)
+        taxonomy_aliases: set[str] = set()
+        parent_by_label: dict[str, str] = {}
+        for taxon in output_contract.taxonomy:
+            if taxon.parent_label is not None:
+                if taxon.parent_label not in taxonomy_label_set:
+                    finding(
+                        "annotator_taxonomy_parent_missing",
+                        "annotator taxonomy label cites an absent parent label",
+                        definition.annotator_id,
+                    )
+                elif taxon.parent_label == taxon.label:
+                    finding(
+                        "annotator_taxonomy_parent_cycle",
+                        "annotator taxonomy label cannot parent itself",
+                        definition.annotator_id,
+                    )
+                else:
+                    parent_by_label[taxon.label] = taxon.parent_label
+            if len(taxon.aliases) != len(set(taxon.aliases)):
+                finding(
+                    "annotator_taxonomy_duplicate_alias",
+                    "annotator taxonomy label contains a duplicate alias",
+                    definition.annotator_id,
+                )
+            for alias in taxon.aliases:
+                if not alias:
+                    finding(
+                        "annotator_taxonomy_empty_alias",
+                        "annotator taxonomy contains an empty alias",
+                        definition.annotator_id,
+                    )
+                if alias in taxonomy_label_set or alias in taxonomy_aliases:
+                    finding(
+                        "annotator_taxonomy_alias_collision",
+                        "annotator taxonomy alias collides with another label or alias",
+                        definition.annotator_id,
+                    )
+                taxonomy_aliases.add(alias)
+        for label in parent_by_label:
+            seen: set[str] = set()
+            cursor = label
+            while cursor in parent_by_label:
+                if cursor in seen:
+                    finding(
+                        "annotator_taxonomy_parent_cycle",
+                        "annotator taxonomy parent hierarchy contains a cycle",
+                        definition.annotator_id,
+                    )
+                    break
+                seen.add(cursor)
+                cursor = parent_by_label[cursor]
+        payload_schema = output_contract.payload_schema
+        if payload_schema is None:
+            continue
+        field_names = tuple(item.field_name for item in payload_schema.fields)
+        if not payload_schema.schema_id or not payload_schema.version:
+            finding(
+                "annotator_payload_schema_identity_missing",
+                "annotator payload schema must declare an id and version",
+                definition.annotator_id,
+            )
+        if any(not name for name in field_names):
+            finding(
+                "annotator_payload_field_name_missing",
+                "annotator payload schema contains an empty field name",
+                definition.annotator_id,
+            )
+        if len(field_names) != len(set(field_names)):
+            finding(
+                "annotator_payload_field_duplicate",
+                "annotator payload schema contains a duplicate field name",
+                definition.annotator_id,
+            )
+        for payload_field in payload_schema.fields:
+            value_kind = str(payload_field.value_kind).lower()
+            if value_kind not in {
+                str(value) for value in AnnotationValueKind
+            }:
+                finding(
+                    "annotator_payload_field_kind_invalid",
+                    "annotator payload field declares an unsupported value kind",
+                    definition.annotator_id,
+                )
+                continue
+            if any(
+                not _annotation_payload_value_matches(value, value_kind)
+                for value in payload_field.allowed_values
+            ):
+                finding(
+                    "annotator_payload_allowed_value_type_mismatch",
+                    "annotator payload allowed value differs from its field value kind",
+                    definition.annotator_id,
+                )
+            if len(payload_field.allowed_values) != len(
+                {
+                    content_digest(value)
+                    for value in payload_field.allowed_values
+                }
+            ):
+                finding(
+                    "annotator_payload_allowed_value_duplicate",
+                    "annotator payload field repeats an allowed value",
+                    definition.annotator_id,
+                )
 
     for rubric in bundle.rubrics:
         seen: set[str] = set()
@@ -1979,6 +2209,7 @@ def validate_evidence(
                 start,
             )
 
+    annotation_dependencies: dict[str, set[str]] = {}
     for annotation in bundle.annotations:
         definition = annotator_definitions.get(annotation.annotator_id)
         if definition is None:
@@ -2000,6 +2231,75 @@ def validate_evidence(
                     "annotation cites a different annotator definition digest",
                     annotation.annotation_id,
                 )
+            producer_kind = str(annotation.producer.kind).strip().lower()
+            author_kind = str(annotation.author_kind).strip().lower()
+            output_contract = definition.output_contract
+            typed_annotation = (
+                output_contract is not None or annotation.status is not None
+            )
+            if (
+                typed_annotation
+                and producer_kind not in {str(value) for value in ProducerKind}
+            ):
+                finding(
+                    "annotation_producer_kind_invalid",
+                    "annotation producer kind is unsupported",
+                    annotation.annotation_id,
+                )
+            if typed_annotation and author_kind != producer_kind:
+                finding(
+                    "annotation_author_producer_mismatch",
+                    "annotation author kind must match its typed producer kind",
+                    annotation.annotation_id,
+                )
+            if (
+                typed_annotation
+                and producer_kind == ProducerKind.AGENTIC
+                and not (
+                    annotation.annotator_execution_trace_id
+                    and annotation.annotator_execution_trace_digest
+                )
+            ):
+                finding(
+                    "annotation_agentic_execution_trace_missing",
+                    "agentic annotation producer must cite its execution trace id and digest",
+                    annotation.annotation_id,
+                )
+            if bool(annotation.annotator_execution_trace_id) != bool(
+                annotation.annotator_execution_trace_digest
+            ):
+                finding(
+                    "annotation_execution_trace_reference_incomplete",
+                    "annotation execution trace reference must include both id and digest",
+                    annotation.annotation_id,
+                )
+            if (
+                definition.model
+                and annotation.producer.model
+                and definition.model != annotation.producer.model
+            ):
+                finding(
+                    "annotation_producer_model_mismatch",
+                    "annotation producer model differs from its annotator definition",
+                    annotation.annotation_id,
+                )
+            if output_contract is not None:
+                if annotation.annotation_type not in output_contract.annotation_types:
+                    finding(
+                        "annotation_type_unsupported",
+                        "annotation type is absent from its annotator output contract",
+                        annotation.annotation_id,
+                    )
+                allowed_producers = {
+                    str(value).lower()
+                    for value in output_contract.allowed_producer_kinds
+                }
+                if allowed_producers and producer_kind not in allowed_producers:
+                    finding(
+                        "annotation_producer_disallowed",
+                        "annotation producer kind is disallowed by its output contract",
+                        annotation.annotation_id,
+                    )
             if len(annotation.labels) != len(set(annotation.labels)):
                 finding(
                     "annotation_duplicate_label",
@@ -2011,6 +2311,62 @@ def validate_evidence(
                 finding(
                     "annotation_taxonomy_mismatch",
                     "annotation contains a label absent from its annotator taxonomy",
+                    annotation.annotation_id,
+                )
+            status = (
+                str(annotation.status).strip().lower()
+                if annotation.status is not None
+                else str(AnnotationStatus.APPLIED)
+            )
+            if status not in {str(value) for value in AnnotationStatus}:
+                finding(
+                    "annotation_status_invalid",
+                    "annotation status is unsupported",
+                    annotation.annotation_id,
+                )
+            if output_contract is not None and annotation.status is None:
+                finding(
+                    "annotation_status_missing",
+                    "typed annotator output must declare an annotation status",
+                    annotation.annotation_id,
+                )
+            if annotation.review_state is not None and str(
+                annotation.review_state
+            ).lower() not in {str(value) for value in AnnotationReviewState}:
+                finding(
+                    "annotation_review_state_invalid",
+                    "annotation review state is unsupported",
+                    annotation.annotation_id,
+                )
+            if str(annotation.visibility).lower() not in {
+                str(value) for value in Visibility
+            }:
+                finding(
+                    "annotation_visibility_invalid",
+                    "annotation visibility is unsupported",
+                    annotation.annotation_id,
+                )
+            else:
+                visibility_rank = {
+                    Visibility.PUBLIC: 0,
+                    Visibility.OPERATOR: 1,
+                    Visibility.PRIVATE: 2,
+                }
+                document_visibility = str(document.visibility)
+                if (
+                    document_visibility in visibility_rank
+                    and visibility_rank[str(annotation.visibility)]
+                    < visibility_rank[document_visibility]
+                ):
+                    finding(
+                        "annotation_visibility_exceeds_trace",
+                        "annotation cannot be less restricted than its source trace",
+                        annotation.annotation_id,
+                    )
+            if typed_annotation and annotation.review_state is None:
+                finding(
+                    "annotation_review_state_missing",
+                    "new annotation outcomes must declare their review state",
                     annotation.annotation_id,
                 )
             required_scope = str(definition.required_subject_scope).strip().lower()
@@ -2029,7 +2385,10 @@ def validate_evidence(
                     "annotation cites the same evidence selector more than once",
                     annotation.annotation_id,
                 )
-            if len(unique_evidence) < definition.minimum_evidence:
+            if (
+                status == AnnotationStatus.APPLIED
+                and len(unique_evidence) < definition.minimum_evidence
+            ):
                 finding(
                     "annotation_minimum_evidence_unmet",
                     "annotation cites less evidence than its annotator requires",
@@ -2039,28 +2398,267 @@ def validate_evidence(
                 definition.grounding_requirement
             ).strip().lower()
             grounding = str(annotation.grounding).strip().lower()
-            if grounding_requirement == "exact_selector" and grounding != str(
-                GroundingStatus.GROUNDED
+            if (
+                status == AnnotationStatus.APPLIED
+                and grounding_requirement == AnnotatorGroundingRequirement.EXACT_SELECTOR
+                and grounding != str(GroundingStatus.GROUNDED)
             ):
                 finding(
                     "annotation_grounding_requirement_unmet",
                     "exact-selector annotator output must be fully grounded",
                     annotation.annotation_id,
                 )
+            inspected_projection = (
+                annotation.inspection.projection_id
+                if annotation.inspection is not None
+                else None
+            )
             if grounding == str(GroundingStatus.SUMMARY_ONLY) and not (
-                annotation.inspected_projection or annotation.target.source_projection
+                annotation.inspected_projection
+                or annotation.target.source_projection
+                or inspected_projection
             ):
                 finding(
                     "annotation_summary_projection_missing",
                     "summary-only annotation must name the projection it inspected",
                     annotation.annotation_id,
                 )
-            if grounding == str(GroundingStatus.GROUNDED) and not annotation.evidence:
+            if (
+                status == AnnotationStatus.APPLIED
+                and grounding == str(GroundingStatus.GROUNDED)
+                and not annotation.evidence
+            ):
                 finding(
                     "annotation_grounded_without_evidence",
                     "fully grounded annotation must cite at least one evidence selector",
                     annotation.annotation_id,
                 )
+            if status == AnnotationStatus.APPLIED and grounding in {
+                GroundingStatus.SOURCE_UNAVAILABLE,
+                GroundingStatus.INVALID,
+            }:
+                finding(
+                    "annotation_applied_grounding_invalid",
+                    "applied annotation cannot use unavailable or invalid grounding",
+                    annotation.annotation_id,
+                )
+            if status == AnnotationStatus.ABSTAINED:
+                if annotation.labels or annotation.payload:
+                    finding(
+                        "annotation_abstention_has_output",
+                        "abstained annotation cannot emit labels or a structured payload",
+                        annotation.annotation_id,
+                    )
+                if not annotation.abstention_reason:
+                    finding(
+                        "annotation_abstention_reason_missing",
+                        "abstained annotation must name its reason",
+                        annotation.annotation_id,
+                    )
+                if str(definition.unavailable_evidence_behavior) not in {
+                    UnavailableEvidenceBehavior.ABSTAIN,
+                    UnavailableEvidenceBehavior.EMIT_UNAVAILABLE,
+                }:
+                    finding(
+                        "annotation_abstention_disallowed",
+                        "annotator definition requires unavailable evidence to fail",
+                        annotation.annotation_id,
+                    )
+            elif status == AnnotationStatus.SOURCE_UNAVAILABLE:
+                if annotation.labels or annotation.payload:
+                    finding(
+                        "annotation_source_unavailable_has_output",
+                        "source-unavailable annotation cannot emit labels or a structured payload",
+                        annotation.annotation_id,
+                    )
+                if grounding != GroundingStatus.SOURCE_UNAVAILABLE:
+                    finding(
+                        "annotation_source_unavailable_grounding_mismatch",
+                        "source-unavailable annotation must use source-unavailable grounding",
+                        annotation.annotation_id,
+                    )
+                if (
+                    str(definition.unavailable_evidence_behavior)
+                    != UnavailableEvidenceBehavior.EMIT_UNAVAILABLE
+                ):
+                    finding(
+                        "annotation_source_unavailable_disallowed",
+                        "annotator definition does not permit an unavailable output",
+                        annotation.annotation_id,
+                    )
+                if (
+                    annotation.unavailable_evidence is None
+                    or not annotation.unavailable_evidence.gaps
+                ):
+                    finding(
+                        "annotation_unavailable_evidence_missing",
+                        "source-unavailable annotation must record at least one evidence gap",
+                        annotation.annotation_id,
+                    )
+            elif annotation.abstention_reason:
+                finding(
+                    "annotation_abstention_reason_unexpected",
+                    "applied annotation cannot carry an abstention reason",
+                    annotation.annotation_id,
+                )
+            if (
+                annotation.unavailable_evidence is not None
+                and status == AnnotationStatus.APPLIED
+            ):
+                finding(
+                    "annotation_applied_with_evidence_gaps",
+                    "applied annotation cannot claim unavailable required evidence",
+                    annotation.annotation_id,
+                )
+            if annotation.unavailable_evidence is not None:
+                if not annotation.unavailable_evidence.gaps:
+                    finding(
+                        "annotation_empty_evidence_gaps",
+                        "annotation evidence-gap record must not be empty",
+                        annotation.annotation_id,
+                    )
+                for gap in annotation.unavailable_evidence.gaps:
+                    if not gap.requirement or not gap.reason:
+                        finding(
+                            "annotation_evidence_gap_incomplete",
+                            "annotation evidence gap must name its requirement and reason",
+                            annotation.annotation_id,
+                        )
+                    if gap.attempted_selector is None:
+                        continue
+                    gap_resolution = resolve_selector(
+                        document, gap.attempted_selector
+                    )
+                    if gap_resolution.resolved:
+                        finding(
+                            "annotation_unavailable_evidence_resolved",
+                            "annotation claims unavailable evidence that resolves successfully",
+                            annotation.annotation_id,
+                        )
+                    elif gap.reason != gap_resolution.reason:
+                        finding(
+                            "annotation_evidence_gap_reason_mismatch",
+                            "annotation evidence-gap reason differs from selector resolution",
+                            annotation.annotation_id,
+                        )
+            if annotation.inspection is not None:
+                inspection = annotation.inspection
+                inspection_source = str(inspection.source).strip().lower()
+                if inspection_source not in {
+                    str(value) for value in AnnotationInspectionSource
+                }:
+                    finding(
+                        "annotation_inspection_source_invalid",
+                        "annotation inspection source is unsupported",
+                        annotation.annotation_id,
+                    )
+                if (
+                    inspection_source == AnnotationInspectionSource.TRACE_AUTHORITY
+                    and not inspection.trace_body_read
+                ):
+                    finding(
+                        "annotation_trace_authority_not_read",
+                        "trace-authority inspection must confirm the trace body was read",
+                        annotation.annotation_id,
+                    )
+                if inspection_source == AnnotationInspectionSource.PROJECTION:
+                    if not (
+                        inspection.projection_id
+                        and inspection.projection_digest
+                        and inspection.projection_manifest_digest
+                    ):
+                        finding(
+                            "annotation_projection_provenance_incomplete",
+                            "projection inspection must cite its id, body digest, and manifest digest",
+                            annotation.annotation_id,
+                        )
+                if (
+                    annotation.inspected_projection
+                    and inspection.projection_id
+                    and annotation.inspected_projection != inspection.projection_id
+                ):
+                    finding(
+                        "annotation_projection_identity_mismatch",
+                        "legacy and typed inspected-projection identities disagree",
+                        annotation.annotation_id,
+                    )
+                loss_keys = {
+                    (item.field_path, item.reason, item.record_count)
+                    for item in inspection.losses
+                }
+                if len(loss_keys) != len(inspection.losses):
+                    finding(
+                        "annotation_projection_loss_duplicate",
+                        "annotation inspection repeats a projection loss",
+                        annotation.annotation_id,
+                    )
+            elif typed_annotation:
+                finding(
+                    "annotation_inspection_missing",
+                    "new annotation outcomes must record what trace authority or projection was inspected",
+                    annotation.annotation_id,
+                )
+            if (
+                annotation.inspection is not None
+                and grounding == GroundingStatus.GROUNDED
+                and not annotation.inspection.trace_body_read
+            ):
+                finding(
+                    "annotation_grounded_without_trace_read",
+                    "grounded annotation must confirm the trace body was read",
+                    annotation.annotation_id,
+                )
+            payload_schema = (
+                output_contract.payload_schema
+                if output_contract is not None
+                else None
+            )
+            if payload_schema is not None and status == AnnotationStatus.APPLIED:
+                fields_by_name = {
+                    item.field_name: item for item in payload_schema.fields
+                }
+                missing_payload_fields = {
+                    name
+                    for name, payload_field in fields_by_name.items()
+                    if payload_field.required and name not in annotation.payload
+                }
+                if missing_payload_fields:
+                    finding(
+                        "annotation_payload_required_field_missing",
+                        "annotation payload omits a required typed field",
+                        annotation.annotation_id,
+                    )
+                unknown_payload_fields = set(annotation.payload) - set(fields_by_name)
+                if (
+                    unknown_payload_fields
+                    and not payload_schema.additional_fields_allowed
+                ):
+                    finding(
+                        "annotation_payload_unknown_field",
+                        "annotation payload contains a field absent from its schema",
+                        annotation.annotation_id,
+                    )
+                for field_name, payload_value in annotation.payload.items():
+                    payload_field = fields_by_name.get(field_name)
+                    if payload_field is None:
+                        continue
+                    if not _annotation_payload_value_matches(
+                        payload_value, str(payload_field.value_kind).lower()
+                    ):
+                        finding(
+                            "annotation_payload_field_type_mismatch",
+                            "annotation payload field does not match its declared value kind",
+                            annotation.annotation_id,
+                        )
+                    if payload_field.allowed_values and not any(
+                        payload_value == allowed
+                        for allowed in payload_field.allowed_values
+                    ):
+                        finding(
+                            "annotation_payload_field_value_disallowed",
+                            "annotation payload field value is absent from its allowed values",
+                            annotation.annotation_id,
+                        )
             if annotation.confidence is not None and not (
                 math.isfinite(float(annotation.confidence))
                 and 0.0 <= annotation.confidence <= 1.0
@@ -2070,6 +2668,160 @@ def validate_evidence(
                     "annotation confidence must be finite and between zero and one",
                     annotation.annotation_id,
                 )
+            confidence_semantics = str(definition.confidence_semantics).lower()
+            if (
+                confidence_semantics == ConfidenceSemantics.NONE
+                and annotation.confidence is not None
+            ):
+                finding(
+                    "annotation_confidence_unexpected",
+                    "annotator declares no confidence semantics but output has confidence",
+                    annotation.annotation_id,
+                )
+            if (
+                confidence_semantics == ConfidenceSemantics.DETERMINISTIC
+                and annotation.confidence is not None
+                and annotation.confidence != 1.0
+            ):
+                finding(
+                    "annotation_deterministic_confidence_invalid",
+                    "deterministic confidence, when present, must be one",
+                    annotation.annotation_id,
+                )
+            if (
+                confidence_semantics
+                == ConfidenceSemantics.INTER_ANNOTATOR_AGREEMENT
+                and annotation.derivation is None
+            ):
+                finding(
+                    "annotation_agreement_derivation_missing",
+                    "inter-annotator agreement confidence must cite its derivation",
+                    annotation.annotation_id,
+                )
+            if annotation.derivation is not None:
+                derivation = annotation.derivation
+                source_ids = derivation.source_annotation_ids
+                annotation_dependencies[annotation.annotation_id] = set(source_ids)
+                if str(derivation.kind).lower() not in {
+                    str(value) for value in AnnotationDerivationKind
+                }:
+                    finding(
+                        "annotation_derivation_kind_invalid",
+                        "annotation derivation kind is unsupported",
+                        annotation.annotation_id,
+                    )
+                if len(source_ids) != len(set(source_ids)):
+                    finding(
+                        "annotation_derivation_duplicate_source",
+                        "annotation derivation cites a source annotation more than once",
+                        annotation.annotation_id,
+                    )
+                minimum_sources = (
+                    2
+                    if str(derivation.kind)
+                    == AnnotationDerivationKind.CONSENSUS
+                    else 1
+                )
+                if len(source_ids) < minimum_sources:
+                    finding(
+                        "annotation_derivation_sources_insufficient",
+                        "annotation derivation cites too few source annotations",
+                        annotation.annotation_id,
+                    )
+                if not derivation.method:
+                    finding(
+                        "annotation_derivation_method_missing",
+                        "annotation derivation must name its method",
+                        annotation.annotation_id,
+                    )
+                if derivation.agreement is not None and not (
+                    math.isfinite(float(derivation.agreement))
+                    and 0.0 <= derivation.agreement <= 1.0
+                ):
+                    finding(
+                        "annotation_derivation_agreement_invalid",
+                        "annotation derivation agreement must be between zero and one",
+                        annotation.annotation_id,
+                    )
+                if (
+                    str(derivation.kind) == AnnotationDerivationKind.CONSENSUS
+                    and derivation.agreement is None
+                ):
+                    finding(
+                        "annotation_consensus_agreement_missing",
+                        "consensus annotation must report agreement",
+                        annotation.annotation_id,
+                    )
+                if not set(derivation.dissenting_annotation_ids).issubset(
+                    set(source_ids)
+                ):
+                    finding(
+                        "annotation_derivation_dissent_source_missing",
+                        "dissenting annotation ids must be a subset of derivation sources",
+                        annotation.annotation_id,
+                    )
+                if len(derivation.dissenting_annotation_ids) != len(
+                    set(derivation.dissenting_annotation_ids)
+                ):
+                    finding(
+                        "annotation_derivation_duplicate_dissent",
+                        "annotation derivation repeats a dissenting annotation id",
+                        annotation.annotation_id,
+                    )
+                if status != AnnotationStatus.APPLIED:
+                    finding(
+                        "annotation_derivation_not_applied",
+                        "consensus or adjudication must produce an applied annotation",
+                        annotation.annotation_id,
+                    )
+                for source_id in source_ids:
+                    source = annotations.get(source_id)
+                    if source is None:
+                        finding(
+                            "annotation_derivation_source_missing",
+                            "annotation derivation cites an annotation absent from the bundle",
+                            annotation.annotation_id,
+                        )
+                    elif (
+                        source.target != annotation.target
+                        or source.annotation_type != annotation.annotation_type
+                    ):
+                        finding(
+                            "annotation_derivation_subject_mismatch",
+                            "annotation derivation crosses target or annotation type",
+                            annotation.annotation_id,
+                        )
+
+    annotation_cycle_reported: set[str] = set()
+    for start in annotation_dependencies:
+        visiting: set[str] = set()
+        visited: set[str] = set()
+
+        def visit_annotation(node: str) -> bool:
+            if node in visiting:
+                return True
+            if node in visited:
+                return False
+            visiting.add(node)
+            if any(
+                visit_annotation(dependency)
+                for dependency in annotation_dependencies.get(node, set())
+            ):
+                return True
+            visiting.remove(node)
+            visited.add(node)
+            return False
+
+        if (
+            visit_annotation(start)
+            and start not in annotation_cycle_reported
+        ):
+            annotation_cycle_reported.add(start)
+            finding(
+                "annotation_derivation_cycle",
+                "annotation derivation dependencies contain a cycle",
+                start,
+            )
 
     def score_value(record: Any) -> float | None:
         for field_name in ("aggregate_score", "score", "value"):
