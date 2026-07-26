@@ -508,6 +508,7 @@ class SqliteCatalogStore:
         event_kind: str | None = None,
         span_kind: str | None = None,
         criterion_id: str | None = None,
+        judgment_id: str | None = None,
         annotation_id: str | None = None,
         reward_id: str | None = None,
         workflow_address: str | None = None,
@@ -592,12 +593,22 @@ class SqliteCatalogStore:
             params.append(span_kind)
         if criterion_id:
             clauses.append(
-                "EXISTS (SELECT 1 FROM evidence_records er, "
-                "json_each(json_extract(er.facts, '$.criterion_results')) cr "
-                "WHERE er.trace_digest = d.trace_digest "
-                "AND json_extract(cr.value, '$.criterion_id') = ?)"
+                "EXISTS (SELECT 1 FROM evidence_records er "
+                "WHERE er.trace_digest = d.trace_digest AND ("
+                "(er.record_kind = 'judgment' AND er.definition_id = ?) OR "
+                "(er.record_kind = 'verifier_result' AND EXISTS ("
+                "SELECT 1 FROM json_each("
+                "json_extract(er.facts, '$.criterion_results')) cr "
+                "WHERE json_extract(cr.value, '$.criterion_id') = ?))))"
             )
-            params.append(criterion_id)
+            params.extend((criterion_id, criterion_id))
+        if judgment_id:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM evidence_records er "
+                "WHERE er.trace_digest = d.trace_digest "
+                "AND er.record_kind = 'judgment' AND er.record_id = ?)"
+            )
+            params.append(judgment_id)
         if annotation_id:
             clauses.append(
                 "EXISTS (SELECT 1 FROM evidence_records er "

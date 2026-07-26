@@ -70,8 +70,12 @@ class TraceEvidenceBundleV5(JsonDataclassMixin):
         for result in self.verifier_results:
             found.append(result.subject)
             found.extend(result.evidence)
-            for criterion in result.criterion_results:
-                found.extend(criterion.evidence)
+            for judgment in result.judgments:
+                if judgment.subject is not None:
+                    found.append(judgment.subject)
+                found.extend(judgment.evidence)
+                if judgment.adjudication is not None:
+                    found.extend(judgment.adjudication.evidence)
         for record in self.reward_records:
             found.append(record.subject)
             found.extend(record.evidence)

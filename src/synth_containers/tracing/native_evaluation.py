@@ -14,11 +14,14 @@ from .models.selectors import GroundingStatus, SelectorKind, selector_for
 from .models.standards import (
     BenchmarkVerdictV1,
     CriterionDefinitionV1,
-    CriterionResultV1,
     CriterionRole,
     EvaluationResultV1,
     ExecutionStatus,
+    JUDGMENT_SCHEMA_VERSION,
+    JudgmentStatus,
+    JudgmentV1,
     ProducerRefV1,
+    RecordState,
     RewardDefinitionV1,
     RewardEmission,
     RewardRecordV1,
@@ -183,6 +186,17 @@ def _typed_native_records(
     execution_completed = execution_status == ExecutionStatus.COMPLETED
     verifier_payload = _mapping(payload.get("verifier"))
     rubric_payload = _mapping(payload.get("rubric"))
+    judgment_producer = ProducerRefV1(
+        kind=str(_verifier_kind(verifier_payload)),
+        name=producer.name,
+        version=producer.version,
+        model=_optional_text(verifier_payload.get("model")) or producer.model,
+        config_digest=(
+            _optional_text(verifier_payload.get("config_digest"))
+            or producer.config_digest
+        ),
+        credential_profile=producer.credential_profile,
+    )
     source_definition_rows = _criterion_rows(
         rubric_payload.get("criteria") or payload.get("criteria")
     )
@@ -219,7 +233,7 @@ def _typed_native_records(
         threshold = 0.5
 
     criteria: list[CriterionDefinitionV1] = []
-    criterion_results: list[CriterionResultV1] = []
+    criterion_results: list[JudgmentV1] = []
     rubric: RubricDefinitionV2 | None = None
     verifier_definition: VerifierDefinitionV1 | None = None
     verifier_result: VerifierResultV2 | None = None
@@ -251,7 +265,15 @@ def _typed_native_records(
             criteria.append(criterion)
             if result_row is not None:
                 criterion_results.append(
-                    _criterion_result(criterion, result_row)
+                    _judgment(
+                        document=document,
+                        criterion=criterion,
+                        row=result_row,
+                        subject=subject,
+                        producer=judgment_producer,
+                        produced_at=produced_at,
+                        source_digest=source_digest,
+                    )
                 )
 
         if not criterion_results and execution_completed:
@@ -273,18 +295,26 @@ def _typed_native_records(
             criteria.append(aggregate)
             if verifier_score is not None:
                 criterion_results.append(
-                    CriterionResultV1(
-                        criterion_id=aggregate.criterion_id,
-                        score=verifier_score,
-                        verdict=(
-                            "pass"
-                            if _passes(verifier_score, aggregate)
-                            else "fail"
-                        ),
-                        passed=_passes(verifier_score, aggregate),
-                        rationale="Imported from the native verifier aggregate score.",
-                        grounding=GroundingStatus.SUMMARY_ONLY,
-                        metadata={"native_criterion_id": aggregate_gate_id},
+                    _judgment(
+                        document=document,
+                        criterion=aggregate,
+                        row={
+                            "criterion_id": aggregate_gate_id,
+                            "score": verifier_score,
+                            "passed": _passes(verifier_score, aggregate),
+                            "verdict": (
+                                "pass"
+                                if _passes(verifier_score, aggregate)
+                                else "fail"
+                            ),
+                            "rationale": (
+                                "Imported from the native verifier aggregate score."
+                            ),
+                        },
+                        subject=subject,
+                        producer=judgment_producer,
+                        produced_at=produced_at,
+                        source_digest=source_digest,
                     )
                 )
 
@@ -810,23 +840,30 @@ def _criterion_definition(
     ).sealed()
 
 
-def _criterion_result(
+def _judgment(
+    *,
+    document: Any,
     criterion: CriterionDefinitionV1,
     row: Mapping[str, Any],
-) -> CriterionResultV1:
+    subject: Any,
+    producer: ProducerRefV1,
+    produced_at: str,
+    source_digest: str,
+) -> JudgmentV1:
     score = _number(row.get("score"))
     passed = _first_bool(row.get("passed"), row.get("accepted"))
     if score is None and passed is not None:
         score = criterion.max_score if passed else criterion.min_score
     if passed is None and score is not None:
         passed = _passes(score, criterion)
-    return CriterionResultV1(
+    verdict = str(
+        row.get("verdict")
+        or ("pass" if passed else "fail" if passed is False else "inconclusive")
+    )
+    return JudgmentV1(
         criterion_id=criterion.criterion_id,
         score=score,
-        verdict=str(
-            row.get("verdict")
-            or ("pass" if passed else "fail" if passed is False else "inconclusive")
-        ),
+        verdict=verdict,
         passed=passed,
         rationale=str(row.get("rationale") or row.get("reason") or ""),
         failure_modes=tuple(
@@ -839,7 +876,46 @@ def _criterion_result(
                 row.get("criterion_id") or row.get("id") or row.get("name") or ""
             )
         },
-    )
+        judgment_id=record_id(
+            "judgment",
+            kind="native_evaluation",
+            scope=(document.trace_id, criterion.criterion_id),
+            key=source_digest,
+        ),
+        criterion_version=criterion.version,
+        criterion_digest=criterion.content_digest,
+        subject=subject,
+        status=_judgment_status(row, verdict=verdict, score=score, passed=passed),
+        producer=producer,
+        produced_at=produced_at,
+        revision=1,
+        state=RecordState.CURRENT,
+        schema_version=JUDGMENT_SCHEMA_VERSION,
+    ).sealed()
+
+
+def _judgment_status(
+    row: Mapping[str, Any],
+    *,
+    verdict: str,
+    score: float | None,
+    passed: bool | None,
+) -> JudgmentStatus | str:
+    declared = row.get("status")
+    if declared is not None:
+        return str(declared).strip().lower()
+    normalized = verdict.strip().lower()
+    if normalized in {"abstain", "abstained"}:
+        return JudgmentStatus.ABSTAINED
+    if normalized == "not_applicable":
+        return JudgmentStatus.NOT_APPLICABLE
+    if normalized == "invalid":
+        return JudgmentStatus.INVALID
+    if normalized == "inconclusive":
+        return JudgmentStatus.INCONCLUSIVE
+    if passed is not None or score is not None:
+        return JudgmentStatus.DECISIVE
+    return JudgmentStatus.INCONCLUSIVE
 
 
 def _criterion_rows(value: Any) -> tuple[Mapping[str, Any], ...]:

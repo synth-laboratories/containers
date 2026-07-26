@@ -1,4 +1,4 @@
-"""Companion evaluation standards: criterion, rubric, verifier, annotator, reward.
+"""Companion evaluation standards: criteria, rubrics, judgments, verifiers, rewards.
 
 Definitions are immutable and content-addressed. Results are append-only facts about
 one subject under one definition version. Re-running a definition creates another
@@ -24,6 +24,8 @@ CRITERION_SCHEMA_VERSION = "synth.criterion.v1"
 RUBRIC_SCHEMA_VERSION = "synth.rubric.v2"
 VERIFIER_DEFINITION_SCHEMA_VERSION = "synth.verifier.v1"
 VERIFIER_RESULT_SCHEMA_VERSION = "synth.verifier-result.v2"
+JUDGMENT_SCHEMA_VERSION = "synth.judgment.v1"
+JUDGMENT_ADJUDICATION_SCHEMA_VERSION = "synth.judgment-adjudication.v1"
 ANNOTATOR_SCHEMA_VERSION = "synth.trace-annotator.v1"
 ANNOTATION_SCHEMA_VERSION = "synth.annotation.v1"
 REWARD_DEFINITION_SCHEMA_VERSION = "synth.reward.v1"
@@ -60,6 +62,24 @@ class VerifierKind(StrEnum):
     AGENTIC = "agentic"
     HUMAN = "human"
     COMPOSITE = "composite"
+
+
+class JudgmentStatus(StrEnum):
+    """Whether a criterion-scoped judgment made a scientifically usable decision."""
+
+    DECISIVE = "decisive"
+    ABSTAINED = "abstained"
+    NOT_APPLICABLE = "not_applicable"
+    INCONCLUSIVE = "inconclusive"
+    INVALID = "invalid"
+
+
+class AdjudicationMethod(StrEnum):
+    HUMAN_REVIEW = "human_review"
+    MAJORITY_VOTE = "majority_vote"
+    CONSENSUS = "consensus"
+    ARBITER = "arbiter"
+    POLICY = "policy"
 
 
 class RewardSourceKind(StrEnum):
@@ -131,7 +151,7 @@ class CriterionDefinitionV1(JsonDataclassMixin):
 
 @dataclass(frozen=True, slots=True)
 class RubricAggregationV1(JsonDataclassMixin):
-    """How criterion results become one score; every edge case is declared."""
+    """How criterion judgments become one score; every edge case is declared."""
 
     strategy: str = "weighted_mean"
     gates_override_score: bool = True
@@ -198,7 +218,30 @@ class VerifierDefinitionV1(JsonDataclassMixin):
 
 
 @dataclass(frozen=True, slots=True)
-class CriterionResultV1(JsonDataclassMixin):
+class JudgmentAdjudicationV1(JsonDataclassMixin):
+    """Provenance for a judgment derived from other judgments."""
+
+    adjudication_id: str
+    method: AdjudicationMethod | str
+    input_judgment_ids: tuple[str, ...]
+    producer: ProducerRefV1
+    produced_at: str
+    decision: str
+    rationale: str = ""
+    policy_ref: str | None = None
+    evidence: tuple[TraceSelectorV1, ...] = ()
+    schema_version: str = JUDGMENT_ADJUDICATION_SCHEMA_VERSION
+
+
+@dataclass(frozen=True, slots=True)
+class JudgmentV1(JsonDataclassMixin):
+    """One producer's criterion-scoped evaluation of an exact trace subject.
+
+    The first fields preserve the historical ``CriterionResultV1`` payload. New
+    judgment fields are nullable so old sealed verifier results rehydrate without
+    changing their canonical bytes or content digests.
+    """
+
     criterion_id: str
     score: float | None
     verdict: str
@@ -209,11 +252,41 @@ class CriterionResultV1(JsonDataclassMixin):
     grounding: GroundingStatus | str = GroundingStatus.UNINSPECTED
     confidence: float | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    judgment_id: str | None = None
+    criterion_version: str | None = None
+    criterion_digest: str | None = None
+    subject: TraceSelectorV1 | None = None
+    status: JudgmentStatus | str | None = None
+    producer: ProducerRefV1 | None = None
+    produced_at: str | None = None
+    adjudication: JudgmentAdjudicationV1 | None = None
+    revision: int | None = None
+    state: RecordState | str | None = None
+    supersedes_id: str | None = None
+    invalidation_reason: str | None = None
+    schema_version: str | None = None
+    content_digest: str | None = None
+
+    def sealed(self) -> "JudgmentV1":
+        if self.schema_version != JUDGMENT_SCHEMA_VERSION:
+            raise ValueError(
+                f"judgment schema must be {JUDGMENT_SCHEMA_VERSION!r} before sealing"
+            )
+        return seal_record(self)
+
+
+# Compatibility name for the original embedded contract. This is the same class,
+# not a parallel result model.
+CriterionResultV1 = JudgmentV1
 
 
 @dataclass(frozen=True, slots=True)
 class VerifierResultV2(JsonDataclassMixin):
-    """Execution status and verification validity are separate on purpose."""
+    """One verifier execution containing criterion-scoped judgments.
+
+    Execution and scientific validity remain separate from the judgments and from
+    downstream benchmark verdicts or optimization rewards.
+    """
 
     verifier_result_id: str
     verifier_id: str
@@ -230,7 +303,7 @@ class VerifierResultV2(JsonDataclassMixin):
     pass_threshold: float | None = None
     passed: bool | None = None
     verdict: str = ""
-    criterion_results: tuple[CriterionResultV1, ...] = ()
+    criterion_results: tuple[JudgmentV1, ...] = ()
     failure_modes: tuple[str, ...] = ()
     evidence: tuple[TraceSelectorV1, ...] = ()
     artifacts: tuple[ArtifactRefV5, ...] = ()
@@ -244,6 +317,12 @@ class VerifierResultV2(JsonDataclassMixin):
 
     def sealed(self) -> "VerifierResultV2":
         return seal_record(self)
+
+    @property
+    def judgments(self) -> tuple[JudgmentV1, ...]:
+        """Canonical name for the compatibility ``criterion_results`` field."""
+
+        return self.criterion_results
 
 
 @dataclass(frozen=True, slots=True)
@@ -470,9 +549,9 @@ class ReceiptV1(JsonDataclassMixin):
 
 def aggregate_rubric_score(
     rubric: RubricDefinitionV2,
-    results: tuple[CriterionResultV1, ...],
+    results: tuple[JudgmentV1, ...],
 ) -> tuple[float | None, bool, tuple[str, ...]]:
-    """Aggregate criterion results under the rubric's declared policy.
+    """Aggregate criterion judgments under the rubric's declared policy.
 
     Returns ``(score, passed, failure_reasons)``. Gating criteria that fail force
     ``passed`` false regardless of the weighted score.
@@ -529,7 +608,22 @@ def aggregate_rubric_score(
             )
             continue
         verdict = str(result.verdict).lower()
-        if verdict == "not_applicable":
+        judgment_status = (
+            str(result.status).lower() if result.status is not None else None
+        )
+        if judgment_status is not None and judgment_status not in {
+            item.value for item in JudgmentStatus
+        }:
+            raise ValueError(
+                f"unsupported judgment status for {criterion.criterion_id}: "
+                f"{result.status!r}"
+            )
+        is_not_applicable = (
+            judgment_status == JudgmentStatus.NOT_APPLICABLE
+            if judgment_status is not None
+            else verdict == "not_applicable"
+        )
+        if is_not_applicable:
             if policy.not_applicable_criterion == "exclude":
                 continue
             add_missing(
@@ -538,16 +632,36 @@ def aggregate_rubric_score(
                 reason="not_applicable",
             )
             continue
-        if verdict in {"invalid", "inconclusive", "abstain", "abstained"}:
-            status = "inconclusive" if verdict in {"abstain", "abstained"} else verdict
+        nondecisive_status = (
+            judgment_status
+            if judgment_status
+            in {
+                JudgmentStatus.ABSTAINED,
+                JudgmentStatus.INCONCLUSIVE,
+                JudgmentStatus.INVALID,
+            }
+            else (
+                "inconclusive"
+                if verdict in {"abstain", "abstained"}
+                else verdict
+                if judgment_status is None
+                and verdict in {"invalid", "inconclusive"}
+                else None
+            )
+        )
+        if nondecisive_status is not None:
             behavior = (
                 policy.invalid_criterion
-                if status == "invalid"
+                if nondecisive_status == JudgmentStatus.INVALID
                 else policy.inconclusive_criterion
             )
             if str(criterion.role) in {CriterionRole.GATING, CriterionRole.REQUIRED}:
-                failures.append(f"{status}:{criterion.criterion_id}")
-            add_missing(criterion, behavior=behavior, reason=status)
+                failures.append(f"{nondecisive_status}:{criterion.criterion_id}")
+            add_missing(
+                criterion,
+                behavior=behavior,
+                reason=str(nondecisive_status),
+            )
             continue
         if result.score is None:
             if str(criterion.role) in {CriterionRole.GATING, CriterionRole.REQUIRED}:
@@ -773,6 +887,8 @@ __all__ = [
     "BENCHMARK_VERDICT_SCHEMA_VERSION",
     "CRITERION_SCHEMA_VERSION",
     "EVALUATION_RESULT_SCHEMA_VERSION",
+    "JUDGMENT_ADJUDICATION_SCHEMA_VERSION",
+    "JUDGMENT_SCHEMA_VERSION",
     "RECEIPT_SCHEMA_VERSION",
     "REWARD_AGGREGATION_SCHEMA_VERSION",
     "REWARD_DEFINITION_SCHEMA_VERSION",
@@ -780,6 +896,7 @@ __all__ = [
     "RUBRIC_SCHEMA_VERSION",
     "VERIFIER_DEFINITION_SCHEMA_VERSION",
     "VERIFIER_RESULT_SCHEMA_VERSION",
+    "AdjudicationMethod",
     "AnnotationV1",
     "BenchmarkVerdictV1",
     "CriterionDefinitionV1",
@@ -787,6 +904,9 @@ __all__ = [
     "CriterionRole",
     "EvaluationResultV1",
     "ExecutionStatus",
+    "JudgmentAdjudicationV1",
+    "JudgmentStatus",
+    "JudgmentV1",
     "ProducerRefV1",
     "ReceiptV1",
     "RecordState",
