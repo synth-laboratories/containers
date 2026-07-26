@@ -3,12 +3,21 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any, Mapping, Optional
 
 from ..canonical import bytes_digest, canonical_bytes, canonical_text, record_id
 from ..models.actors import ActorKind, ActorV5, CoverageState, SessionCoverageV5, SessionV5
 from ..models.completeness import CaptureStatus, TraceCompletenessV5, TraceLifecycleV5, TraceStatus
+from ..models.coordination import (
+    CoordinationEvidenceBasis,
+    CoordinationGraphV1,
+    InteractionEdgeV1,
+    InteractionKind,
+    InteractionStatus,
+    TraceAnchorV1,
+)
 from ..models.document import TraceCaptureSummaryV5, TraceDocumentV5
 from ..models.events import EventOrderV1, EventType, EventV5
 from ..models.identity import AliasNamespace, AliasV1, TraceIdentityV5, TraceKind, TraceProvenanceV5
@@ -34,12 +43,25 @@ _ATIF_SOURCE = {
 }
 
 
+@dataclass(frozen=True, slots=True)
+class _AtifChildLink:
+    parent_actor_id: str
+    child_actor_id: str
+    occurred_at: str
+    sequence: int
+    source_event_id: Optional[str] = None
+
+
 def export_atif(document: TraceDocumentV5) -> dict[str, Any]:
     """Project a sealed V5 graph into a Harbor-valid ATIF-v1.7 trajectory."""
 
     if not document.content_digest:
         raise ValueError("ATIF export requires a sealed Trace V5 document")
-    agents = [actor for actor in document.actors if str(actor.kind) == ActorKind.AGENT]
+    agents = [
+        actor
+        for actor in document.actors
+        if str(actor.kind) in {str(ActorKind.AGENT), str(ActorKind.ORCHESTRATOR)}
+    ]
     root_actor = next((actor for actor in agents if not actor.parent_actor_id), None)
     if root_actor is None and agents:
         root_actor = agents[0]
@@ -67,31 +89,32 @@ def export_atif(document: TraceDocumentV5) -> dict[str, Any]:
         actor_id = actor.actor_id if actor is not None else None
         direct_children = children.get(actor_id or "", ())
         steps = _export_actor_steps(document, actor_id=actor_id, root=root)
+        placement_losses: list[str] = []
         for child in direct_children:
+            interaction = _subagent_interaction(
+                document,
+                parent_actor_id=actor_id,
+                child_actor_id=child.actor_id,
+            )
+            if interaction is not None and _attach_subagent_reference(
+                steps,
+                child=child,
+                interaction=interaction,
+                run_session_id=run_session_id,
+            ):
+                continue
+            loss = (
+                f"subagent {child.actor_id} has no exact ATIF step placement for "
+                "its spawn or assignment interaction"
+            )
+            placement_losses.append(loss)
             steps.append(
-                {
-                    "step_id": 0,
-                    "source": "system",
-                    "message": f"Delegated to {child.display_name}",
-                    "observation": {
-                        "results": [
-                            {
-                                "subagent_trajectory_ref": [
-                                    {
-                                        "trajectory_id": child.actor_id,
-                                        "session_id": run_session_id,
-                                        "extra": {"synth_actor_id": child.actor_id},
-                                    }
-                                ],
-                                "extra": {"event": "subagent.delegation"},
-                            }
-                        ]
-                    },
-                    "extra": {
-                        "synth_event": "subagent.delegation",
-                        "synth_child_actor_id": child.actor_id,
-                    },
-                }
+                _synthetic_subagent_step(
+                    child,
+                    run_session_id=run_session_id,
+                    interaction=interaction,
+                    projection_loss=loss,
+                )
             )
         if not steps:
             steps.append(
@@ -165,14 +188,235 @@ def export_atif(document: TraceDocumentV5) -> dict[str, Any]:
                     "raw provider frames and evidence bundles are not represented in ATIF",
                     "non-ATIF event types are represented as system observations",
                     "the V5 message DAG is linearized into ATIF step order",
+                    *placement_losses,
+                    *_coordination_projection_losses(document, root=root),
                 ],
             },
         }
+        if root and document.coordination is not None:
+            result["extra"]["synth_coordination"] = document.coordination.to_dict()
         if subagents:
             result["subagent_trajectories"] = subagents
         return result
 
     return build(root_actor, root=True)
+
+
+def _subagent_interaction(
+    document: TraceDocumentV5,
+    *,
+    parent_actor_id: Optional[str],
+    child_actor_id: str,
+) -> Optional[InteractionEdgeV1]:
+    if document.coordination is None:
+        return None
+    candidates = [
+        interaction
+        for interaction in document.coordination.interaction_edges
+        if str(interaction.kind)
+        in {
+            str(InteractionKind.ASSIGN_TASK),
+            str(InteractionKind.SPAWN_AGENT),
+        }
+        and str(interaction.target.basis) == "canonical"
+        and interaction.target.entity_kind == "actor"
+        and interaction.target.entity_id == child_actor_id
+    ]
+    owned_entity_ids = _actor_entity_ids(document, parent_actor_id)
+    candidates = [
+        interaction
+        for interaction in candidates
+        if (
+            interaction.source.entity_id in owned_entity_ids
+            or any(
+                message_id in owned_entity_ids
+                for message_id in interaction.carried_message_ids
+            )
+        )
+    ]
+    return min(
+        candidates,
+        key=lambda item: (
+            0
+            if str(item.kind) == str(InteractionKind.ASSIGN_TASK)
+            else 1,
+            item.started_sequence,
+            item.interaction_id,
+        ),
+        default=None,
+    )
+
+
+def _actor_entity_ids(
+    document: TraceDocumentV5,
+    actor_id: Optional[str],
+) -> set[str]:
+    if actor_id is None:
+        return set()
+    return {
+        actor_id,
+        *(
+            message.message_id
+            for message in document.messages
+            if message.sender_actor_id == actor_id
+        ),
+        *(
+            event.event_id
+            for event in document.events
+            if event.actor_id == actor_id
+        ),
+        *(
+            span.span_id
+            for span in document.spans
+            if span.actor_id == actor_id
+        ),
+    }
+
+
+def _attach_subagent_reference(
+    steps: list[dict[str, Any]],
+    *,
+    child: ActorV5,
+    interaction: InteractionEdgeV1,
+    run_session_id: str,
+) -> bool:
+    candidate_ids = {
+        interaction.source.entity_id,
+        *interaction.carried_message_ids,
+        *interaction.carried_event_ids,
+    }
+    candidate_ids.discard(None)
+    step = next(
+        (
+            item
+            for item in steps
+            if str((item.get("extra") or {}).get("synth_entity_id") or "")
+            in candidate_ids
+        ),
+        None,
+    )
+    if step is None:
+        return False
+    observation = step.setdefault("observation", {"results": []})
+    results = observation.setdefault("results", [])
+    results.append(
+        _subagent_reference_result(
+            child,
+            run_session_id=run_session_id,
+            interaction=interaction,
+        )
+    )
+    extra = step.setdefault("extra", {})
+    extra["synth_child_actor_id"] = child.actor_id
+    extra["synth_interaction_id"] = interaction.interaction_id
+    return True
+
+
+def _subagent_reference_result(
+    child: ActorV5,
+    *,
+    run_session_id: str,
+    interaction: Optional[InteractionEdgeV1],
+) -> dict[str, Any]:
+    extra = {
+        "synth_actor_id": child.actor_id,
+        "synth_interaction_id": (
+            interaction.interaction_id if interaction is not None else None
+        ),
+        "synth_interaction_kind": (
+            str(interaction.kind) if interaction is not None else None
+        ),
+    }
+    return {
+        "subagent_trajectory_ref": [
+            {
+                "trajectory_id": child.actor_id,
+                "session_id": run_session_id,
+                "extra": _compact(extra),
+            }
+        ],
+        "extra": _compact(
+            {
+                "event": "subagent.delegation",
+                "synth_interaction_id": (
+                    interaction.interaction_id
+                    if interaction is not None
+                    else None
+                ),
+            }
+        ),
+    }
+
+
+def _synthetic_subagent_step(
+    child: ActorV5,
+    *,
+    run_session_id: str,
+    interaction: Optional[InteractionEdgeV1],
+    projection_loss: str,
+) -> dict[str, Any]:
+    return {
+        "step_id": 0,
+        "source": "system",
+        "message": f"Delegated to {child.display_name}",
+        "observation": {
+            "results": [
+                _subagent_reference_result(
+                    child,
+                    run_session_id=run_session_id,
+                    interaction=interaction,
+                )
+            ]
+        },
+        "extra": _compact(
+            {
+                "synth_event": "subagent.delegation",
+                "synth_child_actor_id": child.actor_id,
+                "synth_interaction_id": (
+                    interaction.interaction_id
+                    if interaction is not None
+                    else None
+                ),
+                "synth_projection_loss": projection_loss,
+            }
+        ),
+    }
+
+
+def _coordination_projection_losses(
+    document: TraceDocumentV5,
+    *,
+    root: bool,
+) -> list[str]:
+    if not root or document.coordination is None:
+        return []
+    graph = document.coordination
+    losses: list[str] = []
+    native_interaction_kinds = {
+        str(InteractionKind.SPAWN_AGENT),
+        str(InteractionKind.ASSIGN_TASK),
+    }
+    if any(
+        str(item.kind) not in native_interaction_kinds
+        for item in graph.interaction_edges
+    ):
+        losses.append(
+            "peer and control interactions are carried in extra.synth_coordination, "
+            "not native ATIF edges"
+        )
+    if graph.actor_groups:
+        losses.append(
+            "actor groups are carried in extra.synth_coordination, not native ATIF groups"
+        )
+    if graph.context_epochs:
+        losses.append(
+            "context epochs are carried in extra.synth_coordination, not native ATIF context"
+        )
+    if graph.joint_turns:
+        losses.append(
+            "joint turns are carried in extra.synth_coordination, not native ATIF steps"
+        )
+    return losses
 
 
 def _export_actor_steps(
@@ -655,14 +899,15 @@ def import_atif(payload: Mapping[str, Any]) -> TraceDocumentV5:
     spans: list[SpanV5] = []
     events: list[EventV5] = []
     aliases: list[AliasV1] = []
+    child_links: list[_AtifChildLink] = []
     timestamps: list[str] = []
     global_event_order = 0
 
     def visit(
         trajectory: Mapping[str, Any],
         *,
-        parent_actor_id: str | None,
-        parent_session_id: str | None,
+        parent_actor_id: Optional[str],
+        parent_session_id: Optional[str],
         path: tuple[int, ...],
     ) -> tuple[str, str]:
         nonlocal global_event_order
@@ -698,6 +943,11 @@ def import_atif(payload: Mapping[str, Any]) -> TraceDocumentV5:
                 display_name=str(agent.get("name") or "ATIF agent"),
                 role="agent",
                 parent_actor_id=parent_actor_id,
+                actor_path=(
+                    "/root"
+                    if len(path) == 1
+                    else "/root/" + "/".join(str(item) for item in path[1:])
+                ),
                 harness=str(agent.get("name") or ""),
                 model=str(agent.get("model_name") or "") or None,
                 aliases=actor_aliases,
@@ -712,6 +962,7 @@ def import_atif(payload: Mapping[str, Any]) -> TraceDocumentV5:
         )
         previous: tuple[str, ...] = ()
         local_timestamps: list[str] = []
+        subagent_reference_events: dict[str, tuple[str, int, str]] = {}
         for index, raw in enumerate(trajectory["steps"]):
             timestamp = str(raw.get("timestamp") or _IMPORT_TIME)
             timestamps.append(timestamp)
@@ -885,6 +1136,26 @@ def import_atif(payload: Mapping[str, Any]) -> TraceDocumentV5:
                         else (),
                     ).sealed()
                 )
+                references = result.get("subagent_trajectory_ref")
+                if isinstance(references, list):
+                    for reference in references:
+                        if not isinstance(reference, Mapping):
+                            continue
+                        referenced_trajectory_id = str(
+                            reference.get("trajectory_id") or ""
+                        )
+                        if not referenced_trajectory_id:
+                            continue
+                        if referenced_trajectory_id in subagent_reference_events:
+                            raise ValueError(
+                                "ATIF trajectory contains duplicate references to "
+                                f"subagent {referenced_trajectory_id!r}"
+                            )
+                        subagent_reference_events[referenced_trajectory_id] = (
+                            event_id,
+                            global_event_order,
+                            timestamp,
+                        )
 
         started = min(local_timestamps) if local_timestamps else _IMPORT_TIME
         ended = max(local_timestamps) if local_timestamps else started
@@ -924,11 +1195,32 @@ def import_atif(payload: Mapping[str, Any]) -> TraceDocumentV5:
             ).sealed()
         )
         for child_index, child in enumerate(trajectory.get("subagent_trajectories") or ()):
-            visit(
+            child_actor_id, _ = visit(
                 child,
                 parent_actor_id=actor_id,
                 parent_session_id=session_id,
                 path=(*path, child_index),
+            )
+            child_native_trajectory_id = str(
+                child.get("trajectory_id")
+                or child.get("session_id")
+                or ".".join(map(str, (*path, child_index)))
+            )
+            reference = subagent_reference_events.get(child_native_trajectory_id)
+            child_links.append(
+                _AtifChildLink(
+                    parent_actor_id=actor_id,
+                    child_actor_id=child_actor_id,
+                    occurred_at=reference[2] if reference is not None else started,
+                    sequence=(
+                        reference[1]
+                        if reference is not None
+                        else global_event_order
+                    ),
+                    source_event_id=(
+                        reference[0] if reference is not None else None
+                    ),
+                )
             )
         return actor_id, session_id
 
@@ -954,6 +1246,93 @@ def import_atif(payload: Mapping[str, Any]) -> TraceDocumentV5:
             )
         )
     usage = _import_total_usage(redacted_value)
+    coordination_edges: list[InteractionEdgeV1] = []
+    origin_by_actor: dict[str, str] = {}
+    for link in child_links:
+        spawn_id = record_id(
+            "ixn",
+            kind="atif_subagent_spawn",
+            scope=(trace_id,),
+            key={
+                "parent_actor_id": link.parent_actor_id,
+                "child_actor_id": link.child_actor_id,
+            },
+        )
+        coordination_edges.append(
+            InteractionEdgeV1(
+                interaction_id=spawn_id,
+                kind=InteractionKind.SPAWN_AGENT,
+                source=TraceAnchorV1.canonical("actor", link.parent_actor_id),
+                target=TraceAnchorV1.canonical("actor", link.child_actor_id),
+                started_sequence=link.sequence,
+                started_at=link.occurred_at,
+                status=InteractionStatus.COMPLETED,
+                evidence_basis=CoordinationEvidenceBasis.DERIVED,
+                metadata={"topology_basis": "atif_subagent_trajectories"},
+            ).sealed()
+        )
+        origin_by_actor[link.child_actor_id] = spawn_id
+        if link.source_event_id is None:
+            continue
+        coordination_edges.append(
+            InteractionEdgeV1(
+                interaction_id=record_id(
+                    "ixn",
+                    kind="atif_subagent_assignment",
+                    scope=(trace_id,),
+                    key={
+                        "source_event_id": link.source_event_id,
+                        "child_actor_id": link.child_actor_id,
+                    },
+                ),
+                kind=InteractionKind.ASSIGN_TASK,
+                source=TraceAnchorV1.canonical("event", link.source_event_id),
+                target=TraceAnchorV1.canonical("actor", link.child_actor_id),
+                started_sequence=link.sequence,
+                started_at=link.occurred_at,
+                status=InteractionStatus.DELIVERED,
+                carried_event_ids=(link.source_event_id,),
+                evidence_basis=CoordinationEvidenceBasis.OBSERVED,
+                metadata={"topology_basis": "atif_subagent_trajectory_ref"},
+            ).sealed()
+        )
+    imported_actors = tuple(
+        replace(
+            actor,
+            origin_interaction_id=origin_by_actor[actor.actor_id],
+            content_digest="",
+        ).sealed()
+        if actor.actor_id in origin_by_actor
+        else actor
+        for actor in actors
+    )
+    coordination = (
+        CoordinationGraphV1(
+            interaction_edges=tuple(
+                sorted(
+                    coordination_edges,
+                    key=lambda item: (
+                        item.started_sequence,
+                        item.interaction_id,
+                    ),
+                )
+            )
+        ).sealed()
+        if coordination_edges
+        else None
+    )
+    native_extra = redacted_value.get("extra")
+    namespaced_coordination = (
+        native_extra.get("synth_coordination")
+        if isinstance(native_extra, Mapping)
+        else None
+    )
+    import_losses = list(assessed["losses"])
+    if namespaced_coordination is not None:
+        import_losses.append(
+            "extra.synth_coordination is retained as native ATIF data; only "
+            "hierarchical subagent relations are canonicalized on import"
+        )
     return TraceDocumentV5(
         trace_id=trace_id,
         trace_kind=(
@@ -1009,15 +1388,16 @@ def import_atif(payload: Mapping[str, Any]) -> TraceDocumentV5:
                 if usage.provenance != UsageProvenance.UNAVAILABLE
                 else CoverageState.NOT_CAPTURED
             ),
-            reasons=tuple(assessed["losses"]),
+            reasons=tuple(import_losses),
         ),
-        actors=tuple(actors),
+        actors=imported_actors,
         sessions=tuple(sessions),
         messages=tuple(messages),
         spans=tuple(spans),
         events=tuple(events),
         usage=usage,
         aliases=tuple(aliases),
+        coordination=coordination,
         extensions={
             "atif_native": redacted_value,
             "atif_source_digest": source_digest,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import Any, Optional
 
 from synth_containers.serde import JsonDataclassMixin
 
@@ -128,6 +128,7 @@ class SpanV5(JsonDataclassMixin):
     turn_id: str | None = None
     branch_id: str | None = None
     workflow_address: str | None = None
+    context_epoch_id: Optional[str] = None
     caused_by_span_ids: tuple[str, ...] = ()
     ended_at: str | None = None
     status: SpanStatus | str = SpanStatus.OK

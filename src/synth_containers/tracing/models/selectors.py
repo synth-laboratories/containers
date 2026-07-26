@@ -29,6 +29,10 @@ class SelectorKind(StrEnum):
     MESSAGE = "message"
     PART = "part"
     ARTIFACT = "artifact"
+    ACTOR_GROUP = "actor_group"
+    INTERACTION = "interaction"
+    CONTEXT_EPOCH = "context_epoch"
+    JOINT_TURN = "joint_turn"
 
 
 class TokenSequence(StrEnum):
@@ -122,6 +126,10 @@ def resolve_selector(
         SelectorKind.EVENT.value: (document.event, "content_digest"),
         SelectorKind.MESSAGE.value: (document.message, "content_digest"),
         SelectorKind.ARTIFACT.value: (document.artifact, "digest"),
+        SelectorKind.ACTOR_GROUP.value: (document.actor_group, "content_digest"),
+        SelectorKind.INTERACTION.value: (document.interaction, "content_digest"),
+        SelectorKind.CONTEXT_EPOCH.value: (document.context_epoch, "content_digest"),
+        SelectorKind.JOINT_TURN.value: (document.joint_turn, "content_digest"),
     }
     if kind == SelectorKind.BRANCH:
         entity = next(

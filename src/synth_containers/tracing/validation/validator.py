@@ -11,11 +11,20 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import StrEnum
 import math
-from typing import Any
+from typing import Any, Optional
 
 from synth_containers.serde import JsonDataclassMixin
 
 from ..canonical import content_digest, record_id, utc_now
+from ..models.coordination import (
+    COORDINATION_SCHEMA_VERSION,
+    ActorGroupKind,
+    AnchorBasis,
+    CoordinationEvidenceBasis,
+    InteractionKind,
+    InteractionStatus,
+    ParticipantState,
+)
 from ..models.document import TraceDocumentV5
 from ..models.evidence import TraceEvidenceBundleV5
 from ..models.selectors import GroundingStatus, resolve_selector
@@ -76,6 +85,7 @@ _CHECKS = (
     "tool_result_pairing",
     "usage_consistency",
     "session_lifecycle",
+    "coordination_graph",
     "completeness_consistency",
     "evidence_selectors",
     "evidence_definitions",
@@ -116,6 +126,7 @@ def validate_trace(document: TraceDocumentV5) -> list[ValidationFindingV1]:
     findings.extend(_check_tool_results(document))
     findings.extend(_check_usage(document))
     findings.extend(_check_session_lifecycle(document))
+    findings.extend(_check_coordination_graph(document))
     findings.extend(_check_completeness(document))
     return findings
 
@@ -132,6 +143,10 @@ _LOCAL_ALIAS_TARGET_KINDS = frozenset(
         "artifact",
         "branch",
         "error",
+        "actor_group",
+        "interaction",
+        "context_epoch",
+        "joint_turn",
     }
 )
 _EXTERNAL_ALIAS_TARGET_KINDS = frozenset({"external_trace"})
@@ -157,6 +172,38 @@ def validate_alias_integrity(
         "artifact": {item.artifact_id for item in document.artifacts},
         "branch": {item.branch_id for item in document.branches},
         "error": {item.error_id for item in document.errors},
+        "actor_group": (
+            {
+                item.group_id
+                for item in document.coordination.actor_groups
+            }
+            if document.coordination is not None
+            else set()
+        ),
+        "interaction": (
+            {
+                item.interaction_id
+                for item in document.coordination.interaction_edges
+            }
+            if document.coordination is not None
+            else set()
+        ),
+        "context_epoch": (
+            {
+                item.context_epoch_id
+                for item in document.coordination.context_epochs
+            }
+            if document.coordination is not None
+            else set()
+        ),
+        "joint_turn": (
+            {
+                item.joint_turn_id
+                for item in document.coordination.joint_turns
+            }
+            if document.coordination is not None
+            else set()
+        ),
     }
     alias_groups = [
         ("trace", document.trace_id, document.aliases),
@@ -180,6 +227,14 @@ def validate_alias_integrity(
         *(
             ("message", item.message_id, item.aliases)
             for item in document.messages
+        ),
+        *(
+            ("actor_group", item.group_id, item.aliases)
+            for item in (
+                document.coordination.actor_groups
+                if document.coordination is not None
+                else ()
+            )
         ),
     ]
     supported = _LOCAL_ALIAS_TARGET_KINDS | _EXTERNAL_ALIAS_TARGET_KINDS
@@ -237,6 +292,32 @@ def _check_unique(document: TraceDocumentV5) -> list[ValidationFindingV1]:
         "message": [item.message_id for item in document.messages],
         "artifact": [item.artifact_id for item in document.artifacts],
         "branch": [item.branch_id for item in document.branches],
+        "actor_group": (
+            [item.group_id for item in document.coordination.actor_groups]
+            if document.coordination is not None
+            else []
+        ),
+        "interaction": (
+            [
+                item.interaction_id
+                for item in document.coordination.interaction_edges
+            ]
+            if document.coordination is not None
+            else []
+        ),
+        "context_epoch": (
+            [
+                item.context_epoch_id
+                for item in document.coordination.context_epochs
+            ]
+            if document.coordination is not None
+            else []
+        ),
+        "joint_turn": (
+            [item.joint_turn_id for item in document.coordination.joint_turns]
+            if document.coordination is not None
+            else []
+        ),
     }
     for kind, ids in groups.items():
         duplicates = sorted({item for item in ids if ids.count(item) > 1})
@@ -402,6 +483,949 @@ def _check_references(document: TraceDocumentV5) -> list[ValidationFindingV1]:
                 )
             )
     return findings
+
+
+def _check_coordination_graph(
+    document: TraceDocumentV5,
+) -> list[ValidationFindingV1]:
+    graph = document.coordination
+    if graph is None:
+        return []
+    findings: list[ValidationFindingV1] = []
+    if graph.schema_version != COORDINATION_SCHEMA_VERSION:
+        findings.append(
+            ValidationFindingV1(
+                code="coordination_schema_unsupported",
+                severity=Severity.ERROR,
+                message="coordination graph schema version is unsupported",
+                entity_id=document.trace_id,
+                detail={
+                    "expected": COORDINATION_SCHEMA_VERSION,
+                    "actual": graph.schema_version,
+                },
+            )
+        )
+    if not graph.content_digest:
+        findings.append(
+            ValidationFindingV1(
+                code="coordination_graph_not_sealed",
+                severity=Severity.ERROR,
+                message="coordination graph has no content digest",
+                entity_id=document.trace_id,
+            )
+        )
+    elif graph.content_digest != content_digest(graph):
+        findings.append(
+            ValidationFindingV1(
+                code="coordination_graph_digest_mismatch",
+                severity=Severity.ERROR,
+                message="coordination graph content digest does not match its content",
+                entity_id=document.trace_id,
+            )
+        )
+
+    actors = {item.actor_id: item for item in document.actors}
+    sessions = {item.session_id: item for item in document.sessions}
+    spans = {item.span_id: item for item in document.spans}
+    events = {item.event_id: item for item in document.events}
+    messages = {item.message_id: item for item in document.messages}
+    artifacts = {item.artifact_id: item for item in document.artifacts}
+    groups = {item.group_id: item for item in graph.actor_groups}
+    interactions = {
+        item.interaction_id: item for item in graph.interaction_edges
+    }
+    epochs = {item.context_epoch_id: item for item in graph.context_epochs}
+    joint_turns = {item.joint_turn_id: item for item in graph.joint_turns}
+    canonical_entities = {
+        "trace": {document.trace_id},
+        "actor": set(actors),
+        "actor_group": set(groups),
+        "session": set(sessions),
+        "span": set(spans),
+        "event": set(events),
+        "message": set(messages),
+        "part": {
+            part.part_id
+            for message in document.messages
+            for part in message.parts
+        },
+        "artifact": set(artifacts),
+        "branch": {item.branch_id for item in document.branches},
+        "error": {item.error_id for item in document.errors},
+        "interaction": set(interactions),
+        "context_epoch": set(epochs),
+        "joint_turn": set(joint_turns),
+    }
+    native_aliases = {
+        (str(alias.namespace), alias.value)
+        for aliases in (
+            document.aliases,
+            document.provenance.aliases,
+            *(item.aliases for item in document.actors),
+            *(item.aliases for item in document.sessions),
+            *(item.aliases for item in document.spans),
+            *(item.aliases for item in document.events),
+            *(item.aliases for item in document.messages),
+            *(item.aliases for item in graph.actor_groups),
+        )
+        for alias in aliases
+    }
+
+    for collection in (
+        graph.actor_groups,
+        graph.interaction_edges,
+        graph.context_epochs,
+        graph.joint_turns,
+    ):
+        for item in collection:
+            stored_digest = item.content_digest
+            if not stored_digest:
+                findings.append(
+                    ValidationFindingV1(
+                        code="coordination_record_not_sealed",
+                        severity=Severity.ERROR,
+                        message="coordination record has no content digest",
+                        entity_id=_coordination_record_id(item),
+                    )
+                )
+            elif stored_digest != content_digest(item):
+                findings.append(
+                    ValidationFindingV1(
+                        code="coordination_record_digest_mismatch",
+                        severity=Severity.ERROR,
+                        message="coordination record digest does not match its content",
+                        entity_id=_coordination_record_id(item),
+                    )
+                )
+
+    for group in graph.actor_groups:
+        _check_enum_value(
+            ActorGroupKind,
+            group.kind,
+            code="actor_group_kind_invalid",
+            entity_id=group.group_id,
+            findings=findings,
+        )
+        members = set(group.member_actor_ids)
+        if not members:
+            findings.append(
+                ValidationFindingV1(
+                    code="actor_group_empty",
+                    severity=Severity.ERROR,
+                    message="actor group must contain at least one actor",
+                    entity_id=group.group_id,
+                )
+            )
+        if len(members) != len(group.member_actor_ids):
+            findings.append(
+                ValidationFindingV1(
+                    code="actor_group_duplicate_member",
+                    severity=Severity.ERROR,
+                    message="actor group contains a duplicate member",
+                    entity_id=group.group_id,
+                )
+            )
+        for actor_id in members:
+            if actor_id not in actors:
+                findings.append(
+                    ValidationFindingV1(
+                        code="actor_group_dangling_member",
+                        severity=Severity.ERROR,
+                        message="actor group references an unknown member actor",
+                        entity_id=group.group_id,
+                        detail={"actor_id": actor_id},
+                    )
+                )
+        for leader_id in group.leader_actor_ids:
+            if leader_id not in members:
+                findings.append(
+                    ValidationFindingV1(
+                        code="actor_group_leader_not_member",
+                        severity=Severity.ERROR,
+                        message="actor group leader is not a group member",
+                        entity_id=group.group_id,
+                        detail={"actor_id": leader_id},
+                    )
+                )
+        if (
+            group.environment_actor_id is not None
+            and group.environment_actor_id not in actors
+        ):
+            findings.append(
+                ValidationFindingV1(
+                    code="actor_group_dangling_environment",
+                    severity=Severity.ERROR,
+                    message="actor group references an unknown environment actor",
+                    entity_id=group.group_id,
+                )
+            )
+        if group.parent_group_id is not None and group.parent_group_id not in groups:
+            findings.append(
+                ValidationFindingV1(
+                    code="actor_group_dangling_parent",
+                    severity=Severity.ERROR,
+                    message="actor group references an unknown parent group",
+                    entity_id=group.group_id,
+                )
+            )
+        if group.formed_at is None and group.dissolved_at is not None:
+            findings.append(
+                ValidationFindingV1(
+                    code="actor_group_time_range_incomplete",
+                    severity=Severity.ERROR,
+                    message="actor group dissolved_at requires formed_at",
+                    entity_id=group.group_id,
+                )
+            )
+        elif group.formed_at is not None:
+            _check_time_range(
+                group.formed_at,
+                group.dissolved_at,
+                entity_id=group.group_id,
+                kind="actor_group",
+                findings=findings,
+            )
+        if group.formed_sequence is None and group.dissolved_sequence is not None:
+            findings.append(
+                ValidationFindingV1(
+                    code="actor_group_sequence_range_incomplete",
+                    severity=Severity.ERROR,
+                    message="actor group dissolved sequence requires formed sequence",
+                    entity_id=group.group_id,
+                )
+            )
+        elif group.formed_sequence is not None:
+            _check_sequence_range(
+                group.formed_sequence,
+                group.dissolved_sequence,
+                entity_id=group.group_id,
+                kind="actor_group",
+                findings=findings,
+            )
+    _check_parent_cycles(
+        {
+            group.group_id: group.parent_group_id
+            for group in graph.actor_groups
+        },
+        code="actor_group_parent_cycle",
+        message="actor group parent chain contains a cycle",
+        findings=findings,
+    )
+
+    for interaction in graph.interaction_edges:
+        _check_coordination_anchor(
+            interaction.source,
+            owner_id=interaction.interaction_id,
+            endpoint="source",
+            canonical_entities=canonical_entities,
+            native_aliases=native_aliases,
+            findings=findings,
+        )
+        _check_coordination_anchor(
+            interaction.target,
+            owner_id=interaction.interaction_id,
+            endpoint="target",
+            canonical_entities=canonical_entities,
+            native_aliases=native_aliases,
+            findings=findings,
+        )
+        _check_sequence_range(
+            interaction.started_sequence,
+            interaction.ended_sequence,
+            entity_id=interaction.interaction_id,
+            kind="interaction",
+            findings=findings,
+        )
+        _check_time_range(
+            interaction.started_at,
+            interaction.ended_at,
+            entity_id=interaction.interaction_id,
+            kind="interaction",
+            findings=findings,
+        )
+        _check_enum_value(
+            InteractionKind,
+            interaction.kind,
+            code="interaction_kind_invalid",
+            entity_id=interaction.interaction_id,
+            findings=findings,
+        )
+        _check_enum_value(
+            InteractionStatus,
+            interaction.status,
+            code="interaction_status_invalid",
+            entity_id=interaction.interaction_id,
+            findings=findings,
+        )
+        _check_enum_value(
+            CoordinationEvidenceBasis,
+            interaction.evidence_basis,
+            code="coordination_evidence_basis_invalid",
+            entity_id=interaction.interaction_id,
+            findings=findings,
+        )
+        for kind, identifiers, known in (
+            ("message", interaction.carried_message_ids, messages),
+            ("artifact", interaction.carried_artifact_ids, artifacts),
+            ("event", interaction.carried_event_ids, events),
+        ):
+            for identifier in identifiers:
+                if identifier not in known:
+                    findings.append(
+                        ValidationFindingV1(
+                            code=f"interaction_dangling_{kind}",
+                            severity=Severity.ERROR,
+                            message=f"interaction carries an unknown {kind}",
+                            entity_id=interaction.interaction_id,
+                            detail={f"{kind}_id": identifier},
+                        )
+                    )
+
+    for actor in document.actors:
+        if actor.origin_interaction_id is None:
+            continue
+        origin = interactions.get(actor.origin_interaction_id)
+        if origin is None:
+            findings.append(
+                ValidationFindingV1(
+                    code="actor_dangling_origin_interaction",
+                    severity=Severity.ERROR,
+                    message="actor references an unknown origin interaction",
+                    entity_id=actor.actor_id,
+                )
+            )
+            continue
+        if (
+            str(origin.kind) != str(InteractionKind.SPAWN_AGENT)
+            or origin.target.basis != AnchorBasis.CANONICAL
+            or origin.target.entity_kind != "actor"
+            or origin.target.entity_id != actor.actor_id
+        ):
+            findings.append(
+                ValidationFindingV1(
+                    code="actor_origin_interaction_mismatch",
+                    severity=Severity.ERROR,
+                    message="actor origin interaction is not its spawn edge",
+                    entity_id=actor.actor_id,
+                )
+            )
+    actor_paths = [
+        actor.actor_path for actor in document.actors if actor.actor_path is not None
+    ]
+    for actor_path in sorted(
+        {path for path in actor_paths if actor_paths.count(path) > 1}
+    ):
+        findings.append(
+            ValidationFindingV1(
+                code="duplicate_actor_path",
+                severity=Severity.ERROR,
+                message="actor_path must be unique within a trace",
+                entity_id=actor_path,
+            )
+        )
+    for actor in document.actors:
+        if actor.actor_path is None:
+            continue
+        if actor.actor_path != "/root" and not actor.actor_path.startswith("/root/"):
+            findings.append(
+                ValidationFindingV1(
+                    code="actor_path_invalid",
+                    severity=Severity.ERROR,
+                    message="actor_path must be rooted at /root",
+                    entity_id=actor.actor_id,
+                )
+            )
+        parent = (
+            actors.get(actor.parent_actor_id)
+            if actor.parent_actor_id is not None
+            else None
+        )
+        if (
+            parent is not None
+            and parent.actor_path is not None
+            and not actor.actor_path.startswith(f"{parent.actor_path}/")
+        ):
+            findings.append(
+                ValidationFindingV1(
+                    code="actor_path_parent_mismatch",
+                    severity=Severity.ERROR,
+                    message="actor_path does not descend from its parent actor path",
+                    entity_id=actor.actor_id,
+                )
+            )
+    _check_parent_cycles(
+        {
+            actor.actor_id: actor.parent_actor_id
+            for actor in document.actors
+        },
+        code="actor_parent_cycle",
+        message="actor parent chain contains a cycle",
+        findings=findings,
+    )
+
+    for epoch in graph.context_epochs:
+        session = sessions.get(epoch.session_id)
+        if epoch.actor_id not in actors:
+            findings.append(
+                ValidationFindingV1(
+                    code="context_epoch_dangling_actor",
+                    severity=Severity.ERROR,
+                    message="context epoch references an unknown actor",
+                    entity_id=epoch.context_epoch_id,
+                )
+            )
+        if session is None:
+            findings.append(
+                ValidationFindingV1(
+                    code="context_epoch_dangling_session",
+                    severity=Severity.ERROR,
+                    message="context epoch references an unknown session",
+                    entity_id=epoch.context_epoch_id,
+                )
+            )
+        elif session.actor_id != epoch.actor_id:
+            findings.append(
+                ValidationFindingV1(
+                    code="context_epoch_actor_session_mismatch",
+                    severity=Severity.ERROR,
+                    message="context epoch actor does not own its session",
+                    entity_id=epoch.context_epoch_id,
+                )
+            )
+        if len(set(epoch.model_visible_message_ids)) != len(
+            epoch.model_visible_message_ids
+        ):
+            findings.append(
+                ValidationFindingV1(
+                    code="context_epoch_duplicate_visible_message",
+                    severity=Severity.ERROR,
+                    message="context epoch lists a model-visible message more than once",
+                    entity_id=epoch.context_epoch_id,
+                )
+            )
+        visible_messages_resolve = True
+        for message_id in epoch.model_visible_message_ids:
+            if message_id not in messages:
+                visible_messages_resolve = False
+                findings.append(
+                    ValidationFindingV1(
+                        code="context_epoch_dangling_message",
+                        severity=Severity.ERROR,
+                        message="context epoch references an unknown model-visible message",
+                        entity_id=epoch.context_epoch_id,
+                        detail={"message_id": message_id},
+                    )
+                )
+        if visible_messages_resolve and epoch.context_digest is not None:
+            expected_context_digest = content_digest(
+                tuple(
+                    messages[message_id].content_digest
+                    for message_id in epoch.model_visible_message_ids
+                )
+            )
+            if epoch.context_digest != expected_context_digest:
+                findings.append(
+                    ValidationFindingV1(
+                        code="context_epoch_digest_mismatch",
+                        severity=Severity.ERROR,
+                        message="context epoch digest does not match visible messages",
+                        entity_id=epoch.context_epoch_id,
+                        detail={
+                            "stored": epoch.context_digest,
+                            "recomputed": expected_context_digest,
+                        },
+                    )
+                )
+        for span_id in epoch.model_call_span_ids:
+            span = spans.get(span_id)
+            if span is None or str(span.span_kind) != "model_call":
+                findings.append(
+                    ValidationFindingV1(
+                        code="context_epoch_invalid_model_call",
+                        severity=Severity.ERROR,
+                        message="context epoch references a non-model-call span",
+                        entity_id=epoch.context_epoch_id,
+                        detail={"span_id": span_id},
+                    )
+                )
+            elif (
+                span.actor_id != epoch.actor_id
+                or span.session_id != epoch.session_id
+                or span.context_epoch_id != epoch.context_epoch_id
+            ):
+                findings.append(
+                    ValidationFindingV1(
+                        code="context_epoch_model_call_mismatch",
+                        severity=Severity.ERROR,
+                        message="context epoch model call has inconsistent ownership or backlink",
+                        entity_id=epoch.context_epoch_id,
+                        detail={"span_id": span_id},
+                    )
+                )
+        for event_id in epoch.runtime_evidence_event_ids:
+            if event_id not in events:
+                findings.append(
+                    ValidationFindingV1(
+                        code="context_epoch_dangling_runtime_evidence",
+                        severity=Severity.ERROR,
+                        message="context epoch references an unknown runtime event",
+                        entity_id=epoch.context_epoch_id,
+                        detail={"event_id": event_id},
+                    )
+                )
+        if (
+            epoch.parent_context_epoch_id is not None
+            and epoch.parent_context_epoch_id not in epochs
+        ):
+            findings.append(
+                ValidationFindingV1(
+                    code="context_epoch_dangling_parent",
+                    severity=Severity.ERROR,
+                    message="context epoch references an unknown parent epoch",
+                    entity_id=epoch.context_epoch_id,
+                )
+            )
+        if (
+            epoch.transfer_interaction_id is not None
+            and epoch.transfer_interaction_id not in interactions
+        ):
+            findings.append(
+                ValidationFindingV1(
+                    code="context_epoch_dangling_transfer",
+                    severity=Severity.ERROR,
+                    message="context epoch references an unknown transfer interaction",
+                    entity_id=epoch.context_epoch_id,
+                )
+            )
+        elif epoch.transfer_interaction_id is not None:
+            transfer = interactions[epoch.transfer_interaction_id]
+            if str(transfer.kind) != str(InteractionKind.CONTEXT_TRANSFER):
+                findings.append(
+                    ValidationFindingV1(
+                        code="context_epoch_transfer_kind_mismatch",
+                        severity=Severity.ERROR,
+                        message="context epoch transfer is not a context-transfer interaction",
+                        entity_id=epoch.context_epoch_id,
+                    )
+                )
+        _check_sequence_range(
+            epoch.started_sequence,
+            epoch.ended_sequence,
+            entity_id=epoch.context_epoch_id,
+            kind="context_epoch",
+            findings=findings,
+        )
+        _check_time_range(
+            epoch.started_at,
+            epoch.ended_at,
+            entity_id=epoch.context_epoch_id,
+            kind="context_epoch",
+            findings=findings,
+        )
+        _check_enum_value(
+            CoordinationEvidenceBasis,
+            epoch.evidence_basis,
+            code="coordination_evidence_basis_invalid",
+            entity_id=epoch.context_epoch_id,
+            findings=findings,
+        )
+    _check_parent_cycles(
+        {
+            epoch.context_epoch_id: epoch.parent_context_epoch_id
+            for epoch in graph.context_epochs
+        },
+        code="context_epoch_parent_cycle",
+        message="context epoch parent chain contains a cycle",
+        findings=findings,
+    )
+    for span in document.spans:
+        if span.context_epoch_id is None:
+            continue
+        epoch = epochs.get(span.context_epoch_id)
+        if epoch is None:
+            findings.append(
+                ValidationFindingV1(
+                    code="span_dangling_context_epoch",
+                    severity=Severity.ERROR,
+                    message="span references an unknown context epoch",
+                    entity_id=span.span_id,
+                )
+            )
+        elif span.span_id not in epoch.model_call_span_ids:
+            findings.append(
+                ValidationFindingV1(
+                    code="span_context_epoch_backlink_missing",
+                    severity=Severity.ERROR,
+                    message="span context epoch does not link back to the span",
+                    entity_id=span.span_id,
+                )
+            )
+
+    for joint_turn in graph.joint_turns:
+        if joint_turn.environment_step < 0:
+            findings.append(
+                ValidationFindingV1(
+                    code="joint_turn_environment_step_invalid",
+                    severity=Severity.ERROR,
+                    message="joint turn environment step must be non-negative",
+                    entity_id=joint_turn.joint_turn_id,
+                )
+            )
+        if not joint_turn.participants:
+            findings.append(
+                ValidationFindingV1(
+                    code="joint_turn_empty",
+                    severity=Severity.ERROR,
+                    message="joint turn must contain at least one participant",
+                    entity_id=joint_turn.joint_turn_id,
+                )
+            )
+        environment_session = (
+            sessions.get(joint_turn.environment_session_id)
+            if joint_turn.environment_session_id is not None
+            else None
+        )
+        if joint_turn.environment_actor_id not in actors:
+            findings.append(
+                ValidationFindingV1(
+                    code="joint_turn_dangling_environment_actor",
+                    severity=Severity.ERROR,
+                    message="joint turn references an unknown environment actor",
+                    entity_id=joint_turn.joint_turn_id,
+                )
+            )
+        if (
+            joint_turn.environment_session_id is not None
+            and environment_session is None
+        ):
+            findings.append(
+                ValidationFindingV1(
+                    code="joint_turn_dangling_environment_session",
+                    severity=Severity.ERROR,
+                    message="joint turn references an unknown environment session",
+                    entity_id=joint_turn.joint_turn_id,
+                )
+            )
+        elif (
+            environment_session is not None
+            and environment_session.actor_id != joint_turn.environment_actor_id
+        ):
+            findings.append(
+                ValidationFindingV1(
+                    code="joint_turn_environment_session_mismatch",
+                    severity=Severity.ERROR,
+                    message="joint turn environment actor does not own its session",
+                    entity_id=joint_turn.joint_turn_id,
+                )
+            )
+        if (
+            joint_turn.actor_group_id is not None
+            and joint_turn.actor_group_id not in groups
+        ):
+            findings.append(
+                ValidationFindingV1(
+                    code="joint_turn_dangling_actor_group",
+                    severity=Severity.ERROR,
+                    message="joint turn references an unknown actor group",
+                    entity_id=joint_turn.joint_turn_id,
+                )
+            )
+        participant_actor_ids = [
+            participant.actor_id for participant in joint_turn.participants
+        ]
+        if len(set(participant_actor_ids)) != len(participant_actor_ids):
+            findings.append(
+                ValidationFindingV1(
+                    code="joint_turn_duplicate_participant",
+                    severity=Severity.ERROR,
+                    message="joint turn lists an actor more than once",
+                    entity_id=joint_turn.joint_turn_id,
+                )
+            )
+        for participant in joint_turn.participants:
+            _check_enum_value(
+                ParticipantState,
+                participant.state,
+                code="joint_turn_participant_state_invalid",
+                entity_id=joint_turn.joint_turn_id,
+                findings=findings,
+            )
+            session = sessions.get(participant.session_id)
+            if participant.actor_id not in actors or session is None:
+                findings.append(
+                    ValidationFindingV1(
+                        code="joint_turn_dangling_participant",
+                        severity=Severity.ERROR,
+                        message="joint turn participant actor or session is unknown",
+                        entity_id=joint_turn.joint_turn_id,
+                        detail={
+                            "actor_id": participant.actor_id,
+                            "session_id": participant.session_id,
+                        },
+                    )
+                )
+            elif session.actor_id != participant.actor_id:
+                findings.append(
+                    ValidationFindingV1(
+                        code="joint_turn_participant_session_mismatch",
+                        severity=Severity.ERROR,
+                        message="joint turn participant actor does not own its session",
+                        entity_id=joint_turn.joint_turn_id,
+                    )
+                )
+            for event_id in (
+                *participant.action_event_ids,
+                *participant.observation_event_ids,
+                *participant.reward_event_ids,
+            ):
+                if event_id not in events:
+                    findings.append(
+                        ValidationFindingV1(
+                            code="joint_turn_dangling_participant_event",
+                            severity=Severity.ERROR,
+                            message="joint turn participant references an unknown event",
+                            entity_id=joint_turn.joint_turn_id,
+                            detail={"event_id": event_id},
+                        )
+                    )
+            for interaction_id in participant.message_interaction_ids:
+                if interaction_id not in interactions:
+                    findings.append(
+                        ValidationFindingV1(
+                            code="joint_turn_dangling_message_interaction",
+                            severity=Severity.ERROR,
+                            message="joint turn participant references an unknown interaction",
+                            entity_id=joint_turn.joint_turn_id,
+                            detail={"interaction_id": interaction_id},
+                        )
+                    )
+                elif str(interactions[interaction_id].kind) != str(
+                    InteractionKind.SEND_MESSAGE
+                ):
+                    findings.append(
+                        ValidationFindingV1(
+                            code="joint_turn_message_interaction_kind_mismatch",
+                            severity=Severity.ERROR,
+                            message="joint turn message interaction is not send_message",
+                            entity_id=joint_turn.joint_turn_id,
+                            detail={"interaction_id": interaction_id},
+                        )
+                    )
+        for event_id in (
+            *joint_turn.shared_transition_event_ids,
+            *joint_turn.shared_reward_event_ids,
+        ):
+            if event_id not in events:
+                findings.append(
+                    ValidationFindingV1(
+                        code="joint_turn_dangling_shared_event",
+                        severity=Severity.ERROR,
+                        message="joint turn references an unknown shared event",
+                        entity_id=joint_turn.joint_turn_id,
+                        detail={"event_id": event_id},
+                    )
+                )
+        _check_sequence_range(
+            joint_turn.started_sequence,
+            joint_turn.ended_sequence,
+            entity_id=joint_turn.joint_turn_id,
+            kind="joint_turn",
+            findings=findings,
+        )
+        _check_time_range(
+            joint_turn.started_at,
+            joint_turn.ended_at,
+            entity_id=joint_turn.joint_turn_id,
+            kind="joint_turn",
+            findings=findings,
+        )
+        _check_enum_value(
+            InteractionStatus,
+            joint_turn.status,
+            code="joint_turn_status_invalid",
+            entity_id=joint_turn.joint_turn_id,
+            findings=findings,
+        )
+        _check_enum_value(
+            CoordinationEvidenceBasis,
+            joint_turn.evidence_basis,
+            code="coordination_evidence_basis_invalid",
+            entity_id=joint_turn.joint_turn_id,
+            findings=findings,
+        )
+    return findings
+
+
+def _coordination_record_id(record: Any) -> str:
+    for attribute in (
+        "group_id",
+        "interaction_id",
+        "context_epoch_id",
+        "joint_turn_id",
+    ):
+        value = getattr(record, attribute, None)
+        if isinstance(value, str) and value:
+            return value
+    raise ValueError("coordination record has no identity field")
+
+
+def _check_coordination_anchor(
+    anchor: Any,
+    *,
+    owner_id: str,
+    endpoint: str,
+    canonical_entities: dict[str, set[str]],
+    native_aliases: set[tuple[str, str]],
+    findings: list[ValidationFindingV1],
+) -> None:
+    basis = str(anchor.basis)
+    if basis == str(AnchorBasis.CANONICAL):
+        known = canonical_entities.get(str(anchor.entity_kind))
+        if known is None or anchor.entity_id not in known:
+            findings.append(
+                ValidationFindingV1(
+                    code="interaction_dangling_canonical_anchor",
+                    severity=Severity.ERROR,
+                    message=f"interaction {endpoint} anchor does not resolve",
+                    entity_id=owner_id,
+                    detail={
+                        "entity_kind": anchor.entity_kind,
+                        "target_id": anchor.entity_id,
+                    },
+                )
+            )
+    elif basis == str(AnchorBasis.NATIVE_ALIAS):
+        key = (str(anchor.alias_namespace), str(anchor.alias_value))
+        if key not in native_aliases:
+            findings.append(
+                ValidationFindingV1(
+                    code="interaction_dangling_native_anchor",
+                    severity=Severity.ERROR,
+                    message=f"interaction {endpoint} native alias does not resolve",
+                    entity_id=owner_id,
+                    detail={
+                        "alias_namespace": anchor.alias_namespace,
+                        "alias_value": anchor.alias_value,
+                    },
+                )
+            )
+    elif basis != str(AnchorBasis.RAW_SOURCE):
+        findings.append(
+            ValidationFindingV1(
+                code="interaction_anchor_basis_invalid",
+                severity=Severity.ERROR,
+                message=f"interaction {endpoint} anchor basis is unsupported",
+                entity_id=owner_id,
+                detail={"basis": basis},
+            )
+        )
+
+
+def _check_sequence_range(
+    started: int,
+    ended: Optional[int],
+    *,
+    entity_id: str,
+    kind: str,
+    findings: list[ValidationFindingV1],
+) -> None:
+    if started < 0 or (ended is not None and ended < started):
+        findings.append(
+            ValidationFindingV1(
+                code=f"{kind}_sequence_order_invalid",
+                severity=Severity.ERROR,
+                message=f"{kind} sequence range is invalid",
+                entity_id=entity_id,
+                detail={"started_sequence": started, "ended_sequence": ended},
+            )
+        )
+
+
+def _check_time_range(
+    started: str,
+    ended: Optional[str],
+    *,
+    entity_id: str,
+    kind: str,
+    findings: list[ValidationFindingV1],
+) -> None:
+    parsed_start = _validated_timestamp(
+        started,
+        code=f"{kind}_timestamp_invalid",
+        entity_id=entity_id,
+        field="started_at",
+        findings=findings,
+    )
+    parsed_end = (
+        _validated_timestamp(
+            ended,
+            code=f"{kind}_timestamp_invalid",
+            entity_id=entity_id,
+            field="ended_at",
+            findings=findings,
+        )
+        if ended is not None
+        else None
+    )
+    if (
+        parsed_start is not None
+        and parsed_end is not None
+        and parsed_end < parsed_start
+    ):
+        findings.append(
+            ValidationFindingV1(
+                code=f"{kind}_timestamp_order_invalid",
+                severity=Severity.ERROR,
+                message=f"{kind} ended_at precedes started_at",
+                entity_id=entity_id,
+            )
+        )
+
+
+def _check_enum_value(
+    enum_type: type[StrEnum],
+    value: Any,
+    *,
+    code: str,
+    entity_id: str,
+    findings: list[ValidationFindingV1],
+) -> None:
+    try:
+        enum_type(str(value))
+    except ValueError:
+        findings.append(
+            ValidationFindingV1(
+                code=code,
+                severity=Severity.ERROR,
+                message=f"unsupported {enum_type.__name__} value {value!r}",
+                entity_id=entity_id,
+            )
+        )
+
+
+def _check_parent_cycles(
+    parents: dict[str, Optional[str]],
+    *,
+    code: str,
+    message: str,
+    findings: list[ValidationFindingV1],
+) -> None:
+    for entity_id in parents:
+        seen: set[str] = set()
+        current: str | None = entity_id
+        while current is not None and current in parents:
+            if current in seen:
+                findings.append(
+                    ValidationFindingV1(
+                        code=code,
+                        severity=Severity.ERROR,
+                        message=message,
+                        entity_id=entity_id,
+                    )
+                )
+                break
+            seen.add(current)
+            current = parents[current]
 
 
 def _check_message_graph(document: TraceDocumentV5) -> list[ValidationFindingV1]:
@@ -678,6 +1702,31 @@ def _check_session_lifecycle(
             else None
         )
         parsed_sessions[session.session_id] = (started, ended)
+        if (session.started_sequence is None) != (session.ended_sequence is None):
+            findings.append(
+                ValidationFindingV1(
+                    code="session_sequence_range_incomplete",
+                    severity=Severity.ERROR,
+                    message="session sequence range must provide both endpoints",
+                    entity_id=session.session_id,
+                )
+            )
+        elif (
+            session.started_sequence is not None
+            and session.ended_sequence is not None
+            and (
+                session.started_sequence < 0
+                or session.ended_sequence < session.started_sequence
+            )
+        ):
+            findings.append(
+                ValidationFindingV1(
+                    code="session_sequence_order_invalid",
+                    severity=Severity.ERROR,
+                    message="session sequence range is invalid",
+                    entity_id=session.session_id,
+                )
+            )
         if started is not None and ended is not None and ended < started:
             findings.append(
                 ValidationFindingV1(

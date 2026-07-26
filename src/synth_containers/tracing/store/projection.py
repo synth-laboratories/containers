@@ -100,6 +100,8 @@ def _trace_projection(document: TraceDocumentV5) -> dict[str, Any]:
                 "name": actor.display_name,
                 "role": actor.role,
                 "subtype": actor.subtype,
+                "actor_path": actor.actor_path,
+                "origin_interaction_id": actor.origin_interaction_id,
                 "model": actor.model,
                 "provider": actor.provider,
                 "task_id": actor.task_id,
@@ -127,6 +129,8 @@ def _trace_projection(document: TraceDocumentV5) -> dict[str, Any]:
                 "attempt_id": session.attempt_id,
                 "thread_id": session.thread_id,
                 "workflow_id": session.workflow_id,
+                "started_sequence": session.started_sequence,
+                "ended_sequence": session.ended_sequence,
                 "provider": session.provider,
                 "trace_visibility": str(document.visibility),
             },
@@ -152,6 +156,7 @@ def _trace_projection(document: TraceDocumentV5) -> dict[str, Any]:
                 "turn_id": span.turn_id,
                 "branch_id": span.branch_id,
                 "workflow_address": span.workflow_address,
+                "context_epoch_id": span.context_epoch_id,
                 "model": span.detail.get("model"),
                 "provider": (
                     span.detail.get("provider")
@@ -302,6 +307,281 @@ def _trace_projection(document: TraceDocumentV5) -> dict[str, Any]:
         )
         if error.caused_by_error_id:
             relationship(error.caused_by_error_id, "caused", error.error_id, index)
+
+    if document.coordination is not None:
+        for index, group in enumerate(document.coordination.actor_groups):
+            group_order = (
+                group.formed_sequence
+                if group.formed_sequence is not None
+                else index
+            )
+            entity(
+                group.group_id,
+                "actor_group",
+                source_order=group_order,
+                occurred_at=group.formed_at,
+                content_digest=group.content_digest,
+                facts={
+                    "kind": str(group.kind),
+                    "display_name": group.display_name,
+                    "purpose": group.purpose,
+                    "formed_sequence": group.formed_sequence,
+                    "dissolved_sequence": group.dissolved_sequence,
+                    "member_actor_ids": list(group.member_actor_ids),
+                    "leader_actor_ids": list(group.leader_actor_ids),
+                    "environment_actor_id": group.environment_actor_id,
+                    "trace_visibility": str(document.visibility),
+                },
+            )
+            if group.parent_group_id:
+                relationship(
+                    group.parent_group_id,
+                    "parent_of",
+                    group.group_id,
+                    group_order,
+                )
+            for actor_id in group.member_actor_ids:
+                relationship(group.group_id, "has_member", actor_id, group_order)
+                relationship(actor_id, "member_of", group.group_id, group_order)
+            for actor_id in group.leader_actor_ids:
+                relationship(actor_id, "leads", group.group_id, group_order)
+            if group.environment_actor_id:
+                relationship(
+                    group.group_id,
+                    "has_environment",
+                    group.environment_actor_id,
+                    group_order,
+                )
+            for alias in group.aliases:
+                add_alias(alias)
+
+        for interaction in document.coordination.interaction_edges:
+            entity(
+                interaction.interaction_id,
+                "interaction",
+                source_order=interaction.started_sequence,
+                occurred_at=interaction.started_at,
+                content_digest=interaction.content_digest,
+                facts={
+                    "kind": str(interaction.kind),
+                    "status": str(interaction.status),
+                    "source": interaction.source.to_dict(),
+                    "target": interaction.target.to_dict(),
+                    "correlation_id": interaction.correlation_id,
+                    "transport": interaction.transport,
+                    "evidence_basis": str(interaction.evidence_basis),
+                    "carried_message_ids": list(interaction.carried_message_ids),
+                    "carried_artifact_ids": list(interaction.carried_artifact_ids),
+                    "carried_event_ids": list(interaction.carried_event_ids),
+                    "delivery_receipt_ids": list(interaction.delivery_receipt_ids),
+                    "trace_visibility": str(document.visibility),
+                },
+            )
+            source_id = (
+                interaction.source.entity_id
+                if str(interaction.source.basis) == "canonical"
+                else None
+            )
+            target_id = (
+                interaction.target.entity_id
+                if str(interaction.target.basis) == "canonical"
+                else None
+            )
+            if source_id:
+                relationship(
+                    source_id,
+                    "initiated",
+                    interaction.interaction_id,
+                    interaction.started_sequence,
+                )
+            if target_id:
+                relationship(
+                    interaction.interaction_id,
+                    "targets",
+                    target_id,
+                    interaction.started_sequence,
+                )
+            if source_id and target_id:
+                relationship(
+                    source_id,
+                    str(interaction.kind),
+                    target_id,
+                    interaction.started_sequence,
+                )
+            for message_id in interaction.carried_message_ids:
+                relationship(
+                    interaction.interaction_id,
+                    "carries_message",
+                    message_id,
+                    interaction.started_sequence,
+                )
+            for artifact_id in interaction.carried_artifact_ids:
+                relationship(
+                    interaction.interaction_id,
+                    "carries_artifact",
+                    artifact_id,
+                    interaction.started_sequence,
+                )
+            for event_id in interaction.carried_event_ids:
+                relationship(
+                    interaction.interaction_id,
+                    "carries_event",
+                    event_id,
+                    interaction.started_sequence,
+                )
+
+        for epoch in document.coordination.context_epochs:
+            entity(
+                epoch.context_epoch_id,
+                "context_epoch",
+                owner_actor_id=epoch.actor_id,
+                owner_session_id=epoch.session_id,
+                source_order=epoch.started_sequence,
+                occurred_at=epoch.started_at,
+                content_digest=epoch.content_digest,
+                facts={
+                    "context_digest": epoch.context_digest,
+                    "evidence_basis": str(epoch.evidence_basis),
+                    "model_visible_message_count": len(
+                        epoch.model_visible_message_ids
+                    ),
+                    "model_call_count": len(epoch.model_call_span_ids),
+                    "runtime_evidence_count": len(
+                        epoch.runtime_evidence_event_ids
+                    ),
+                    "losses": list(epoch.losses),
+                    "trace_visibility": str(document.visibility),
+                },
+            )
+            relationship(
+                epoch.actor_id,
+                "owns_context",
+                epoch.context_epoch_id,
+                epoch.started_sequence,
+            )
+            relationship(
+                epoch.session_id,
+                "contains_context",
+                epoch.context_epoch_id,
+                epoch.started_sequence,
+            )
+            if epoch.parent_context_epoch_id:
+                relationship(
+                    epoch.parent_context_epoch_id,
+                    "context_parent_of",
+                    epoch.context_epoch_id,
+                    epoch.started_sequence,
+                )
+            if epoch.transfer_interaction_id:
+                relationship(
+                    epoch.transfer_interaction_id,
+                    "produced_context",
+                    epoch.context_epoch_id,
+                    epoch.started_sequence,
+                )
+            for message_id in epoch.model_visible_message_ids:
+                relationship(
+                    message_id,
+                    "visible_in_context",
+                    epoch.context_epoch_id,
+                    epoch.started_sequence,
+                )
+            for span_id in epoch.model_call_span_ids:
+                relationship(
+                    epoch.context_epoch_id,
+                    "input_to",
+                    span_id,
+                    epoch.started_sequence,
+                )
+            for event_id in epoch.runtime_evidence_event_ids:
+                relationship(
+                    event_id,
+                    "runtime_evidence_for",
+                    epoch.context_epoch_id,
+                    epoch.started_sequence,
+                )
+
+        for joint_turn in document.coordination.joint_turns:
+            entity(
+                joint_turn.joint_turn_id,
+                "joint_turn",
+                owner_actor_id=joint_turn.environment_actor_id,
+                owner_session_id=joint_turn.environment_session_id,
+                source_order=joint_turn.started_sequence,
+                occurred_at=joint_turn.started_at,
+                content_digest=joint_turn.content_digest,
+                facts={
+                    "environment_step": joint_turn.environment_step,
+                    "status": str(joint_turn.status),
+                    "evidence_basis": str(joint_turn.evidence_basis),
+                    "participant_actor_ids": [
+                        item.actor_id for item in joint_turn.participants
+                    ],
+                    "trace_visibility": str(document.visibility),
+                },
+            )
+            relationship(
+                joint_turn.environment_actor_id,
+                "environment_for",
+                joint_turn.joint_turn_id,
+                joint_turn.started_sequence,
+            )
+            if joint_turn.actor_group_id:
+                relationship(
+                    joint_turn.actor_group_id,
+                    "joint_turn",
+                    joint_turn.joint_turn_id,
+                    joint_turn.started_sequence,
+                )
+            for participant in joint_turn.participants:
+                relationship(
+                    participant.actor_id,
+                    "participates_in",
+                    joint_turn.joint_turn_id,
+                    joint_turn.started_sequence,
+                )
+                for event_id in participant.action_event_ids:
+                    relationship(
+                        event_id,
+                        "action_in",
+                        joint_turn.joint_turn_id,
+                        joint_turn.started_sequence,
+                    )
+                for event_id in participant.observation_event_ids:
+                    relationship(
+                        event_id,
+                        "observation_in",
+                        joint_turn.joint_turn_id,
+                        joint_turn.started_sequence,
+                    )
+                for event_id in participant.reward_event_ids:
+                    relationship(
+                        event_id,
+                        "reward_in",
+                        joint_turn.joint_turn_id,
+                        joint_turn.started_sequence,
+                    )
+                for interaction_id in participant.message_interaction_ids:
+                    relationship(
+                        interaction_id,
+                        "message_in",
+                        joint_turn.joint_turn_id,
+                        joint_turn.started_sequence,
+                    )
+            for event_id in joint_turn.shared_transition_event_ids:
+                relationship(
+                    event_id,
+                    "transition_in",
+                    joint_turn.joint_turn_id,
+                    joint_turn.started_sequence,
+                )
+            for event_id in joint_turn.shared_reward_event_ids:
+                relationship(
+                    event_id,
+                    "shared_reward_in",
+                    joint_turn.joint_turn_id,
+                    joint_turn.started_sequence,
+                )
 
     for alias in document.aliases:
         add_alias(alias)

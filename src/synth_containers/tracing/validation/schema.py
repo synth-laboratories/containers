@@ -17,6 +17,13 @@ from ..capture.coverage import CaptureCoverageReceiptV1
 from ..capture.envelope import RawCaptureEnvelopeV1
 from ..capture.spool import TraceSegmentManifestV1
 from ..models.capture_data import CapturedBodyRefV1
+from ..models.coordination import (
+    ActorGroupV1,
+    ContextEpochV1,
+    CoordinationGraphV1,
+    InteractionEdgeV1,
+    JointTurnV1,
+)
 from ..models.tokens import TokenCaptureV5, TokenSequenceRefV1
 from ..store.bundle import (
     BundleManifestPointerV1,
@@ -53,6 +60,11 @@ PUBLIC_CONTRACTS: tuple[type, ...] = (
     CapturedBodyRefV1,
     CaptureCoverageReceiptV1,
     TraceDocumentV5,
+    CoordinationGraphV1,
+    ActorGroupV1,
+    InteractionEdgeV1,
+    ContextEpochV1,
+    JointTurnV1,
     TraceEvidenceBundleV5,
     TokenCaptureV5,
     TokenSequenceRefV1,

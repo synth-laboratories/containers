@@ -4,11 +4,23 @@ from __future__ import annotations
 
 import base64
 import os
-from typing import Any
+from typing import Any, Mapping, Optional, Sequence
 
 import httpx
 
 from ..models.actors import SessionStatus
+from ..models.coordination import (
+    ACTOR_GROUP_DECLARED_EVENT,
+    CONTEXT_EPOCH_OBSERVED_EVENT,
+    JOINT_TURN_OBSERVED_EVENT,
+    ActorGroupV1,
+    CoordinationEvidenceBasis,
+    InteractionKind,
+    InteractionStatus,
+    JointTurnParticipantV1,
+    TraceAnchorV1,
+    coordination_event_type,
+)
 from ..models.identity import TraceContextV1
 
 
@@ -120,6 +132,147 @@ class TraceEmitter:
         )
         response.raise_for_status()
         return str(response.json()["artifact_id"])
+
+    def declare_actor_group(self, group: ActorGroupV1) -> str:
+        """Append an explicit team/group declaration."""
+
+        return self.event(
+            ACTOR_GROUP_DECLARED_EVENT,
+            {"actor_group": group.to_dict()},
+        )
+
+    def interaction(
+        self,
+        kind: InteractionKind | str,
+        source: TraceAnchorV1,
+        target: TraceAnchorV1,
+        *,
+        status: InteractionStatus | str,
+        interaction_id: Optional[str] = None,
+        ended_sequence: Optional[int] = None,
+        ended_at: Optional[str] = None,
+        correlation_id: Optional[str] = None,
+        transport: Optional[str] = None,
+        carried_message_ids: Sequence[str] = (),
+        carried_artifact_ids: Sequence[str] = (),
+        carried_event_ids: Sequence[str] = (),
+        carried_raw_refs: Sequence[str] = (),
+        delivery_receipt_ids: Sequence[str] = (),
+        evidence_basis: CoordinationEvidenceBasis | str = (
+            CoordinationEvidenceBasis.OBSERVED
+        ),
+        metadata: Optional[Mapping[str, Any]] = None,
+        occurred_at: Optional[str] = None,
+    ) -> str:
+        """Append one typed information-flow or lifecycle edge."""
+
+        payload = {
+            "kind": str(kind),
+            "source": source.to_dict(),
+            "target": target.to_dict(),
+            "status": str(status),
+            "interaction_id": interaction_id,
+            "ended_sequence": ended_sequence,
+            "ended_at": ended_at,
+            "correlation_id": correlation_id,
+            "transport": transport,
+            "carried_message_ids": list(carried_message_ids),
+            "carried_artifact_ids": list(carried_artifact_ids),
+            "carried_event_ids": list(carried_event_ids),
+            "carried_raw_refs": list(carried_raw_refs),
+            "delivery_receipt_ids": list(delivery_receipt_ids),
+            "evidence_basis": str(evidence_basis),
+            "metadata": {} if metadata is None else dict(metadata),
+        }
+        return self.event(
+            coordination_event_type(kind),
+            {"interaction": payload},
+            occurred_at=occurred_at,
+        )
+
+    def context_epoch(
+        self,
+        model_visible_message_ids: Sequence[str],
+        *,
+        context_epoch_id: Optional[str] = None,
+        model_call_span_ids: Sequence[str] = (),
+        runtime_evidence_event_ids: Sequence[str] = (),
+        parent_context_epoch_id: Optional[str] = None,
+        transfer_interaction_id: Optional[str] = None,
+        context_digest: Optional[str] = None,
+        ended_sequence: Optional[int] = None,
+        ended_at: Optional[str] = None,
+        evidence_basis: CoordinationEvidenceBasis | str = (
+            CoordinationEvidenceBasis.OBSERVED
+        ),
+        losses: Sequence[str] = (),
+        metadata: Optional[Mapping[str, Any]] = None,
+        occurred_at: Optional[str] = None,
+    ) -> str:
+        """Append the exact model-visible inputs for one context epoch."""
+
+        return self.event(
+            CONTEXT_EPOCH_OBSERVED_EVENT,
+            {
+                "context_epoch": {
+                    "context_epoch_id": context_epoch_id,
+                    "model_visible_message_ids": list(model_visible_message_ids),
+                    "model_call_span_ids": list(model_call_span_ids),
+                    "runtime_evidence_event_ids": list(runtime_evidence_event_ids),
+                    "parent_context_epoch_id": parent_context_epoch_id,
+                    "transfer_interaction_id": transfer_interaction_id,
+                    "context_digest": context_digest,
+                    "ended_sequence": ended_sequence,
+                    "ended_at": ended_at,
+                    "evidence_basis": str(evidence_basis),
+                    "losses": list(losses),
+                    "metadata": {} if metadata is None else dict(metadata),
+                }
+            },
+            occurred_at=occurred_at,
+        )
+
+    def joint_turn(
+        self,
+        environment_step: int,
+        participants: Sequence[JointTurnParticipantV1],
+        *,
+        joint_turn_id: Optional[str] = None,
+        actor_group_id: Optional[str] = None,
+        started_sequence: Optional[int] = None,
+        started_at: Optional[str] = None,
+        shared_transition_event_ids: Sequence[str] = (),
+        shared_reward_event_ids: Sequence[str] = (),
+        status: InteractionStatus | str = InteractionStatus.COMPLETED,
+        evidence_basis: CoordinationEvidenceBasis | str = (
+            CoordinationEvidenceBasis.OBSERVED
+        ),
+        metadata: Optional[Mapping[str, Any]] = None,
+        occurred_at: Optional[str] = None,
+    ) -> str:
+        """Append a shared environment turn without duplicating event payloads."""
+
+        return self.event(
+            JOINT_TURN_OBSERVED_EVENT,
+            {
+                "joint_turn": {
+                    "joint_turn_id": joint_turn_id,
+                    "actor_group_id": actor_group_id,
+                    "environment_step": environment_step,
+                    "started_sequence": started_sequence,
+                    "started_at": started_at,
+                    "participants": [item.to_dict() for item in participants],
+                    "shared_transition_event_ids": list(
+                        shared_transition_event_ids
+                    ),
+                    "shared_reward_event_ids": list(shared_reward_event_ids),
+                    "status": str(status),
+                    "evidence_basis": str(evidence_basis),
+                    "metadata": {} if metadata is None else dict(metadata),
+                }
+            },
+            occurred_at=occurred_at,
+        )
 
     def register_context(
         self,
