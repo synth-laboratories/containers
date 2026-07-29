@@ -307,12 +307,20 @@ class OpenAIResponsesStreamAssembler:
             ),
             None,
         )
-        if terminal and isinstance(terminal.get("response"), Mapping):
-            result = normalize_responses_response(terminal["response"])
+        terminal_response = terminal.get("response") if terminal else None
+        if (
+            isinstance(terminal_response, Mapping)
+            and terminal_response.get("output")
+        ):
+            result = normalize_responses_response(terminal_response)
             result.raw_events = list(self.events)
             result.diagnostics.extend(self.diagnostics)
             result.terminal_observed = True
             return result
+        if isinstance(terminal_response, Mapping):
+            self.diagnostics.append(
+                "Responses terminal payload omitted output; reconstructed from stream events"
+            )
         return _responses_from_events(self.events, diagnostics=self.diagnostics)
 
 
@@ -324,6 +332,7 @@ def _responses_from_events(
     text: list[str] = []
     reasoning: list[str] = []
     calls: dict[str, dict[str, str]] = {}
+    call_aliases: dict[str, str] = {}
     usage: Mapping[str, Any] | None = None
     terminal = False
     provider_ids: dict[str, str] = {}
@@ -334,15 +343,30 @@ def _responses_from_events(
         elif kind in {"response.reasoning_summary_text.delta", "response.reasoning_text.delta"}:
             reasoning.append(str(event.get("delta") or ""))
         elif kind == "response.function_call_arguments.delta":
-            call_id = str(event.get("call_id") or event.get("item_id") or "")
+            observed_id = str(event.get("call_id") or event.get("item_id") or "")
+            call_id = call_aliases.get(observed_id, observed_id)
             call = calls.setdefault(call_id, {"name": "", "arguments": ""})
             call["arguments"] += str(event.get("delta") or "")
-        elif kind == "response.output_item.added" and isinstance(event.get("item"), Mapping):
+        elif kind in {"response.output_item.added", "response.output_item.done"} and isinstance(
+            event.get("item"), Mapping
+        ):
             item = event["item"]
             if item.get("type") == "function_call":
                 call_id = str(item.get("call_id") or item.get("id") or "")
+                item_id = str(item.get("id") or "")
+                if item_id:
+                    call_aliases[item_id] = call_id
+                    if item_id != call_id and item_id in calls:
+                        pending = calls.pop(item_id)
+                        call = calls.setdefault(
+                            call_id, {"name": "", "arguments": ""}
+                        )
+                        call["name"] = call["name"] or pending["name"]
+                        call["arguments"] += pending["arguments"]
                 call = calls.setdefault(call_id, {"name": "", "arguments": ""})
-                call["name"] = str(item.get("name") or "")
+                call["name"] = str(item.get("name") or call["name"])
+                if kind == "response.output_item.done" and item.get("arguments") is not None:
+                    call["arguments"] = _json_text(item.get("arguments"))
         elif kind in {"response.completed", "response.failed", "response.cancelled"}:
             terminal = True
             response = event.get("response")
