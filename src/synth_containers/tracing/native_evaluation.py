@@ -184,6 +184,13 @@ def _typed_native_records(
     subject = selector_for(document, kind=SelectorKind.TRACE)
     execution_status = _execution_status(payload)
     execution_completed = execution_status == ExecutionStatus.COMPLETED
+    pipeline_metadata = {
+        "evaluation_stage_id": str(payload.get("stage_id") or ""),
+        "evaluation_stage_kind": str(payload.get("stage_kind") or ""),
+        "evaluation_stage_role": str(payload.get("stage_role") or ""),
+        "evaluation_pipeline_digest": str(payload.get("pipeline_digest") or ""),
+        "evaluation_runtime": dict(_mapping(payload.get("runtime"))),
+    }
     verifier_payload = _mapping(payload.get("verifier"))
     rubric_payload = _mapping(payload.get("rubric"))
     judgment_producer = ProducerRefV1(
@@ -460,6 +467,7 @@ def _typed_native_records(
             metadata={
                 "native": True,
                 "native_source_digest": source_digest,
+                **pipeline_metadata,
             },
         ).sealed()
 
@@ -559,6 +567,7 @@ def _typed_native_records(
                 metadata={
                     "native": True,
                     "native_source_digest": source_digest,
+                    **pipeline_metadata,
                 },
             ).sealed()
 
@@ -619,6 +628,7 @@ def _typed_native_records(
                 payload.get("trace_correlation_id") or ""
             ),
             "aggregate_score_source": aggregate_source,
+            **pipeline_metadata,
         },
     ).sealed()
 
@@ -836,6 +846,7 @@ def _criterion_definition(
             "native": True,
             "native_criterion_id": native_id,
             "native_role": str(row.get("role") or role),
+            "native_metadata": dict(_mapping(row.get("metadata"))),
         },
     ).sealed()
 
@@ -874,7 +885,10 @@ def _judgment(
         metadata={
             "native_criterion_id": str(
                 row.get("criterion_id") or row.get("id") or row.get("name") or ""
-            )
+            ),
+            "evidence_refs": [
+                str(item) for item in row.get("evidence_refs") or ()
+            ],
         },
         judgment_id=record_id(
             "judgment",

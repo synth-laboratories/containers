@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from ..capture.envelope import RawCaptureEnvelopeV1
@@ -363,12 +363,18 @@ def _append_evidence_items(
 ) -> None:
     start = len(items)
     for result in evidence.verifier_results:
+        evaluation_context = _evaluation_context(result.metadata)
         items.append(
             _evidence_item(
                 item_id=result.verifier_result_id,
                 kind="evidence.verifier_result",
                 occurred_at=result.produced_at,
-                title=result.verdict or result.verifier_id,
+                title=(
+                    f"{evaluation_context['stage_id']} · "
+                    f"{result.verdict or result.verifier_id}"
+                    if evaluation_context["stage_id"]
+                    else result.verdict or result.verifier_id
+                ),
                 status=str(result.verification_status),
                 selector=result.subject,
                 digest=result.content_digest,
@@ -377,6 +383,7 @@ def _append_evidence_items(
                     "score": result.score,
                     "passed": result.passed,
                     "grounding": str(result.grounding),
+                    **evaluation_context,
                 },
             )
         )
@@ -388,7 +395,9 @@ def _append_evidence_items(
                     ),
                     kind="evidence.judgment",
                     occurred_at=judgment.produced_at or result.produced_at,
-                    title=judgment.verdict,
+                    title=(
+                        f"{judgment.criterion_id} · {judgment.verdict}"
+                    ),
                     status=str(judgment.status or ""),
                     selector=judgment.subject or result.subject,
                     digest=judgment.content_digest,
@@ -397,6 +406,7 @@ def _append_evidence_items(
                         "score": judgment.score,
                         "passed": judgment.passed,
                         "rationale": judgment.rationale,
+                        **evaluation_context,
                     },
                 )
             )
@@ -419,12 +429,17 @@ def _append_evidence_items(
             )
         )
     for reward in evidence.reward_records:
+        evaluation_context = _evaluation_context(reward.metadata)
         items.append(
             _evidence_item(
                 item_id=reward.reward_record_id,
                 kind="evidence.reward",
                 occurred_at=reward.produced_at,
-                title=reward.reward_id,
+                title=(
+                    f"{evaluation_context['stage_id']} · reward"
+                    if evaluation_context["stage_id"]
+                    else reward.reward_id
+                ),
                 status=reward.validity,
                 selector=reward.subject,
                 digest=reward.content_digest,
@@ -433,16 +448,22 @@ def _append_evidence_items(
                     "actor_id": reward.actor_id,
                     "session_id": reward.session_id,
                     "components": reward.components,
+                    **evaluation_context,
                 },
             )
         )
     for evaluation in evidence.evaluation_results:
+        evaluation_context = _evaluation_context(evaluation.metadata)
         items.append(
             _evidence_item(
                 item_id=evaluation.evaluation_id,
                 kind="evidence.evaluation",
                 occurred_at=evaluation.produced_at,
-                title=evaluation.benchmark or evaluation.suite or "evaluation",
+                title=(
+                    f"{evaluation_context['stage_id']} · evaluation"
+                    if evaluation_context["stage_id"]
+                    else evaluation.benchmark or evaluation.suite or "evaluation"
+                ),
                 status=str(evaluation.execution_status),
                 selector=evaluation.subject,
                 digest=evaluation.content_digest,
@@ -450,6 +471,7 @@ def _append_evidence_items(
                     "aggregate_score": evaluation.aggregate_score,
                     "metrics": evaluation.objective_metrics,
                     "task_id": evaluation.task_id,
+                    **evaluation_context,
                 },
             )
         )
@@ -474,6 +496,25 @@ def _append_evidence_items(
         for item in items[start:]
         if _visible(item.visibility, visibility_ceiling)
     ]
+
+
+def _evaluation_context(metadata: Mapping[str, Any]) -> dict[str, Any]:
+    runtime = metadata.get("evaluation_runtime")
+    runtime = dict(runtime) if isinstance(runtime, Mapping) else {}
+    usage = runtime.get("usage")
+    return {
+        "stage_id": str(metadata.get("evaluation_stage_id") or ""),
+        "stage_kind": str(metadata.get("evaluation_stage_kind") or ""),
+        "stage_role": str(metadata.get("evaluation_stage_role") or ""),
+        "duration_seconds": runtime.get("duration_seconds"),
+        "usage": dict(usage) if isinstance(usage, Mapping) else {},
+        "cost_usd": runtime.get("cost_usd"),
+        "cost_status": runtime.get("cost_status"),
+        "cost_note": runtime.get("cost_note"),
+        "pipeline_digest": str(
+            metadata.get("evaluation_pipeline_digest") or ""
+        ),
+    }
 
 
 def _sealed_item(
