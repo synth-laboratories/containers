@@ -238,6 +238,8 @@ def _typed_native_records(
     verifier_definition: VerifierDefinitionV1 | None = None
     verifier_result: VerifierResultV2 | None = None
     aggregate_gate_id: str | None = None
+    verifier_threshold = threshold
+    rubric_passed: bool | None = None
 
     if has_verifier:
         definition_rows = list(source_definition_rows)
@@ -278,6 +280,11 @@ def _typed_native_records(
 
         if not criterion_results and execution_completed:
             aggregate_gate_id = "native_aggregate_score"
+            aggregate_range_values = tuple(
+                value
+                for value in (0.0, 1.0, threshold, verifier_score)
+                if value is not None
+            )
             aggregate = _criterion_definition(
                 authority=authority,
                 payload=payload,
@@ -287,6 +294,8 @@ def _typed_native_records(
                     "description": (
                         "The aggregate score reported by the native evaluator."
                     ),
+                    "min_score": min(aggregate_range_values),
+                    "max_score": max(aggregate_range_values),
                 },
                 native_id=aggregate_gate_id,
                 role=CriterionRole.GATING,
@@ -318,6 +327,11 @@ def _typed_native_records(
                     )
                 )
 
+        if aggregate_gate_id and criteria:
+            verifier_threshold = _normalized_criterion_score(
+                threshold,
+                criteria[-1],
+            )
         rubric_key = {
             "task": _task_key(payload),
             "native_rubric": {
@@ -360,7 +374,7 @@ def _typed_native_records(
             ),
             aggregation=RubricAggregationV1(
                 strategy="weighted_mean",
-                pass_threshold=threshold,
+                pass_threshold=verifier_threshold,
                 tie_break="pass_closed",
             ),
             scoring_instructions=str(
@@ -374,8 +388,8 @@ def _typed_native_records(
                 ),
             },
         ).sealed()
-        if verifier_score is None and criterion_results:
-            verifier_score, _, _ = aggregate_rubric_score(
+        if criterion_results:
+            verifier_score, rubric_passed, _ = aggregate_rubric_score(
                 rubric,
                 tuple(criterion_results),
             )
@@ -423,8 +437,10 @@ def _typed_native_records(
             verifier_payload.get("accepted"),
         )
         passed = explicit_passed
+        if passed is None:
+            passed = rubric_passed
         if passed is None and verifier_score is not None:
-            passed = verifier_score >= threshold
+            passed = verifier_score >= verifier_threshold
         if verification_status != VerificationStatus.VALID:
             passed = None
         verifier_result = VerifierResultV2(
@@ -445,7 +461,7 @@ def _typed_native_records(
             produced_at=produced_at,
             producer=producer,
             score=verifier_score,
-            pass_threshold=threshold,
+            pass_threshold=verifier_threshold,
             passed=passed,
             verdict=(
                 (
@@ -605,7 +621,7 @@ def _typed_native_records(
         rubric_ids=((rubric.rubric_id,) if rubric is not None else ()),
         aggregate_score=score,
         threshold=(
-            threshold
+            verifier_threshold
             if execution_completed and verifier_result is not None
             else None
         ),
@@ -623,7 +639,7 @@ def _typed_native_records(
     ).sealed()
 
     decision = (
-        _decision(payload, verifier_payload, score, threshold)
+        _decision(payload, verifier_payload, score, verifier_threshold)
         if execution_completed
         else None
     )
@@ -654,7 +670,7 @@ def _typed_native_records(
             score_source=aggregate_source or evaluation.evaluation_id,
             required_evaluation_ids=(evaluation.evaluation_id,),
             required_gates=required_gates,
-            threshold=threshold if score is not None else None,
+            threshold=verifier_threshold if score is not None else None,
             failure_reasons=(
                 ()
                 if decision == "pass"
@@ -1064,6 +1080,17 @@ def _passes(score: float, criterion: CriterionDefinitionV1) -> bool:
         if criterion.higher_is_better
         else score <= criterion.pass_threshold
     )
+
+
+def _normalized_criterion_score(
+    score: float,
+    criterion: CriterionDefinitionV1,
+) -> float:
+    bounded = min(criterion.max_score, max(criterion.min_score, score))
+    normalized = (bounded - criterion.min_score) / (
+        criterion.max_score - criterion.min_score
+    )
+    return normalized if criterion.higher_is_better else 1.0 - normalized
 
 
 def _mapping(value: Any) -> Mapping[str, Any]:
