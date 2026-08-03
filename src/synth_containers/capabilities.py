@@ -8,6 +8,8 @@ from .ontology import (
     CONTRACT_VERSION,
     CapabilityLevel,
     CheckpointSemantics,
+    ContainerComputeProvider,
+    ContainerHarnessSubtype,
     CoreNoun,
     ExecutionProfile,
     PrimitiveProtocol,
@@ -100,7 +102,10 @@ class RouteHints(JsonDataclassMixin):
 @dataclass(slots=True)
 class RuntimeCapabilitySurface(JsonDataclassMixin):
     contract_version: str = CONTRACT_VERSION
-    runtime_kind: RuntimeKind | str = RuntimeKind.ENVIRONMENT
+    runtime_kind: RuntimeKind | str | None = RuntimeKind.ENVIRONMENT
+    container_compute_provider: ContainerComputeProvider | str | None = None
+    container_subtype: str | None = None
+    container_harness_subtype: ContainerHarnessSubtype | str | None = None
     profiles: list[ExecutionProfile | str] = field(default_factory=list)
     rollout_modes: list[RolloutMode | str] = field(default_factory=lambda: [RolloutMode.BLOCKING])
     statefulness_tier: StatefulnessTier | str = StatefulnessTier.EPISODIC
@@ -204,9 +209,19 @@ class RuntimeCapabilitySurface(JsonDataclassMixin):
 
     def to_dict(self) -> dict[str, Any]:
         self.validate()
-        return {
+        payload = {
             "contract_version": self.contract_version,
-            "runtime_kind": str(self.runtime_kind),
+            "container_compute_provider": (
+                ContainerComputeProvider.parse(self.container_compute_provider).value
+                if self.container_compute_provider is not None
+                else None
+            ),
+            "container_subtype": self.container_subtype,
+            "container_harness_subtype": (
+                ContainerHarnessSubtype.parse(self.container_harness_subtype).value
+                if self.container_harness_subtype is not None
+                else None
+            ),
             "profiles": [item.value for item in self.normalized_profiles()],
             "rollout_modes": [item.value for item in self.normalized_rollout_modes()],
             "statefulness_tier": str(self.statefulness_tier),
@@ -240,6 +255,12 @@ class RuntimeCapabilitySurface(JsonDataclassMixin):
             "route_hints": self.route_hints.to_dict(),
             "metadata": dict(self.metadata),
         }
+        # ``runtime_kind`` is an older cross-framework ontology, not part of
+        # managed-container deployment. Omitting it when unclassified keeps a
+        # Harbor subtype from being mistaken for a runtime kind.
+        if self.runtime_kind is not None:
+            payload["runtime_kind"] = str(self.runtime_kind)
+        return payload
 
 
 @dataclass(slots=True)
