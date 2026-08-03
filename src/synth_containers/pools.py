@@ -235,9 +235,11 @@ class HarborTaskBundle:
     before upload, never silently ignored.
     """
 
-    root: Path
+    task_directory: Path
+    build_context_root: Path
     schema_version: str
     task_name: str
+    task_config_path: str
     dockerfile_path: str
     cpu_cores: float | None
     memory_mb: int | None
@@ -252,8 +254,20 @@ class HarborTaskBundle:
     has_tpu_config: bool
 
     @classmethod
-    def from_directory(cls, root: str | Path) -> "HarborTaskBundle":
+    def from_directory(
+        cls,
+        root: str | Path,
+        *,
+        build_context_root: str | Path | None = None,
+    ) -> "HarborTaskBundle":
         base = Path(root).resolve()
+        context = Path(build_context_root).resolve() if build_context_root else base
+        try:
+            base.relative_to(context)
+        except ValueError as error:
+            raise HarborPoolSupportError(
+                f"Harbor task directory {base} is outside build context {context}"
+            ) from error
         task_config = base / HARBOR_TASK_CONFIG
         if not task_config.is_file():
             raise HarborPoolSupportError(f"Harbor task is missing {task_config}")
@@ -276,10 +290,12 @@ class HarborTaskBundle:
             )
 
         return cls(
-            root=base,
+            task_directory=base,
+            build_context_root=context,
             schema_version=str(payload.get("schema_version") or "").strip(),
             task_name=str(task.get("name") or base.name).strip() or base.name,
-            dockerfile_path=HARBOR_ENVIRONMENT_DOCKERFILE,
+            task_config_path=task_config.relative_to(context).as_posix(),
+            dockerfile_path=dockerfile.relative_to(context).as_posix(),
             cpu_cores=_optional_float(environment.get("cpus"), field_name="environment.cpus"),
             memory_mb=_optional_int(
                 environment.get("memory_mb"), field_name="environment.memory_mb"
@@ -354,7 +370,8 @@ class HarborTaskBundle:
             "task_format": "harbor",
             "harbor_schema_version": self.schema_version,
             "harbor_task_name": self.task_name,
-            "harbor_task_config_path": HARBOR_TASK_CONFIG,
+            "harbor_task_config_path": self.task_config_path,
+            "harbor_dockerfile_path": self.dockerfile_path,
             "harbor_allow_internet": self.allow_internet,
             "harbor_phase_timeouts_seconds": {
                 "build": self.build_timeout_seconds,
@@ -740,6 +757,7 @@ class PoolClient:
         pool_id: str,
         *,
         task_directory: str | Path,
+        build_context_root: str | Path | None = None,
         compute_provider: ContainerComputeProvider | str,
         name: str | None = None,
         env_vars: Mapping[str, str] | None = None,
@@ -747,17 +765,19 @@ class PoolClient:
     ) -> dict[str, Any]:
         """Publish one Harbor-formatted task as a normal container release.
 
-        The task is validated before upload. This intentionally sends
-        Harbor is a container subtype, never a runtime or harness identity.
-        Typed metadata tells the pool adapter to
+        The task is validated before upload. Harbor is sent only as a
+        container subtype, never as a runtime or harness identity. Typed
+        metadata tells the pool adapter to
         translate setup, agent, verifier, reward extraction, and artifact
         transfer rather than treating the context as an ordinary one-phase
         command job.
         """
 
-        environment = HarborTaskBundle.from_directory(task_directory)
+        environment = HarborTaskBundle.from_directory(
+            task_directory, build_context_root=build_context_root
+        )
         environment.require_supported()
-        archive = pack_build_context(environment.root)
+        archive = pack_build_context(environment.build_context_root)
         return await self.create_image_release(
             pool_id,
             archive=archive,

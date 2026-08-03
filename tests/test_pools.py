@@ -145,6 +145,32 @@ def test_create_harbor_task_release_uses_container_subtype_metadata(tmp_path: Pa
     assert "release_metadata" not in captured
 
 
+def test_harbor_task_release_packs_the_declared_build_context(tmp_path: Path) -> None:
+    task_directory = tmp_path / "tasks" / "example"
+    task_directory.mkdir(parents=True)
+    _write_harbor_task(task_directory, environment="allow_internet = true\n")
+    shared_source = tmp_path / "shared" / "dependency.txt"
+    shared_source.parent.mkdir()
+    shared_source.write_text("required by Dockerfile", encoding="utf-8")
+
+    bundle = HarborTaskBundle.from_directory(task_directory, build_context_root=tmp_path)
+
+    assert bundle.task_config_path == "tasks/example/task.toml"
+    assert bundle.dockerfile_path == "tasks/example/environment/Dockerfile"
+    assert bundle.build_context_root == tmp_path.resolve()
+
+
+def test_harbor_task_directory_must_be_inside_build_context(tmp_path: Path) -> None:
+    task_directory = tmp_path / "task"
+    task_directory.mkdir()
+    _write_harbor_task(task_directory, environment="allow_internet = true\n")
+    unrelated_context = tmp_path / "elsewhere"
+    unrelated_context.mkdir()
+
+    with pytest.raises(HarborPoolSupportError, match="outside build context"):
+        HarborTaskBundle.from_directory(task_directory, build_context_root=unrelated_context)
+
+
 def test_pool_state_contract() -> None:
     assert pool_state_is_provisioning(PoolState.BUILDING)
     assert pool_state_admits_rollouts(PoolState.ACTIVE)
