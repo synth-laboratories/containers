@@ -115,7 +115,7 @@ def test_create_harbor_task_release_uses_container_subtype_metadata(tmp_path: Pa
             200,
             json={
                 "id": "release-1",
-                "runtime_kind": payload["runtime_kind"],
+                "source_kind": payload["source_kind"],
                 "source_content_hash": hashlib.sha256(archive).hexdigest(),
             },
             request=request,
@@ -135,9 +135,10 @@ def test_create_harbor_task_release_uses_container_subtype_metadata(tmp_path: Pa
             )
 
     release = asyncio.run(exercise())
-    assert release["runtime_kind"] == "docker_context"
+    assert release["source_kind"] == "docker_context"
     assert captured["source_kind"] == "docker_context"
-    assert captured["runtime_kind"] == "docker_context"
+    assert "runtime_kind" not in captured
+    assert "provider" not in captured
     assert "interface_mode" not in captured
     assert captured["metadata"]["container_subtype"] == "harbor"
     assert captured["metadata"]["container_compute_provider"] == "daytona"

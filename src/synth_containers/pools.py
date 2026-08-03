@@ -718,8 +718,6 @@ class PoolClient:
         )
         payload: dict[str, Any] = {
             "source_kind": normalized_source_kind,
-            # Compatibility for backends predating the source-kind rename.
-            "runtime_kind": normalized_source_kind,
             "dockerfile_path": dockerfile_path,
             "archive_base64": base64.b64encode(payload_bytes).decode("ascii"),
             "filename": filename,
@@ -727,12 +725,6 @@ class PoolClient:
         for key, value in (
             ("name", name),
             ("compute_provider", normalized_compute_provider),
-            (
-                "provider",
-                "docker"
-                if normalized_compute_provider == ContainerComputeProvider.LOCAL.value
-                else normalized_compute_provider,
-            ),
             ("entrypoint", entrypoint),
             ("env_vars", dict(env_vars) if env_vars else None),
             ("limits", dict(limits) if limits else None),
@@ -833,18 +825,11 @@ class PoolClient:
         )
         payload: dict[str, Any] = {
             "source_kind": ContainerSourceKind.IMAGE_REF.value,
-            "runtime_kind": ContainerSourceKind.IMAGE_REF.value,
             "image_ref": ref,
         }
         for key, value in (
             ("name", name),
             ("compute_provider", normalized_compute_provider),
-            (
-                "provider",
-                "docker"
-                if normalized_compute_provider == ContainerComputeProvider.LOCAL.value
-                else normalized_compute_provider,
-            ),
             ("entrypoint", entrypoint),
             ("env_vars", dict(env_vars) if env_vars else None),
             ("limits", dict(limits) if limits else None),
