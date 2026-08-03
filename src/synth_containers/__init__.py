@@ -17,6 +17,16 @@ from .capabilities import (
     TaskInfo,
     TokenEmissionCapabilities,
 )
+from .annotations import (
+    ROLLOUT_ANNOTATIONS_SCHEMA,
+    RolloutAnnotation,
+    RolloutAnnotationList,
+    annotation_list,
+    derive_annotations_from_execution,
+    extract_behavior_diagnostics,
+    extract_env_progress,
+    make_annotation,
+)
 from .compatibility import (
     CONSUMER_REQUIREMENTS,
     CompatibilityIssue,
@@ -182,6 +192,14 @@ __all__ = [
     "Actor",
     "ActionableSideInfo",
     "AgentRuntimeTarget",
+    "ROLLOUT_ANNOTATIONS_SCHEMA",
+    "RolloutAnnotation",
+    "RolloutAnnotationList",
+    "annotation_list",
+    "derive_annotations_from_execution",
+    "extract_behavior_diagnostics",
+    "extract_env_progress",
+    "make_annotation",
     "ArtifactContract",
     "ArtifactDescriptor",
     "ArtifactPaths",

@@ -22,6 +22,11 @@ from .http_models import (
     RolloutRequestModel,
     TerminateRequestModel,
 )
+from .annotations import (
+    RolloutAnnotationList,
+    coerce_annotation_list,
+    derive_annotations_from_execution,
+)
 from .nouns import CheckpointDescriptor, ExecutionRecord
 from .ontology import CONTRACT_VERSION
 from .prompt_programs import gepa_optimizer_contract
@@ -178,6 +183,27 @@ def _coerce_checkpoint_list(value: list[CheckpointDescriptor]) -> list[dict[str,
     return [item.to_dict() for item in value]
 
 
+async def _resolve_rollout_annotations(
+    runtime: ManagedRuntime, rollout_id: str
+) -> RolloutAnnotationList:
+    execution = await runtime.get_execution(rollout_id=rollout_id)
+    if execution is None:
+        raise HTTPException(status_code=404, detail=f"unknown_rollout:{rollout_id}")
+    handler = getattr(runtime, "get_rollout_annotations", None)
+    if callable(handler):
+        value = handler(rollout_id)
+        if isawaitable(value):
+            value = await value
+        coerced = coerce_annotation_list(
+            value,
+            rollout_id=rollout_id,
+            trace_correlation_id=execution.trace_correlation_id,
+        )
+        if coerced is not None:
+            return coerced
+    return derive_annotations_from_execution(execution)
+
+
 def create_reference_app(
     runtime: ManagedRuntime, *, title: str = "synth-containers-reference"
 ) -> FastAPI:
@@ -293,6 +319,10 @@ def create_reference_app(
     async def get_rollout_artifacts(rollout_id: str) -> dict[str, Any]:
         payload = await get_rollout(rollout_id)
         return {"rollout_id": rollout_id, "artifacts": payload["artifacts"]}
+
+    @app.get("/rollouts/{rollout_id}/annotations")
+    async def get_rollout_annotations(rollout_id: str) -> dict[str, Any]:
+        return (await _resolve_rollout_annotations(runtime, rollout_id)).to_dict()
 
     @app.get("/rollouts/{rollout_id}/events")
     async def get_rollout_events(rollout_id: str) -> dict[str, Any]:
