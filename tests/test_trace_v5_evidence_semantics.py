@@ -510,6 +510,41 @@ def test_native_evaluation_writes_reachable_typed_revisions_twice(
     ]
 
 
+def test_native_evaluation_infers_bounds_that_include_unbounded_native_score(
+    tmp_path: Path,
+) -> None:
+    trace = _trace("native-correlation")
+    _write_trace_bundle(tmp_path, trace)
+
+    attached = attach_native_evaluation(
+        tmp_path,
+        payload={
+            "schema_version": "harbor.native-evaluation.v1",
+            "authority": "harbor",
+            "trace_correlation_id": "native-correlation",
+            "status": "completed",
+            "verifier": {
+                "returncode": 0,
+                "score": 1.01,
+            },
+        },
+        source_name="harbor-above-unit-range.json",
+    )
+    inspected = load_bundle(tmp_path)[0]
+    assert inspected.evidence is not None
+    criterion = inspected.evidence.criteria[-1]
+    verifier_result = inspected.evidence.verifier_results[-1]
+
+    assert attached["validation_valid"] is True
+    assert attached["aggregate_score"] == 1.0
+    assert criterion.min_score == 0.0
+    assert criterion.max_score == 1.01
+    assert verifier_result.score == 1.0
+    assert verifier_result.criterion_results[0].score == 1.01
+    assert verifier_result.pass_threshold == pytest.approx(0.5 / 1.01)
+    assert _codes(trace, inspected.evidence) == set()
+
+
 def test_failed_native_evaluation_does_not_publish_placeholder_score_or_verdict(
     tmp_path: Path,
 ) -> None:

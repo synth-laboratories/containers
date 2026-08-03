@@ -92,6 +92,9 @@ class RouteHints(JsonDataclassMixin):
     event_routes: list[str] = field(default_factory=lambda: ["/rollouts/{rollout_id}/events"])
     trace_routes: list[str] = field(default_factory=lambda: ["/rollouts/{rollout_id}/trace"])
     artifact_routes: list[str] = field(default_factory=lambda: ["/rollouts/{rollout_id}/artifacts"])
+    annotation_routes: list[str] = field(
+        default_factory=lambda: ["/rollouts/{rollout_id}/annotations"]
+    )
 
 
 @dataclass(slots=True)
@@ -120,6 +123,7 @@ class RuntimeCapabilitySurface(JsonDataclassMixin):
     reward_support: bool = False
     verifier_support: bool = False
     artifact_support: bool = False
+    annotations_support: bool = True
     tool_runtime: ToolRuntimeCapabilities = field(default_factory=ToolRuntimeCapabilities)
     token_emission: TokenEmissionCapabilities = field(default_factory=TokenEmissionCapabilities)
     multi_actor: bool = False

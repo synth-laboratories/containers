@@ -694,6 +694,16 @@ class ReferenceManagedRuntime:
             return status
         return self._executions.get(rollout_id)
 
+    async def get_rollout_annotations(self, rollout_id: str):
+        """Return derived annotations for a finished (or in-flight) execution."""
+
+        from .annotations import derive_annotations_from_execution
+
+        execution = await self.get_execution(rollout_id)
+        if execution is None:
+            return None
+        return derive_annotations_from_execution(execution)
+
     async def get_execution_state(self, rollout_id: str) -> ExecutionRecord | None:
         return await self.get_execution(rollout_id)
 

@@ -170,6 +170,9 @@ class HTTPContainerClient:
     async def artifacts(self, rollout_id: str) -> dict[str, Any]:
         return await self._get(f"/rollouts/{rollout_id}/artifacts", optional=True)
 
+    async def annotations(self, rollout_id: str) -> dict[str, Any]:
+        return await self._get(f"/rollouts/{rollout_id}/annotations", optional=True)
+
     async def events(self, rollout_id: str) -> dict[str, Any]:
         return await self._get(f"/rollouts/{rollout_id}/events", optional=True)
 
