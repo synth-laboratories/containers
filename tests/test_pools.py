@@ -66,7 +66,7 @@ def test_harbor_is_a_container_subtype_not_a_runtime() -> None:
         compute_provider="daytona", container_harness_subtype="opencode"
     )
     payload = capabilities.to_dict()
-    assert payload["runtime_kind"] is None
+    assert "runtime_kind" not in payload
     assert payload["container_compute_provider"] == "daytona"
     assert payload["container_subtype"] == "harbor"
     assert payload["container_harness_subtype"] == "opencode"

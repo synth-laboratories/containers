@@ -209,9 +209,8 @@ class RuntimeCapabilitySurface(JsonDataclassMixin):
 
     def to_dict(self) -> dict[str, Any]:
         self.validate()
-        return {
+        payload = {
             "contract_version": self.contract_version,
-            "runtime_kind": str(self.runtime_kind) if self.runtime_kind is not None else None,
             "container_compute_provider": (
                 ContainerComputeProvider.parse(self.container_compute_provider).value
                 if self.container_compute_provider is not None
@@ -256,6 +255,12 @@ class RuntimeCapabilitySurface(JsonDataclassMixin):
             "route_hints": self.route_hints.to_dict(),
             "metadata": dict(self.metadata),
         }
+        # ``runtime_kind`` is an older cross-framework ontology, not part of
+        # managed-container deployment. Omitting it when unclassified keeps a
+        # Harbor subtype from being mistaken for a runtime kind.
+        if self.runtime_kind is not None:
+            payload["runtime_kind"] = str(self.runtime_kind)
+        return payload
 
 
 @dataclass(slots=True)
