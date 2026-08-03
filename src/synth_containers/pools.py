@@ -28,19 +28,12 @@ delete           ``delete_pool`` — archives; see the method note
 metadata         ``pool_metadata``, free-form and uninterpreted
 tasks            list / create / update / delete
 image releases   create / register / list / get / bind / delete
-pause, resume    **declared, backend support pending** — see below
+pause, resume    ``pause_pool`` / ``resume_pool``
 ===============  ====================================================
 
 ``pause_pool`` and ``resume_pool`` exist and target ``POST /v1/pools/{id}/pause``
-and ``/resume``, but no backend serves those routes yet: ``ContainerPool.status``
-is constrained to ``('active','archived')`` by a CHECK constraint and nothing
-transitions it. Against such a backend they raise `PoolStateError` naming the
-gap rather than leaking a bare 404 — a caller learns *why* pausing is
-unavailable instead of guessing at a missing route. Setting ``concurrency`` to
-zero is not a substitute: nothing reads that field yet.
-
-Making them work needs the states on `PoolState`: a migration widening the
-constraint, transitions wired into the provisioning path, and the two routes.
+and ``/resume``. Backends predating the lifecycle migration still receive a
+typed `PoolStateError` instead of a bare 404.
 """
 
 from __future__ import annotations
@@ -122,11 +115,9 @@ class PoolState:
     - Any non-terminal state may be archived directly; abandoning a pool
       mid-build must not require driving it to ``active`` first.
 
-    **Implementation status.** ``active`` and ``archived`` exist today. The rest
-    are proposed and need a backend migration widening the CHECK constraint,
-    plus transition routes for pause and resume. Until then a live pool only
-    ever reports the two, and the predicates below still behave correctly —
-    they simply never see the others.
+    All states are implemented by the backend lifecycle migration. Older
+    deployments may still report only ``active`` and ``archived``; the
+    predicates remain backward compatible with those responses.
     """
 
     CREATED = "created"
@@ -139,8 +130,19 @@ class PoolState:
     ARCHIVED = "archived"
 
 
-#: States that exist in the backend today. Everything else is proposed.
-IMPLEMENTED_POOL_STATES = frozenset({PoolState.ACTIVE, PoolState.ARCHIVED})
+#: States recognized by the backend and public client.
+IMPLEMENTED_POOL_STATES = frozenset(
+    {
+        PoolState.CREATED,
+        PoolState.UPLOADING,
+        PoolState.BUILDING,
+        PoolState.WARMING,
+        PoolState.ACTIVE,
+        PoolState.PAUSED,
+        PoolState.FAILED,
+        PoolState.ARCHIVED,
+    }
+)
 
 #: A pool in one of these is on its way to `active` without operator action.
 PROVISIONING_POOL_STATES = frozenset(
@@ -570,9 +572,8 @@ class PoolClient:
     async def pause_pool(self, pool_id: str) -> dict[str, Any]:
         """Stop admitting new rollouts; let in-flight work drain.
 
-        Requires the lifecycle states described on `PoolState`. Against a
-        backend that still has the two-state CHECK constraint this raises
-        `PoolStateError` naming the gap, rather than surfacing a bare 404.
+        Against a pre-lifecycle backend this raises `PoolStateError` naming the
+        missing capability rather than surfacing a bare 404.
         """
 
         return await self._transition(pool_id, "pause")
@@ -587,9 +588,8 @@ class PoolClient:
         if not body:
             raise PoolStateError(
                 f"pool {verb} is not available on this backend: "
-                f"ContainerPool.status is still constrained to "
-                f"('active','archived') and no /{verb} route exists. "
-                "See PoolState for the states this needs."
+                f"the /{verb} lifecycle route is missing. "
+                "Upgrade the backend container-pool lifecycle migration."
             )
         return body
 

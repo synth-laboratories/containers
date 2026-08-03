@@ -297,7 +297,7 @@ def test_preflight_reports_optional_missing_probes() -> None:
     assert result["missing"] == ["metadata", "task_info"]
 
 
-def test_pause_names_the_backend_state_machine_gap() -> None:
+def test_pause_names_a_pre_lifecycle_backend() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(404, json={"detail": "not found"}, request=request)
 
@@ -309,8 +309,29 @@ def test_pause_names_the_backend_state_machine_gap() -> None:
             client = PoolClient(api_key="test", client=transport_client)
             await client.pause_pool("pool-1")
 
-    with pytest.raises(PoolStateError, match="ContainerPool.status"):
+    with pytest.raises(PoolStateError, match="lifecycle route"):
         asyncio.run(exercise())
+
+
+def test_pause_uses_the_public_lifecycle_route() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url.path == "/v1/pools/pool-1/pause"
+        return httpx.Response(
+            200,
+            json={"id": "pool-1", "status": PoolState.PAUSED},
+            request=request,
+        )
+
+    async def exercise() -> dict[str, Any]:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(
+            base_url="https://example.test", transport=transport
+        ) as transport_client:
+            client = PoolClient(api_key="test", client=transport_client)
+            return await client.pause_pool("pool-1")
+
+    assert asyncio.run(exercise())["status"] == PoolState.PAUSED
 
 
 def test_create_image_release_refuses_backend_hash_mismatch() -> None:
