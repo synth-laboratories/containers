@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import io
+import json
 import tarfile
 from pathlib import Path
 from typing import Any, Mapping
@@ -12,7 +14,13 @@ from typing import Any, Mapping
 import httpx
 import pytest
 
+from synth_containers.adapters import harbor_descriptor
+from synth_containers.compat.harbor import harbor_capability_surface
+from synth_containers.ontology import ContainerHarnessSubtype
 from synth_containers.pools import (
+    HARBOR_CONTAINER_SUBTYPE,
+    HarborPoolSupportError,
+    HarborTaskBundle,
     PoolClient,
     PoolClientError,
     PoolState,
@@ -24,6 +32,117 @@ from synth_containers.pools import (
     pool_state_is_terminal,
     validate_pool_transition,
 )
+
+
+def _write_harbor_task(root: Path, *, environment: str = "") -> None:
+    (root / "environment").mkdir(parents=True)
+    (root / "environment" / "Dockerfile").write_text("FROM scratch\n")
+    (root / "task.toml").write_text(
+        """schema_version = "1.1"
+
+[task]
+name = "example/harbor-task"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 900.0
+
+[environment]
+build_timeout_sec = 600.0
+cpus = 2
+memory_mb = 4096
+"""
+        + environment
+    )
+
+
+def test_harbor_is_a_container_subtype_not_a_runtime() -> None:
+    descriptor = harbor_descriptor()
+    assert descriptor.runtime_kind is None
+    assert descriptor.container_subtype == HARBOR_CONTAINER_SUBTYPE
+    capabilities = harbor_capability_surface(
+        compute_provider="daytona", container_harness_subtype="opencode"
+    )
+    payload = capabilities.to_dict()
+    assert payload["runtime_kind"] is None
+    assert payload["container_compute_provider"] == "daytona"
+    assert payload["container_subtype"] == "harbor"
+    assert payload["container_harness_subtype"] == "opencode"
+
+
+def test_harbor_task_bundle_preserves_phase_and_resource_semantics(tmp_path: Path) -> None:
+    _write_harbor_task(tmp_path, environment="allow_internet = true\n")
+
+    bundle = HarborTaskBundle.from_directory(tmp_path)
+
+    assert bundle.task_name == "example/harbor-task"
+    assert bundle.pool_limits() == {"cpu_cores": 2.0, "memory_mb": 4096}
+    assert bundle.unsupported_requirements() == ()
+    assert bundle.release_metadata()["container_subtype"] == "harbor"
+    assert bundle.release_metadata()["harbor_phase_timeouts_seconds"] == {
+        "build": 600.0,
+        "agent": 1800.0,
+        "verifier": 900.0,
+    }
+
+
+def test_harbor_task_bundle_refuses_requirements_pools_cannot_honor(tmp_path: Path) -> None:
+    _write_harbor_task(
+        tmp_path,
+        environment="storage_mb = 8192\nallow_internet = false\n",
+    )
+    bundle = HarborTaskBundle.from_directory(tmp_path)
+
+    with pytest.raises(HarborPoolSupportError) as exc_info:
+        bundle.require_supported()
+
+    message = str(exc_info.value)
+    assert "allow_internet=false" in message
+    assert "storage_mb" in message
+
+
+def test_create_harbor_task_release_uses_container_subtype_metadata(tmp_path: Path) -> None:
+    _write_harbor_task(tmp_path, environment="allow_internet = true\n")
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        captured.update(payload)
+        archive = base64.b64decode(payload["archive_base64"])
+        return httpx.Response(
+            200,
+            json={
+                "id": "release-1",
+                "runtime_kind": payload["runtime_kind"],
+                "source_content_hash": hashlib.sha256(archive).hexdigest(),
+            },
+            request=request,
+        )
+
+    async def exercise() -> dict[str, Any]:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(
+            base_url="https://example.test", transport=transport
+        ) as transport_client:
+            client = PoolClient(api_key="test", client=transport_client)
+            return await client.create_harbor_task_release(
+                "pool-1",
+                task_directory=tmp_path,
+                compute_provider="daytona",
+                container_harness_subtype=ContainerHarnessSubtype.CLAUDE_CODE,
+            )
+
+    release = asyncio.run(exercise())
+    assert release["runtime_kind"] == "docker_context"
+    assert captured["source_kind"] == "docker_context"
+    assert captured["runtime_kind"] == "docker_context"
+    assert "interface_mode" not in captured
+    assert captured["metadata"]["container_subtype"] == "harbor"
+    assert captured["metadata"]["container_compute_provider"] == "daytona"
+    assert captured["metadata"]["container_harness_subtype"] == "claude_code"
+    assert "release_metadata" not in captured
 
 
 def test_pool_state_contract() -> None:

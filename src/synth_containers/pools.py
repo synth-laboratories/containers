@@ -53,11 +53,19 @@ import io
 import logging
 import os
 import tarfile
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 import httpx
+
+from .ontology import (
+    ContainerComputeProvider,
+    ContainerHarnessSubtype,
+    ContainerSourceKind,
+    ContainerSubtype,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +80,10 @@ SUCCESS_STATUSES = frozenset({"completed"})
 DEFAULT_POLL_INTERVAL_SECONDS = 2.0
 DEFAULT_POLL_TIMEOUT_SECONDS = 1800.0
 DEFAULT_MAX_IN_FLIGHT = 8
+
+HARBOR_CONTAINER_SUBTYPE = ContainerSubtype.HARBOR.value
+HARBOR_TASK_CONFIG = "task.toml"
+HARBOR_ENVIRONMENT_DOCKERFILE = "environment/Dockerfile"
 
 
 class PoolState:
@@ -206,6 +218,156 @@ class PoolStateError(PoolClientError):
 
 class PoolRolloutTimeout(PoolClientError):
     """A rollout was still non-terminal when its deadline elapsed."""
+
+
+class HarborPoolSupportError(PoolClientError):
+    """A Harbor task requires pool behavior the platform cannot honor yet."""
+
+
+@dataclass(frozen=True, slots=True)
+class HarborTaskBundle:
+    """Pool-facing projection of a Harbor task directory.
+
+    Harbor is a container subtype and task/evaluation format, not a runtime.
+    The underlying runtime remains an ordinary image or Docker build context.
+    The backend translates setup, agent, and verifier phases onto that runtime.
+    Requirements the pool cannot faithfully represent are retained and rejected
+    before upload, never silently ignored.
+    """
+
+    root: Path
+    schema_version: str
+    task_name: str
+    dockerfile_path: str
+    cpu_cores: float | None
+    memory_mb: int | None
+    storage_mb: int | None
+    allow_internet: bool | None
+    gpu_count: int | None
+    gpu_types: tuple[str, ...]
+    build_timeout_seconds: float | None
+    agent_timeout_seconds: float | None
+    verifier_timeout_seconds: float | None
+    verifier_environment_mode: str
+    has_tpu_config: bool
+
+    @classmethod
+    def from_directory(cls, root: str | Path) -> "HarborTaskBundle":
+        base = Path(root).resolve()
+        task_config = base / HARBOR_TASK_CONFIG
+        if not task_config.is_file():
+            raise HarborPoolSupportError(f"Harbor task is missing {task_config}")
+        try:
+            payload = tomllib.loads(task_config.read_text(encoding="utf-8"))
+        except (OSError, tomllib.TOMLDecodeError) as error:
+            raise HarborPoolSupportError(
+                f"Harbor task config is not readable TOML: {task_config}: {error}"
+            ) from error
+
+        task = _mapping(payload.get("task"))
+        environment = _mapping(payload.get("environment"))
+        agent = _mapping(payload.get("agent"))
+        verifier = _mapping(payload.get("verifier"))
+        dockerfile = base / HARBOR_ENVIRONMENT_DOCKERFILE
+        if not dockerfile.is_file():
+            raise HarborPoolSupportError(
+                "Harbor pool source-build currently requires "
+                f"{HARBOR_ENVIRONMENT_DOCKERFILE}; docker_image-only tasks are not yet supported"
+            )
+
+        return cls(
+            root=base,
+            schema_version=str(payload.get("schema_version") or "").strip(),
+            task_name=str(task.get("name") or base.name).strip() or base.name,
+            dockerfile_path=HARBOR_ENVIRONMENT_DOCKERFILE,
+            cpu_cores=_optional_float(environment.get("cpus"), field_name="environment.cpus"),
+            memory_mb=_optional_int(
+                environment.get("memory_mb"), field_name="environment.memory_mb"
+            ),
+            storage_mb=_optional_int(
+                environment.get("storage_mb"), field_name="environment.storage_mb"
+            ),
+            allow_internet=_optional_bool(
+                environment.get("allow_internet"), field_name="environment.allow_internet"
+            ),
+            gpu_count=_optional_int(environment.get("gpus"), field_name="environment.gpus"),
+            gpu_types=_string_tuple(environment.get("gpu_types")),
+            build_timeout_seconds=_optional_float(
+                environment.get("build_timeout_sec"),
+                field_name="environment.build_timeout_sec",
+            ),
+            agent_timeout_seconds=_optional_float(
+                agent.get("timeout_sec"), field_name="agent.timeout_sec"
+            ),
+            verifier_timeout_seconds=_optional_float(
+                verifier.get("timeout_sec"), field_name="verifier.timeout_sec"
+            ),
+            verifier_environment_mode=str(verifier.get("environment_mode") or "shared")
+            .strip()
+            .lower(),
+            has_tpu_config=bool(_mapping(environment.get("tpu"))),
+        )
+
+    def unsupported_requirements(self) -> tuple[str, ...]:
+        """Return requirements that a pool must refuse rather than ignore."""
+
+        unsupported: list[str] = []
+        if self.allow_internet is False:
+            unsupported.append("environment.allow_internet=false (egress isolation)")
+        if self.storage_mb not in {None, 0}:
+            unsupported.append("environment.storage_mb")
+        if self.gpu_count not in {None, 0} or self.gpu_types:
+            unsupported.append("environment.gpus/gpu_types")
+        if self.has_tpu_config:
+            unsupported.append("environment.tpu")
+        if self.verifier_environment_mode != "shared":
+            unsupported.append("verifier.environment_mode=separate")
+        return tuple(unsupported)
+
+    def require_supported(self) -> None:
+        unsupported = self.unsupported_requirements()
+        if unsupported:
+            raise HarborPoolSupportError(
+                "Harbor task cannot be translated faithfully by the current pool backend; "
+                f"unsupported requirements: {', '.join(unsupported)}"
+            )
+
+    def pool_limits(self) -> dict[str, Any]:
+        """Map only resource dimensions with equivalent pool semantics."""
+
+        limits: dict[str, Any] = {}
+        if self.cpu_cores is not None:
+            limits["cpu_cores"] = self.cpu_cores
+        if self.memory_mb is not None:
+            limits["memory_mb"] = self.memory_mb
+        return limits
+
+    def release_metadata(
+        self,
+        *,
+        container_harness_subtype: ContainerHarnessSubtype | str | None = None,
+    ) -> dict[str, Any]:
+        """Metadata needed by the backend's native three-phase translator."""
+
+        metadata: dict[str, Any] = {
+            "container_subtype": HARBOR_CONTAINER_SUBTYPE,
+            "task_format": "harbor",
+            "harbor_schema_version": self.schema_version,
+            "harbor_task_name": self.task_name,
+            "harbor_task_config_path": HARBOR_TASK_CONFIG,
+            "harbor_allow_internet": self.allow_internet,
+            "harbor_phase_timeouts_seconds": {
+                "build": self.build_timeout_seconds,
+                "agent": self.agent_timeout_seconds,
+                "verifier": self.verifier_timeout_seconds,
+            },
+            "harbor_verifier_environment_mode": self.verifier_environment_mode,
+        }
+        if container_harness_subtype is not None:
+            metadata["container_harness_subtype"] = ContainerHarnessSubtype.parse(
+                container_harness_subtype
+            ).value
+        return metadata
 
 
 @dataclass(slots=True)
@@ -482,16 +644,15 @@ class PoolClient:
     #
     # Pool images are NOT actor images. They live in
     # `container_pool_runtime_image_releases`, are scoped to a pool rather than
-    # an org, and carry pool-only concepts: `runtime_kind`
-    # (image_ref/docker_context/source_build/service_url), `interface_mode`,
-    # `dockerfile_path`, `entrypoint`. The SMR actor image lane has its own
+    # an org, and carry pool-only concepts: source kind, compute provider,
+    # `dockerfile_path`, and `entrypoint`. The SMR actor image lane has its own
     # table, its own `RuntimeImageKind` vocabulary, its own registry env vars,
     # and no interface modes at all. Push/pull *mechanics* can be shared; the
     # namespaces, lifecycles, and vocabularies must not be.
 
     async def list_image_releases(self, pool_id: str) -> list[dict[str, Any]]:
         body = await self._request("GET", f"/pools/{pool_id}/runtime_image_releases", optional=True)
-        releases = body.get("releases")
+        releases = body.get("releases", body.get("items"))
         return (
             [item for item in releases if isinstance(item, dict)]
             if isinstance(releases, list)
@@ -507,9 +668,8 @@ class PoolClient:
         *,
         archive: bytes | str | Path,
         dockerfile_path: str = "Dockerfile",
-        runtime_kind: str = "docker_context",
-        interface_mode: str | None = None,
-        provider: str | None = None,
+        source_kind: ContainerSourceKind | str = ContainerSourceKind.DOCKER_CONTEXT,
+        compute_provider: ContainerComputeProvider | str | None = None,
         name: str | None = None,
         entrypoint: str | None = None,
         env_vars: Mapping[str, str] | None = None,
@@ -533,20 +693,33 @@ class PoolClient:
 
         payload_bytes = _archive_bytes(archive)
         local_hash = hashlib.sha256(payload_bytes).hexdigest()
+        normalized_source_kind = ContainerSourceKind.parse(source_kind).value
+        normalized_compute_provider = (
+            ContainerComputeProvider.parse(compute_provider).value
+            if compute_provider is not None
+            else None
+        )
         payload: dict[str, Any] = {
-            "runtime_kind": runtime_kind,
+            "source_kind": normalized_source_kind,
+            # Compatibility for backends predating the source-kind rename.
+            "runtime_kind": normalized_source_kind,
             "dockerfile_path": dockerfile_path,
             "archive_base64": base64.b64encode(payload_bytes).decode("ascii"),
             "filename": filename,
         }
         for key, value in (
             ("name", name),
-            ("interface_mode", interface_mode),
-            ("provider", provider),
+            ("compute_provider", normalized_compute_provider),
+            (
+                "provider",
+                "docker"
+                if normalized_compute_provider == ContainerComputeProvider.LOCAL.value
+                else normalized_compute_provider,
+            ),
             ("entrypoint", entrypoint),
             ("env_vars", dict(env_vars) if env_vars else None),
             ("limits", dict(limits) if limits else None),
-            ("release_metadata", dict(release_metadata) if release_metadata else None),
+            ("metadata", dict(release_metadata) if release_metadata else None),
         ):
             if value is not None:
                 payload[key] = value
@@ -562,14 +735,53 @@ class PoolClient:
             )
         return release
 
+    async def create_harbor_task_release(
+        self,
+        pool_id: str,
+        *,
+        task_directory: str | Path,
+        compute_provider: ContainerComputeProvider | str,
+        name: str | None = None,
+        env_vars: Mapping[str, str] | None = None,
+        container_harness_subtype: ContainerHarnessSubtype | str | None = None,
+    ) -> dict[str, Any]:
+        """Publish one Harbor-formatted task as a normal container release.
+
+        The task is validated before upload. This intentionally sends
+        Harbor is a container subtype, never a runtime or harness identity.
+        Typed metadata tells the pool adapter to
+        translate setup, agent, verifier, reward extraction, and artifact
+        transfer rather than treating the context as an ordinary one-phase
+        command job.
+        """
+
+        environment = HarborTaskBundle.from_directory(task_directory)
+        environment.require_supported()
+        archive = pack_build_context(environment.root)
+        return await self.create_image_release(
+            pool_id,
+            archive=archive,
+            dockerfile_path=environment.dockerfile_path,
+            source_kind=ContainerSourceKind.DOCKER_CONTEXT,
+            compute_provider=compute_provider,
+            name=name or environment.task_name,
+            env_vars=env_vars,
+            limits=environment.pool_limits(),
+            filename="harbor-task.tar.gz",
+            release_metadata={
+                **environment.release_metadata(container_harness_subtype=container_harness_subtype),
+                "container_compute_provider": ContainerComputeProvider.parse(
+                    compute_provider
+                ).value,
+            },
+        )
+
     async def register_image_release(
         self,
         pool_id: str,
         *,
         image_ref: str,
-        runtime_kind: str = "image_ref",
-        interface_mode: str | None = None,
-        provider: str | None = None,
+        compute_provider: ContainerComputeProvider | str | None = None,
         name: str | None = None,
         entrypoint: str | None = None,
         env_vars: Mapping[str, str] | None = None,
@@ -594,15 +806,29 @@ class PoolClient:
                 "change what it runs between rollouts",
                 ref,
             )
-        payload: dict[str, Any] = {"runtime_kind": runtime_kind, "image_ref": ref}
+        normalized_compute_provider = (
+            ContainerComputeProvider.parse(compute_provider).value
+            if compute_provider is not None
+            else None
+        )
+        payload: dict[str, Any] = {
+            "source_kind": ContainerSourceKind.IMAGE_REF.value,
+            "runtime_kind": ContainerSourceKind.IMAGE_REF.value,
+            "image_ref": ref,
+        }
         for key, value in (
             ("name", name),
-            ("interface_mode", interface_mode),
-            ("provider", provider),
+            ("compute_provider", normalized_compute_provider),
+            (
+                "provider",
+                "docker"
+                if normalized_compute_provider == ContainerComputeProvider.LOCAL.value
+                else normalized_compute_provider,
+            ),
             ("entrypoint", entrypoint),
             ("env_vars", dict(env_vars) if env_vars else None),
             ("limits", dict(limits) if limits else None),
-            ("release_metadata", dict(release_metadata) if release_metadata else None),
+            ("metadata", dict(release_metadata) if release_metadata else None),
         ):
             if value is not None:
                 payload[key] = value
@@ -859,6 +1085,49 @@ def _is_excluded(relative: str, patterns: Sequence[str]) -> bool:
     return False
 
 
+def _mapping(value: Any) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _optional_float(value: Any, *, field_name: str) -> float | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        raise HarborPoolSupportError(f"{field_name} must be numeric")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as error:
+        raise HarborPoolSupportError(f"{field_name} must be numeric") from error
+    if number < 0:
+        raise HarborPoolSupportError(f"{field_name} must be non-negative")
+    return number
+
+
+def _optional_int(value: Any, *, field_name: str) -> int | None:
+    number = _optional_float(value, field_name=field_name)
+    if number is None:
+        return None
+    if int(number) != number:
+        raise HarborPoolSupportError(f"{field_name} must be an integer")
+    return int(number)
+
+
+def _optional_bool(value: Any, *, field_name: str) -> bool | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return value
+    raise HarborPoolSupportError(f"{field_name} must be a boolean")
+
+
+def _string_tuple(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise HarborPoolSupportError("environment.gpu_types must be a list")
+    return tuple(text for item in value if (text := str(item).strip()))
+
+
 def _archive_bytes(archive: bytes | str | Path) -> bytes:
     if isinstance(archive, bytes):
         return archive
@@ -886,6 +1155,10 @@ __all__ = [
     "pack_build_context",
     "DEFAULT_POLL_INTERVAL_SECONDS",
     "DEFAULT_POLL_TIMEOUT_SECONDS",
+    "HARBOR_CONTAINER_SUBTYPE",
+    "HARBOR_TASK_CONFIG",
+    "HarborPoolSupportError",
+    "HarborTaskBundle",
     "IMPLEMENTED_POOL_STATES",
     "POOL_STATE_TRANSITIONS",
     "PROVISIONING_POOL_STATES",
