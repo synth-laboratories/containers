@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import base64
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
@@ -34,6 +35,7 @@ class GoldState:
         self.omit_frames = False
         self.omit_events = False
         self.include_cursor = True
+        self.next_rollout = 0
 
 
 def _gold_handler(state: GoldState) -> type[BaseHTTPRequestHandler]:
@@ -64,7 +66,8 @@ def _gold_handler(state: GoldState) -> type[BaseHTTPRequestHandler]:
             length = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
             if self.path == "/rollouts":
-                rollout_id = "gold_roll_1"
+                state.next_rollout += 1
+                rollout_id = f"gold_roll_{state.next_rollout}"
                 max_steps = int(((body.get("task") or {}).get("max_steps")) or 1)
                 state.rollouts[rollout_id] = {
                     "steps": 0,
@@ -90,6 +93,36 @@ def _gold_handler(state: GoldState) -> type[BaseHTTPRequestHandler]:
                 if terminated:
                     row["events"].append({"kind": "terminal", "status": "completed"})
                 self._json(_readout(rollout_id, steps=row["steps"], terminated=terminated))
+                return
+            if self.path.endswith("/checkpoint"):
+                rollout_id = self.path.split("/")[2]
+                row = state.rollouts[rollout_id]
+                blob = base64.b64encode(json.dumps(row).encode("utf-8")).decode("ascii")
+                self._json(
+                    {
+                        "rollout_id": rollout_id,
+                        "checkpoint_id": f"gold_checkpoint_{rollout_id}_{row['steps']}",
+                        "blob": blob,
+                        "bytes": len(blob),
+                        "step_index": row["steps"],
+                    }
+                )
+                return
+            if self.path.endswith("/restore"):
+                rollout_id = self.path.split("/")[2]
+                restored = json.loads(base64.b64decode(body["blob"]).decode("utf-8"))
+                state.rollouts[rollout_id] = restored
+                self._json(
+                    {
+                        "rollout_id": rollout_id,
+                        "restore_report": {"bytes": len(body["blob"])},
+                        "state": _readout(
+                            rollout_id,
+                            steps=restored["steps"],
+                            terminated=restored["steps"] >= restored["max_steps"],
+                        ),
+                    }
+                )
                 return
             self.send_response(404)
             self.end_headers()
@@ -289,6 +322,93 @@ def test_craftax_react_relays_gold_through_http(gold_http, monkeypatch, tmp_path
     assert body["kind"] == "frame"
     scored = client.post("/reward", json={"rollout_id": rid, "mode": "terminal"}).json()
     assert scored["reward"] == 0.5
+
+
+def test_craftax_goex_captures_and_forks_true_environment_and_policy_state(
+    gold_http, monkeypatch, tmp_path
+) -> None:
+    _state, url = gold_http
+    monkeypatch.setenv("SYNTH_CRAFTAX_URL", url)
+    monkeypatch.setenv("SYNTH_CRAFTAX_MAX_STEPS", "6")
+    monkeypatch.setattr(
+        "synth_containers.platform.runtimes.craftax.OpenRouterReAct",
+        lambda **kwargs: ScriptedReAct(config_id=str(kwargs.get("config_id") or "luna_med")),
+    )
+    app = create_compat_app("craftax_goex", storage_root=tmp_path)
+    client = TestClient(app)
+    info = client.get("/info").json()
+    assert info["target_id"] == "craftax_goex"
+    assert info["affordances"]["environment"]["true_checkpoint"] == "native"
+    assert info["affordances"]["environment"]["restore"] == "native"
+    assert info["affordances"]["environment"]["fork"] == "native"
+
+    parent = client.post(
+        "/rollouts",
+        json={
+            "rollout_id": "goex_parent",
+            "telemetry": {"enabled": True, "transport": "sse", "retention": "run"},
+            "task_instance_id": "seed:11",
+            "policy_ref": {"harness": "react", "config": "luna_med"},
+            "recipe": {"require": {"environment.true_checkpoint": "native"}},
+            "checkpoint_schedule": {
+                "mode": "per_policy_call",
+                "checkpoint_id_prefix": "goex_parent_cp",
+            },
+        },
+    )
+    assert parent.status_code == 200, parent.text
+    checkpoints = parent.json()["scheduled_checkpoints"]
+    assert checkpoints
+    checkpoint = checkpoints[0]
+    assert checkpoint["restore_eligible"] is True
+    assert checkpoint["branchable"] is True
+    assert "environment_blob" not in checkpoint
+    assert "policy_state" not in checkpoint
+
+    child = client.post(
+        "/rollouts",
+        json={
+            "rollout_id": "goex_child",
+            "telemetry": {"enabled": True, "transport": "sse", "retention": "run"},
+            "task_instance_id": "seed:999",
+            "policy_ref": {"harness": "react", "config": "sol_med"},
+            "recipe": {
+                "require": {
+                    "environment.true_checkpoint": "native",
+                    "environment.restore": "native",
+                    "environment.fork": "native",
+                }
+            },
+            "resume_from_checkpoint_id": checkpoint["checkpoint_id"],
+            "checkpoint_schedule": {
+                "mode": "per_policy_call",
+                "checkpoint_id_prefix": "goex_child_cp",
+            },
+        },
+    )
+    assert child.status_code == 200, child.text
+    body = child.json()
+    assert body["rollout_id"] == "goex_child"
+    assert body["resume_from_checkpoint_id"] == checkpoint["checkpoint_id"]
+    assert body["scheduled_checkpoints"]
+    assert body["scheduled_checkpoints"][0]["parent_checkpoint_id"] == checkpoint["checkpoint_id"]
+    parent_step = checkpoint["step"]
+    child_events = client.get("/rollouts/goex_child/events", params={"after": 0}).json()[
+        "events"
+    ]
+    observations = [event for event in child_events if event["kind"] == "observation"]
+    assert observations[0]["payload"]["step"] == parent_step
+    assert any(event["kind"] == "rollout.checkpoint" for event in child_events)
+    restored = [event for event in child_events if event["kind"] == "rollout.restored"]
+    assert len(restored) == 1
+    assert restored[0]["payload"]["checkpoint_id"] == checkpoint["checkpoint_id"]
+    assert restored[0]["payload"]["step"] == checkpoint["step"]
+
+    reopened = create_compat_app("craftax_goex", storage_root=tmp_path)
+    recovered = reopened.state.platform.checkpoints[checkpoint["checkpoint_id"]]
+    assert recovered["content_digest"]
+    assert recovered["environment_blob"]
+    assert recovered["policy_state"]["calls"] >= 1
 
 
 def test_engine_fixture_artifacts_are_not_claimed_as_png(tmp_path) -> None:

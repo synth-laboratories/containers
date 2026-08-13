@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any, Protocol
 
 from ..event_log import RolloutEventLog
@@ -88,12 +89,40 @@ def run_episode(
     max_steps: int,
     omit_reward: bool = False,
     emit_policy_spans: bool = True,
+    resume_checkpoint: dict[str, Any] | None = None,
+    checkpoint_callback: Callable[
+        [Any, Planner, StepResult, list[float | None]], dict[str, Any]
+    ]
+    | None = None,
 ) -> dict[str, Any]:
     log.append("env.episode.opened", {"seed": seed, "max_steps": max_steps})
     result = world.reset(seed, max_steps=max_steps)
+    if resume_checkpoint is not None:
+        env_blob = resume_checkpoint.get("environment_blob")
+        policy_state = resume_checkpoint.get("policy_state")
+        restore_world = getattr(world, "restore", None)
+        restore_policy = getattr(planner, "restore_checkpoint_state", None)
+        if not isinstance(env_blob, str) or not env_blob:
+            raise RuntimeError("resume checkpoint omitted environment_blob")
+        if not isinstance(policy_state, dict):
+            raise RuntimeError("resume checkpoint omitted policy_state")
+        if not callable(restore_world) or not callable(restore_policy):
+            raise RuntimeError("runtime does not implement true checkpoint restore")
+        result = restore_world(env_blob)
+        restore_policy(policy_state)
+        log.append(
+            "rollout.restored",
+            {
+                "checkpoint_id": resume_checkpoint.get("checkpoint_id"),
+                "parent_rollout_id": resume_checkpoint.get("rollout_id"),
+                "step": result.env_steps,
+                "checkpoint_semantics": "true_environment_snapshot",
+            },
+        )
     signals: list[float | None] = []
     actions: list[str] = []
     frames: list[dict[str, Any]] = []
+    scheduled_checkpoints: list[dict[str, Any]] = []
     _relay_native(world, log)
     durable_url = _emit_obs(log, result, seed=seed)
     frames.append(_frame_record(result, durable_url))
@@ -142,6 +171,10 @@ def run_episode(
             durable_url = _emit_obs(log, result, seed=seed)
             frames.append(_frame_record(result, durable_url))
             log.append("span.step.closed", {"action": action, "step": result.env_steps})
+        if checkpoint_callback is not None:
+            scheduled_checkpoints.append(
+                checkpoint_callback(world, planner, result, list(signals))
+            )
     if session_open:
         log.append("policy.session.closed", {"calls": planner.usage().get("calls")})
     log.append("env.episode.closed", {"status": "completed", "steps": result.env_steps})
@@ -157,4 +190,5 @@ def run_episode(
         "frame_digest": result.frame_digest,
         "steps": result.env_steps,
         "frames": frames,
+        "scheduled_checkpoints": scheduled_checkpoints,
     }

@@ -52,6 +52,17 @@ class ScriptedReAct:
             "calls": self.calls,
         }
 
+    def checkpoint_state(self) -> dict[str, Any]:
+        return {
+            "schema_version": "synth.containers.scripted-react-checkpoint.v1",
+            "calls": self.calls,
+        }
+
+    def restore_checkpoint_state(self, state: dict[str, Any]) -> None:
+        if state.get("schema_version") != "synth.containers.scripted-react-checkpoint.v1":
+            raise RuntimeError("unsupported scripted policy checkpoint schema")
+        self.calls = int(state.get("calls") or 0)
+
     def plan(self, observation: dict[str, Any], on_delta: DeltaCallback | None = None) -> list[str]:
         del on_delta
         self.calls += 1
@@ -160,6 +171,39 @@ class OpenRouterReAct:
 
     def trace_data(self) -> dict[str, Any]:
         return dict(self._last_trace)
+
+    def checkpoint_state(self) -> dict[str, Any]:
+        """Secret-free policy-session state paired with an environment snapshot."""
+        return {
+            "schema_version": "synth.containers.react-checkpoint.v1",
+            "messages": json.loads(json.dumps(self._messages)),
+            "calls": self.calls,
+            "compact_count": self._compact_count,
+            "deltas_emitted": self._deltas_emitted,
+            "usage": dict(self._usage),
+        }
+
+    def restore_checkpoint_state(self, state: dict[str, Any]) -> None:
+        if state.get("schema_version") != "synth.containers.react-checkpoint.v1":
+            raise RuntimeError("unsupported policy checkpoint schema")
+        messages = state.get("messages")
+        if not isinstance(messages, list) or not messages:
+            raise RuntimeError("policy checkpoint omitted messages")
+        restored = json.loads(json.dumps(messages))
+        if not isinstance(restored[0], dict) or restored[0].get("role") != "system":
+            raise RuntimeError("policy checkpoint omitted system message")
+        # The branch evaluates the NEW candidate prompt while retaining the
+        # parent's observation/action history. Never silently restore the parent
+        # candidate's system prompt.
+        restored[0] = dict(self._messages[0])
+        self._messages = restored
+        self.calls = int(state.get("calls") or 0)
+        self._compact_count = int(state.get("compact_count") or 0)
+        self._deltas_emitted = int(state.get("deltas_emitted") or 0)
+        usage = state.get("usage")
+        if not isinstance(usage, dict):
+            raise RuntimeError("policy checkpoint omitted usage")
+        self._usage = dict(usage)
 
     def plan(
         self,
