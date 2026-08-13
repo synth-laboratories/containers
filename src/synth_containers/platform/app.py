@@ -113,7 +113,13 @@ def create_compat_app(
                 "stream": platform.stream_descriptor_for(rollout_id),
                 "replayed": True,
             }
-        descriptor = platform.prepare(rollout_id, req.telemetry.transport, retention)
+        try:
+            descriptor = platform.prepare(rollout_id, req.telemetry.transport, retention)
+        except RuntimeError as exc:
+            detail = str(exc)
+            if detail.startswith(("event_log_sealed:", "event_log_unrecoverable:")):
+                raise HTTPException(status_code=409, detail=detail) from exc
+            raise
         return {"rollout_id": rollout_id, "stream": descriptor}
 
     @app.post("/rollout", include_in_schema=False)

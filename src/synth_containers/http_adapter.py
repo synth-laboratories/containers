@@ -230,6 +230,7 @@ def create_reference_app(
     event_logs: dict[str, RolloutEventLog] = {}
     start_requests: dict[str, dict[str, Any]] = {}
     start_responses: dict[str, dict[str, Any]] = {}
+    start_lock = asyncio.Lock()
     reward_executions: dict[str, dict[str, Any]] = {}
     event_store_root = (
         Path(storage_root)
@@ -347,6 +348,10 @@ def create_reference_app(
     @app.post("/rollout", include_in_schema=False)
     @app.post("/rollouts")
     async def rollout(request: RolloutRequestModel) -> dict[str, Any]:
+        async with start_lock:
+            return await _rollout_locked(request)
+
+    async def _rollout_locked(request: RolloutRequestModel) -> dict[str, Any]:
         payload = request.model_dump(mode="json", exclude_none=True)
         # The prepare response allocates the public rollout id. Existing managed
         # runtimes key execution by trace_correlation_id, so carry that id through
@@ -427,8 +432,16 @@ def create_reference_app(
             or payload.get("rollout_id")
             or result.execution_id
         )
-        start_requests[response_rollout_id] = dict(payload)
-        start_responses[response_rollout_id] = dict(response)
+        request_identity = (
+            str(requested_rollout_id)
+            if requested_rollout_id is not None
+            else response_rollout_id
+        )
+        start_requests[request_identity] = dict(payload)
+        start_responses[request_identity] = dict(response)
+        if response_rollout_id != request_identity:
+            start_requests[response_rollout_id] = dict(payload)
+            start_responses[response_rollout_id] = dict(response)
         return response
 
     @app.post("/rollouts/prepare")

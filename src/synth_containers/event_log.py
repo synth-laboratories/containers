@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -123,50 +124,54 @@ class RolloutEventLog:
     journal_path: Path | None = None
     _high_water: int = 0
     _items: list[LogEnvelope] = field(default_factory=list)
+    _lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
 
     @property
     def high_water(self) -> int:
         return self._high_water
 
     def append_control(self, kind: str, payload: dict[str, Any]) -> LogEnvelope:
-        if self.closed:
-            raise RuntimeError(f"event_log_closed:{self.rollout_id}")
-        frozen_payload = _normalized_payload(payload)
-        envelope = LogEnvelope(
-            kind=kind,
-            payload=frozen_payload,
-            sequence=None,
-            control=True,
-            ts=_utc_now(),
-            digest=_digest(kind, None, frozen_payload),
-        )
-        self._persist({"record": "envelope", "envelope": envelope.to_dict()})
-        self._items.append(envelope)
-        return envelope
+        with self._lock:
+            if self.closed:
+                raise RuntimeError(f"event_log_closed:{self.rollout_id}")
+            frozen_payload = _normalized_payload(payload)
+            envelope = LogEnvelope(
+                kind=kind,
+                payload=frozen_payload,
+                sequence=None,
+                control=True,
+                ts=_utc_now(),
+                digest=_digest(kind, None, frozen_payload),
+            )
+            self._persist({"record": "envelope", "envelope": envelope.to_dict()})
+            self._items.append(envelope)
+            return envelope
 
     def append(self, kind: str, payload: dict[str, Any]) -> LogEnvelope:
-        if self.closed:
-            raise RuntimeError(f"event_log_closed:{self.rollout_id}")
-        frozen_payload = _normalized_payload(payload)
-        next_sequence = self._high_water + 1
-        envelope = LogEnvelope(
-            kind=kind,
-            payload=frozen_payload,
-            sequence=next_sequence,
-            control=False,
-            ts=_utc_now(),
-            digest=_digest(kind, next_sequence, frozen_payload),
-        )
-        self._persist({"record": "envelope", "envelope": envelope.to_dict()})
-        self._high_water = next_sequence
-        self._items.append(envelope)
-        return envelope
+        with self._lock:
+            if self.closed:
+                raise RuntimeError(f"event_log_closed:{self.rollout_id}")
+            frozen_payload = _normalized_payload(payload)
+            next_sequence = self._high_water + 1
+            envelope = LogEnvelope(
+                kind=kind,
+                payload=frozen_payload,
+                sequence=next_sequence,
+                control=False,
+                ts=_utc_now(),
+                digest=_digest(kind, next_sequence, frozen_payload),
+            )
+            self._persist({"record": "envelope", "envelope": envelope.to_dict()})
+            self._high_water = next_sequence
+            self._items.append(envelope)
+            return envelope
 
     def mark_closed(self) -> None:
-        if self.closed:
-            return
-        self._persist({"record": "closed", "high_water": self._high_water})
-        self.closed = True
+        with self._lock:
+            if self.closed:
+                return
+            self._persist({"record": "closed", "high_water": self._high_water})
+            self.closed = True
 
     def subscribed_payload(self) -> dict[str, Any]:
         return {
@@ -179,15 +184,16 @@ class RolloutEventLog:
 
     def after(self, sequence: int) -> list[LogEnvelope]:
         """Semantic events with sequence > `sequence`, plus control records when sequence == 0."""
-        out: list[LogEnvelope] = []
-        for item in self._items:
-            if item.control:
-                if sequence <= 0:
+        with self._lock:
+            out: list[LogEnvelope] = []
+            for item in self._items:
+                if item.control:
+                    if sequence <= 0:
+                        out.append(item)
+                    continue
+                if item.sequence is not None and item.sequence > sequence:
                     out.append(item)
-                continue
-            if item.sequence is not None and item.sequence > sequence:
-                out.append(item)
-        return out
+            return out
 
     def snapshot_key(self) -> str:
         return self.last_snapshot_key

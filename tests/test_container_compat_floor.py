@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import asyncio
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 
 from synth_containers.compat.openenv import openenv_capability_surface
 from synth_containers.contracts import CheckpointResumeContract
@@ -171,6 +173,33 @@ def test_reference_app_persists_trace_stream_schema_before_publish(tmp_path: Pat
     persisted = [json.loads(line) for line in journal.read_text().splitlines()]
     assert len(persisted) >= len(events)
     assert persisted[-1]["record"] == "closed"
+
+
+def test_reference_app_concurrent_retry_is_keyed_by_requested_rollout_id(
+    tmp_path: Path,
+) -> None:
+    runtime = ReferenceManagedRuntime.counter_default(target=1)
+    app = create_reference_app(runtime, storage_root=tmp_path)
+    payload = {
+        "rollout_id": "requested-stable-id",
+        "submission_mode": "sync",
+        "env": {"config": {"actions": ["increment", "stop"]}},
+        "telemetry": {"enabled": True, "transport": "sse"},
+    }
+    async def start_twice():
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            return await asyncio.gather(
+                client.post("/rollouts", json=payload),
+                client.post("/rollouts", json=payload),
+            )
+
+    responses = asyncio.run(start_twice())
+
+    assert [response.status_code for response in responses] == [200, 200]
+    assert sum(bool(response.json().get("replayed")) for response in responses) == 1
+    assert responses[0].json()["rollout_id"] == responses[1].json()["rollout_id"]
 
 
 def test_reference_prepare_binding_mismatch_refuses_before_rollout(tmp_path: Path) -> None:

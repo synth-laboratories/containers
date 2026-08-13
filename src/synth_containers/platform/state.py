@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import tempfile
+import threading
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -139,6 +140,7 @@ class CompatPlatform:
         self.start_session_calls = 0
         self.policy_code: bytes | None = None
         self.policy_process: IsolatedPolicyProcess | None = None
+        self._state_lock = threading.RLock()
         self._seed_default_policies()
 
     def _seed_default_policies(self) -> None:
@@ -254,15 +256,24 @@ class CompatPlatform:
         return None
 
     def prepare(self, rollout_id: str, transport: str, retention: str) -> dict[str, Any]:
+        with self._state_lock:
+            return self._prepare_locked(rollout_id, transport, retention)
+
+    def _prepare_locked(self, rollout_id: str, transport: str, retention: str) -> dict[str, Any]:
         stream_id = f"stream:{rollout_id}"
         # rollout_id is caller-controlled; never use it as a path component.
         journal_name = hashlib.sha256(rollout_id.encode("utf-8")).hexdigest()
         journal_path = self.storage_root / "event_logs" / f"{journal_name}.jsonl"
-        log = RolloutEventLog(
-            rollout_id=rollout_id,
-            stream_id=stream_id,
-            journal_path=journal_path,
-        )
+        try:
+            log = RolloutEventLog.recover(
+                rollout_id=rollout_id,
+                stream_id=stream_id,
+                journal_path=journal_path,
+            )
+        except ValueError as exc:
+            raise RuntimeError(f"event_log_unrecoverable:{exc}") from exc
+        if log.closed:
+            raise RuntimeError(f"event_log_sealed:{rollout_id}")
         log.append_control(CONTROL_SUBSCRIBED, log.subscribed_payload())
         self.logs[rollout_id] = log
         self.stream_bindings[rollout_id] = (transport, retention or self.spec.retention)
@@ -284,6 +295,10 @@ class CompatPlatform:
         return None
 
     def start_rollout(self, request: CreateRolloutRequest) -> dict[str, Any]:
+        with self._state_lock:
+            return self._start_rollout_locked(request)
+
+    def _start_rollout_locked(self, request: CreateRolloutRequest) -> dict[str, Any]:
         slot = request.slot
         if slot in {"live", "jobs"}:
             return {
@@ -323,6 +338,10 @@ class CompatPlatform:
                 and existing_pin.policy_ref.get("config") == requested_config
                 and existing_pin.policy_ref.get("code") == request.policy_ref.code
                 and existing_pin.task_instance_id == requested_task
+                and existing_pin.world_ref == str(request.world_ref or self.spec.world_ref)
+                and existing_pin.evaluation_plan_ref
+                == str(request.evaluation_plan_ref or self.spec.evaluation_plan_ref)
+                and existing_pin.omit_reward == request.omit_reward
                 and bound_transport == transport
                 and bound_retention == requested_retention
             )
@@ -433,19 +452,27 @@ class CompatPlatform:
         pin.status = "running"
         if async_mode:
             return self._rollout_response(pin, descriptor)
-        self._simulate(pin, log)
-        self.active_leases = max(0, self.active_leases - 1)
+        try:
+            self._simulate(pin, log)
+        finally:
+            self.active_leases = max(0, self.active_leases - 1)
         return self._rollout_response(pin, descriptor)
 
     def complete_rollout(self, rollout_id: str) -> dict[str, Any]:
+        with self._state_lock:
+            return self._complete_rollout_locked(rollout_id)
+
+    def _complete_rollout_locked(self, rollout_id: str) -> dict[str, Any]:
         pin = self.pins.get(rollout_id)
         log = self.logs.get(rollout_id)
         if pin is None or log is None:
             return {"error": "unknown_rollout", "status_code": 404}
         if pin.terminal:
             return self._rollout_response(pin, self.stream_descriptor_for(rollout_id))
-        self._simulate(pin, log)
-        self.active_leases = max(0, self.active_leases - 1)
+        try:
+            self._simulate(pin, log)
+        finally:
+            self.active_leases = max(0, self.active_leases - 1)
         return self._rollout_response(pin, self.stream_descriptor_for(rollout_id))
 
     def rollout_status(self, rollout_id: str) -> dict[str, Any]:
@@ -525,7 +552,9 @@ class CompatPlatform:
         )
         seal_path = self.storage_root / "seals" / f"{pin.rollout_id}.trace-v5.json"
         seal_path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = seal_path.with_suffix(".tmp")
+        temporary = seal_path.with_name(
+            f".{seal_path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+        )
         encoded = json.dumps(
             self.seals[pin.rollout_id],
             sort_keys=True,

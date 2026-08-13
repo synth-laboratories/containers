@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -243,6 +245,85 @@ def test_closed_log_refuses_control_and_semantic_records(tmp_path: Path) -> None
         log.append_control("stream.subscribed", {"ready": True})
     with pytest.raises(RuntimeError, match="event_log_closed"):
         log.append("status", {"status": "completed"})
+
+
+def test_concurrent_appends_are_gap_free_and_recoverable(tmp_path: Path) -> None:
+    journal = tmp_path / "events.jsonl"
+    log = RolloutEventLog(
+        rollout_id="concurrent",
+        stream_id="stream:concurrent",
+        journal_path=journal,
+    )
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(lambda value: log.append("observation", {"value": value}), range(64)))
+
+    recovered = RolloutEventLog.recover(
+        rollout_id=log.rollout_id,
+        stream_id=log.stream_id,
+        journal_path=journal,
+    )
+    assert recovered.high_water == 64
+    assert [item.sequence for item in recovered.after(0)] == list(range(1, 65))
+
+
+def test_concurrent_identical_start_executes_once(tmp_path: Path) -> None:
+    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path))
+    payload = {
+        "rollout_id": "same-start",
+        "slot": "stream",
+        "submission_mode": "async",
+        "task_instance_id": "seed:0",
+        "policy_ref": _CRAFTAX_PIN,
+        "telemetry": {"enabled": True, "transport": "sse", "retention": "run"},
+    }
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        responses = list(executor.map(lambda _: client.post("/rollouts", json=payload), range(2)))
+
+    assert [response.status_code for response in responses] == [200, 200]
+    assert sum(bool(response.json().get("replayed")) for response in responses) == 1
+    journal = next((tmp_path / "event_logs").glob("*.jsonl"))
+    recovered = RolloutEventLog.recover(
+        rollout_id="same-start",
+        stream_id="stream:same-start",
+        journal_path=journal,
+    )
+    assert sum(item.kind == "trace.opened" for item in recovered.after(0)) == 1
+
+
+def test_prepare_restart_recovers_open_and_refuses_sealed_or_corrupt(tmp_path: Path) -> None:
+    payload = {
+        "rollout_id": "restart-open",
+        "telemetry": {"enabled": True, "transport": "sse", "retention": "run"},
+    }
+    first = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path))
+    assert first.post("/rollouts/prepare", json=payload).status_code == 200
+    restarted = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path))
+    recovered = restarted.post("/rollouts/prepare", json=payload)
+    assert recovered.status_code == 200, recovered.text
+
+    started = restarted.post(
+        "/rollouts",
+        json={
+            **payload,
+            "slot": "stream",
+            "policy_ref": _CRAFTAX_PIN,
+        },
+    )
+    assert started.status_code == 200, started.text
+    sealed_restart = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path))
+    sealed = sealed_restart.post("/rollouts/prepare", json=payload)
+    assert sealed.status_code == 409
+    assert "event_log_sealed" in sealed.text
+
+    corrupt_payload = {**payload, "rollout_id": "restart-corrupt"}
+    assert first.post("/rollouts/prepare", json=corrupt_payload).status_code == 200
+    corrupt_name = hashlib.sha256(b"restart-corrupt").hexdigest()
+    corrupt_journal = tmp_path / "event_logs" / f"{corrupt_name}.jsonl"
+    corrupt_journal.write_text(corrupt_journal.read_text() + "{not-json}\n")
+    corrupt_restart = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path))
+    corrupt = corrupt_restart.post("/rollouts/prepare", json=corrupt_payload)
+    assert corrupt.status_code == 409
+    assert "event_log_unrecoverable:event_log_malformed_json_line" in corrupt.text
 
 
 def test_prepare_requires_enabled_telemetry(tmp_path: Path) -> None:
