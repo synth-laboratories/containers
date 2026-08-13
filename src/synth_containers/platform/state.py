@@ -113,8 +113,19 @@ class RolloutPin:
 
 
 class CompatPlatform:
-    def __init__(self, spec: TargetSpec, *, storage_root: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        spec: TargetSpec,
+        *,
+        storage_root: str | Path | None = None,
+        runtime_config: dict[str, Any] | None = None,
+    ) -> None:
         self.spec = spec
+        # Process-local runtime extensions (for example a private, pinned
+        # Harbor/Dock task bundle) are deliberately not part of target
+        # metadata or the trace envelope.  Runtimes may read this immutable
+        # construction input, but callers cannot mutate it through HTTP.
+        self.runtime_config = dict(runtime_config or {})
         self.storage_root = (
             Path(storage_root)
             if storage_root is not None
