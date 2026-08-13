@@ -359,7 +359,7 @@ def test_craftax_goex_captures_and_forks_true_environment_and_policy_state(
     assert parent.status_code == 200, parent.text
     checkpoints = parent.json()["scheduled_checkpoints"]
     assert checkpoints
-    checkpoint = checkpoints[0]
+    checkpoint = next(item for item in checkpoints if item["branchable"] is True)
     assert checkpoint["restore_eligible"] is True
     assert checkpoint["branchable"] is True
     assert "environment_blob" not in checkpoint
@@ -403,6 +403,12 @@ def test_craftax_goex_captures_and_forks_true_environment_and_policy_state(
     assert len(restored) == 1
     assert restored[0]["payload"]["checkpoint_id"] == checkpoint["checkpoint_id"]
     assert restored[0]["payload"]["step"] == checkpoint["step"]
+
+    terminal = checkpoints[-1]
+    if terminal["step"] == 6:
+        assert terminal["restore_eligible"] is False
+        assert terminal["branchable"] is False
+        assert terminal["resume_blockers"] == ["terminal_environment"]
 
     reopened = create_compat_app("craftax_goex", storage_root=tmp_path)
     recovered = reopened.state.platform.checkpoints[checkpoint["checkpoint_id"]]
