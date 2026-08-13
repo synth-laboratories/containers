@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Any
 
@@ -191,6 +191,26 @@ CRAFTAX_REACT = TargetSpec(
         ),
     ),
     max_episode_steps=120,
+)
+
+# Dedicated GoEx target: same gold Rust environment and paid ReAct harness, but
+# only this surface advertises the paired environment+policy checkpoint contract
+# implemented by the Containers adapter. The ordinary Craftax viewer remains
+# conservatively unsupported.
+CRAFTAX_GOEX = replace(
+    CRAFTAX_REACT,
+    target_id="craftax_goex",
+    true_checkpoint="native",
+    event_kinds=CRAFTAX_REACT.event_kinds
+    + ("rollout.checkpoint", "rollout.restored"),
+    affordances=_env(
+        {
+            **CRAFTAX_REACT.affordances.by_role["environment"],
+            "true_checkpoint": "native",
+            "restore": "native",
+            "fork": "native",
+        }
+    ),
 )
 
 CRAFTAX_CODE_POLICY = TargetSpec(
@@ -544,6 +564,7 @@ TARGETS: dict[str, TargetSpec] = {
     for spec in (
         CRAFTAX_ENGINE,
         CRAFTAX_REACT,
+        CRAFTAX_GOEX,
         CRAFTAX_CODE_POLICY,
         HARBOR_PUBLIC,
         HARBOR_DOCKER,
@@ -565,4 +586,4 @@ PR_TARGETS = (
     "banking77_classify",
 )
 
-PAID_TARGETS = ("craftax_react", "digbench_public")
+PAID_TARGETS = ("craftax_react", "craftax_goex", "digbench_public")
