@@ -66,9 +66,22 @@ def test_harbor_docker_distinct_executions_read_verifier_reward_txt(monkeypatch)
     )
     calls: list[dict[str, object]] = []
 
-    def fake_execute(*, role: str, image: str, command: list[str], volumes, name: str, timeout_seconds: float = 120.0):
+    def fake_execute(
+        *,
+        role: str,
+        image: str,
+        command: list[str],
+        volumes,
+        name: str,
+        environment=None,
+        allow_nonzero=False,
+        timeout_seconds: float = 120.0,
+    ):
         del image, timeout_seconds
-        calls.append({"role": role, "name": name, "command": list(command)})
+        assert allow_nonzero is False
+        calls.append(
+            {"role": role, "name": name, "command": list(command), "environment": environment}
+        )
         if role == "agent":
             workspace = Path(volumes["/workspace"])
             workspace.mkdir(parents=True, exist_ok=True)
@@ -105,8 +118,12 @@ def test_harbor_docker_distinct_executions_read_verifier_reward_txt(monkeypatch)
     assert kinds.index("span.agent.closed") < kinds.index("span.verifier.opened")
     assert not _CRAFTAX_KINDS.intersection(kinds)
     assert [row["role"] for row in calls] == ["agent", "verifier"]
+    assert calls[0]["environment"] is None
+    assert calls[1]["environment"] is None
     assert calls[0]["name"] != calls[1]["name"]
-    native = next(item["payload"].get("reward.txt") for item in events if item["kind"] == "verifier")
+    native = next(
+        item["payload"].get("reward.txt") for item in events if item["kind"] == "verifier"
+    )
     assert native == 0.25
     scored = client.post("/reward", json={"rollout_id": rid, "mode": "terminal"})
     assert scored.status_code in {200, 202, 409}
@@ -158,8 +175,18 @@ def test_harbor_docker_missing_reward_txt_stays_null(monkeypatch) -> None:
         lambda: True,
     )
 
-    def fake_execute(*, role: str, image: str, command: list[str], volumes, name: str, timeout_seconds: float = 120.0):
-        del image, command, volumes, timeout_seconds
+    def fake_execute(
+        *,
+        role: str,
+        image: str,
+        command: list[str],
+        volumes,
+        name: str,
+        environment=None,
+        allow_nonzero=False,
+        timeout_seconds: float = 120.0,
+    ):
+        del image, command, volumes, environment, allow_nonzero, timeout_seconds
         return DockerExecution(role=role, exit_code=0, stdout="ok\n", name=name)
 
     monkeypatch.setattr(
@@ -240,7 +267,9 @@ def test_harbor_fixture_keeps_verifier_on_parent_with_distinct_spans() -> None:
     assert "span.agent.opened" in kinds
     assert "span.verifier.opened" in kinds
     assert kinds.index("span.agent.closed") < kinds.index("span.verifier.opened")
-    native = next(item["payload"].get("reward.txt") for item in events if item["kind"] == "verifier")
+    native = next(
+        item["payload"].get("reward.txt") for item in events if item["kind"] == "verifier"
+    )
     scored = client.post("/reward", json={"rollout_id": rid, "mode": "terminal"}).json()
     assert native == scored["reward"] == 1.0
     assert project_harbor_atif(events)["reward.txt"] == 1.0
@@ -262,13 +291,17 @@ def test_deo_nested_child_is_code_policy() -> None:
     child = client.get(f"/rollouts/{child_id}").json()
     assert child["environment_ref"] == "env:craftax_fixture"
     assert child["policy_ref"]["harness"] == "isolated_policy_process"
-    parent_events = client.get(f"/rollouts/{body['rollout_id']}/events", params={"after": 0}).json()["events"]
+    parent_events = client.get(
+        f"/rollouts/{body['rollout_id']}/events", params={"after": 0}
+    ).json()["events"]
     child_events = client.get(f"/rollouts/{child_id}/events", params={"after": 0}).json()["events"]
     parent_kinds = {item["kind"] for item in parent_events}
     child_kinds = {item["kind"] for item in child_events}
     assert "frame" in child_kinds
     assert "frame" not in parent_kinds
-    parent_reward = client.post("/reward", json={"rollout_id": body["rollout_id"], "mode": "terminal"}).json()
+    parent_reward = client.post(
+        "/reward", json={"rollout_id": body["rollout_id"], "mode": "terminal"}
+    ).json()
     child_reward = client.post("/reward", json={"rollout_id": child_id, "mode": "terminal"}).json()
     assert parent_reward.get("reward") != child_reward.get("reward")
     assert parent_reward.get("reward") is not None
