@@ -7,11 +7,17 @@ missing ≠ 0, gold private, /reward env-authored accuracy.
 from __future__ import annotations
 
 import json
+import urllib.error
 
 from fastapi.testclient import TestClient
 
 from synth_containers.platform import create_compat_app
-from synth_containers.platform.banking77_world import load_row, split_size
+from synth_containers.platform.banking77_world import (
+    CLASSIFY_SYSTEM,
+    load_row,
+    split_size,
+    user_prompt,
+)
 
 
 TELEMETRY = {"enabled": True, "transport": "sse", "retention": "run"}
@@ -285,3 +291,197 @@ def test_tinker_error_code_is_typed_without_provider_prose() -> None:
         "or by setting the TINKER_API_KEY environment variable"
     )
     assert _error_code(missing) == "tinker_api_key_missing"
+def test_remote_checkpoint_sampler_is_loopback_only_and_secret_free(monkeypatch) -> None:
+    client = _client()
+    gold = load_row("heldout", 0)
+    assert gold is not None
+    opaque = "opaque-per-run-bearer.do-not-log"
+    captured: dict[str, object] = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _limit: int) -> bytes:
+            return json.dumps(
+                {
+                    "text": gold.label,
+                    "usage": {
+                        "prompt_tokens": 12,
+                        "completion_tokens": 2,
+                        "total_tokens": 14,
+                    },
+                }
+            ).encode("utf-8")
+
+    def fake_urlopen(request, *, timeout):
+        captured["url"] = request.full_url
+        captured["authorization"] = request.get_header("Authorization")
+        captured["body"] = json.loads(request.data)
+        captured["timeout"] = timeout
+        return Response()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    registered = client.post(
+        "/policy-configs",
+        json={
+            "config_id": "remote_checkpoint",
+            "harness": "classify",
+            "config": {
+                "max_tokens": 24,
+                "inference_target": {
+                    "provider_endpoint_id": "http://127.0.0.1:18880/v1/sft/checkpoints/sample",
+                    "provider": "tinker",
+                    "auth_bearer": opaque,
+                    "run_id": "sft_run_1",
+                    "checkpoint_id": "checkpoint_20",
+                    "base_model": "fixture/base-model",
+                },
+            },
+        },
+    )
+    assert registered.status_code == 200, registered.text
+    assert opaque not in registered.text
+    _, started = _prepare_start(
+        client,
+        rollout_id="b77_remote_checkpoint",
+        body={
+            "world_ref": "world:banking77@heldout",
+            "task_instance_id": "seed:0",
+            "policy_ref": {"harness": "classify", "config": "remote_checkpoint"},
+        },
+    )
+    assert started["status"] == "completed"
+    assert started["usage"] == {
+        "prompt_tokens": 12,
+        "completion_tokens": 2,
+        "total_tokens": 14,
+    }
+    assert captured["authorization"] == f"Bearer {opaque}"
+    assert captured["body"] == {
+        "run_id": "sft_run_1",
+        "checkpoint_id": "checkpoint_20",
+        "messages": [
+            {"role": "system", "content": CLASSIFY_SYSTEM},
+            {"role": "user", "content": user_prompt(gold.text)},
+        ],
+        "max_tokens": 24,
+    }
+    events = client.get(
+        "/rollouts/b77_remote_checkpoint/events", params={"after": 0}
+    ).json()["events"]
+    serialized = json.dumps(events)
+    assert opaque not in serialized
+    assert "Authorization" not in serialized
+    assert "provider_endpoint_id" not in serialized
+    assert "auth_bearer" not in serialized
+    reward = client.post(
+        "/reward",
+        json={"rollout_id": "b77_remote_checkpoint", "mode": "terminal"},
+    ).json()
+    assert reward["reward"] == 1.0
+
+
+def test_remote_checkpoint_failure_is_null_with_fixed_error_code(monkeypatch) -> None:
+    client = _client()
+    opaque = "opaque-refused-secret"
+
+    def unavailable(_request, *, timeout):
+        del timeout
+        raise urllib.error.HTTPError(
+            "http://127.0.0.1:18880/v1/sft/checkpoints/sample",
+            409,
+            "provider unavailable with sensitive prose",
+            {},
+            None,
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", unavailable)
+    client.post(
+        "/policy-configs",
+        json={
+            "config_id": "remote_unavailable",
+            "harness": "classify",
+            "config": {
+                "inference_target": {
+                    "provider_endpoint_id": "http://localhost:18880/v1/sft/checkpoints/sample",
+                    "provider": "tinker",
+                    "auth_bearer": opaque,
+                    "run_id": "sft_run_2",
+                    "checkpoint_id": "checkpoint_40",
+                    "base_model": "fixture/base-model",
+                }
+            },
+        },
+    )
+    _, started = _prepare_start(
+        client,
+        rollout_id="b77_remote_unavailable",
+        body={
+            "world_ref": "world:banking77@heldout",
+            "task_instance_id": "seed:1",
+            "policy_ref": {"harness": "classify", "config": "remote_unavailable"},
+        },
+    )
+    assert started["status"] == "failed"
+    events = client.get(
+        "/rollouts/b77_remote_unavailable/events", params={"after": 0}
+    ).json()["events"]
+    policy_closed = next(row for row in events if row["kind"] == "span.policy.closed")
+    assert policy_closed["payload"]["error_code"] == "remote_checkpoint_unavailable"
+    serialized = json.dumps(events)
+    assert opaque not in serialized
+    assert "sensitive prose" not in serialized
+    reward = client.post(
+        "/reward",
+        json={"rollout_id": "b77_remote_unavailable", "mode": "terminal"},
+    ).json()
+    assert reward["reward"] is None
+
+
+def test_remote_checkpoint_refuses_unapproved_endpoint_before_network(monkeypatch) -> None:
+    client = _client()
+    called = False
+
+    def unexpected(*_args, **_kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("network must not run")
+
+    monkeypatch.setattr("urllib.request.urlopen", unexpected)
+    client.post(
+        "/policy-configs",
+        json={
+            "config_id": "remote_refused",
+            "harness": "classify",
+            "config": {
+                "inference_target": {
+                    "provider_endpoint_id": "https://unapproved.example/v1/sample",
+                    "provider": "tinker",
+                    "auth_bearer": "opaque",
+                    "run_id": "run",
+                    "checkpoint_id": "checkpoint",
+                    "base_model": "model",
+                }
+            },
+        },
+    )
+    _, started = _prepare_start(
+        client,
+        rollout_id="b77_remote_refused",
+        body={
+            "world_ref": "world:banking77@heldout",
+            "task_instance_id": "seed:2",
+            "policy_ref": {"harness": "classify", "config": "remote_refused"},
+        },
+    )
+    assert started["status"] == "failed"
+    assert called is False
+    events = client.get(
+        "/rollouts/b77_remote_refused/events", params={"after": 0}
+    ).json()["events"]
+    closed = next(row for row in events if row["kind"] == "span.policy.closed")
+    assert closed["payload"]["error_code"] == "remote_checkpoint_endpoint_refused"

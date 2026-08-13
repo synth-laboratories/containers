@@ -51,9 +51,14 @@ def create_compat_app(
     target: str | TargetSpec = "craftax_engine",
     *,
     storage_root: str | Path | None = None,
+    runtime_config: dict[str, Any] | None = None,
 ) -> FastAPI:
     spec = TARGETS[target] if isinstance(target, str) else target
-    platform = CompatPlatform(spec, storage_root=storage_root)
+    platform = CompatPlatform(
+        spec,
+        storage_root=storage_root,
+        runtime_config=runtime_config,
+    )
     app = FastAPI(title=f"synth-containers-compat:{spec.target_id}")
     app.add_middleware(
         CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
