@@ -18,15 +18,28 @@ from .craftax_world import ACTIONS
 DeltaCallback = Callable[[dict[str, Any]], None]
 
 
+# The prompt seeded configs use. Named and exported rather than inlined as a
+# fallback, so a config that wants it must say so and one that forgets is refused.
+CRAFTAX_REACT_SYSTEM_PROMPT = (
+    "You are a careful Craftax ReAct policy. You must call the "
+    "choose_actions tool exactly once; do not answer with prose."
+)
+
+
 class PolicyConfigError(ValueError):
     """A policy config omitted a field that defines what is being measured."""
 
 
-def _required_str(config: dict[str, Any], key: str, config_id: str) -> str:
+def _required_str(
+    config: dict[str, Any], key: str, config_id: str, alias: str | None = None
+) -> str:
     value = config.get(key)
+    if (not isinstance(value, str) or not value.strip()) and alias is not None:
+        value = config.get(alias)
     if not isinstance(value, str) or not value.strip():
+        named = repr(key) if alias is None else f"{key!r} (or {alias!r})"
         raise PolicyConfigError(
-            f"policy config {config_id!r} must set {key!r} explicitly; "
+            f"policy config {config_id!r} must set {named} explicitly; "
             f"it defines the policy under test and is never defaulted"
         )
     return value.strip()
@@ -231,10 +244,13 @@ class OpenRouterReAct:
         )
         self.compact_threshold = int(self.context_token_budget * self.compact_at)
         self.last_prompt_tokens = 0
-        # Infrastructure, not policy: these do not change what was measured.
-        self.base_url = str(config.get("base_url") or "https://openrouter.ai/api/v1").rstrip("/")
-        self.api_key_env = str(config.get("api_key_env") or "OPENROUTER_API_KEY")
-        self.parse_retries = min(max(int(config.get("parse_retries") or 0), 0), 2)
+        # Where inference is served is not a detail: defaulting it to OpenRouter
+        # sent a `tinker-infer:` checkpoint id to a provider that cannot serve it,
+        # and every rollout died on turn 0 with `policy_error` after zero steps.
+        # A missing endpoint must say so, not pick one.
+        self.base_url = _required_str(config, "base_url", config_id).rstrip("/")
+        self.api_key_env = _required_str(config, "api_key_env", config_id)
+        self.parse_retries = _required_bounded_int(config, "parse_retries", config_id, 0, 2)
         self.calls = 0
         self._compact_count = 0
         self._deltas_emitted = 0
@@ -245,12 +261,12 @@ class OpenRouterReAct:
             "cost_usd": None,
         }
         self._last_trace: dict[str, Any] = {}
-        system_prompt = str(config.get("system_prompt") or config.get("react_system_prompt") or "").strip()
-        if not system_prompt:
-            system_prompt = (
-                "You are a careful Craftax ReAct policy. You must call the "
-                "choose_actions tool exactly once; do not answer with prose."
-            )
+        # The system prompt is the policy. Substituting a fallback is how a
+        # student gets trained against one prompt and measured against another
+        # (see image_input.md) — the mismatch then reads as "no uplift".
+        system_prompt = _required_str(
+            config, "system_prompt", config_id, alias="react_system_prompt"
+        )
         self._messages: list[dict[str, Any]] = [
             {
                 "role": "system",

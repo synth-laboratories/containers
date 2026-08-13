@@ -18,6 +18,7 @@ from ..event_log import (
     stream_descriptor,
     validate_rollout_id,
 )
+from .react import CRAFTAX_REACT_SYSTEM_PROMPT
 from .affordances import bind_recipe
 from .http_requests import CreateRolloutRequest, ISOLATED_POLICY_HARNESS
 from .policy_process import DEFAULT_HEURISTIC, IsolatedPolicyProcess
@@ -400,6 +401,10 @@ class CompatPlatform:
                 "keep_recent_messages": 8,
                 "keep_recent_frames": 2,
                 "observation_mode": "text",
+                "base_url": "https://openrouter.ai/api/v1",
+                "api_key_env": "OPENROUTER_API_KEY",
+                "parse_retries": 0,
+                "system_prompt": CRAFTAX_REACT_SYSTEM_PROMPT,
             },
         )
         self.policy_configs["sol_med"] = PolicyConfig(
@@ -414,6 +419,10 @@ class CompatPlatform:
                 "keep_recent_messages": 8,
                 "keep_recent_frames": 2,
                 "observation_mode": "text",
+                "base_url": "https://openrouter.ai/api/v1",
+                "api_key_env": "OPENROUTER_API_KEY",
+                "parse_retries": 0,
+                "system_prompt": CRAFTAX_REACT_SYSTEM_PROMPT,
             },
         )
         for seed in self.spec.policy_seeds:
