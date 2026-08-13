@@ -42,7 +42,7 @@ def test_openrouter_react_normalizes_craftax_direction_aliases() -> None:
 def test_openrouter_react_binds_candidate_system_prompt() -> None:
     policy = OpenRouterReAct(
         config_id="goex_candidate_test",
-        config={"model": "gpt-5.6-luna", "effort": "medium", "max_tokens": 768, "compact_every": 16, "system_prompt": "Prioritize wood before stone."},
+        config={"model": "gpt-5.6-luna", "effort": "medium", "max_tokens": 1024, "context_token_budget": 16000, "compact_at": 0.7, "keep_recent_messages": 8, "keep_recent_frames": 2, "observation_mode": "text", "system_prompt": "Prioritize wood before stone."},
     )
     assert policy._messages[0] == {
         "role": "system",
@@ -74,7 +74,7 @@ def test_openrouter_react_preserves_empty_response_as_labeled_fallback(
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-only")
     monkeypatch.setattr("urllib.request.urlopen", lambda *_args, **_kwargs: Response())
-    policy = OpenRouterReAct(config_id="muse_spark_medium", config={"model": "gpt-5.6-luna", "effort": "medium", "max_tokens": 768, "compact_every": 16, })
+    policy = OpenRouterReAct(config_id="muse_spark_medium", config={"model": "gpt-5.6-luna", "effort": "medium", "max_tokens": 1024, "context_token_budget": 16000, "compact_at": 0.7, "keep_recent_messages": 8, "keep_recent_frames": 2, "observation_mode": "text", })
     actions = policy.plan(
         {
             "valid_actions": ["up", "do"],
@@ -89,7 +89,8 @@ def test_openrouter_react_preserves_empty_response_as_labeled_fallback(
     assert trace["reasoning"] == "thinking"
     assert trace["tool_arguments"] == ""
     assert trace["actions"] == ["do"]
-    assert trace["compact_every"] == 16
+    assert trace["context_token_budget"] == 16000
+    assert trace["compact_at"] == 0.7
     assert trace["compact_count"] == 0
     assert trace["history_turns"] == 1
     assert trace["deltas_emitted"] == 0
@@ -134,7 +135,7 @@ def test_openrouter_react_uses_forced_tool_arguments(monkeypatch) -> None:
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-only")
     monkeypatch.setattr("urllib.request.urlopen", lambda *_args, **_kwargs: Response())
-    policy = OpenRouterReAct(config_id="muse_spark_medium", config={"model": "gpt-5.6-luna", "effort": "medium", "max_tokens": 768, "compact_every": 16, })
+    policy = OpenRouterReAct(config_id="muse_spark_medium", config={"model": "gpt-5.6-luna", "effort": "medium", "max_tokens": 1024, "context_token_budget": 16000, "compact_at": 0.7, "keep_recent_messages": 8, "keep_recent_frames": 2, "observation_mode": "text", })
     assert policy.plan({"valid_actions": ["right", "do"], "observation_text": "obs"}) == [
         "right",
         "do",
@@ -143,7 +144,8 @@ def test_openrouter_react_uses_forced_tool_arguments(monkeypatch) -> None:
     assert trace["action_authority"] == "policy"
     assert trace["fallback"] is False
     assert trace["tool_arguments"] == '{"actions":["east","do"]}'
-    assert trace["compact_every"] == 16
+    assert trace["context_token_budget"] == 16000
+    assert trace["compact_at"] == 0.7
     assert len(policy._messages) == 3
     assert policy._messages[0]["role"] == "system"
     assert policy._messages[1]["role"] == "user"
@@ -194,7 +196,7 @@ def test_openrouter_react_keeps_history_across_turns(monkeypatch) -> None:
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-only")
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-    policy = OpenRouterReAct(config_id="luna_med", config={"model": "gpt-5.6-luna", "effort": "medium", "max_tokens": 768, "compact_every": 16})
+    policy = OpenRouterReAct(config_id="luna_med", config={"model": "gpt-5.6-luna", "effort": "medium", "max_tokens": 1024, "context_token_budget": 16000, "compact_at": 0.7, "keep_recent_messages": 8, "keep_recent_frames": 2, "observation_mode": "text"})
     observation = {"valid_actions": ["right", "do"], "observation_text": "first"}
     policy.plan(observation)
     policy.plan({**observation, "observation_text": "second"})
@@ -211,26 +213,53 @@ def test_openrouter_react_keeps_history_across_turns(monkeypatch) -> None:
     assert captured[0]["stream"] is True
 
 
-def test_openrouter_react_compacts_every_sixteen_turns(monkeypatch) -> None:
+def test_openrouter_react_compacts_on_token_threshold_with_a_model_summary(monkeypatch) -> None:
+    """Compaction fires on real prompt_tokens and the middle is model-written.
+
+    Replaces the old every-16-turns behaviour. A turn count is a poor proxy once
+    frames and long observations are in the transcript, and pasting truncated
+    payloads is not a summary — it drops the map knowledge the agent needs.
+    Mirrors craftax_gold.rs so a checkpoint is evaluated under the same policy
+    its teacher data was collected with.
+    """
     captured: list[dict] = []
 
     def fake_urlopen(request, timeout=None):
-        captured.append(json.loads(request.data.decode()))
-        return _json_response(_tool_body(["do"]))
+        body = json.loads(request.data.decode())
+        captured.append(body)
+        if body.get("tools") is None:
+            # the summarizer call
+            return _json_response(
+                {"choices": [{"message": {"content": "Trees west, stone north. Have wood."}}]}
+            )
+        # report a prompt size over the threshold (16000 * 0.7 = 11200)
+        payload = _tool_body(["do"])
+        payload["usage"] = {"prompt_tokens": 12000, "completion_tokens": 5, "total_tokens": 12005}
+        return _json_response(payload)
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-only")
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-    policy = OpenRouterReAct(config_id="luna_med", config={"model": "gpt-5.6-luna", "effort": "medium", "max_tokens": 768, "compact_every": 16})
-    observation = {"valid_actions": ["do"], "observation_text": "obs"}
-    for index in range(17):
+    policy = OpenRouterReAct(
+        config_id="luna_med",
+        config={
+            "model": "gpt-5.6-luna", "effort": "medium", "max_tokens": 1024,
+            "context_token_budget": 16000, "compact_at": 0.7,
+            "keep_recent_messages": 8, "keep_recent_frames": 2,
+            "observation_mode": "text",
+        },
+    )
+    observation = {"valid_actions": ["do"]}
+    for index in range(12):
         policy.plan({**observation, "observation_text": f"obs-{index}"})
-    assert policy.trace_data()["compact_count"] == 1
-    last_messages = captured[-1]["messages"]
-    assert last_messages[1]["content"].startswith("[compacted 14 earlier ReAct turns")
-    assert "compact_every=16" in last_messages[1]["content"]
-    user_turns = [message for message in last_messages if message["role"] == "user"]
-    assert len(user_turns) == 4  # compact + 2 kept + current
-    assert "obs-16" in last_messages[-1]["content"]
+
+    assert policy.trace_data()["compact_count"] >= 1
+    action_calls = [body for body in captured if body.get("tools") is not None]
+    last_messages = action_calls[-1]["messages"]
+    assert last_messages[1]["content"].startswith("[context compacted")
+    assert "Trees west, stone north" in last_messages[1]["content"]
+    # the mechanical paste is gone
+    assert "earlier ReAct turns" not in last_messages[1]["content"]
+    assert "obs-11" in str(last_messages[-1]["content"])
 
 
 def test_openrouter_react_streams_token_deltas_and_skips_empty_reasoning(
@@ -266,7 +295,7 @@ def test_openrouter_react_streams_token_deltas_and_skips_empty_reasoning(
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-only")
     monkeypatch.setattr("urllib.request.urlopen", lambda *_args, **_kwargs: StreamResponse())
     deltas: list[dict] = []
-    policy = OpenRouterReAct(config_id="luna_med", config={"model": "gpt-5.6-luna", "effort": "medium", "max_tokens": 768, "compact_every": 16})
+    policy = OpenRouterReAct(config_id="luna_med", config={"model": "gpt-5.6-luna", "effort": "medium", "max_tokens": 1024, "context_token_budget": 16000, "compact_at": 0.7, "keep_recent_messages": 8, "keep_recent_frames": 2, "observation_mode": "text"})
     actions = policy.plan(
         {"valid_actions": ["right", "do"], "observation_text": "obs"},
         on_delta=deltas.append,

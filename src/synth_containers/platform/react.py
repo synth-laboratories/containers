@@ -49,6 +49,58 @@ def _required_bounded_int(
 
 
 
+
+def _required_fraction(
+    config: dict[str, Any], key: str, config_id: str, low: float, high: float
+) -> float:
+    value = config.get(key)
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise PolicyConfigError(
+            f"policy config {config_id!r} must set {key!r} explicitly as a number; "
+            f"it changes the policy under test and is never defaulted"
+        )
+    if not low <= float(value) <= high:
+        raise PolicyConfigError(
+            f"policy config {config_id!r} {key}={value} is outside [{low}, {high}]"
+        )
+    return float(value)
+
+
+def _required_choice(
+    config: dict[str, Any], key: str, config_id: str, allowed: tuple[str, ...]
+) -> str:
+    value = config.get(key)
+    if not isinstance(value, str) or value not in allowed:
+        raise PolicyConfigError(
+            f"policy config {config_id!r} must set {key!r} to one of {allowed}; "
+            f"it changes the policy under test and is never defaulted"
+        )
+    return value
+
+
+def _text_of(message: dict[str, Any]) -> str:
+    """Text of a message whose content may be a multimodal part list.
+
+    Frames are named, never inlined: shipping accumulated base64 to the
+    summarizer is enormous, and it cannot use pixels in a text brief anyway.
+    """
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            if part.get("type") == "image_url":
+                parts.append("<frame omitted>")
+            elif isinstance(part.get("text"), str):
+                parts.append(part["text"])
+        return " ".join(parts)
+    return ""
+
+
+
 class ScriptedReAct:
     """Observe → open span → emit a 5-action plan → close span → execute.
 
@@ -140,7 +192,7 @@ class OpenRouterReAct:
     """Paid ReAct planner for reviewed provider configs.
 
     The key is read only at request time and never enters metadata or the event
-    log. History is the same session across `plan()` calls; `compact_every`
+    log. History is the same session across `plan()` calls; compaction
     (default 16) is a harness facet. Token deltas are forwarded only when the
     provider actually streams non-empty chunks — Luna often returns empty
     reasoning, and that absence is left blank.
@@ -158,8 +210,27 @@ class OpenRouterReAct:
         # reports a score for "luna_med" that some other policy produced.
         self.model = _required_str(config, "model", config_id)
         self.reasoning_effort = _required_str(config, "effort", config_id)
-        self.max_tokens = _required_bounded_int(config, "max_tokens", config_id, 64, 2048)
-        self.compact_every = _required_bounded_int(config, "compact_every", config_id, 1, 64)
+        self.max_tokens = _required_bounded_int(config, "max_tokens", config_id, 64, 4096)
+        # Compaction knobs mirror craftax_gold.rs. The old `compact_every` fired
+        # on a turn count and pasted truncated payloads; that is a different
+        # policy from a token-triggered, model-authored summary, and comparing
+        # a checkpoint evaluated one way against teacher data collected the
+        # other way measures the mismatch rather than the model.
+        self.context_token_budget = _required_bounded_int(
+            config, "context_token_budget", config_id, 2000, 400_000
+        )
+        self.compact_at = _required_fraction(config, "compact_at", config_id, 0.1, 0.95)
+        self.keep_recent_messages = _required_bounded_int(
+            config, "keep_recent_messages", config_id, 2, 64
+        )
+        self.keep_recent_frames = _required_bounded_int(
+            config, "keep_recent_frames", config_id, 1, 16
+        )
+        self.observation_mode = _required_choice(
+            config, "observation_mode", config_id, ("text", "image", "both")
+        )
+        self.compact_threshold = int(self.context_token_budget * self.compact_at)
+        self.last_prompt_tokens = 0
         # Infrastructure, not policy: these do not change what was measured.
         self.base_url = str(config.get("base_url") or "https://openrouter.ai/api/v1").rstrip("/")
         self.api_key_env = str(config.get("api_key_env") or "OPENROUTER_API_KEY")
@@ -197,7 +268,11 @@ class OpenRouterReAct:
             "reasoning_effort": self.reasoning_effort,
             "plan_min": self.plan_min,
             "plan_max": self.plan_max,
-            "compact_every": self.compact_every,
+            "context_token_budget": self.context_token_budget,
+            "compact_at": self.compact_at,
+            "keep_recent_messages": self.keep_recent_messages,
+            "keep_recent_frames": self.keep_recent_frames,
+            "observation_mode": self.observation_mode,
             "token_trace": "derived",
             "graded": True,
         }
@@ -252,8 +327,30 @@ class OpenRouterReAct:
         valid = [str(action) for action in observation.get("valid_actions") or []]
         if not valid:
             raise RuntimeError("Craftax observation omitted valid_actions")
-        self._maybe_compact(on_delta)
-        self._messages.append({"role": "user", "content": self._observation_prompt(observation, valid)})
+        self._maybe_compact(api_key, on_delta)
+        text = self._observation_prompt(observation, valid)
+        frame = observation.get("frame_png_b64")
+        if self.observation_mode in ("image", "both"):
+            if not isinstance(frame, str) or not frame:
+                # Failing here is the point: silently falling back to text would
+                # evaluate a different policy than the one requested, which is
+                # exactly the train/eval mismatch this alignment exists to close.
+                raise RuntimeError(
+                    f"observation_mode={self.observation_mode!r} requires a frame; "
+                    "the world supplied none (needs live_frames=native)"
+                )
+            parts: list[dict[str, Any]] = []
+            if self.observation_mode == "both":
+                parts.append({"type": "text", "text": text})
+            else:
+                parts.append({"type": "text", "text": "Current view:"})
+            parts.append(
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{frame}"}}
+            )
+            self._messages.append({"role": "user", "content": parts})
+            self._prune_frames()
+        else:
+            self._messages.append({"role": "user", "content": text})
         prior_attempts: list[dict[str, Any]] = []
         assistant = ""
         reasoning = ""
@@ -324,7 +421,11 @@ class OpenRouterReAct:
             "action_authority": "harness_fallback" if fallback else "policy",
             "fallback": fallback,
             "parse_error": parse_error,
-            "compact_every": self.compact_every,
+            "context_token_budget": self.context_token_budget,
+            "compact_at": self.compact_at,
+            "keep_recent_messages": self.keep_recent_messages,
+            "keep_recent_frames": self.keep_recent_frames,
+            "observation_mode": self.observation_mode,
             "compact_count": self._compact_count,
             "history_turns": self.calls,
             "deltas_emitted": call_deltas,
@@ -352,8 +453,8 @@ class OpenRouterReAct:
             'Return JSON only: {"actions":["do","right"]}'
         )
 
-    def _maybe_compact(self, on_delta: DeltaCallback | None) -> None:
-        if self.calls == 0 or self.calls % self.compact_every != 0:
+    def _maybe_compact(self, api_key: str, on_delta: DeltaCallback | None) -> None:
+        if self.calls == 0:
             return
         pairs: list[tuple[dict[str, Any], dict[str, Any] | None]] = []
         rest = self._messages[1:]
@@ -372,22 +473,34 @@ class OpenRouterReAct:
             if str(message.get("content") or "").startswith("[compacted "):
                 continue
             pairs.append((message, assistant))
-        if len(pairs) < self.compact_every:
+        # Token-triggered, matching craftax_gold.rs: compaction fires on the
+        # real prompt_tokens the provider reported, not on a turn count. A
+        # turn count is a poor proxy — turns vary hugely in size once frames
+        # and long observations are in the transcript.
+        if self.last_prompt_tokens <= self.compact_threshold:
             return
-        keep = pairs[-self.compact_keep_turns :]
-        dropped = pairs[: -self.compact_keep_turns]
-        dropped_payloads = [
-            str(assistant.get("content") or "")[:200]
-            for _, assistant in dropped
-            if assistant is not None
-        ]
+        if len(pairs) <= self.keep_recent_messages:
+            return
+        keep = pairs[-self.keep_recent_messages :]
+        dropped = pairs[: -self.keep_recent_messages]
+        if not dropped:
+            return
+
+        # Model-authored summary, not a mechanical paste of truncated payloads.
+        # The summary is the agent's only memory of these turns, so it has to
+        # carry map knowledge and intent rather than the last 200 characters.
+        transcript: list[dict[str, Any]] = []
+        for user, assistant in dropped:
+            transcript.append({"role": "user", "content": _text_of(user)})
+            if assistant is not None:
+                transcript.append({"role": "assistant", "content": _text_of(assistant)})
+        summary = self._summarize(api_key, transcript)
+
         compact = {
             "role": "user",
             "content": (
-                f"[compacted {len(dropped)} earlier ReAct turns; "
-                f"compact_every={self.compact_every}. Mechanical history compact, "
-                "not a model-authored summary. Dropped assistant payloads "
-                f"(truncated): {json.dumps(dropped_payloads[-8:])}]"
+                "[context compacted — the turns below are summarized, not verbatim]\n"
+                + summary
             ),
         }
         rebuilt: list[dict[str, Any]] = [self._messages[0], compact]
@@ -396,21 +509,99 @@ class OpenRouterReAct:
             if assistant is not None:
                 rebuilt.append(assistant)
         self._messages = rebuilt
+        self._prune_frames()
         self._compact_count += 1
         if on_delta is not None:
             on_delta(
                 {
                     "delta": False,
                     "channel": "compact",
-                    "compact_every": self.compact_every,
+                    "trigger": "fixed_threshold",
+                    "prompt_tokens_before": self.last_prompt_tokens,
+                    "compact_threshold": self.compact_threshold,
                     "compact_count": self._compact_count,
                     "dropped_turns": len(dropped),
                     "kept_turns": len(keep),
+                    "summarized": True,
                     "call": self.calls,
                     "model": self.model,
                     "provider": "openrouter",
                 }
             )
+
+
+    def _prune_frames(self) -> None:
+        """Keep only the most recent frames as pixels; older ones keep text.
+
+        Frames re-send on every request until compaction. Unbounded, a single
+        episode reached ~1M prompt tokens and blew the client timeout — and the
+        resulting failures killed long rollouts preferentially, biasing any
+        comparison toward early deaths.
+        """
+        seen = 0
+        for message in reversed(self._messages):
+            content = message.get("content")
+            if not isinstance(content, list):
+                continue
+            if not any(
+                isinstance(part, dict) and part.get("type") == "image_url" for part in content
+            ):
+                continue
+            seen += 1
+            if seen > self.keep_recent_frames:
+                message["content"] = _text_of(message) + " [frame dropped — superseded]"
+
+    def _summarize(self, api_key: str, transcript: list[dict[str, Any]]) -> str:
+        """Ask the model to compact its own history into a usable brief.
+
+        Its own request, not `_complete`, which always sends `self._messages`.
+        Non-streaming and tool-free: this call produces prose, not actions.
+        """
+        payload = {
+            "model": self.model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You compact an agent's episode transcript. Write a dense "
+                        "factual brief the agent will rely on as its only memory "
+                        "of these turns."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        "Summarize this episode segment for the agent that will keep "
+                        "playing. Cover: terrain and resources seen and roughly where "
+                        "relative to the player; inventory and achievements gained; "
+                        "what was attempted and failed; the current goal. Be concrete "
+                        "and brief. No preamble.\n\n" + json.dumps(transcript)
+                    ),
+                },
+            ],
+            "temperature": 0,
+            "max_tokens": 700,
+        }
+        request = urllib.request.Request(
+            f"{self.base_url}/chat/completions",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "authorization": f"Bearer {api_key}",
+                "content-type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=120) as response:
+                body = json.loads(response.read().decode("utf-8"))
+            text = self._message_text(
+                (body.get("choices") or [{}])[0].get("message", {}).get("content")
+            )
+        except (urllib.error.URLError, OSError, ValueError, KeyError, IndexError):
+            # A failed summary must not end the rollout. Name what was dropped
+            # rather than silently losing the turns.
+            return f"[summary unavailable; {len(transcript)} messages dropped]"
+        return text.strip() or f"[summary empty; {len(transcript)} messages dropped]"
 
     def _complete(
         self,
@@ -585,6 +776,10 @@ class OpenRouterReAct:
             if isinstance(value, int):
                 current = self._usage.get(key)
                 self._usage[key] = value + (current if isinstance(current, int) else 0)
+                if key == "prompt_tokens":
+                    # Compaction triggers on the real size of the last request,
+                    # so record it per call rather than using the running total.
+                    self.last_prompt_tokens = value
         provider_cost = usage.get("cost")
         if isinstance(provider_cost, (int, float)) and not isinstance(provider_cost, bool):
             current_cost = self._usage.get("cost_usd")

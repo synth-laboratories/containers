@@ -187,7 +187,12 @@ CRAFTAX_REACT = TargetSpec(
                 # the reasoning budget with no model-authored content.
                 "max_tokens": 2048,
                 "parse_retries": 2,
-                "compact_every": 16,
+                "max_tokens": 1024,
+                "context_token_budget": 16000,
+                "compact_at": 0.7,
+                "keep_recent_messages": 8,
+                "keep_recent_frames": 2,
+                "observation_mode": "text",
             },
         ),
     ),

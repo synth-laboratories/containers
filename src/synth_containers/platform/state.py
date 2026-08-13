@@ -394,8 +394,12 @@ class CompatPlatform:
             config={
                 "model": "gpt-5.6-luna",
                 "effort": "medium",
-                "max_tokens": 768,
-                "compact_every": 16,
+                "max_tokens": 1024,
+                "context_token_budget": 16000,
+                "compact_at": 0.7,
+                "keep_recent_messages": 8,
+                "keep_recent_frames": 2,
+                "observation_mode": "text",
             },
         )
         self.policy_configs["sol_med"] = PolicyConfig(
@@ -404,8 +408,12 @@ class CompatPlatform:
             config={
                 "model": "gpt-5.6-sol",
                 "effort": "medium",
-                "max_tokens": 768,
-                "compact_every": 16,
+                "max_tokens": 1024,
+                "context_token_budget": 16000,
+                "compact_at": 0.7,
+                "keep_recent_messages": 8,
+                "keep_recent_frames": 2,
+                "observation_mode": "text",
             },
         )
         for seed in self.spec.policy_seeds:
