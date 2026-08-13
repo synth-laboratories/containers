@@ -17,6 +17,7 @@ class TargetRuntimeKind(StrEnum):
     DIGBENCH = "digbench"
     OPENENV = "openenv"
     BANKING77 = "banking77"
+    HEALTHBENCH = "healthbench"
 
 
 class RewardKind(StrEnum):
@@ -539,6 +540,70 @@ BANKING77_CLASSIFY = TargetSpec(
     ),
 )
 
+HEALTHBENCH_CHAT = TargetSpec(
+    target_id="healthbench_chat",
+    runtime_family=TargetRuntimeKind.HEALTHBENCH,
+    adapter_chain=(),
+    world_ref="world:healthbench@eval",
+    environment_ref="env:healthbench_physician_rubrics",
+    evaluation_plan_ref="healthbench_eval.v1",
+    default_policy_harness="chat_completion",
+    scale_leases=30,
+    retention="run",
+    reward_kind=RewardKind.ENV_SUM,
+    live_reward=True,
+    live_frames="unsupported",
+    true_checkpoint="unsupported",
+    blocking_trial="unsupported",
+    mcp_bind="unused",
+    reconnect="derived",
+    event_kinds=(
+        "trace.opened",
+        "env.episode.opened",
+        "observation",
+        "span.policy.opened",
+        "span.policy.closed",
+        "action",
+        "span.evaluator.opened",
+        "rubric.grade",
+        "span.evaluator.closed",
+        "reward_signal",
+        "env.episode.closed",
+        "capture.closed",
+        "status",
+    ),
+    affordances=_env(
+        {
+            "step": "native",
+            "poll": "native",
+            "sse": "derived",
+            "websocket": "derived",
+            "live_frames": "unsupported",
+            "true_checkpoint": "unsupported",
+            "restore": "unsupported",
+            "fork": "unsupported",
+            "live_reward": "native",
+            "scale_leases": "native",
+            "bind_policy_config": "native",
+            "restart_policy": "native",
+            "physician_rubric_grading": "native",
+        }
+    ),
+    policy_seeds=(
+        PolicySeed(
+            "groq_llama31_8b",
+            "chat_completion",
+            {
+                "provider": "groq",
+                "model": "llama-3.1-8b-instant",
+                "api_key_env": "GROQ_API_KEY",
+                "base_url": "https://api.groq.com/openai/v1",
+                "max_tokens": 1536,
+            },
+        ),
+    ),
+)
+
 TARGETS: dict[str, TargetSpec] = {
     spec.target_id: spec
     for spec in (
@@ -552,6 +617,7 @@ TARGETS: dict[str, TargetSpec] = {
         DIGBENCH_MOCK,
         DIGBENCH_PUBLIC,
         BANKING77_CLASSIFY,
+        HEALTHBENCH_CHAT,
     )
 }
 
@@ -565,4 +631,4 @@ PR_TARGETS = (
     "banking77_classify",
 )
 
-PAID_TARGETS = ("craftax_react", "digbench_public")
+PAID_TARGETS = ("craftax_react", "digbench_public", "healthbench_chat")

@@ -11,6 +11,7 @@ from .banking77 import Banking77Runtime
 from .craftax import CraftaxRuntime
 from .digbench import DigbenchRuntime
 from .harbor import HarborRuntime
+from .healthbench import HealthBenchRuntime
 from .openenv import OpenEnvRuntime
 
 _BY_FAMILY = {
@@ -19,6 +20,7 @@ _BY_FAMILY = {
     TargetRuntimeKind.DIGBENCH: DigbenchRuntime(),
     TargetRuntimeKind.OPENENV: OpenEnvRuntime(),
     TargetRuntimeKind.BANKING77: Banking77Runtime(),
+    TargetRuntimeKind.HEALTHBENCH: HealthBenchRuntime(),
 }
 
 
