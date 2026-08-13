@@ -18,6 +18,37 @@ from .craftax_world import ACTIONS
 DeltaCallback = Callable[[dict[str, Any]], None]
 
 
+class PolicyConfigError(ValueError):
+    """A policy config omitted a field that defines what is being measured."""
+
+
+def _required_str(config: dict[str, Any], key: str, config_id: str) -> str:
+    value = config.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise PolicyConfigError(
+            f"policy config {config_id!r} must set {key!r} explicitly; "
+            f"it defines the policy under test and is never defaulted"
+        )
+    return value.strip()
+
+
+def _required_bounded_int(
+    config: dict[str, Any], key: str, config_id: str, low: int, high: int
+) -> int:
+    value = config.get(key)
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise PolicyConfigError(
+            f"policy config {config_id!r} must set {key!r} explicitly as an int; "
+            f"it changes the policy under test and is never defaulted"
+        )
+    if not low <= value <= high:
+        raise PolicyConfigError(
+            f"policy config {config_id!r} {key}={value} is outside [{low}, {high}]"
+        )
+    return value
+
+
+
 class ScriptedReAct:
     """Observe → open span → emit a 5-action plan → close span → execute.
 
@@ -121,13 +152,18 @@ class OpenRouterReAct:
 
     def __init__(self, *, config_id: str, config: dict[str, Any]) -> None:
         self.config_id = config_id
-        self.model = str(config.get("model") or "meta/muse-spark-1.1")
-        self.reasoning_effort = str(config.get("effort") or "medium")
+        # Policy identity is never defaulted. A silent fallback here attributes
+        # a result to a model, effort or memory window the caller never asked
+        # for, and the mistake is invisible in the output — the run simply
+        # reports a score for "luna_med" that some other policy produced.
+        self.model = _required_str(config, "model", config_id)
+        self.reasoning_effort = _required_str(config, "effort", config_id)
+        self.max_tokens = _required_bounded_int(config, "max_tokens", config_id, 64, 2048)
+        self.compact_every = _required_bounded_int(config, "compact_every", config_id, 1, 64)
+        # Infrastructure, not policy: these do not change what was measured.
         self.base_url = str(config.get("base_url") or "https://openrouter.ai/api/v1").rstrip("/")
         self.api_key_env = str(config.get("api_key_env") or "OPENROUTER_API_KEY")
-        self.max_tokens = min(max(int(config.get("max_tokens") or 768), 64), 2048)
         self.parse_retries = min(max(int(config.get("parse_retries") or 0), 0), 2)
-        self.compact_every = min(max(int(config.get("compact_every") or 16), 1), 64)
         self.calls = 0
         self._compact_count = 0
         self._deltas_emitted = 0

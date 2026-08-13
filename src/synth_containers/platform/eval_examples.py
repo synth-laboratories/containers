@@ -39,7 +39,7 @@ def _prepare_and_start(client: TestClient, *, rollout_id: str, body: dict[str, A
 
 def run_react(*, seeds: int = 10) -> dict[str, Any]:
     client = TestClient(create_compat_app("craftax_engine"))
-    client.post("/policy-configs", json={"config_id": "luna_med", "config": {"model": "gpt-5.6-luna"}})
+    client.post("/policy-configs", json={"config_id": "luna_med", "config": {"model": "gpt-5.6-luna", "effort": "medium", "max_tokens": 768, "compact_every": 16}})
     rows = []
     for seed in range(seeds):
         rollout_id = f"react_seed_{seed}"

@@ -383,15 +383,30 @@ class CompatPlatform:
     def _seed_default_policies(self) -> None:
         if self.spec.default_policy_harness == "isolated_policy_process":
             return
+        # Seeded configs must name every policy-identity field. A partial seed
+        # is worse than none: the harness would fill the gaps from its own
+        # defaults, and a result reported for "luna_med" would describe a
+        # policy nobody chose. `sol_med` previously omitted compact_every and
+        # both omitted max_tokens.
         self.policy_configs["luna_med"] = PolicyConfig(
             config_id="luna_med",
             harness=self.spec.default_policy_harness,
-            config={"model": "gpt-5.6-luna", "effort": "medium", "compact_every": 16},
+            config={
+                "model": "gpt-5.6-luna",
+                "effort": "medium",
+                "max_tokens": 768,
+                "compact_every": 16,
+            },
         )
         self.policy_configs["sol_med"] = PolicyConfig(
             config_id="sol_med",
             harness=self.spec.default_policy_harness,
-            config={"model": "gpt-5.6-sol", "effort": "medium"},
+            config={
+                "model": "gpt-5.6-sol",
+                "effort": "medium",
+                "max_tokens": 768,
+                "compact_every": 16,
+            },
         )
         for seed in self.spec.policy_seeds:
             self.policy_configs[seed.config_id] = PolicyConfig(

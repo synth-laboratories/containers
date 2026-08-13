@@ -21,7 +21,7 @@ def _kinds(events: list[dict[str, Any]]) -> list[str]:
 
 def run(*, seeds: int = 10) -> dict[str, Any]:
     client = TestClient(create_compat_app("craftax_engine"))
-    client.post("/policy-configs", json={"config_id": "luna_med", "config": {"model": "gpt-5.6-luna"}})
+    client.post("/policy-configs", json={"config_id": "luna_med", "config": {"model": "gpt-5.6-luna", "effort": "medium", "max_tokens": 768, "compact_every": 16}})
     rows: list[dict[str, Any]] = []
     for seed in range(seeds):
         rollout_id = f"craftax_seed_{seed}"

@@ -42,7 +42,7 @@ def test_openrouter_react_normalizes_craftax_direction_aliases() -> None:
 def test_openrouter_react_binds_candidate_system_prompt() -> None:
     policy = OpenRouterReAct(
         config_id="goex_candidate_test",
-        config={"system_prompt": "Prioritize wood before stone."},
+        config={"model": "gpt-5.6-luna", "effort": "medium", "max_tokens": 768, "compact_every": 16, "system_prompt": "Prioritize wood before stone."},
     )
     assert policy._messages[0] == {
         "role": "system",
@@ -74,7 +74,7 @@ def test_openrouter_react_preserves_empty_response_as_labeled_fallback(
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-only")
     monkeypatch.setattr("urllib.request.urlopen", lambda *_args, **_kwargs: Response())
-    policy = OpenRouterReAct(config_id="muse_spark_medium", config={})
+    policy = OpenRouterReAct(config_id="muse_spark_medium", config={"model": "gpt-5.6-luna", "effort": "medium", "max_tokens": 768, "compact_every": 16, })
     actions = policy.plan(
         {
             "valid_actions": ["up", "do"],
@@ -134,7 +134,7 @@ def test_openrouter_react_uses_forced_tool_arguments(monkeypatch) -> None:
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-only")
     monkeypatch.setattr("urllib.request.urlopen", lambda *_args, **_kwargs: Response())
-    policy = OpenRouterReAct(config_id="muse_spark_medium", config={})
+    policy = OpenRouterReAct(config_id="muse_spark_medium", config={"model": "gpt-5.6-luna", "effort": "medium", "max_tokens": 768, "compact_every": 16, })
     assert policy.plan({"valid_actions": ["right", "do"], "observation_text": "obs"}) == [
         "right",
         "do",
@@ -194,7 +194,7 @@ def test_openrouter_react_keeps_history_across_turns(monkeypatch) -> None:
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-only")
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-    policy = OpenRouterReAct(config_id="luna_med", config={"compact_every": 16})
+    policy = OpenRouterReAct(config_id="luna_med", config={"model": "gpt-5.6-luna", "effort": "medium", "max_tokens": 768, "compact_every": 16})
     observation = {"valid_actions": ["right", "do"], "observation_text": "first"}
     policy.plan(observation)
     policy.plan({**observation, "observation_text": "second"})
@@ -220,7 +220,7 @@ def test_openrouter_react_compacts_every_sixteen_turns(monkeypatch) -> None:
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-only")
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-    policy = OpenRouterReAct(config_id="luna_med", config={"compact_every": 16})
+    policy = OpenRouterReAct(config_id="luna_med", config={"model": "gpt-5.6-luna", "effort": "medium", "max_tokens": 768, "compact_every": 16})
     observation = {"valid_actions": ["do"], "observation_text": "obs"}
     for index in range(17):
         policy.plan({**observation, "observation_text": f"obs-{index}"})
@@ -266,7 +266,7 @@ def test_openrouter_react_streams_token_deltas_and_skips_empty_reasoning(
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-only")
     monkeypatch.setattr("urllib.request.urlopen", lambda *_args, **_kwargs: StreamResponse())
     deltas: list[dict] = []
-    policy = OpenRouterReAct(config_id="luna_med", config={})
+    policy = OpenRouterReAct(config_id="luna_med", config={"model": "gpt-5.6-luna", "effort": "medium", "max_tokens": 768, "compact_every": 16})
     actions = policy.plan(
         {"valid_actions": ["right", "do"], "observation_text": "obs"},
         on_delta=deltas.append,
