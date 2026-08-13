@@ -121,9 +121,7 @@ class HarborPinnedBundle:
         if not isinstance(task_tree, Mapping):
             raise HarborBundleError("harbor_bundle_task_tree_invalid")
         agent_command = _command(agent.get("command"), "harbor_bundle_agent_invalid")
-        verifier_command = _command(
-            verifier.get("command"), "harbor_bundle_verifier_invalid"
-        )
+        verifier_command = _command(verifier.get("command"), "harbor_bundle_verifier_invalid")
         reward_path = _safe_relative(
             str(verifier.get("reward_path") or "verifier/reward.txt"),
             "harbor_bundle_reward_path_invalid",
@@ -152,9 +150,7 @@ class HarborPinnedBundle:
             raise HarborBundleError("harbor_bundle_required_paths_missing")
         required_paths: list[str] = []
         for raw_path in raw_required:
-            relative = _safe_relative(
-                str(raw_path or ""), "harbor_bundle_required_path_invalid"
-            )
+            relative = _safe_relative(str(raw_path or ""), "harbor_bundle_required_path_invalid")
             required = _within(root, relative, "harbor_bundle_required_path_invalid")
             if not required.is_file() or required.is_symlink():
                 # A missing GameBench runner is unavailable evidence, not a
@@ -206,10 +202,16 @@ def execute_docker_role(
     command: list[str],
     volumes: Mapping[str, str | DockerVolume],
     name: str,
+    environment: Mapping[str, str] | None = None,
+    allow_nonzero: bool = False,
     timeout_seconds: float = 120.0,
 ) -> DockerExecution:
     """One short-lived `docker run --rm`. Tests may replace this."""
     argv = ["docker", "run", "--rm", "--network", "none", "--name", name]
+    for key, value in sorted((environment or {}).items()):
+        if not re.fullmatch(r"[A-Z_][A-Z0-9_]*", key):
+            raise DockerRunError("harbor_docker_environment_invalid")
+        argv.extend(["-e", f"{key}={value}"])
     for container_path, mount in volumes.items():
         if isinstance(mount, DockerVolume):
             host_path = mount.host_path
@@ -233,7 +235,7 @@ def execute_docker_role(
     except subprocess.TimeoutExpired as exc:
         subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False)
         raise DockerRunError("harbor_docker_run_failed") from exc
-    if completed.returncode != 0:
+    if completed.returncode != 0 and not allow_nonzero:
         raise DockerRunError("harbor_docker_run_failed")
     return DockerExecution(
         role=role,
@@ -266,7 +268,9 @@ def run_docker_trial(platform: CompatPlatform, pin: RolloutPin, log: RolloutEven
                 logs_root=logs_root,
             )
     except DockerRunError as exc:
-        _fail(pin, log, "harbor_docker_run_failed", error_type=str(exc) or "harbor_docker_run_failed")
+        _fail(
+            pin, log, "harbor_docker_run_failed", error_type=str(exc) or "harbor_docker_run_failed"
+        )
     finally:
         shutil.rmtree(workspace_root, ignore_errors=True)
         shutil.rmtree(logs_root, ignore_errors=True)
@@ -282,9 +286,7 @@ def _run_pinned_bundle(
 ) -> None:
     agent_name = _container_name("harbor-agent", pin.rollout_id)
     verifier_name = _container_name("harbor-verifier", pin.rollout_id)
-    instruction = _clip_stdout(
-        (bundle.root / bundle.instruction_path).read_text(encoding="utf-8")
-    )
+    instruction = _clip_stdout((bundle.root / bundle.instruction_path).read_text(encoding="utf-8"))
     task_tree_host = str(bundle.root / bundle.task_tree_path)
     shared_volumes: dict[str, str | DockerVolume] = {
         "/workspace": workspace_root,
@@ -320,6 +322,10 @@ def _run_pinned_bundle(
         command=list(bundle.agent_command),
         volumes=shared_volumes,
         name=agent_name,
+        environment={
+            "SYNTH_POLICY_HARNESS": str(pin.policy_ref.get("harness") or ""),
+            "SYNTH_POLICY_CONFIG": str(pin.policy_ref.get("config") or ""),
+        },
     )
     log.append("tools", {"name": "bundle_agent", "stdout": agent.stdout, "execution": agent.name})
     log.append("stdout", {"text": agent.stdout})
@@ -328,12 +334,13 @@ def _run_pinned_bundle(
     log.append("span.verifier.opened", {"role": "verifier", "execution": "distinct"})
     verifier_volumes = dict(shared_volumes)
     verifier_volumes["/logs"] = logs_root
-    execute_docker_role(
+    verifier = execute_docker_role(
         role="verifier",
         image=bundle.image,
         command=list(bundle.verifier_command),
         volumes=verifier_volumes,
         name=verifier_name,
+        allow_nonzero=True,
     )
     reward = _read_reward_txt(Path(logs_root) / bundle.reward_path)
     if reward is None:
@@ -347,6 +354,7 @@ def _run_pinned_bundle(
             "reward.txt": reward,
             "bundle_digest": bundle.bundle_digest,
             "task_tree_digest": bundle.task_tree_digest,
+            "exit_code": verifier.exit_code,
         },
     )
     log.append("span.verifier.closed", {"role": "verifier"})
