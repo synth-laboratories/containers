@@ -773,7 +773,7 @@ class CompatPlatform:
         if async_mode or defer_sync:
             return self._rollout_response(pin, descriptor)
         try:
-            self._simulate(pin, log)
+            self._simulate_or_fail(pin, log)
         finally:
             self.active_leases = max(0, self.active_leases - 1)
         return self._rollout_response(pin, descriptor)
@@ -790,7 +790,7 @@ class CompatPlatform:
         if pin.terminal:
             return self._rollout_response(pin, self.stream_descriptor_for(rollout_id))
         try:
-            self._simulate(pin, log)
+            self._simulate_or_fail(pin, log)
         finally:
             self.active_leases = max(0, self.active_leases - 1)
         return self._rollout_response(pin, self.stream_descriptor_for(rollout_id))
@@ -882,6 +882,23 @@ class CompatPlatform:
             "closed": seal.get("closed"),
             "url": f"/rollouts/{rollout_id}/trace",
         }
+
+    def _simulate_or_fail(self, pin: RolloutPin, log: RolloutEventLog) -> None:
+        """Run the rollout, terminalizing the pin even when it raises.
+
+        `register_policy_config` refuses while any pin is started and not
+        terminal. A rollout that raised before its runtime could record an
+        outcome — a malformed policy config, say — left its pin pinned forever,
+        so every later bind returned 409 and the container had to be restarted
+        to accept work again. The error still propagates; it just no longer
+        takes the container down with it.
+        """
+        try:
+            self._simulate(pin, log)
+        except BaseException:
+            pin.status = "failed"
+            pin.terminal = True
+            raise
 
     def _simulate(self, pin: RolloutPin, log: RolloutEventLog) -> None:
         pin.env_generation += 1
