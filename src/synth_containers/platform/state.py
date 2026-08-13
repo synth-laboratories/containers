@@ -12,13 +12,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ..event_log import CONTROL_SUBSCRIBED, RolloutEventLog, stream_descriptor
+from ..event_log import (
+    CONTROL_SUBSCRIBED,
+    RolloutEventLog,
+    stream_descriptor,
+    validate_rollout_id,
+)
 from .affordances import bind_recipe
 from .http_requests import CreateRolloutRequest, ISOLATED_POLICY_HARNESS
 from .policy_process import DEFAULT_HEURISTIC, IsolatedPolicyProcess
 from .reward_plan import PlanOutcome, classify_plan_outcome
 from .runtime import runtime_for
-from .seal import seal_rollout_log
+from .seal import seal_rollout_log, validate_rollout_seal
 from .targets import TargetSpec
 
 
@@ -153,6 +158,168 @@ class CompatPlatform:
         self.policy_process: IsolatedPolicyProcess | None = None
         self._state_lock = threading.RLock()
         self._seed_default_policies()
+        self._recover_completed_rollouts()
+
+    def _durable_key(self, rollout_id: str) -> str:
+        return hashlib.sha256(rollout_id.encode("utf-8")).hexdigest()
+
+    def _manifest_path(self, rollout_id: str) -> Path:
+        return self.storage_root / "run_manifests" / f"{self._durable_key(rollout_id)}.json"
+
+    def _reward_path(self, rollout_id: str) -> Path:
+        return self.storage_root / "reward_receipts" / f"{self._durable_key(rollout_id)}.json"
+
+    @staticmethod
+    def _receipt_digest(value: dict[str, Any]) -> str:
+        blob = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+        return "sha256:" + hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _atomic_json(path: Path, value: dict[str, Any]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+        with temporary.open("w", encoding="utf-8") as handle:
+            handle.write(encoded)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        directory_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+
+    def _persist_completed_rollout(self, pin: RolloutPin) -> None:
+        manifest = {
+            "schema": "synth.containers.completed-rollout.v1",
+            "target_id": self.spec.target_id,
+            "rollout_id": pin.rollout_id,
+            "stream_id": pin.stream_id,
+            "stream_binding": list(self.stream_bindings[pin.rollout_id]),
+            "pin": {
+                "world_ref": pin.world_ref,
+                "environment_ref": pin.environment_ref,
+                "policy_ref": {key: value for key, value in pin.policy_ref.items() if key != "code"},
+                "evaluation_plan_ref": pin.evaluation_plan_ref,
+                "task_instance_id": pin.task_instance_id,
+                "engine_generation": pin.engine_generation,
+                "policy_revision_id": pin.policy_revision_id,
+                "seed": pin.seed,
+                "child_rollout_id": pin.child_rollout_id,
+                "child_resource_ref": pin.child_resource_ref,
+                "usage": pin.usage,
+                "status": pin.status,
+                "reward_signals": pin.reward_signals,
+                "native_script_reward": pin.native_script_reward,
+                "hillclimb_nodes": [node.to_dict() for node in (pin.hillclimb_nodes or ())],
+                "env_generation": pin.env_generation,
+                "omit_reward": pin.omit_reward,
+                "outcome": pin.outcome,
+                "session_dropped": pin.session_dropped,
+                "reward_kind": pin.reward_kind,
+            },
+        }
+        self._atomic_json(self._manifest_path(pin.rollout_id), manifest)
+
+    def _recover_completed_rollouts(self) -> None:
+        root = self.storage_root / "run_manifests"
+        if not root.is_dir():
+            return
+        for path in sorted(root.glob("*.json")):
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+            if manifest.get("schema") != "synth.containers.completed-rollout.v1":
+                raise ValueError(f"completed_rollout_manifest_schema:{path.name}")
+            if manifest.get("target_id") != self.spec.target_id:
+                continue
+            rollout_id = str(manifest.get("rollout_id") or "")
+            validate_rollout_id(rollout_id)
+            expected_name = f"{self._durable_key(rollout_id)}.json"
+            if path.name != expected_name:
+                raise ValueError(f"completed_rollout_manifest_identity:{path.name}")
+            stream_id = str(manifest.get("stream_id") or "")
+            if stream_id != f"stream:{rollout_id}":
+                raise ValueError(f"completed_rollout_stream_identity:{rollout_id}")
+            journal = self.storage_root / "event_logs" / expected_name.replace(".json", ".jsonl")
+            log = RolloutEventLog.recover(
+                rollout_id=rollout_id,
+                stream_id=stream_id,
+                journal_path=journal,
+            )
+            seal_path = self.storage_root / "seals" / f"{rollout_id}.trace-v5.json"
+            seal = json.loads(seal_path.read_text(encoding="utf-8"))
+            validate_rollout_seal(seal)
+            if seal.get("rollout_id") != rollout_id or seal.get("high_water") != log.high_water:
+                raise ValueError(f"completed_rollout_seal_identity:{rollout_id}")
+            expected_seal = seal_rollout_log(
+                log,
+                pin=seal.get("pin") if isinstance(seal.get("pin"), dict) else None,
+            )
+            if expected_seal["content_digest"] != seal["content_digest"]:
+                raise ValueError(f"completed_rollout_seal_log_mismatch:{rollout_id}")
+            binding = manifest.get("stream_binding")
+            if not isinstance(binding, list) or len(binding) != 2:
+                raise ValueError(f"completed_rollout_stream_binding:{rollout_id}")
+            raw_pin = manifest.get("pin")
+            if not isinstance(raw_pin, dict):
+                raise ValueError(f"completed_rollout_pin:{rollout_id}")
+            nodes = tuple(
+                RewardNode(
+                    node_id=str(row["node_id"]),
+                    kind=str(row["kind"]),
+                    authority=str(row["authority"]),
+                    status=str(row["status"]),
+                    value=row.get("value"),
+                )
+                for row in (raw_pin.get("hillclimb_nodes") or [])
+            )
+            pin = RolloutPin(
+                rollout_id=rollout_id,
+                world_ref=str(raw_pin["world_ref"]),
+                environment_ref=str(raw_pin["environment_ref"]),
+                policy_ref=dict(raw_pin["policy_ref"]),
+                evaluation_plan_ref=str(raw_pin["evaluation_plan_ref"]),
+                task_instance_id=str(raw_pin["task_instance_id"]),
+                stream_id=stream_id,
+                engine_generation=int(raw_pin["engine_generation"]),
+                policy_revision_id=raw_pin.get("policy_revision_id"),
+                seed=raw_pin.get("seed"),
+                child_rollout_id=raw_pin.get("child_rollout_id"),
+                child_resource_ref=raw_pin.get("child_resource_ref"),
+                usage=raw_pin.get("usage"),
+                terminal=True,
+                status=str(raw_pin["status"]),
+                started=True,
+                reward_signals=list(raw_pin.get("reward_signals") or []),
+                native_script_reward=raw_pin.get("native_script_reward"),
+                hillclimb_nodes=nodes or None,
+                env_generation=int(raw_pin.get("env_generation") or 1),
+                omit_reward=bool(raw_pin.get("omit_reward")),
+                outcome=raw_pin.get("outcome"),
+                session_dropped=bool(raw_pin.get("session_dropped")),
+                reward_kind=str(raw_pin.get("reward_kind") or self.spec.reward_kind),
+            )
+            self.logs[rollout_id] = log
+            self.stream_bindings[rollout_id] = (str(binding[0]), str(binding[1]))
+            self.pins[rollout_id] = pin
+            self.seals[rollout_id] = seal
+            reward_path = self._reward_path(rollout_id)
+            if reward_path.is_file():
+                wrapper = json.loads(reward_path.read_text(encoding="utf-8"))
+                reward = wrapper.get("receipt") if isinstance(wrapper, dict) else None
+                if (
+                    wrapper.get("schema") != "synth.containers.reward-receipt.v1"
+                    or not isinstance(reward, dict)
+                    or wrapper.get("content_digest") != self._receipt_digest(reward)
+                ):
+                    raise ValueError(f"reward_receipt_digest:{rollout_id}")
+                if reward.get("rollout_id") != rollout_id:
+                    raise ValueError(f"reward_receipt_identity:{rollout_id}")
+                self.reward_executions[rollout_id] = reward
+                execution_id = reward.get("execution_id")
+                if execution_id:
+                    self.reward_by_execution_id[str(execution_id)] = reward
 
     def _seed_default_policies(self) -> None:
         if self.spec.default_policy_harness == "isolated_policy_process":
@@ -582,6 +749,7 @@ class CompatPlatform:
             os.fsync(directory_fd)
         finally:
             os.close(directory_fd)
+        self._persist_completed_rollout(pin)
 
     def _ensure_policy_process(self) -> IsolatedPolicyProcess:
         if self.policy_process is not None and self.policy_process._proc.poll() is None:
@@ -870,6 +1038,14 @@ class CompatPlatform:
             ]
         self.reward_by_execution_id[record["execution_id"]] = record
         self.reward_executions[pin.rollout_id] = record
+        self._atomic_json(
+            self._reward_path(pin.rollout_id),
+            {
+                "schema": "synth.containers.reward-receipt.v1",
+                "receipt": record,
+                "content_digest": self._receipt_digest(record),
+            },
+        )
         return record
 
     def _signals_up_to(self, pin: RolloutPin, after_sequence: int | None) -> list[float | None]:
