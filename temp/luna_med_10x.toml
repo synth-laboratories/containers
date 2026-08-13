@@ -1,0 +1,14 @@
+# Retired. temp/run.sh no longer reads evals TOML.
+#
+# The previous file was schema evals.nonproduct.craftax.run.v2 and launched
+# `python -m suites.nonproduct.craftax` against GameBench rust. That job did
+# not go through synth-containers HTTP, /rollouts/prepare, or stream.subscribed.
+#
+# Use:
+#   bash temp/run.sh              # Luna medium (default)
+#   bash temp/run.sh --scripted   # ScriptedReAct fixture
+#
+# See temp/README.md.
+schema_version = "retired.evals.nonproduct.craftax.run.v2"
+retired = true
+use = "bash temp/run.sh"

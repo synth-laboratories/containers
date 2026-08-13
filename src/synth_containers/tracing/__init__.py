@@ -125,6 +125,7 @@ from .models import (
     ProducerRefV1,
     ParticipantState,
     ProjectionManifestV1,
+    RolloutInspectorProjectionV1,
     ReceiptV1,
     RewardAggregationV1,
     RewardDefinitionV1,
@@ -163,13 +164,30 @@ from .models import (
     resolve_selector,
     selector_for,
 )
-from .projections import load_bundle, project_v4, select_evidence_head, summarize
+from .projections import (
+    load_bundle,
+    project_v4,
+    rollout_inspector_from_sealed,
+    select_evidence_head,
+    summarize,
+)
 from .projections import PROJECTIONS, event_history, logprobs, memory, training, transcript
 from .interchange import (
     catalog_projection,
     load_bundle_manifest,
     load_evidence_bundle,
     load_trace_document,
+)
+from .inspection import (
+    ROLLOUT_INSPECTOR_PROJECTION_FORMAT,
+    TRACE_INSPECTION_SCHEMA_VERSION,
+    InspectedAssetV1,
+    InspectedProjectionV1,
+    InspectedTraceV1,
+    TraceInspectionIssueV1,
+    TraceInspectionV1,
+    TraceInspectionValidationV1,
+    inspect_trace_input,
 )
 from .negotiation import SUPPORTED_TRACE_FORMATS, negotiate_trace
 from .evidence_ops import attach, attach_many, evaluate, new_evidence_bundle
@@ -195,7 +213,9 @@ from .validation import (
 __all__ = [
     "CANONICAL_JSON_PROFILE",
     "PROJECTIONS",
+    "ROLLOUT_INSPECTOR_PROJECTION_FORMAT",
     "SUPPORTED_TRACE_FORMATS",
+    "TRACE_INSPECTION_SCHEMA_VERSION",
     "DIGEST_ALGORITHM",
     "TRACE_SCHEMA_VERSION",
     "COORDINATION_SCHEMA_VERSION",
@@ -258,6 +278,9 @@ __all__ = [
     "InteractionEdgeV1",
     "InteractionKind",
     "InteractionStatus",
+    "InspectedAssetV1",
+    "InspectedProjectionV1",
+    "InspectedTraceV1",
     "Interception",
     "JudgmentAdjudicationV1",
     "JudgmentStatus",
@@ -275,6 +298,7 @@ __all__ = [
     "ProducerRefV1",
     "ParticipantState",
     "ProjectionManifestV1",
+    "RolloutInspectorProjectionV1",
     "RawCaptureEnvelopeV1",
     "RawRecordType",
     "RawSpool",
@@ -305,6 +329,9 @@ __all__ = [
     "TraceEvidenceBundleV5",
     "TraceFinalizer",
     "TraceIdentityV5",
+    "TraceInspectionIssueV1",
+    "TraceInspectionV1",
+    "TraceInspectionValidationV1",
     "TraceKind",
     "TraceProvenanceV5",
     "TraceRefV5",
@@ -343,6 +370,7 @@ __all__ = [
     "import_legacy",
     "import_atif",
     "inspect_atif_import",
+    "inspect_trace_input",
     "load_bundle",
     "logprobs",
     "memory",
@@ -350,6 +378,7 @@ __all__ = [
     "negotiate_trace",
     "new_evidence_bundle",
     "project_v4",
+    "rollout_inspector_from_sealed",
     "replicate_objects",
     "readable_json",
     "rebuild_catalog",

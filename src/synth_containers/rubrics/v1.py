@@ -11,11 +11,16 @@ RUBRIC_SCHEMA_VERSION_NAME = "synth_rubric_v1"
 VERIFIER_RESULT_SCHEMA_VERSION_NAME = "synth_verifier_result_v1"
 
 
-def _clamp_score(value: Any, *, default: float = 0.0) -> float:
+def _clamp_score(value: Any) -> float | None:
+    """Clamp a present score into [0, 1]. Missing/invalid stays missing — never 0.0."""
+    if value is None or value == "":
+        return None
     try:
         score = float(value)
     except (TypeError, ValueError):
-        score = float(default)
+        return None
+    if score != score:  # NaN
+        return None
     return max(0.0, min(1.0, score))
 
 
@@ -85,8 +90,8 @@ class TraceEvidenceRefV1(JsonDataclassMixin):
 @dataclass(slots=True, frozen=True)
 class CriterionVerdictV1(JsonDataclassMixin):
     criterion_id: str
-    score: float
-    passed: bool
+    score: float | None
+    passed: bool | None
     rationale: str = ""
     failure_modes: tuple[str, ...] = ()
     evidence_refs: tuple[TraceEvidenceRefV1, ...] = ()
@@ -97,8 +102,8 @@ class CriterionVerdictV1(JsonDataclassMixin):
 @dataclass(slots=True, frozen=True)
 class VerifierResultV1(JsonDataclassMixin):
     rubric_id: str
-    score: float
-    passed: bool
+    score: float | None
+    passed: bool | None
     verdict: str
     rationale: str = ""
     failure_modes: tuple[str, ...] = ()
@@ -175,7 +180,7 @@ def openenv_react_base_v1() -> RubricDefinitionV1:
 def aggregate_criterion_score(
     rubric: RubricDefinitionV1,
     criterion_verdicts: tuple[CriterionVerdictV1, ...] | list[CriterionVerdictV1],
-) -> float:
+) -> float | None:
     verdict_by_id = {item.criterion_id: item for item in criterion_verdicts}
     numerator = 0.0
     denominator = 0.0
@@ -184,10 +189,15 @@ def aggregate_criterion_score(
         if verdict is None:
             continue
         weight = max(0.0, float(criterion.weight))
-        numerator += _clamp_score(verdict.score) * weight
+        if weight <= 0.0:
+            continue
+        clamped = _clamp_score(verdict.score)
+        if clamped is None:
+            return None
+        numerator += clamped * weight
         denominator += weight
     if denominator <= 0.0:
-        return 0.0
+        return None
     return _clamp_score(numerator / denominator)
 
 
@@ -233,6 +243,12 @@ def trace_evidence_ref_from_mapping(payload: Mapping[str, Any]) -> TraceEvidence
 
 def criterion_verdict_from_mapping(payload: Mapping[str, Any], *, pass_threshold: float) -> CriterionVerdictV1:
     score = _clamp_score(payload.get("score"))
+    if payload.get("passed") is not None:
+        passed: bool | None = bool(payload.get("passed"))
+    elif score is not None:
+        passed = score >= float(pass_threshold)
+    else:
+        passed = None
     evidence_payloads = payload.get("evidence_refs")
     if not isinstance(evidence_payloads, list):
         evidence_payloads = []
@@ -240,7 +256,7 @@ def criterion_verdict_from_mapping(payload: Mapping[str, Any], *, pass_threshold
     return CriterionVerdictV1(
         criterion_id=str(payload.get("criterion_id") or payload.get("id") or ""),
         score=score,
-        passed=bool(payload.get("passed")) if payload.get("passed") is not None else score >= float(pass_threshold),
+        passed=passed,
         rationale=str(payload.get("rationale") or payload.get("reasoning") or ""),
         failure_modes=_tuple_of_strings(failure_modes),
         evidence_refs=tuple(
@@ -286,13 +302,26 @@ def verifier_result_from_mapping(
     if not isinstance(evidence_payloads, list):
         evidence_payloads = []
     failure_modes = payload.get("failure_modes")
-    passed = bool(payload.get("passed")) if payload.get("passed") is not None else score >= float(rubric.scale.pass_threshold)
+    if payload.get("passed") is not None:
+        passed: bool | None = bool(payload.get("passed"))
+    elif score is not None:
+        passed = score >= float(rubric.scale.pass_threshold)
+    else:
+        passed = None
+    if payload.get("verdict"):
+        verdict = str(payload.get("verdict"))
+    elif passed is True:
+        verdict = "pass"
+    elif passed is False:
+        verdict = "fail"
+    else:
+        verdict = "absent"
     return VerifierResultV1(
         verifier_id=str(payload.get("verifier_id") or payload.get("id") or ""),
         rubric_id=str(payload.get("rubric_id") or rubric.rubric_id),
         score=score,
         passed=passed,
-        verdict=str(payload.get("verdict") or ("pass" if passed else "fail")),
+        verdict=verdict,
         rationale=str(payload.get("rationale") or payload.get("reasoning") or ""),
         failure_modes=_tuple_of_strings(failure_modes),
         criterion_verdicts=criterion_verdicts,

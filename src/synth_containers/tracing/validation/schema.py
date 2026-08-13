@@ -34,6 +34,7 @@ from ..store.bundle import (
 from ..models.document import TraceDocumentV5
 from ..models.evidence import TraceEvidenceBundleV5
 from ..models.projection import ProjectionManifestV1
+from ..models.rollout_inspector import RolloutInspectorProjectionV1
 from ..models.reconciliation import (
     LiveReconciliationEntryV1,
     LiveReconciliationTargetV1,
@@ -119,6 +120,7 @@ PUBLIC_CONTRACTS: tuple[type, ...] = (
     RewardRecordV1,
     RewardAggregationV1,
     ProjectionManifestV1,
+    RolloutInspectorProjectionV1,
     LiveReconciliationEntryV1,
     LiveReconciliationTargetV1,
     TraceLiveReconciliationReceiptV1,

@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Mapping
 
-from ..canonical import bytes_digest, canonical_bytes, record_id
+from ..canonical import bytes_digest, canonical_bytes
 from ..capture.binding import (
     BindingCaptureV1,
     BindingWorkloadV1,
@@ -39,6 +39,7 @@ from ..models.document import TraceDocumentV5
 from ..models.spans import UsageProvenance, UsageV5
 from ..store.bundle import LocalTraceBundle
 from .codex_jsonl import import_codex_jsonl
+from .craftax import promote_craftax_document
 
 
 IMPORTED_AT = "1970-01-01T00:00:00Z"
@@ -60,7 +61,6 @@ def import_native_to_bundle(
         "codex_stdout_jsonl",
         "react",
         "craftax_react",
-        "gamebench_react",
         "jesterky",
         "jesterky_manifest",
     }
@@ -75,17 +75,24 @@ def import_native_to_bundle(
     stored_source_digest = bundle.blobs.put(safe_source)
     if normalized in {"codex", "codex_jsonl", "codex_stdout_jsonl"}:
         result = _import_codex(safe_source, source_digest=source_digest, bundle=bundle)
-    elif normalized in {"react", "craftax_react", "gamebench_react"}:
+    # The wire shape is Craftax/ReAct. A GameBench task id may be present in
+    # payload content, but the dataset name is not a trace format.
+    elif normalized in {"react", "craftax_react"}:
         payload = _json_object(safe_source)
         result = _import_events(
             payload,
             source_digest=source_digest,
-            source_format="gamebench.react-native-events.v1",
+            source_format="craftax.react-native-events.v1",
             bundle=bundle,
             workload_kind=WorkloadKind.REACT,
             event_adapter=_react_events,
             identity=TraceIdentityV5(
+                run_id=str(payload.get("run_id") or "") or None,
                 correlation_id=str(payload.get("trace_correlation_id") or "") or None,
+            ),
+            document_adapter=lambda document: promote_craftax_document(
+                document,
+                source_digest=source_digest,
             ),
         )
     else:
@@ -262,6 +269,7 @@ def _import_events(
     event_adapter: Any,
     identity: TraceIdentityV5,
     trace_kind: TraceKind | str = TraceKind.AGENT_ROLLOUT,
+    document_adapter: Any = None,
 ) -> dict[str, Any]:
     trace_id = mint_trace_id(kind=f"imported_{workload_kind}", key=source_digest)
     return _assemble_events(
@@ -273,6 +281,7 @@ def _import_events(
         workload_kind=workload_kind,
         identity=identity,
         trace_kind=trace_kind,
+        document_adapter=document_adapter,
     )
 
 
@@ -288,6 +297,7 @@ def _assemble_events(
     trace_kind: TraceKind | str,
     usage: UsageV5 | None = None,
     aliases: tuple[AliasV1, ...] = (),
+    document_adapter: Any = None,
 ) -> dict[str, Any]:
     capture_id = mint_capture_id(trace_id=trace_id, key=source_digest)
     actor_id = mint_actor_id(trace_id=trace_id, name=f"imported-{workload_kind}")
@@ -299,9 +309,7 @@ def _assemble_events(
     policy = CapturePolicyV1(
         profile=f"imported_{workload_kind}",
         raw_capture="source_artifact",
-        token_level=(
-            TokenCaptureLevel.USAGE_ONLY if usage is not None else TokenCaptureLevel.NONE
-        ),
+        token_level=(TokenCaptureLevel.USAGE_ONLY if usage is not None else TokenCaptureLevel.NONE),
         retention_class="local_only",
     )
     binding = mint_binding(
@@ -336,9 +344,7 @@ def _assemble_events(
     for index, item in enumerate(events):
         source_id = str(item.get("source_id") or index)
         caused_by = tuple(
-            envelope_ids[parent]
-            for parent in item.get("caused_by") or ()
-            if parent in envelope_ids
+            envelope_ids[parent] for parent in item.get("caused_by") or () if parent in envelope_ids
         )
         occurred_at = str(item.get("occurred_at") or IMPORTED_AT)
         envelope_id = collector.event(
@@ -406,6 +412,8 @@ def _assemble_events(
     document = sealed.document
     if usage is not None:
         document = replace(document, usage=usage, content_digest="").sealed()
+    if document_adapter is not None:
+        document = document_adapter(document)
     bundle.write_trace(document, binding=binding, segments=sealed.segments)
     bundle.write_receipt("capture-coverage", sealed.coverage)
     bundle.write_receipt(

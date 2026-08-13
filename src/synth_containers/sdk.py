@@ -494,7 +494,7 @@ class Container:
                         "task_info_routes": ["/task_info"],
                         "program_routes": ["/program"],
                         "taskset_routes": ["/taskset", "/taskset/tasks"],
-                        "rollout_routes": ["/rollout", "/rollouts"],
+                        "rollout_routes": ["/rollouts"],
                         "state_routes": ["/rollouts/{rollout_id}/state"],
                     },
                     "metadata": {
@@ -608,7 +608,7 @@ class Container:
         async def taskset_tasks(request: TasksetTasksPayload) -> dict[str, Any]:
             return await taskset_tasks_payload(request.to_payload())
 
-        @app.post("/rollout")
+        @app.post("/rollout", include_in_schema=False)
         @app.post("/rollouts")
         async def rollout(submission: RolloutSubmissionPayload) -> dict[str, Any]:
             payload = submission.to_payload()

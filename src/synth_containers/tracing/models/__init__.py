@@ -69,6 +69,10 @@ from .messages import (
     ReasoningAvailability,
 )
 from .projection import ProjectionLossV1, ProjectionManifestV1
+from .rollout_inspector import (
+    ROLLOUT_INSPECTOR_PROJECTION_SCHEMA_VERSION,
+    RolloutInspectorProjectionV1,
+)
 from .reconciliation import (
     TRACE_LIVE_RECONCILIATION_SCHEMA_VERSION,
     LiveReconciliationDisposition,
@@ -220,6 +224,7 @@ __all__ = [
     "ProducerRefV1",
     "ProjectionLossV1",
     "ProjectionManifestV1",
+    "ROLLOUT_INSPECTOR_PROJECTION_SCHEMA_VERSION",
     "TRACE_LIVE_RECONCILIATION_SCHEMA_VERSION",
     "TRACE_VISUAL_SCHEMA_VERSION",
     "ReasoningAvailability",
@@ -236,6 +241,7 @@ __all__ = [
     "RewardSourceKind",
     "RubricAggregationV1",
     "RubricDefinitionV2",
+    "RolloutInspectorProjectionV1",
     "SelectorKind",
     "SelectorResolutionV1",
     "SessionCoverageV5",

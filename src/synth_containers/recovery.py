@@ -59,6 +59,18 @@ class RunRecoveryProjection(JsonDataclassMixin):
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+def _optional_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number != number:
+        return None
+    return number
+
+
 def derive_run_recovery_projection(
     *,
     run_id: str,
@@ -72,14 +84,19 @@ def derive_run_recovery_projection(
     checkpoint_rows = [dict(item) for item in list(checkpoints or []) if isinstance(item, dict)]
     failures = list(transform_failures or [])
     eligible_checkpoints = [row for row in checkpoint_rows if bool(row.get("resume_eligible") or row.get("restore_eligible"))]
-    eligible_checkpoints.sort(
-        key=lambda row: (
-            float(row.get("reward") or 0.0),
-            float(row.get("frontier_score") or 0.0),
+
+    def _checkpoint_sort_key(row: dict[str, Any]) -> tuple[bool, float, bool, float, str]:
+        reward = _optional_float(row.get("reward"))
+        frontier = _optional_float(row.get("frontier_score"))
+        return (
+            reward is not None,
+            reward if reward is not None else float("-inf"),
+            frontier is not None,
+            frontier if frontier is not None else float("-inf"),
             str(row.get("checkpoint_id") or ""),
-        ),
-        reverse=True,
-    )
+        )
+
+    eligible_checkpoints.sort(key=_checkpoint_sort_key, reverse=True)
     best_checkpoint = eligible_checkpoints[0] if eligible_checkpoints else None
     best_checkpoint_restore_semantics = str(
         (best_checkpoint or {}).get("restore_semantics")
@@ -143,7 +160,7 @@ def derive_run_recovery_projection(
         RecoveryPoint(
             checkpoint_id=str(best_checkpoint.get("checkpoint_id") or ""),
             rollout_id=str(best_checkpoint.get("rollout_id") or ""),
-            reward=float(best_checkpoint.get("reward") or 0.0) if best_checkpoint is not None else None,
+            reward=_optional_float(best_checkpoint.get("reward")) if best_checkpoint is not None else None,
             restore_semantics=str(
                 best_checkpoint.get("restore_semantics")
                 or best_checkpoint.get("checkpoint_semantics")

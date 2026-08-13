@@ -474,8 +474,14 @@ class LocalTraceBundle:
         *,
         max_entries: int = 100_000,
         max_expanded_bytes: int = 8 * 1024 * 1024 * 1024,
+        require_self_contained: bool = True,
     ) -> "LocalTraceBundle":
-        """Safely import and verify a bundle ZIP before publishing its directory."""
+        """Safely extract a bundle ZIP before publishing its directory.
+
+        Normal imports require a self-contained verified bundle.  Read-only
+        inspection may set ``require_self_contained=False`` to classify partial
+        bundles after the same path, collision, symlink, and expansion checks.
+        """
 
         source = Path(source)
         target = Path(target)
@@ -519,9 +525,10 @@ class LocalTraceBundle:
                     with archive.open(info, "r") as incoming, destination.open("xb") as outgoing:
                         shutil.copyfileobj(incoming, outgoing)
             imported = cls(staging)
-            ok, failures = imported.verify_self_contained()
-            if not ok:
-                raise ValueError(f"imported bundle failed verification: {failures}")
+            if require_self_contained:
+                ok, failures = imported.verify_self_contained()
+                if not ok:
+                    raise ValueError(f"imported bundle failed verification: {failures}")
             os.replace(staging, target)
             published = True
             return cls(target)

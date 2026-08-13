@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://synth-laboratories.com/schemas/trace-stream/envelope.schema.json",
+  "title": "synth.trace-stream-event.v1",
+  "type": "object",
+  "required": ["schema", "kind", "ts", "control", "payload", "digest", "event_id"],
+  "properties": {
+    "schema": { "const": "synth.trace-stream-event.v1" },
+    "kind": { "type": "string", "minLength": 1 },
+    "ts": { "type": "string", "minLength": 1 },
+    "control": { "type": "boolean" },
+    "payload": { "type": "object" },
+    "digest": { "type": "string", "minLength": 1 },
+    "event_id": { "type": "string", "minLength": 1 },
+    "sequence": { "type": ["integer", "null"] }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "control": { "const": true } } },
+      "then": {
+        "properties": { "sequence": { "type": "null" } }
+      }
+    },
+    {
+      "if": { "properties": { "control": { "const": false } } },
+      "then": {
+        "required": ["sequence"],
+        "properties": { "sequence": { "type": "integer", "minimum": 1 } }
+      }
+    }
+  ],
+  "additionalProperties": true
+}

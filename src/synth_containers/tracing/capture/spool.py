@@ -25,7 +25,7 @@ from typing import Any, Iterator
 from synth_containers.serde import JsonDataclassMixin
 
 from ..canonical import bytes_digest, canonical_text, content_digest, short_digest, utc_now
-from .envelope import RawCaptureEnvelopeV1, validate_envelope_payload
+from .envelope import RawCaptureEnvelopeV1, RawRecordType, validate_envelope_payload
 from .redaction import assert_no_secrets
 
 
@@ -227,6 +227,37 @@ class RawSpool:
             self._closed_manifest = self._publish_manifest(closed=True)
             self._changed.notify_all()
             return self._closed_manifest
+
+    def reopen_for_resume(self) -> LiveManifestV1:
+        """Reopen a verified nonterminal spool after an orderly process stop.
+
+        ``close()`` seals storage so shutdown cannot leave a partial segment. It
+        is not, by itself, trace lifecycle authority: only a durable
+        ``capture.finished`` record makes the capture terminal. Resuming writes
+        therefore publishes a new immutable live-manifest generation with
+        ``closed=false`` before the in-process append gate is reopened.
+        """
+
+        with self._lock:
+            if self._closed_manifest is None:
+                if self._latest_manifest is None:
+                    raise RuntimeError("cannot resume a capture spool without a manifest")
+                return self._latest_manifest
+            if self._open_handle is not None or self._open_records or self._open_path is not None:
+                raise RuntimeError("cannot resume a closed spool with an open segment")
+            if any(
+                str(record.get("record_type") or "")
+                == str(RawRecordType.CAPTURE_FINISHED)
+                for record in self.records()
+            ):
+                raise RuntimeError("terminal capture authority cannot be reopened")
+
+            # Persist the reopen before allowing append. If publication fails,
+            # _closed_manifest remains set and writers continue to fail closed.
+            manifest = self._publish_manifest(closed=False)
+            self._closed_manifest = None
+            self._changed.notify_all()
+            return manifest
 
     def freeze_existing(self) -> LiveManifestV1:
         """Publish terminal state for a resumed capture with no open segment."""

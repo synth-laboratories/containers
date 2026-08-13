@@ -148,7 +148,7 @@ class HTTPContainerClient:
     async def rollout(self, payload: dict[str, Any]) -> dict[str, Any]:
         body = dict(payload)
         body.setdefault("submission_mode", "sync")
-        return await self._post("/rollout", body)
+        return await self._post("/rollouts", body)
 
     async def rollouts(self, payload: dict[str, Any]) -> dict[str, Any]:
         body = dict(payload)

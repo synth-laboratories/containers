@@ -102,7 +102,14 @@ class CollectorServer:
         if self._stopped:
             return
         self._stopped = True
-        self.collector.session.spool.wake_readers()
+        # CollectorServer is also used with small protocol fakes in tests and
+        # adapters. Wake live spool readers when the concrete collector exposes
+        # them, without making shutdown depend on that implementation detail.
+        session = getattr(self.collector, "session", None)
+        spool = getattr(session, "spool", None)
+        wake_readers = getattr(spool, "wake_readers", None)
+        if callable(wake_readers):
+            wake_readers()
         # BaseServer.shutdown deadlocks when serve_forever was never started.
         if self._started:
             self._server.shutdown()

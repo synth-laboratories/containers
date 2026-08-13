@@ -234,6 +234,38 @@ def test_annotations_route_default_derivation() -> None:
     assert any(row["kind"] == "outcome" for row in payload["annotations"])
 
 
+def test_rollout_telemetry_advertises_and_streams_sse() -> None:
+    client = TestClient(create_reference_app(ReferenceManagedRuntime.counter_default(target=1)))
+    submitted = client.post("/rollouts", json={
+        "submission_mode": "sync",
+        "env": {"config": {"actions": ["increment", "stop"]}},
+        "telemetry": {"enabled": True, "transport": "sse", "poll_interval_ms": 100},
+    })
+    assert submitted.status_code == 200
+    stream = submitted.json()["stream"]
+    assert stream["schema"] == "synth.rollout.stream.v1"
+    with client.stream("GET", stream["transports"]["sse"]["url"]) as response:
+        body = "".join(response.iter_text())
+    assert response.status_code == 200
+    assert "event: eval.run.terminal" in body
+    assert "synth.trace-stream-event.v1" in body
+
+
+def test_rollout_telemetry_websocket_uses_same_event_schema() -> None:
+    client = TestClient(create_reference_app(ReferenceManagedRuntime.counter_default(target=1)))
+    submitted = client.post("/rollouts", json={
+        "submission_mode": "sync",
+        "env": {"config": {"actions": ["increment", "stop"]}},
+        "telemetry": {"enabled": True, "transport": "websocket", "poll_interval_ms": 100},
+    })
+    with client.websocket_connect(submitted.json()["stream"]["transports"]["websocket"]["url"]) as socket:
+        event = socket.receive_json()
+        while event.get("kind") != "eval.run.terminal":
+            event = socket.receive_json()
+    assert event["schema"] == "synth.trace-stream-event.v1"
+    assert event["kind"] == "eval.run.terminal"
+
+
 def test_annotations_route_custom_runtime_override() -> None:
     class CustomRuntime(ReferenceManagedRuntime):
         async def get_rollout_annotations(self, rollout_id: str) -> Any:

@@ -10,6 +10,7 @@ from .inspector import (
 from .v4 import project_v4, v4_payload
 from .derived import PROJECTIONS, event_history, logprobs, memory, training, transcript
 from .reconciliation import build_live_reconciliation
+from .rollout_inspector import rollout_inspector_from_sealed
 from .visual import visual_from_raw, visual_from_sealed
 
 __all__ = [
@@ -22,6 +23,7 @@ __all__ = [
     "memory",
     "project_v4",
     "render",
+    "rollout_inspector_from_sealed",
     "select_evidence_head",
     "summarize",
     "training",

@@ -23,19 +23,21 @@ from .projections.inspector import load_bundle, summarize
 from .projections.v4 import project_v4
 from .projections.derived import PROJECTIONS
 from .projections.visual import visual_from_sealed
+from .projections.rollout_inspector import rollout_inspector_from_sealed
 from .adapters.atif import export_atif
 from .models.projection import (
     ProjectionLossV1,
     ProjectionManifestV1,
     bind_projection_manifest,
 )
+from .models.rollout_inspector import ROLLOUT_INSPECTOR_PROJECTION_SCHEMA_VERSION
 from .store.bundle import LocalTraceBundle, rebuild_catalog
 from .validation.schema import all_schemas
 from .validation.validator import validate
 from .adapters.legacy import import_legacy
 from .adapters.native import import_native_to_bundle, write_imported_document
-from .canonical import bytes_digest
 from .native_evaluation import attach_native_evaluation
+from .inspection import inspect_trace_input
 from .capture.binding import (
     CaptureMode,
     Interception,
@@ -54,6 +56,17 @@ def main(argv: list[str] | None = None) -> int:
     inspect = subparsers.add_parser("inspect", help="summarize every trace in a bundle")
     inspect.add_argument("bundle", type=Path)
 
+    inspect_input = subparsers.add_parser(
+        "inspect-input",
+        help="emit the stable storage inspection contract for a bundle, ZIP, or sealed trace",
+    )
+    inspect_input.add_argument("source", type=Path)
+    inspect_input.add_argument(
+        "--archive-output",
+        type=Path,
+        help="write a deterministic ZIP only when the inspected bundle is trusted",
+    )
+
     validate_parser = subparsers.add_parser("validate", help="run invariants over a bundle")
     validate_parser.add_argument("bundle", type=Path)
 
@@ -66,6 +79,7 @@ def main(argv: list[str] | None = None) -> int:
             "v4",
             "atif",
             "visual",
+            "rollout-inspector",
             "transcript",
             "memory",
             "training",
@@ -250,6 +264,14 @@ def main(argv: list[str] | None = None) -> int:
         print(readable_json(result.receipt), file=sys.stderr)
         return result.exit_code
 
+    if args.command == "inspect-input":
+        result = inspect_trace_input(
+            args.source,
+            archive_output=args.archive_output,
+        )
+        print(readable_json(result))
+        return 0 if result.compatibility in {"native", "legacy_native", "opaque"} else 1
+
     if args.command == "inspect":
         print(readable_json([summarize(item) for item in load_bundle(args.bundle)]))
         return 0
@@ -278,18 +300,20 @@ def main(argv: list[str] | None = None) -> int:
                 kind = "v4"
             else:
                 kind = args.format
-                payload = (
-                    export_atif(inspected.trace)
-                    if kind == "atif"
-                    else (
-                        visual_from_sealed(
-                            inspected.trace,
-                            inspected.evidence,
-                        ).to_dict()
-                        if kind == "visual"
-                        else PROJECTIONS[kind](inspected.trace)
-                    )
-                )
+                if kind == "atif":
+                    payload = export_atif(inspected.trace)
+                elif kind == "visual":
+                    payload = visual_from_sealed(
+                        inspected.trace,
+                        inspected.evidence,
+                    ).to_dict()
+                elif kind == "rollout-inspector":
+                    payload = rollout_inspector_from_sealed(
+                        inspected.trace,
+                        inspected.evidence,
+                    ).to_dict()
+                else:
+                    payload = PROJECTIONS[kind](inspected.trace)
                 losses = tuple(
                     ProjectionLossV1(field_path="*", reason=str(item), record_count=0)
                     for item in payload.get("losses")
@@ -303,7 +327,11 @@ def main(argv: list[str] | None = None) -> int:
                         scope=(inspected.trace.trace_id,),
                         key=inspected.trace.content_digest,
                     ),
-                    format=kind,
+                    format=(
+                        ROLLOUT_INSPECTOR_PROJECTION_SCHEMA_VERSION
+                        if kind == "rollout-inspector"
+                        else kind
+                    ),
                     source_trace_id=inspected.trace.trace_id,
                     source_trace_digest=inspected.trace.content_digest,
                     producer="synth_containers.tracing.cli",
@@ -378,7 +406,6 @@ def main(argv: list[str] | None = None) -> int:
                 "codex_stdout_jsonl",
                 "react",
                 "craftax_react",
-                "gamebench_react",
                 "jesterky",
                 "jesterky_manifest",
             }:

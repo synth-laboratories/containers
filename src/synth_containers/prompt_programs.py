@@ -58,5 +58,5 @@ def gepa_optimizer_contract() -> dict[str, str]:
         "program_route": "/program",
         "taskset_route": "/taskset",
         "taskset_tasks_route": "/taskset/tasks",
-        "rollout_route": "/rollout",
+        "rollout_route": "/rollouts",
     }

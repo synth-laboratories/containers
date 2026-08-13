@@ -67,7 +67,7 @@ class RouteHints(JsonDataclassMixin):
     compatibility_routes: list[str] = field(default_factory=lambda: ["/compatibility"])
     program_routes: list[str] = field(default_factory=lambda: ["/program"])
     taskset_routes: list[str] = field(default_factory=lambda: ["/taskset", "/taskset/tasks"])
-    rollout_routes: list[str] = field(default_factory=lambda: ["/rollout", "/rollouts"])
+    rollout_routes: list[str] = field(default_factory=lambda: ["/rollouts"])
     state_routes: list[str] = field(default_factory=lambda: ["/rollouts/{rollout_id}/state"])
     pause_routes: list[str] = field(default_factory=lambda: ["/rollouts/{rollout_id}/pause"])
     terminate_routes: list[str] = field(

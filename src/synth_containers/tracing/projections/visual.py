@@ -83,11 +83,7 @@ def visual_from_raw(
             "visible_item_count": len(items),
             "lane_count": len(lanes),
         },
-        losses=(
-            (f"visibility_filtered:{omitted}",)
-            if omitted
-            else ()
-        ),
+        losses=((f"visibility_filtered:{omitted}",) if omitted else ()),
     ).sealed()
 
 
@@ -102,6 +98,13 @@ def visual_from_sealed(
     if not document.content_digest:
         raise ValueError("sealed visual projection requires a sealed trace")
     actor_by_id = {item.actor_id: item for item in document.actors}
+    active_session_ids = {
+        *(item.session_id for item in document.events),
+        *(item.session_id for item in document.spans),
+        *(item.session_id for item in document.messages),
+    }
+    if not active_session_ids:
+        active_session_ids = {item.session_id for item in document.sessions}
     lanes = tuple(
         TraceVisualLaneV1(
             lane_id=_lane_id(session.actor_id, session.session_id),
@@ -117,11 +120,7 @@ def visual_from_sealed(
                 if session.actor_id in actor_by_id
                 else "unknown"
             ),
-            role=(
-                actor_by_id[session.actor_id].role
-                if session.actor_id in actor_by_id
-                else ""
-            ),
+            role=(actor_by_id[session.actor_id].role if session.actor_id in actor_by_id else ""),
             parent_actor_id=(
                 actor_by_id[session.actor_id].parent_actor_id
                 if session.actor_id in actor_by_id
@@ -138,6 +137,7 @@ def visual_from_sealed(
             },
         )
         for session in document.sessions
+        if session.session_id in active_session_ids
         if _visible(
             str(actor_by_id[session.actor_id].visibility)
             if session.actor_id in actor_by_id
@@ -183,8 +183,7 @@ def visual_from_sealed(
             (
                 item.order.chronological_sequence
                 for item in document.events
-                if item.span_id == span.span_id
-                and item.order.chronological_sequence is not None
+                if item.span_id == span.span_id and item.order.chronological_sequence is not None
             ),
             default=None,
         )
@@ -207,10 +206,12 @@ def visual_from_sealed(
                 source_digest=span.content_digest,
                 visibility=visibility,
                 detail={
+                    **span.detail,
                     "ended_at": span.ended_at,
                     "input_message_ids": list(span.input_message_ids),
                     "output_message_ids": list(span.output_message_ids),
                     "artifact_ids": list(span.artifact_ids),
+                    "usage": span.usage.to_dict() if span.usage is not None else None,
                 },
             )
         )
@@ -228,6 +229,17 @@ def visual_from_sealed(
         )
     )
     omitted_actor_count = len(document.sessions) - len(lanes)
+    summary: dict[str, Any] = {
+        "actor_count": len(document.actors),
+        "session_count": len(document.sessions),
+        "event_count": len(document.events),
+        "span_count": len(document.spans),
+        "artifact_count": len(document.artifacts),
+        "visual_item_count": len(items),
+    }
+    craftax = document.extensions.get("craftax")
+    if isinstance(craftax, dict):
+        summary["craftax"] = craftax
     return TraceVisualProjectionV1(
         capture_id=document.capture.capture_id,
         trace_id=document.trace_id,
@@ -240,18 +252,9 @@ def visual_from_sealed(
         items=tuple(items),
         visibility_ceiling=visibility_ceiling,
         usage=document.usage.to_dict(),
-        summary={
-            "actor_count": len(document.actors),
-            "session_count": len(document.sessions),
-            "event_count": len(document.events),
-            "span_count": len(document.spans),
-            "artifact_count": len(document.artifacts),
-            "visual_item_count": len(items),
-        },
+        summary=summary,
         losses=(
-            (f"visibility_filtered_sessions:{omitted_actor_count}",)
-            if omitted_actor_count
-            else ()
+            (f"visibility_filtered_sessions:{omitted_actor_count}",) if omitted_actor_count else ()
         ),
     ).sealed()
 
@@ -342,15 +345,9 @@ def _append_coordination_items(
                     status=str(turn.status),
                     detail={
                         "environment_actor_id": turn.environment_actor_id,
-                        "participants": [
-                            item.to_dict() for item in turn.participants
-                        ],
-                        "shared_transition_event_ids": list(
-                            turn.shared_transition_event_ids
-                        ),
-                        "shared_reward_event_ids": list(
-                            turn.shared_reward_event_ids
-                        ),
+                        "participants": [item.to_dict() for item in turn.participants],
+                        "shared_transition_event_ids": list(turn.shared_transition_event_ids),
+                        "shared_reward_event_ids": list(turn.shared_reward_event_ids),
                     },
                 )
             )
@@ -383,9 +380,8 @@ def _append_evidence_items(
         for judgment in result.judgments:
             items.append(
                 _evidence_item(
-                    item_id=judgment.judgment_id or (
-                        f"{result.verifier_result_id}:{judgment.criterion_id}"
-                    ),
+                    item_id=judgment.judgment_id
+                    or (f"{result.verifier_result_id}:{judgment.criterion_id}"),
                     kind="evidence.judgment",
                     occurred_at=judgment.produced_at or result.produced_at,
                     title=judgment.verdict,
@@ -470,9 +466,7 @@ def _append_evidence_items(
             )
         )
     items[start:] = [
-        item
-        for item in items[start:]
-        if _visible(item.visibility, visibility_ceiling)
+        item for item in items[start:] if _visible(item.visibility, visibility_ceiling)
     ]
 
 
@@ -500,11 +494,7 @@ def _sealed_item(
         sequence=sequence,
         actor_id=actor_id,
         session_id=session_id,
-        lane_id=(
-            _lane_id(actor_id, session_id)
-            if actor_id and session_id
-            else None
-        ),
+        lane_id=(_lane_id(actor_id, session_id) if actor_id and session_id else None),
         status=status,
         source_selector=selector_for(
             document,

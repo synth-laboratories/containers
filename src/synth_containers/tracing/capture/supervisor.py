@@ -225,18 +225,21 @@ class CaptureSupervisor:
             capture_id=capture_id,
             max_segment_records=self.binding.policy.max_segment_records,
         )
-        self.session = CaptureSession(
-            binding=self.binding,
-            spool=self.spool,
-            blobs=self.bundle.blobs,
-        )
+        existing_records = tuple(self.spool.records())
         self._terminal_resume_candidate = bool(
             config.resume
             and any(
                 str(record.get("record_type") or "")
                 == str(RawRecordType.CAPTURE_FINISHED)
-                for record in self.spool.records()
+                for record in existing_records
             )
+        )
+        if config.resume and not self._terminal_resume_candidate and self.spool.closed:
+            self.spool.reopen_for_resume()
+        self.session = CaptureSession(
+            binding=self.binding,
+            spool=self.spool,
+            blobs=self.bundle.blobs,
         )
         if (
             not self._terminal_resume_candidate

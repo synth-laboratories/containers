@@ -169,6 +169,80 @@ def test_capture_session_concurrent_append_allocates_contiguous_ordinals(
     assert {record["payload"]["index"] for record in records} == set(range(64))
 
 
+def test_closed_nonterminal_spool_reopens_with_new_manifest_generation(
+    tmp_path: Path,
+) -> None:
+    first = _session(tmp_path, capture_id="capture_resume_storage_close")
+    before = first.append(
+        RawRecordType.APPLICATION_EVENT,
+        payload={"phase": "before"},
+    )
+    closed = first.spool.close()
+    resumed_spool = RawSpool(
+        first.spool.root,
+        capture_id=first.binding.capture_id,
+        max_segment_records=128,
+    )
+
+    assert resumed_spool.closed is True
+    reopened = resumed_spool.reopen_for_resume()
+    assert reopened.generation == closed.generation + 1
+    assert reopened.metadata["closed"] is False
+    assert resumed_spool.closed is False
+
+    resumed = CaptureSession(
+        binding=first.binding,
+        spool=resumed_spool,
+        blobs=first.blobs,
+    )
+    after = resumed.append(
+        RawRecordType.APPLICATION_EVENT,
+        payload={"phase": "after"},
+    )
+    resumed.close()
+    assert after.ordinal == before.ordinal + 1
+    assert [record["payload"]["phase"] for record in resumed_spool.records()] == [
+        "before",
+        "after",
+    ]
+
+
+def test_terminal_spool_and_failed_reopen_remain_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    terminal = _session(tmp_path / "terminal", capture_id="capture_terminal_closed")
+    terminal.append(RawRecordType.CAPTURE_FINISHED, payload={"terminal": True})
+    terminal.spool.close()
+    terminal_spool = RawSpool(
+        terminal.spool.root,
+        capture_id=terminal.binding.capture_id,
+    )
+    with pytest.raises(RuntimeError, match="terminal capture authority"):
+        terminal_spool.reopen_for_resume()
+    assert terminal_spool.closed is True
+
+    nonterminal = _session(
+        tmp_path / "publish-failure",
+        capture_id="capture_reopen_publish_failure",
+    )
+    nonterminal.append(RawRecordType.APPLICATION_EVENT, payload={"safe": True})
+    nonterminal.spool.close()
+    nonterminal_spool = RawSpool(
+        nonterminal.spool.root,
+        capture_id=nonterminal.binding.capture_id,
+    )
+
+    def fail_publish(*, closed: bool = False):
+        del closed
+        raise OSError("manifest publication failed")
+
+    monkeypatch.setattr(nonterminal_spool, "_publish_manifest", fail_publish)
+    with pytest.raises(OSError, match="manifest publication failed"):
+        nonterminal_spool.reopen_for_resume()
+    assert nonterminal_spool.closed is True
+
+
 def test_shared_http_websocket_stats_increment_atomically() -> None:
     stats = ProxyStats()
 

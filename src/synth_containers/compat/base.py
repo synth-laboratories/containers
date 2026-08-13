@@ -82,11 +82,11 @@ def _first_numeric(values: list[Any]) -> float | None:
     return None
 
 
-def _extract_reward(payload: Mapping[str, Any]) -> float:
+def _extract_reward(payload: Mapping[str, Any]) -> float | None:
     reward_info = _as_dict(payload.get("reward_info"))
     metrics = _as_dict(payload.get("metrics"))
     summary = _as_dict(payload.get("summary"))
-    value = _first_numeric(
+    return _first_numeric(
         [
             payload.get("score"),
             payload.get("reward"),
@@ -98,7 +98,6 @@ def _extract_reward(payload: Mapping[str, Any]) -> float:
             summary.get("total_reward"),
         ]
     )
-    return float(value or 0.0)
 
 
 def _artifact_descriptors(
