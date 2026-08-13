@@ -217,6 +217,8 @@ def create_compat_app(
             req.telemetry.retention if req.telemetry.retention is not None else spec.retention
         )
         if rollout_id in platform.logs:
+            if platform.logs[rollout_id].closed:
+                raise HTTPException(status_code=409, detail=f"event_log_sealed:{rollout_id}")
             bound_transport, bound_retention = platform.stream_bindings.get(
                 rollout_id, (req.telemetry.transport, retention)
             )
