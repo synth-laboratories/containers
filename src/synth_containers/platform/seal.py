@@ -44,3 +44,22 @@ def seal_rollout_log(log: RolloutEventLog, *, pin: dict[str, Any] | None = None)
     }
     sealed = {**body, "content_digest": _digest(body)}
     return sealed
+
+
+def validate_rollout_seal(seal: dict[str, Any]) -> None:
+    """Fail closed unless a persisted lite Trace V5 seal is self-consistent."""
+    if seal.get("schema_version") != SCHEMA:
+        raise ValueError("trace_seal_schema_mismatch")
+    supplied = seal.get("content_digest")
+    body = {key: value for key, value in seal.items() if key != "content_digest"}
+    if supplied != _digest(body):
+        raise ValueError("trace_seal_digest_mismatch")
+    events = seal.get("events")
+    high_water = seal.get("high_water")
+    if not isinstance(events, list) or isinstance(high_water, bool) or not isinstance(high_water, int):
+        raise ValueError("trace_seal_shape_invalid")
+    sequences = [((row.get("order") or {}).get("chronological_sequence")) for row in events]
+    if sequences != list(range(1, high_water + 1)):
+        raise ValueError("trace_seal_sequence_mismatch")
+    if seal.get("closed") is not True or seal.get("capture.closed") is not True:
+        raise ValueError("trace_seal_not_closed")
