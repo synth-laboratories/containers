@@ -53,6 +53,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="synth-trace", description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    subparsers.add_parser("version", help="print the installed synth-containers version")
+
     inspect = subparsers.add_parser("inspect", help="summarize every trace in a bundle")
     inspect.add_argument("bundle", type=Path)
 
@@ -220,6 +222,10 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("child_command", nargs=argparse.REMAINDER)
 
     args = parser.parse_args(argv)
+
+    if args.command == "version":
+        print(version("synth-containers"))
+        return 0
 
     if args.command == "run":
         child_command = tuple(args.child_command)

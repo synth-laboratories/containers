@@ -22,37 +22,25 @@ pip install synth-containers
 uv add synth-containers
 ```
 
-Latest daily dev build:
+## Local Synth development
+
+Register the current checkout once after changing Containers or its package version:
 
 ```bash
-pip install --pre synth-containers==0.2.0.dev202605312141
-uv add --prerelease allow synth-containers==0.2.0.dev202605312141
+./scripts/register-local-dev-build.sh
 ```
 
-## Local Better SDK Dev
+The command builds a wheel, installs it into an immutable machine-local directory,
+verifies the installed version, and atomically selects it for local Workshop builds.
+No launch flags or environment variables are required. Re-running it reuses an
+identical registered wheel.
 
-This branch pair expects:
-
-- `containers`: package `synth-containers==0.2.0.dev202605312141`
-- `optimizers`: package `synth-optimizers==0.2.0.dev202605312141`
-
-Install both editable checkouts with `uv` (sibling repos under your workspace):
+Sibling Optimizers development remains editable through its checked-in uv source:
 
 ```bash
-cd optimizers
+cd ../optimizers
 uv sync --group dev
-uv pip install -e ../containers
-uv pip install -e .
 ```
-
-Verify import paths and versions:
-
-```bash
-uv run python -c "import importlib.metadata as m, synth_containers, synth_optimizers; print(synth_containers.__file__); print(m.version('synth-containers')); print(synth_optimizers.__version__)"
-```
-
-The SDK validation examples (Banking77, TBLite, Crafter, MiniGrid) live in local
-`optimizers/dev_examples/` (gitignored — not shipped in the repo).
 
 ## The contract
 

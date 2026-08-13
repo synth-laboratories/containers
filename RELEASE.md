@@ -14,6 +14,17 @@ uv build
 uv run --group dev twine check dist/*
 ```
 
+## Register a local development build
+
+```bash
+./scripts/register-local-dev-build.sh
+```
+
+This no-argument command registers an immutable, versioned wheel under
+`~/.synth-desktop/dev-builds/synth-containers/`. Workshop resolves its exact
+checked-in version from that registry, so local app launches need no flags or
+environment variables.
+
 For cookbook-facing releases, also compile the touched cookbook entrypoints
 from the repository root:
 
