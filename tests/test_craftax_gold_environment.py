@@ -359,6 +359,8 @@ def test_craftax_goex_captures_and_forks_true_environment_and_policy_state(
     assert parent.status_code == 200, parent.text
     checkpoints = parent.json()["scheduled_checkpoints"]
     assert checkpoints
+    assert checkpoints[0]["step"] == 0
+    assert checkpoints[0]["policy_llm_call_index"] == 0
     checkpoint = next(item for item in checkpoints if item["branchable"] is True)
     assert checkpoint["restore_eligible"] is True
     assert checkpoint["branchable"] is True
@@ -414,7 +416,7 @@ def test_craftax_goex_captures_and_forks_true_environment_and_policy_state(
     recovered = reopened.state.platform.checkpoints[checkpoint["checkpoint_id"]]
     assert recovered["content_digest"]
     assert recovered["environment_blob"]
-    assert recovered["policy_state"]["calls"] >= 1
+    assert recovered["policy_state"]["calls"] == checkpoint["policy_llm_call_index"]
 
 
 def test_engine_fixture_artifacts_are_not_claimed_as_png(tmp_path) -> None:
