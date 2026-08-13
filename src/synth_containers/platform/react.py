@@ -248,9 +248,32 @@ class OpenRouterReAct:
         # sent a `tinker-infer:` checkpoint id to a provider that cannot serve it,
         # and every rollout died on turn 0 with `policy_error` after zero steps.
         # A missing endpoint must say so, not pick one.
-        self.base_url = _required_str(config, "base_url", config_id).rstrip("/")
+        self.provider = _required_choice(
+            config, "provider", config_id, ("openrouter", "tinker")
+        )
         self.api_key_env = _required_str(config, "api_key_env", config_id)
         self.parse_retries = _required_bounded_int(config, "parse_retries", config_id, 0, 2)
+        if self.provider == "openrouter":
+            self.base_url = _required_str(config, "base_url", config_id).rstrip("/")
+            self.sampler_path = ""
+            self.tokenizer_id = ""
+        else:
+            # Tinker samples through its SDK, not an HTTP base_url. The sampler
+            # path names the trained weights; the tokenizer must be the base
+            # model's, or the chat template renders a prompt the student never
+            # saw in training.
+            self.base_url = ""
+            self.sampler_path = _required_str(config, "sampler_path", config_id)
+            self.tokenizer_id = _required_str(config, "tokenizer_id", config_id)
+            if self.observation_mode != "text":
+                raise PolicyConfigError(
+                    f"policy config {config_id!r} sets observation_mode="
+                    f"{self.observation_mode!r}, but the tinker provider renders a "
+                    "text chat template and cannot carry frames; dropping them "
+                    "would evaluate a different policy than the one requested"
+                )
+        self._sampling_client: Any = None
+        self._tokenizer: Any = None
         self.calls = 0
         self._compact_count = 0
         self._deltas_emitted = 0
@@ -598,6 +621,14 @@ class OpenRouterReAct:
             "temperature": 0,
             "max_tokens": 700,
         }
+        if self.provider == "tinker":
+            # A checkpoint trained to emit `{"actions":[...]}` cannot be asked
+            # for prose, and borrowing a second model to summarize would put a
+            # policy nobody named inside the loop. Name the gap instead.
+            return (
+                f"[summary unavailable; provider={self.provider!r} does not summarize; "
+                f"{len(transcript)} messages dropped]"
+            )
         request = urllib.request.Request(
             f"{self.base_url}/chat/completions",
             data=json.dumps(payload).encode("utf-8"),
@@ -619,12 +650,77 @@ class OpenRouterReAct:
             return f"[summary unavailable; {len(transcript)} messages dropped]"
         return text.strip() or f"[summary empty; {len(transcript)} messages dropped]"
 
+    def _tinker_sample(self, api_key: str) -> dict[str, Any]:
+        """Sample the trained checkpoint through the Tinker SDK.
+
+        Returns an OpenAI-shaped body so the caller's parse, retry, usage and
+        compaction paths are the same ones the OpenRouter provider exercises.
+        Tinker has no tool-calling API, so the sample arrives as assistant text
+        — which is exactly the `{"actions":[...]}` shape the SFT targets were
+        written in, and `_parse_actions` already reads it.
+        """
+        if self._sampling_client is None:
+            import tinker  # noqa: PLC0415 — optional dependency of the tinker provider
+            from transformers import AutoTokenizer  # noqa: PLC0415
+
+            self._tinker = tinker
+            self._tokenizer = AutoTokenizer.from_pretrained(self.tokenizer_id)
+            self._sampling_client = tinker.ServiceClient(
+                api_key=api_key
+            ).create_sampling_client(model_path=self.sampler_path)
+
+        tinker = self._tinker
+        tokenizer = self._tokenizer
+        try:
+            prompt = tokenizer.apply_chat_template(
+                list(self._messages),
+                tokenize=False,
+                add_generation_prompt=True,
+                enable_thinking=False,
+            )
+        except TypeError:
+            prompt = tokenizer.apply_chat_template(
+                list(self._messages), tokenize=False, add_generation_prompt=True
+            )
+        prompt_ids = [int(value) for value in tokenizer(prompt, add_special_tokens=False)["input_ids"]]
+        model_input_cls = getattr(tinker, "ModelInput", None) or tinker.types.ModelInput
+        try:
+            model_input = model_input_cls.from_ints(tokens=prompt_ids)
+        except TypeError:
+            model_input = model_input_cls.from_ints(prompt_ids)
+        sequence = (
+            self._sampling_client.sample(
+                prompt=model_input,
+                num_samples=1,
+                sampling_params=tinker.SamplingParams(
+                    max_tokens=self.max_tokens, temperature=0.0
+                ),
+            )
+            .result()
+            .sequences[0]
+        )
+        completion_ids = [int(value) for value in sequence.tokens]
+        text = tokenizer.decode(completion_ids, skip_special_tokens=True)
+        # Token counts are exact here rather than provider-reported, which is
+        # what compaction triggers on.
+        return {
+            "choices": [{"message": {"content": text, "tool_calls": None}}],
+            "usage": {
+                "prompt_tokens": len(prompt_ids),
+                "completion_tokens": len(completion_ids),
+                "total_tokens": len(prompt_ids) + len(completion_ids),
+            },
+        }
+
     def _complete(
         self,
         api_key: str,
         valid: list[str],
         on_delta: DeltaCallback | None,
     ) -> dict[str, Any]:
+        if self.provider == "tinker":
+            del valid, on_delta  # no tool schema and no token stream on this path
+            return self._tinker_sample(api_key)
         payload = {
             "model": self.model,
             "messages": list(self._messages),
