@@ -9,10 +9,11 @@ from .serde import JsonDataclassMixin
 @dataclass(frozen=True, slots=True)
 class FrameworkAdapterDescriptor(JsonDataclassMixin):
     framework: str
-    runtime_kind: RuntimeKind
+    runtime_kind: RuntimeKind | str | None
     noun_fidelity: dict[CoreNoun, CapabilityLevel]
     protocol_fidelity: dict[PrimitiveProtocol, CapabilityLevel]
     profile_fidelity: dict[ExecutionProfile, CapabilityLevel]
+    container_subtype: str | None = None
     notes: list[str] = field(default_factory=list)
 
 
@@ -165,7 +166,8 @@ def archipelago_descriptor() -> FrameworkAdapterDescriptor:
 def harbor_descriptor() -> FrameworkAdapterDescriptor:
     return FrameworkAdapterDescriptor(
         framework="harbor",
-        runtime_kind=RuntimeKind.HARNESS,
+        runtime_kind=None,
+        container_subtype="harbor",
         noun_fidelity={
             CoreNoun.RUNTIME: CapabilityLevel.NATIVE,
             CoreNoun.ACTOR: CapabilityLevel.NATIVE,

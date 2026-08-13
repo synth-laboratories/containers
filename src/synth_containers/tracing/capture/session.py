@@ -1,0 +1,161 @@
+"""``CaptureSession`` — the single append point every capture producer writes through.
+
+The proxy and the collector share one monotonic ordinal and one spool so that model
+calls and application events interleave in a single, replayable order.
+"""
+
+from __future__ import annotations
+
+from contextlib import contextmanager
+import threading
+from collections.abc import Iterator, Mapping
+from typing import Any
+
+from ..canonical import record_id
+from ..store.base import BlobStore
+from .binding import TraceCaptureBindingV1
+from .envelope import RawCaptureEnvelopeV1, RawRecordType, make_envelope
+from .spool import LiveManifestV1, RawSpool
+
+
+class CaptureSession:
+    """Owns the raw spool, ordinal sequence, and content-addressed blob root."""
+
+    def __init__(
+        self,
+        *,
+        binding: TraceCaptureBindingV1,
+        spool: RawSpool,
+        blobs: BlobStore,
+    ) -> None:
+        self.binding = binding
+        self.spool = spool
+        self.blobs = blobs
+        existing_records = tuple(spool.records())
+        self.first_observed_at: str | None = (
+            str(existing_records[0]["occurred_at"])
+            if existing_records
+            else None
+        )
+        self.last_observed_at: str | None = (
+            str(existing_records[-1]["occurred_at"])
+            if existing_records
+            else None
+        )
+        self._lock = threading.RLock()
+        self._closed = False
+        self._ordinal = spool.high_water_ordinal
+        self._call_index = max(
+            (
+                int(payload.get("call_index"))
+                for record in existing_records
+                if isinstance((payload := record.get("payload")), Mapping)
+                and isinstance(payload.get("call_index"), int)
+            ),
+            default=0,
+        )
+
+    def append(
+        self,
+        record_type: RawRecordType | str,
+        *,
+        payload: dict[str, Any],
+        actor_id: str | None = None,
+        session_id: str | None = None,
+        call_id: str | None = None,
+        upstream_attempt_id: str | None = None,
+        sequence_in_call: int | None = None,
+        occurred_at: str | None = None,
+        producer_version: str = "1",
+    ) -> RawCaptureEnvelopeV1:
+        with self._lock:
+            self._assert_open()
+            self._ordinal += 1
+            ordinal = self._ordinal
+            envelope = make_envelope(
+                capture_id=self.binding.capture_id,
+                ordinal=ordinal,
+                record_type=record_type,
+                actor_id=actor_id or self.binding.workload.root_actor_id,
+                session_id=session_id or self.binding.workload.actor_session_id,
+                payload=payload,
+                call_id=call_id,
+                upstream_attempt_id=upstream_attempt_id,
+                sequence_in_call=sequence_in_call,
+                occurred_at=occurred_at,
+                producer_version=producer_version,
+            )
+            # Ordinal allocation and durable append are one critical section. If
+            # they were separate, thread B could append N+1 before thread A
+            # appended N, advancing the spool high-water mark and rejecting N.
+            self.spool.append(envelope)
+            if self.first_observed_at is None:
+                self.first_observed_at = envelope.occurred_at
+            self.last_observed_at = envelope.occurred_at
+        return envelope
+
+    def store_blob(self, content: bytes) -> tuple[str, str]:
+        """Write a content-addressed body and return ``(digest, relative uri)``."""
+
+        with self._lock:
+            self._assert_open()
+            digest = self.blobs.put(content)
+            return digest, self.blobs.uri(digest)
+
+    def close(self) -> LiveManifestV1:
+        """Atomically seal the spool against every CaptureSession append."""
+
+        with self._lock:
+            if self._closed:
+                return self.spool.close()
+            manifest = self.spool.close()
+            self._closed = True
+            return manifest
+
+    def freeze_existing(self) -> LiveManifestV1:
+        """Make a resumed terminal spool immutable without rewriting its manifest."""
+
+        with self._lock:
+            manifest = self.spool.freeze_existing()
+            self._closed = True
+            return manifest
+
+    @contextmanager
+    def write_transaction(self) -> Iterator[None]:
+        """Keep a compound collector write atomic against finalization."""
+
+        with self._lock:
+            self._assert_open()
+            yield
+
+    def mint(self, prefix: str, *, kind: str, key: Any) -> str:
+        return record_id(
+            prefix,
+            kind=kind,
+            scope=(self.binding.trace_id, self.binding.capture_id),
+            key=key,
+        )
+
+    def mint_call(self, *, kind: str) -> tuple[str, int]:
+        """Atomically allocate one capture-global model-call identity.
+
+        HTTP and WebSocket producers share a finalizer, so their call indices must
+        occupy one sequence. The persisted high-water scan above also prevents a
+        resumed capture from reusing an earlier call identity.
+        """
+
+        with self._lock:
+            self._assert_open()
+            self._call_index += 1
+            call_index = self._call_index
+        return (
+            self.mint("call", kind=kind, key=call_index),
+            call_index,
+        )
+
+    def _assert_open(self) -> None:
+        if self._closed or self.spool.closed:
+            raise RuntimeError("capture session is closed")
+
+
+__all__ = ["CaptureSession"]

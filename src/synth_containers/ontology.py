@@ -28,12 +28,93 @@ class CoreNoun(StrEnum):
 
 
 class RuntimeKind(StrEnum):
+    """Legacy cross-framework ontology. Do not use for pool deployment fields."""
+
     ENVIRONMENT = "environment"
     SANDBOX = "sandbox"
     SESSION = "session"
     HARNESS = "harness"
     EVALUATOR = "evaluator"
     PROXY = "proxy"
+
+
+class ContainerComputeProvider(StrEnum):
+    """Compute substrate on which a managed container executes."""
+
+    LOCAL = "local"
+    DOCKER = "docker"
+    DAYTONA = "daytona"
+    MODAL = "modal"
+    RUNPOD = "runpod"
+    EXE_DEV = "exe_dev"
+    KERNEL = "kernel"
+    OTHER = "other"
+
+    @classmethod
+    def parse(cls, value: "ContainerComputeProvider | str") -> "ContainerComputeProvider":
+        if isinstance(value, cls):
+            return value
+        text = str(value or "").strip().lower().replace("-", "_")
+        try:
+            return cls(text)
+        except ValueError:
+            raise ValueError(
+                f"unsupported container compute provider {text!r}; "
+                f"expected one of {[item.value for item in cls]}"
+            ) from None
+
+
+class ContainerSourceKind(StrEnum):
+    """How source for a managed container is supplied."""
+
+    IMAGE_REF = "image_ref"
+    DOCKER_CONTEXT = "docker_context"
+    SOURCE_BUILD = "source_build"
+
+    @classmethod
+    def parse(cls, value: "ContainerSourceKind | str") -> "ContainerSourceKind":
+        if isinstance(value, cls):
+            return value
+        text = str(value or "").strip().lower().replace("-", "_")
+        if text == "modal_source":
+            text = cls.SOURCE_BUILD.value
+        try:
+            return cls(text)
+        except ValueError:
+            raise ValueError(
+                f"unsupported container source kind {text!r}; "
+                f"expected one of {[item.value for item in cls]}"
+            ) from None
+
+
+class ContainerSubtype(StrEnum):
+    """Specialized contract layered onto a managed container."""
+
+    HARBOR = "harbor"
+    OTHER = "other"
+
+
+class ContainerHarnessSubtype(StrEnum):
+    """Agent harness hosted inside a container, independent of task format."""
+
+    CODEX = "codex"
+    OPENCODE = "opencode"
+    PI = "pi"
+    CLAUDE_CODE = "claude_code"
+    OTHER = "other"
+
+    @classmethod
+    def parse(cls, value: "ContainerHarnessSubtype | str") -> "ContainerHarnessSubtype":
+        if isinstance(value, cls):
+            return value
+        text = str(value or "").strip().lower().replace("-", "_")
+        try:
+            return cls(text)
+        except ValueError:
+            raise ValueError(
+                f"unsupported container harness subtype {text!r}; "
+                f"expected one of {[item.value for item in cls]}"
+            ) from None
 
 
 class ExecutionKind(StrEnum):

@@ -1,0 +1,24 @@
+{
+  "schema": "synth.harbor-pinned-bundle.v1",
+  "bundle_id": "harbor-fixture/gamebench-example@1",
+  "image": "example.invalid/harbor-fixture@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "instruction_path": "instruction.md",
+  "agent": {
+    "command": ["sh", "/harbor/bundle/agent.sh"]
+  },
+  "required_paths": [
+    "agent.sh",
+    "tests/test.sh",
+    "gamebench/tasks/example/task.txt"
+  ],
+  "verifier": {
+    "command": ["sh", "/harbor/bundle/tests/test.sh"],
+    "tests": "tests/test.sh",
+    "reward_path": "verifier/reward.txt"
+  },
+  "task_tree": {
+    "path": "gamebench/tasks/example",
+    "mount": "/workspace/gamebench/tasks/example",
+    "digest": "sha256:a2e45c12bd7e27cef8b5c787bb7903dd2c6e579899c88bda460cd5e8092cce94"
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://synth-laboratories.com/schemas/trace-stream/stream-descriptor.schema.json",
+  "title": "synth.rollout.stream.v1",
+  "type": "object",
+  "required": ["schema", "id", "transports", "cursor", "reward", "auth", "retention"],
+  "properties": {
+    "schema": { "const": "synth.rollout.stream.v1" },
+    "id": { "type": "string", "minLength": 1 },
+    "transports": {
+      "type": "object",
+      "required": ["poll", "sse", "websocket"],
+      "properties": {
+        "poll": {
+          "type": "object",
+          "required": ["url"],
+          "properties": { "url": { "type": "string", "minLength": 1 } }
+        },
+        "sse": {
+          "type": ["object", "null"],
+          "properties": { "url": { "type": "string" } }
+        },
+        "websocket": {
+          "type": ["object", "null"],
+          "properties": { "url": { "type": "string" } }
+        }
+      },
+      "additionalProperties": false
+    },
+    "cursor": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "const": "sequence" },
+        "producer_kind": { "type": ["string", "null"] }
+      }
+    },
+    "reward": {
+      "type": "object",
+      "required": ["url"],
+      "properties": { "url": { "type": "string", "minLength": 1 } }
+    },
+    "auth": { "type": "object" },
+    "retention": { "type": "string", "minLength": 1 }
+  },
+  "additionalProperties": true
+}

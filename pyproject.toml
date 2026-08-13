@@ -1,16 +1,19 @@
 [project]
 name = "synth-containers"
-version = "0.2.0.20260604"
+version = "0.4.0.20260730"
 description = "Shared Synth container and environment runtime substrate"
 authors = [{name = "Synth Laboratories", email = "josh@usesynth.ai"}]
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 dependencies = [
+    "certifi>=2024.0.0",
     "pydantic>=2.0.0",
     "fastapi>=0.110.0",
     "httpx>=0.27.0",
     "uvicorn>=0.30.0",
+    "websockets>=14.0",
+    "zstandard>=0.23.0",
 ]
 
 [project.optional-dependencies]
@@ -28,6 +31,9 @@ dev = [
     "ruff>=0.6.0",
     "ty>=0.0.32",
 ]
+
+[project.scripts]
+synth-trace = "synth_containers.tracing.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/synth-laboratories/containers"

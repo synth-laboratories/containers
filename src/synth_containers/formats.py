@@ -26,7 +26,7 @@ class ExecutionProgress:
     step_count: int = 0
     agent_turn_count: int = 0
     wall_clock_seconds: float | None = None
-    reward: float = 0.0
+    reward: float | None = None
     goal_signals: list[str] | None = None
     stall_signals: list[str] | None = None
 

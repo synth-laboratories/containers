@@ -8,3 +8,6 @@ __pycache__/
 # Editor / IDE — local workspace files only.
 *.code-workspace
 .cursor/
+
+# Scratch eval artifacts (runner/config in temp/ stay tracked)
+temp/_runs/

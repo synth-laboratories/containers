@@ -199,7 +199,7 @@ class Outcome(JsonDataclassMixin):
     details: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
-    def outcome_reward(self) -> float:
+    def outcome_reward(self) -> float | None:
         if self.reward is not None:
             return float(self.reward)
         if self.score is not None:
@@ -208,7 +208,7 @@ class Outcome(JsonDataclassMixin):
             return float(self.grade)
         if self.verifier and self.verifier.score is not None:
             return float(self.verifier.score)
-        return 0.0
+        return None
 
 
 @dataclass(slots=True)
@@ -368,10 +368,13 @@ class ExecutionRecord(JsonDataclassMixin):
                 return text
         return None
 
-    def outcome_reward(self) -> float:
+    def outcome_reward(self) -> float | None:
         summary_value = self.summary.get("outcome_reward")
-        if summary_value is not None:
-            return float(summary_value)
+        if summary_value is not None and summary_value != "":
+            try:
+                return float(summary_value)
+            except (TypeError, ValueError):
+                return None
         return self.outcome.outcome_reward()
 
     def artifact_turns(self) -> list[dict[str, Any]]:

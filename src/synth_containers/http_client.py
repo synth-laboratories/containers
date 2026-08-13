@@ -148,7 +148,7 @@ class HTTPContainerClient:
     async def rollout(self, payload: dict[str, Any]) -> dict[str, Any]:
         body = dict(payload)
         body.setdefault("submission_mode", "sync")
-        return await self._post("/rollout", body)
+        return await self._post("/rollouts", body)
 
     async def rollouts(self, payload: dict[str, Any]) -> dict[str, Any]:
         body = dict(payload)
@@ -169,6 +169,9 @@ class HTTPContainerClient:
 
     async def artifacts(self, rollout_id: str) -> dict[str, Any]:
         return await self._get(f"/rollouts/{rollout_id}/artifacts", optional=True)
+
+    async def annotations(self, rollout_id: str) -> dict[str, Any]:
+        return await self._get(f"/rollouts/{rollout_id}/annotations", optional=True)
 
     async def events(self, rollout_id: str) -> dict[str, Any]:
         return await self._get(f"/rollouts/{rollout_id}/events", optional=True)

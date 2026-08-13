@@ -12,7 +12,7 @@ GEPA v1 uses:
         "program_route": "/program",
         "dataset_route": "/dataset",
         "dataset_rows_route": "/dataset/rows",
-        "rollout_route": "/rollout"
+        "rollout_route": "/rollouts"
       }
     }
   }
@@ -75,7 +75,7 @@ dataset directly when this route is available. Every returned row must be an
 object with a stable `example_id` or `id`; a request for `N` seeds must return
 `N` rows or fail.
 
-### `POST /rollout`
+### `POST /rollouts`
 
 Executes one candidate on one task row or seed. The rollout request uses the
 normal `synth-containers` request model and may include `candidate`. The result

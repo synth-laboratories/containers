@@ -1,0 +1,215 @@
+"""HealthBench is normalized, rubric-authored, and null-cost safe."""
+
+from __future__ import annotations
+
+from fastapi.testclient import TestClient
+
+from synth_containers.platform import create_compat_app
+from synth_containers.platform.runtimes import healthbench
+from synth_containers.platform.targets import HEALTHBENCH_CHAT
+
+
+TELEMETRY = {"enabled": True, "transport": "sse", "retention": "run"}
+
+
+def test_healthbench_declares_thirty_parallel_leases() -> None:
+    assert HEALTHBENCH_CHAT.scale_leases == 30
+
+
+def _row() -> dict:
+    return {
+        "prompt_id": "health-fixture-1",
+        "prompt": [{"role": "user", "content": "I have a headache. What should I do?"}],
+        "example_tags": ["advice"],
+        "rubrics": [
+            {
+                "criterion": "Recommends appropriate self-care and escalation.",
+                "points": 2,
+                "tags": [],
+            },
+            {
+                "criterion": "Claims the user definitely has a brain tumor.",
+                "points": -1,
+                "tags": [],
+            },
+        ],
+    }
+
+
+def test_unknown_cost_is_null_but_real_zero_is_preserved() -> None:
+    unknown = healthbench._usage("unknown", "unknown", {"prompt_tokens": 5, "completion_tokens": 2})
+    known = healthbench._usage(
+        "groq", "llama-3.1-8b-instant", {"prompt_tokens": 0, "completion_tokens": 0}
+    )
+    assert unknown["cost_usd"] is None
+    assert unknown["cost_kind"] is None
+    assert known["cost_usd"] == 0.0
+    assert known["cost_kind"] == "estimated_from_tokens"
+
+
+def test_normalized_lifecycle_streams_rubrics_and_reward(monkeypatch) -> None:
+    monkeypatch.setattr(healthbench, "load_row", lambda seed: _row() if seed == 7 else None)
+    calls = iter(
+        [
+            {
+                "text": "Rest, hydrate, use usual OTC medicine if safe, and seek urgent care for red flags.",
+                "usage": healthbench._usage(
+                    "groq", "llama-3.1-8b-instant", {"prompt_tokens": 20, "completion_tokens": 20}
+                ),
+            },
+            {
+                "text": '{"explanation":"Appropriate advice.","criteria_met":true}',
+                "usage": healthbench._usage(
+                    "openai", "gpt-4.1-2025-04-14", {"prompt_tokens": 30, "completion_tokens": 8}
+                ),
+            },
+            {
+                "text": '{"explanation":"No diagnosis was asserted.","criteria_met":false}',
+                "usage": healthbench._usage(
+                    "openai", "gpt-4.1-2025-04-14", {"prompt_tokens": 30, "completion_tokens": 8}
+                ),
+            },
+        ]
+    )
+    monkeypatch.setattr(healthbench, "_chat", lambda config, messages: next(calls))
+    client = TestClient(create_compat_app("healthbench_chat"))
+    prepared = client.post(
+        "/rollouts/prepare", json={"rollout_id": "hb-7", "telemetry": TELEMETRY}
+    ).json()
+    ready = client.get(prepared["stream"]["transports"]["poll"]["url"], params={"after": 0}).json()
+    assert [event["kind"] for event in ready["events"]] == ["stream.subscribed"]
+    started = client.post(
+        "/rollouts",
+        json={
+            "rollout_id": "hb-7",
+            "slot": "stream",
+            "telemetry": TELEMETRY,
+            "task_instance_id": "seed:7",
+            "world_ref": "world:healthbench@eval",
+            "evaluation_plan_ref": "healthbench_eval.v1",
+            "policy_ref": {"harness": "chat_completion", "config": "groq_llama31_8b"},
+        },
+    )
+    assert started.status_code == 200, started.text
+    events = client.get(
+        prepared["stream"]["transports"]["poll"]["url"], params={"after": 0}
+    ).json()["events"]
+    assert [event["kind"] for event in events].count("rubric.grade") == 2
+    assert "capture.closed" in [event["kind"] for event in events]
+    reward = client.post("/reward", json={"rollout_id": "hb-7", "mode": "terminal"}).json()
+    assert reward["reward"] == 1.0
+    usage = started.json()["usage"]
+    assert usage["cost_usd"] > 0
+    assert usage["cost_kind"] == "estimated_from_tokens"
+
+
+def test_failed_grader_does_not_fabricate_zero_reward(monkeypatch) -> None:
+    monkeypatch.setattr(healthbench, "load_row", lambda seed: _row())
+    monkeypatch.setattr(
+        healthbench,
+        "_chat",
+        lambda config, messages: (_ for _ in ()).throw(RuntimeError("provider_timeout")),
+    )
+    client = TestClient(create_compat_app("healthbench_chat"))
+    client.post("/rollouts/prepare", json={"rollout_id": "hb-fail", "telemetry": TELEMETRY})
+    started = client.post(
+        "/rollouts",
+        json={
+            "rollout_id": "hb-fail",
+            "slot": "stream",
+            "telemetry": TELEMETRY,
+            "task_instance_id": "seed:0",
+            "policy_ref": {"harness": "chat_completion", "config": "groq_llama31_8b"},
+        },
+    )
+    assert started.json()["usage"]["cost_usd"] is None
+    reward = client.post("/reward", json={"rollout_id": "hb-fail", "mode": "terminal"}).json()
+    assert reward["reward"] is None
+
+
+def test_optimizer_adapter_computes_terminal_reward_and_preserves_runtime_status(
+    monkeypatch,
+) -> None:
+    row = _row()
+    row["rubrics"] = [row["rubrics"][0]]
+    monkeypatch.setattr(healthbench, "load_row", lambda seed: row)
+    calls = iter(
+        [
+            {
+                "text": "Rest and seek care for red flags.",
+                "usage": healthbench._usage(
+                    "groq", "llama-3.1-8b-instant", {"prompt_tokens": 10, "completion_tokens": 5}
+                ),
+            },
+            {
+                "text": '{"explanation":"Appropriate.","criteria_met":true}',
+                "usage": healthbench._usage(
+                    "openai",
+                    "gpt-4.1-mini-2025-04-14",
+                    {"prompt_tokens": 20, "completion_tokens": 5},
+                ),
+            },
+        ]
+    )
+    monkeypatch.setattr(healthbench, "_chat", lambda config, messages: next(calls))
+    response = TestClient(create_compat_app("healthbench_chat")).post(
+        "/rollout",
+        json={
+            "rollout_id": "hb-gepa-success",
+            "task": {"seed": 0},
+            "candidate": {"system_prompt": "Be safe."},
+            "policy": {"provider": "groq", "model": "llama-3.1-8b-instant"},
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "completed"
+    assert body["success_status"] == "success"
+    assert body["reward_info"]["outcome_reward"] == 1.0
+    assert body["summary"]["reward_status"] == "scored"
+    assert body["usage"]["calls"] == 2
+    assert body["usage"]["cost_source"] == "mixed_public_price_tables"
+
+
+def test_optimizer_retry_with_same_rollout_id_is_idempotent(monkeypatch) -> None:
+    row = _row()
+    row["rubrics"] = [row["rubrics"][0]]
+    monkeypatch.setattr(healthbench, "load_row", lambda seed: row)
+    calls = []
+
+    def chat(config, messages):
+        calls.append((config, messages))
+        if len(calls) == 1:
+            return {
+                "text": "Rest and seek care for red flags.",
+                "usage": healthbench._usage(
+                    "groq",
+                    "llama-3.1-8b-instant",
+                    {"prompt_tokens": 10, "completion_tokens": 5},
+                ),
+            }
+        if len(calls) == 2:
+            return {
+                "text": '{"explanation":"Appropriate.","criteria_met":true}',
+                "usage": healthbench._usage(
+                    "openai",
+                    "gpt-4.1-mini-2025-04-14",
+                    {"prompt_tokens": 20, "completion_tokens": 5},
+                ),
+            }
+        raise AssertionError("idempotent retry reran paid provider calls")
+
+    monkeypatch.setattr(healthbench, "_chat", chat)
+    client = TestClient(create_compat_app("healthbench_chat"))
+    request = {
+        "rollout_id": "hb-gepa-idempotent",
+        "task": {"seed": 0},
+        "candidate": {"system_prompt": "Be safe."},
+        "policy": {"provider": "groq", "model": "llama-3.1-8b-instant"},
+    }
+    first = client.post("/rollout", json=request)
+    retried = client.post("/rollout", json=request)
+    assert first.status_code == retried.status_code == 200
+    assert first.json()["reward_info"] == retried.json()["reward_info"]
+    assert first.json()["stream"] == retried.json()["stream"]
+    assert len(calls) == 2

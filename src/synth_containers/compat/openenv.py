@@ -20,7 +20,7 @@ from .base import RolloutHandler, ThinCompatRuntime
 
 def openenv_capability_surface(
     *,
-    checkpointable: bool = True,
+    checkpointable: bool = False,
     metadata: dict[str, Any] | None = None,
 ) -> RuntimeCapabilitySurface:
     protocol_fidelity: dict[PrimitiveProtocol | str, CapabilityLevel | str] = {
@@ -42,12 +42,12 @@ def openenv_capability_surface(
                 PrimitiveProtocol.ASYNC_ROLLOUT_RUNNABLE: CapabilityLevel.NATIVE,
             }
         )
+    profiles = [ExecutionProfile.GYM_STYLE_ENVIRONMENT]
+    if checkpointable:
+        profiles.append(ExecutionProfile.CHECKPOINTABLE_LONG_HORIZON_ENVIRONMENT)
     return RuntimeCapabilitySurface(
         runtime_kind=RuntimeKind.ENVIRONMENT,
-        profiles=[
-            ExecutionProfile.GYM_STYLE_ENVIRONMENT,
-            ExecutionProfile.CHECKPOINTABLE_LONG_HORIZON_ENVIRONMENT,
-        ],
+        profiles=profiles,
         rollout_modes=(
             [RolloutMode.BLOCKING, RolloutMode.ASYNC]
             if checkpointable

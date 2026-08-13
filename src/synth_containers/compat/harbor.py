@@ -6,10 +6,11 @@ from typing import Any
 from ..capabilities import RuntimeCapabilitySurface, RuntimeMetadata, TaskCatalog, TaskInfo
 from ..ontology import (
     CapabilityLevel,
+    ContainerComputeProvider,
+    ContainerHarnessSubtype,
     ExecutionProfile,
     PrimitiveProtocol,
     RolloutMode,
-    RuntimeKind,
     StatefulnessTier,
 )
 from ..resources import ResourceKind, ResourceRef
@@ -18,10 +19,15 @@ from .base import RolloutHandler, ThinCompatRuntime
 
 def harbor_capability_surface(
     *,
+    compute_provider: ContainerComputeProvider | str | None = None,
+    container_harness_subtype: ContainerHarnessSubtype | str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> RuntimeCapabilitySurface:
     return RuntimeCapabilitySurface(
-        runtime_kind=RuntimeKind.ENVIRONMENT,
+        runtime_kind=None,
+        container_compute_provider=compute_provider,
+        container_subtype="harbor",
+        container_harness_subtype=container_harness_subtype,
         profiles=[ExecutionProfile.HARNESS_MANAGED_BENCHMARK_ENVIRONMENT],
         rollout_modes=[RolloutMode.BLOCKING],
         statefulness_tier=StatefulnessTier.EPISODIC,

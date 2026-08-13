@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from .event_log import validate_rollout_id
 
 from .proxying import (
     CredentialMode,
@@ -86,6 +88,36 @@ class RolloutPolicySpecModel(StrictModel):
         return InferenceTarget.from_policy_spec(self)
 
 
+class RolloutTelemetryFrameModel(StrictModel):
+    enabled: bool = False
+    format: str = "png"
+    every_n_steps: int = Field(default=1, ge=1, le=10_000)
+
+
+class RolloutTelemetryModel(StrictModel):
+    enabled: bool = False
+    transport: str = "sse"
+    detail: str = "standard"
+    poll_interval_ms: int = Field(default=500, ge=100, le=30_000)
+    events: list[str] = Field(default_factory=list)
+    frame: RolloutTelemetryFrameModel = Field(default_factory=RolloutTelemetryFrameModel)
+    retention: str = "run"
+
+    @model_validator(mode="after")
+    def validate_transport(self) -> "RolloutTelemetryModel":
+        allowed = {"poll", "sse", "websocket"}
+        if self.enabled:
+            if self.transport == "auto":
+                raise ValueError(
+                    "telemetry.transport=auto is refused on authoritative / visual-attached runs"
+                )
+            if self.transport not in allowed:
+                raise ValueError("telemetry.transport must be poll, sse, or websocket")
+        elif self.transport not in allowed | {"auto"}:
+            raise ValueError("telemetry.transport must be poll, sse, websocket, or auto")
+        return self
+
+
 class RolloutRequestModel(StrictModel):
     rollout_id: str | None = None
     trace_correlation_id: str | None = None
@@ -113,6 +145,34 @@ class RolloutRequestModel(StrictModel):
     actors: list[RolloutActorSpecModel] = Field(default_factory=list)
     actor_ids: list[str] = Field(default_factory=list)
     actor_overrides: HttpObject = Field(default_factory=dict)
+    telemetry: RolloutTelemetryModel | None = None
+
+    @field_validator("rollout_id")
+    @classmethod
+    def validate_public_rollout_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return validate_rollout_id(value)
+
+
+class RewardRequestModel(StrictModel):
+    rollout_id: str | None = None
+    evidence: HttpObject | None = None
+    evaluation_plan_ref: str | None = None
+    mode: str = "terminal"
+    node_ids: list[str] = Field(default_factory=list)
+    idempotency_key: str | None = None
+    rescore: bool = False
+
+    @model_validator(mode="after")
+    def xor_rollout_or_evidence(self) -> "RewardRequestModel":
+        has_rollout = bool(self.rollout_id)
+        has_evidence = self.evidence is not None
+        if has_rollout == has_evidence:
+            raise ValueError("POST /reward requires exactly one of rollout_id or evidence")
+        if self.mode not in {"terminal", "provisional"}:
+            raise ValueError("mode must be terminal or provisional")
+        return self
 
 
 class PauseRequestModel(StrictModel):
