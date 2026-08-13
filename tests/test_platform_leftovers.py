@@ -330,3 +330,44 @@ def test_craftax_ten_seeds_distinct_rewards_field() -> None:
             assert row["reward"] is None
         else:
             assert row["reward"] is None or isinstance(row["reward"], (int, float))
+
+
+def test_a_raising_rollout_does_not_wedge_later_policy_binds(monkeypatch, tmp_path) -> None:
+    """A rollout that raises must terminalize its pin.
+
+    `register_policy_config` refuses while any pin is started and not terminal.
+    An exception raised before the runtime could record an outcome — a
+    malformed policy config, for instance — used to leave the pin pinned
+    forever, so every later bind returned 409 and the only recovery was
+    restarting the container.
+    """
+
+    def explode(*_args, **_kwargs):
+        raise RuntimeError("policy config is malformed")
+
+    monkeypatch.setattr(
+        "synth_containers.platform.runtimes.craftax.CraftaxRuntime.simulate",
+        explode,
+    )
+    platform = CompatPlatform(TARGETS["craftax_react"], storage_root=tmp_path)
+    request = parse_create_rollout(
+        {
+            "task_instance_id": "seed:0",
+            "policy_ref": {"harness": "react", "config": "luna_med"},
+        }
+    )
+
+    # The error still reaches the caller — it is not swallowed.
+    with pytest.raises(RuntimeError, match="policy config is malformed"):
+        platform.start_rollout(request)
+
+    pin = next(iter(platform.pins.values()))
+    assert pin.terminal is True
+    assert pin.status == "failed"
+
+    # ...and the container still accepts work.
+    result = platform.register_policy_config(
+        "next_policy", {"harness": "react", "config": {"model": "m"}}
+    )
+    assert result.get("error") != "in_flight", result
+    assert result["config_id"] == "next_policy"
