@@ -290,6 +290,43 @@ def test_concurrent_identical_start_executes_once(tmp_path: Path) -> None:
     assert sum(item.kind == "trace.opened" for item in recovered.after(0)) == 1
 
 
+def test_concurrent_distinct_starts_enforce_lease_limit_and_isolate_logs(
+    tmp_path: Path,
+) -> None:
+    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path))
+
+    def start(index: int):
+        return client.post(
+            "/rollouts",
+            json={
+                "rollout_id": f"lease-{index}",
+                "slot": "stream",
+                "submission_mode": "async",
+                "task_instance_id": f"seed:{index}",
+                "policy_ref": _CRAFTAX_PIN,
+                "telemetry": {"enabled": True, "transport": "sse", "retention": "run"},
+            },
+        )
+
+    with ThreadPoolExecutor(max_workers=11) as executor:
+        responses = list(executor.map(start, range(11)))
+
+    assert sum(response.status_code == 200 for response in responses) == 10
+    assert sum(response.status_code == 429 for response in responses) == 1
+    successful_ids = {
+        response.json()["rollout_id"] for response in responses if response.status_code == 200
+    }
+    assert len(successful_ids) == 10
+    for rollout_id in successful_ids:
+        journal_name = hashlib.sha256(rollout_id.encode()).hexdigest()
+        recovered = RolloutEventLog.recover(
+            rollout_id=rollout_id,
+            stream_id=f"stream:{rollout_id}",
+            journal_path=tmp_path / "event_logs" / f"{journal_name}.jsonl",
+        )
+        assert sum(item.kind == "trace.opened" for item in recovered.after(0)) == 1
+
+
 def test_prepare_restart_recovers_open_and_refuses_sealed_or_corrupt(tmp_path: Path) -> None:
     payload = {
         "rollout_id": "restart-open",
