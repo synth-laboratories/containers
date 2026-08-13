@@ -34,6 +34,7 @@ class CaptureMode(StrEnum):
 
 
 class Interception(StrEnum):
+    APPLICATION = "application"
     PROVIDER_PROXY = "provider_proxy"
     TLS_MITM = "tls_mitm"
     BOTH = "both"

@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import threading
 from typing import Any
 
 from .canonical import content_digest, readable_json
@@ -46,6 +47,7 @@ from .capture.binding import (
 )
 from .capture.runner import run_captured_command
 from .capture.supervisor import SupervisorConfig
+from .capture.control_server import DetachedCaptureConfig, DetachedCaptureSupervisor
 from .models.identity import TraceKind, TraceProvenanceV5
 
 
@@ -221,6 +223,26 @@ def main(argv: list[str] | None = None) -> int:
     )
     run.add_argument("child_command", nargs=argparse.REMAINDER)
 
+    serve = subparsers.add_parser(
+        "serve",
+        help="serve detached request-scoped captures without a child command",
+    )
+    serve.add_argument("--output", required=True, type=Path)
+    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--port", type=int, default=0)
+    serve.add_argument("--upstream-base-url", default="https://api.openai.com/v1")
+    serve.add_argument("--capture-disk-budget-bytes", type=int)
+    serve.add_argument("--capture-disk-reserve-bytes", type=int, default=0)
+    serve.add_argument(
+        "--budget-policy",
+        choices=("refuse", "evict_oldest_sealed"),
+        default="refuse",
+    )
+    serve.add_argument(
+        "--control-token-env",
+        help="read the HTTP bearer token from this environment variable",
+    )
+
     args = parser.parse_args(argv)
 
     if args.command == "version":
@@ -269,6 +291,46 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(readable_json(result.receipt), file=sys.stderr)
         return result.exit_code
+
+    if args.command == "serve":
+        control_token = None
+        if args.control_token_env:
+            control_token = os.environ.get(args.control_token_env)
+            if not control_token:
+                raise SystemExit(
+                    f"--control-token-env requested unset variable {args.control_token_env!r}"
+                )
+        service = DetachedCaptureSupervisor(
+            DetachedCaptureConfig(
+                output_root=args.output,
+                host=args.host,
+                port=args.port,
+                upstream_base_url=args.upstream_base_url,
+                capture_disk_budget_bytes=args.capture_disk_budget_bytes,
+                capture_disk_reserve_bytes=args.capture_disk_reserve_bytes,
+                budget_policy=args.budget_policy,
+                control_token=control_token,
+            )
+        ).start()
+        print(
+            readable_json(
+                {
+                    "base_url": service.base_url,
+                    "output": str(args.output),
+                    "budget_bytes": args.capture_disk_budget_bytes,
+                    "reserve_bytes": args.capture_disk_reserve_bytes,
+                    "budget_policy": args.budget_policy,
+                }
+            ),
+            flush=True,
+        )
+        try:
+            threading.Event().wait()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            service.stop()
+        return 0
 
     if args.command == "inspect-input":
         result = inspect_trace_input(

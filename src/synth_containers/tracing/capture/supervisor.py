@@ -89,7 +89,6 @@ from .envelope import RawRecordType
 from .mitm import (
     MITM_LIFECYCLE_SCHEMA_VERSION,
     MitmLifecycleReceiptV1,
-    MitmStartupError,
     ScopedMitmProxy,
 )
 from .websocket import ResponsesWebSocketRelay, ResponsesWebSocketServer
@@ -149,6 +148,7 @@ class SupervisorConfig:
     mitm_container_ca_path: str | None = None
     mitm_startup_timeout: float = 10.0
     binding_path: Path | None = None
+    detached: bool = False
 
 
 class CaptureSupervisor:
@@ -839,8 +839,14 @@ class CaptureSupervisor:
             self._capture_operational = False
             return self
         try:
-            self.collector_server.start()
-            self.proxy.start()
+            if str(self.binding.capture.interception) == Interception.APPLICATION:
+                # Detached control planes invoke LocalCollector directly.  The
+                # control plane itself is the HTTP collector; starting a private
+                # second server per request would add ports and shutdown latency.
+                pass
+            else:
+                self.collector_server.start()
+                self.proxy.start()
             if self.websocket_server is not None:
                 self.websocket_server.start()
             if self.mitm is not None:
@@ -942,6 +948,8 @@ class CaptureSupervisor:
         return False
 
     def _probe(self) -> tuple[bool, bool, bool]:
+        if str(self.binding.capture.interception) == Interception.APPLICATION:
+            return True, True, bool(self.mitm is None or self.mitm.ready)
         try:
             with httpx.Client(timeout=10.0, trust_env=False) as client:
                 proxy_response = client.get(f"{self.proxy.base_url}/healthz")
@@ -1000,6 +1008,19 @@ class CaptureSupervisor:
             )
             raise CaptureNotReady(detail)
         return mitm_receipt
+
+    def abandon(self) -> None:
+        """Stop an unsealed capture without publishing a partial trace."""
+
+        with self._lifecycle_lock:
+            if self.sealed is not None or self._finalization_started:
+                raise RuntimeError("capture cannot be abandoned after finalization begins")
+            self.collector_server.freeze()
+            self.proxy.freeze()
+            self.collector.freeze()
+            self._finalization_started = True
+        self._stop_capture_services(reason="abandoned")
+        self.session.close()
 
     # -- injection surface --------------------------------------------------------
 

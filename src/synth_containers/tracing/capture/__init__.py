@@ -48,6 +48,11 @@ from .spool import (
     repair,
 )
 from .supervisor import CaptureNotReady, CaptureSupervisor, SupervisorConfig
+from .control_server import (
+    CaptureControlError,
+    DetachedCaptureConfig,
+    DetachedCaptureSupervisor,
+)
 from .runner import CapturedCommandResult, run_captured_command
 from .websocket import ResponsesWebSocketRelay
 from .egress import EgressAssertion, assert_egress, mitm_environment
@@ -65,6 +70,7 @@ __all__ = [
     "BindingContextV1",
     "BindingWorkloadV1",
     "CaptureCoverageReceiptV1",
+    "CaptureControlError",
     "CaptureFinalizationV1",
     "CapturedCommandResult",
     "CaptureMode",
@@ -74,6 +80,8 @@ __all__ = [
     "CaptureScope",
     "CaptureSession",
     "CaptureSupervisor",
+    "DetachedCaptureConfig",
+    "DetachedCaptureSupervisor",
     "EgressAssertion",
     "CollectorServer",
     "Completeness",

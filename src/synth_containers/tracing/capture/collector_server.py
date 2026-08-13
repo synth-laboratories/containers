@@ -63,7 +63,7 @@ class CollectorServer:
         self._server = ThreadingHTTPServer((host, port), _handler(self))
         self._server.daemon_threads = True
         self._thread = threading.Thread(
-            target=self._server.serve_forever,
+            target=lambda: self._server.serve_forever(poll_interval=0.05),
             name=f"synth-trace-collector-{collector.binding.capture_id}",
             daemon=True,
         )
