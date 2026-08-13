@@ -46,6 +46,70 @@ class CraftaxRuntime:
                 if platform.spec.environment_ref == GOLD_ENVIRONMENT
                 else ScriptedReAct(config_id=config_id)
             )
+        resume_checkpoint = None
+        if pin.resume_from_checkpoint_id:
+            resume_checkpoint = platform.checkpoints.get(pin.resume_from_checkpoint_id)
+            if resume_checkpoint is None:
+                raise RuntimeError(f"unknown_checkpoint:{pin.resume_from_checkpoint_id}")
+
+        checkpoint_callback = None
+        if pin.checkpoint_schedule is not None:
+            mode = str(pin.checkpoint_schedule.get("mode") or "").strip()
+            if mode != "per_policy_call":
+                raise RuntimeError(f"unsupported_checkpoint_schedule:{mode or 'missing'}")
+            prefix = str(pin.checkpoint_schedule.get("checkpoint_id_prefix") or "").strip()
+            if not prefix:
+                raise RuntimeError("checkpoint_schedule requires checkpoint_id_prefix")
+
+            def checkpoint_callback(
+                current_world: Any,
+                current_planner: Any,
+                result: Any,
+                signals: list[float | None],
+            ) -> dict[str, Any]:
+                capture = getattr(current_world, "checkpoint", None)
+                policy_capture = getattr(current_planner, "checkpoint_state", None)
+                if not callable(capture) or not callable(policy_capture):
+                    raise RuntimeError("runtime does not implement true checkpoint capture")
+                environment = capture()
+                checkpoint_id = f"{prefix}_{int(current_planner.usage().get('calls') or 0):04d}"
+                reward = sum(float(value) for value in signals if isinstance(value, (int, float)))
+                achievements = _achievement_labels(result.observation)
+                platform.record_checkpoint(
+                    {
+                        "checkpoint_id": checkpoint_id,
+                        "rollout_id": pin.rollout_id,
+                        "environment_ref": pin.environment_ref,
+                        "world_ref": pin.world_ref,
+                        "policy_ref": {
+                            key: value for key, value in pin.policy_ref.items() if key != "code"
+                        },
+                        "policy_llm_call_index": int(
+                            current_planner.usage().get("calls") or 0
+                        ),
+                        "step": int(result.env_steps),
+                        "reward": reward,
+                        "achievements": achievements,
+                        "environment_checkpoint_id": environment["checkpoint_id"],
+                        "environment_blob": environment["blob"],
+                        "policy_state": policy_capture(),
+                        "parent_checkpoint_id": pin.resume_from_checkpoint_id,
+                    }
+                )
+                descriptor = {
+                    "checkpoint_id": checkpoint_id,
+                    "rollout_id": pin.rollout_id,
+                    "policy_llm_call_index": int(current_planner.usage().get("calls") or 0),
+                    "step": int(result.env_steps),
+                    "reward": reward,
+                    "achievements": achievements,
+                    "parent_checkpoint_id": pin.resume_from_checkpoint_id,
+                    "restore_eligible": True,
+                    "branchable": True,
+                    "checkpoint_semantics": "true_environment_snapshot",
+                }
+                log.append("rollout.checkpoint", descriptor)
+                return descriptor
         try:
             try:
                 outcome = run_episode(
@@ -56,6 +120,8 @@ class CraftaxRuntime:
                     max_steps=max_steps,
                     omit_reward=pin.omit_reward,
                     emit_policy_spans=True,
+                    resume_checkpoint=resume_checkpoint,
+                    checkpoint_callback=checkpoint_callback,
                 )
             except Exception as exc:
                 # The stream is the durable authority. A provider/configuration
@@ -96,6 +162,7 @@ class CraftaxRuntime:
         pin.status = "completed"
         pin.terminal = True
         pin.usage = dict(outcome["usage"])
+        pin.scheduled_checkpoints = list(outcome.get("scheduled_checkpoints") or [])
         digest = str(outcome["frame_digest"])
         records = list(outcome.get("frames") or [])
         if not records:
@@ -203,6 +270,33 @@ def _max_steps(platform: CompatPlatform) -> int:
             "do not inherit gold's silent 120-step world default"
         )
     return int(pinned)
+
+
+def _achievement_labels(observation: dict[str, Any]) -> list[str]:
+    labels: set[str] = set()
+
+    def visit(value: Any, key: str = "") -> None:
+        lowered = key.lower()
+        if "achievement" in lowered:
+            if isinstance(value, str) and value.strip():
+                labels.add(value.strip())
+            elif isinstance(value, list):
+                for item in value:
+                    if isinstance(item, str) and item.strip():
+                        labels.add(item.strip())
+            elif isinstance(value, dict):
+                for name, enabled in value.items():
+                    if enabled and str(name).strip():
+                        labels.add(str(name).strip())
+        if isinstance(value, dict):
+            for child_key, child in value.items():
+                visit(child, str(child_key))
+        elif isinstance(value, list):
+            for child in value:
+                visit(child, key)
+
+    visit(observation)
+    return sorted(labels)
 
 
 def _world_for(platform: CompatPlatform, *, max_steps: int) -> CraftaxWorld | GoldCraftaxWorld:

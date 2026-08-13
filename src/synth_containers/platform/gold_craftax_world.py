@@ -123,6 +123,30 @@ class GoldCraftaxWorld:
         )
         return self._result(payload)
 
+    def checkpoint(self) -> dict[str, Any]:
+        if self.rollout_id is None:
+            raise RuntimeError("Craftax gold checkpoint before reset")
+        payload = self._request("POST", f"/rollouts/{self.rollout_id}/checkpoint", {})
+        blob = payload.get("blob")
+        if not isinstance(blob, str) or not blob:
+            raise RuntimeError("Craftax gold checkpoint omitted blob")
+        if not isinstance(payload.get("checkpoint_id"), str):
+            raise RuntimeError("Craftax gold checkpoint omitted checkpoint_id")
+        return payload
+
+    def restore(self, blob: str) -> StepResult:
+        if self.rollout_id is None:
+            raise RuntimeError("Craftax gold restore before reset")
+        if not blob:
+            raise RuntimeError("Craftax gold restore requires checkpoint blob")
+        payload = self._request(
+            "POST", f"/rollouts/{self.rollout_id}/restore", {"blob": blob}
+        )
+        state = payload.get("state")
+        if not isinstance(state, dict):
+            raise RuntimeError("Craftax gold restore omitted state")
+        return self._result(state)
+
     def _result(self, payload: dict[str, Any]) -> StepResult:
         readout = payload.get("readout") if isinstance(payload.get("readout"), dict) else {}
         observation = (

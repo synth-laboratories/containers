@@ -31,6 +31,12 @@ def _digest(payload: Any) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
 
+def _checkpoint_digest(payload: Any) -> str:
+    """Return the full content address used for durable checkpoint evidence."""
+    blob = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return "sha256:" + hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
 def _seed_from_task_instance_id(task_instance_id: str | None) -> int:
     """Parse seed from `seed:N` or a trailing `:N`. Absent → 0. No integer suffix → 0.
 
@@ -114,6 +120,9 @@ class RolloutPin:
     outcome: str | None = None
     session_dropped: bool = False
     reward_kind: str = "env_sum"
+    checkpoint_schedule: dict[str, Any] | None = None
+    resume_from_checkpoint_id: str | None = None
+    scheduled_checkpoints: list[dict[str, Any]] = field(default_factory=list)
 
 
 class CompatPlatform:
@@ -150,12 +159,14 @@ class CompatPlatform:
         self.evaluation_logs: dict[str, list[dict[str, Any]]] = {}
         self.artifacts: dict[str, dict[str, Any]] = {}
         self.seals: dict[str, dict[str, Any]] = {}
+        self.checkpoints: dict[str, dict[str, Any]] = {}
         self.stopped_worlds: set[str] = set()
         self.step_calls = 0
         self.start_session_calls = 0
         self.policy_code: bytes | None = None
         self.policy_process: IsolatedPolicyProcess | None = None
         self._seed_default_policies()
+        self._recover_checkpoints()
         self._recover_completed_rollouts()
 
     def _durable_key(self, rollout_id: str) -> str:
@@ -166,6 +177,48 @@ class CompatPlatform:
 
     def _reward_path(self, rollout_id: str) -> Path:
         return self.storage_root / "reward_receipts" / f"{self._durable_key(rollout_id)}.json"
+
+    def _checkpoint_path(self, checkpoint_id: str) -> Path:
+        return self.storage_root / "checkpoints" / f"{self._durable_key(checkpoint_id)}.json"
+
+    def _recover_checkpoints(self) -> None:
+        root = self.storage_root / "checkpoints"
+        if not root.is_dir():
+            return
+        for path in sorted(root.glob("*.json")):
+            record = json.loads(path.read_text(encoding="utf-8"))
+            checkpoint_id = str(record.get("checkpoint_id") or "")
+            if record.get("schema_version") != "synth.containers.checkpoint.v1":
+                raise ValueError(f"checkpoint_schema:{path.name}")
+            if path.name != f"{self._durable_key(checkpoint_id)}.json":
+                raise ValueError(f"checkpoint_identity:{path.name}")
+            if record.get("target_id") != self.spec.target_id:
+                continue
+            expected_digest = _checkpoint_digest(
+                {key: value for key, value in record.items() if key != "content_digest"}
+            )
+            if record.get("content_digest") != expected_digest:
+                raise ValueError(f"checkpoint_digest:{checkpoint_id}")
+            self.checkpoints[checkpoint_id] = record
+
+    def record_checkpoint(self, record: dict[str, Any]) -> dict[str, Any]:
+        checkpoint_id = str(record.get("checkpoint_id") or "").strip()
+        if not checkpoint_id:
+            raise ValueError("checkpoint_id_required")
+        durable = {
+            "schema_version": "synth.containers.checkpoint.v1",
+            "target_id": self.spec.target_id,
+            **record,
+        }
+        durable["content_digest"] = _checkpoint_digest(durable)
+        existing = self.checkpoints.get(checkpoint_id)
+        if existing is not None:
+            if existing != durable:
+                raise ValueError(f"checkpoint_identity_conflict:{checkpoint_id}")
+            return existing
+        self._atomic_json(self._checkpoint_path(checkpoint_id), durable)
+        self.checkpoints[checkpoint_id] = durable
+        return durable
 
     @staticmethod
     def _receipt_digest(value: dict[str, Any]) -> str:
@@ -217,6 +270,9 @@ class CompatPlatform:
                 "outcome": pin.outcome,
                 "session_dropped": pin.session_dropped,
                 "reward_kind": pin.reward_kind,
+                "checkpoint_schedule": pin.checkpoint_schedule,
+                "resume_from_checkpoint_id": pin.resume_from_checkpoint_id,
+                "scheduled_checkpoints": pin.scheduled_checkpoints,
             },
         }
         self._atomic_json(self._manifest_path(pin.rollout_id), manifest)
@@ -297,6 +353,9 @@ class CompatPlatform:
                 outcome=raw_pin.get("outcome"),
                 session_dropped=bool(raw_pin.get("session_dropped")),
                 reward_kind=str(raw_pin.get("reward_kind") or self.spec.reward_kind),
+                checkpoint_schedule=raw_pin.get("checkpoint_schedule"),
+                resume_from_checkpoint_id=raw_pin.get("resume_from_checkpoint_id"),
+                scheduled_checkpoints=list(raw_pin.get("scheduled_checkpoints") or []),
             )
             self.logs[rollout_id] = log
             self.stream_bindings[rollout_id] = (str(binding[0]), str(binding[1]))
@@ -503,6 +562,8 @@ class CompatPlatform:
                 and existing_pin.task_instance_id == requested_task
                 and bound_transport == transport
                 and bound_retention == requested_retention
+                and existing_pin.resume_from_checkpoint_id
+                == request.resume_from_checkpoint_id
             )
             if not same_identity:
                 return {
@@ -567,6 +628,29 @@ class CompatPlatform:
         if config_id and config_id not in self.policy_configs and harness != ISOLATED_POLICY_HARNESS:
             return {"error": "unknown_policy_config", "status_code": 404, "config_id": config_id}
 
+        if request.resume_from_checkpoint_id:
+            if self.spec.affordances.level("restore") != "native" or self.spec.affordances.level(
+                "fork"
+            ) != "native":
+                return {
+                    "error": "checkpoint_resume_unsupported",
+                    "status_code": 409,
+                    "checkpoint_id": request.resume_from_checkpoint_id,
+                }
+            checkpoint = self.checkpoints.get(request.resume_from_checkpoint_id)
+            if checkpoint is None:
+                return {
+                    "error": "unknown_checkpoint",
+                    "status_code": 404,
+                    "checkpoint_id": request.resume_from_checkpoint_id,
+                }
+            if checkpoint.get("environment_ref") != self.spec.environment_ref:
+                return {
+                    "error": "checkpoint_environment_mismatch",
+                    "status_code": 409,
+                    "checkpoint_id": request.resume_from_checkpoint_id,
+                }
+
         seed_i = _seed_from_task_instance_id(request.task_instance_id)
         task_instance_id = request.task_instance_id or f"seed:{seed_i}"
         async_mode = request.submission_mode == "async"
@@ -585,6 +669,8 @@ class CompatPlatform:
             omit_reward=request.omit_reward,
             outcome=request.outcome,
             reward_kind=self.spec.reward_kind,
+            checkpoint_schedule=request.checkpoint_schedule,
+            resume_from_checkpoint_id=request.resume_from_checkpoint_id,
         )
         self.pins[rollout_id] = pin
         self.active_leases += 1
@@ -670,6 +756,8 @@ class CompatPlatform:
             "policy_revision_id": pin.policy_revision_id,
             "terminated": pin.terminal,
             "truncated": pin.status == "truncated",
+            "resume_from_checkpoint_id": pin.resume_from_checkpoint_id,
+            "scheduled_checkpoints": pin.scheduled_checkpoints,
         }
 
     def _simulate(self, pin: RolloutPin, log: RolloutEventLog) -> None:

@@ -61,6 +61,8 @@ class CreateRolloutRequest:
     outcome: Optional[str]
     slot: str
     metadata: dict[str, Any]
+    checkpoint_schedule: Optional[dict[str, Any]] = None
+    resume_from_checkpoint_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -161,6 +163,11 @@ def parse_create_rollout(
         outcome=_optional_str(raw, "outcome", operation=operation) or None,
         slot=slot,
         metadata=metadata,
+        checkpoint_schedule=_optional_object(raw, "checkpoint_schedule", operation=operation),
+        resume_from_checkpoint_id=_optional_str(
+            raw, "resume_from_checkpoint_id", operation=operation
+        )
+        or None,
     )
 
 
@@ -195,6 +202,8 @@ def to_platform_dict(req: CreateRolloutRequest) -> dict[str, Any]:
         "slot": req.slot,
         "stream_slot": req.slot,
         "metadata": req.metadata,
+        "checkpoint_schedule": req.checkpoint_schedule,
+        "resume_from_checkpoint_id": req.resume_from_checkpoint_id,
     }
 
 
