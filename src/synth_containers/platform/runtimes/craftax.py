@@ -104,9 +104,14 @@ class CraftaxRuntime:
                     "reward": reward,
                     "achievements": achievements,
                     "parent_checkpoint_id": pin.resume_from_checkpoint_id,
-                    "restore_eligible": True,
-                    "branchable": True,
+                    # A snapshot taken after the environment has terminated is
+                    # valid terminal evidence, but it is not a state from
+                    # which GoEx can continue. Never advertise terminal
+                    # snapshots as resumable branches.
+                    "restore_eligible": not bool(result.done),
+                    "branchable": not bool(result.done),
                     "checkpoint_semantics": "true_environment_snapshot",
+                    "resume_blockers": ["terminal_environment"] if result.done else [],
                 }
                 log.append("rollout.checkpoint", descriptor)
                 return descriptor
