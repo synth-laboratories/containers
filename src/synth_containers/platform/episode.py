@@ -130,6 +130,11 @@ def run_episode(
     if emit_policy_spans:
         log.append("policy.session.opened", dict(planner.metadata()))
         session_open = True
+    # Step zero is a real policy-call boundary. Capturing it guarantees a true
+    # branch even when one model plan spans the entire episode and the next
+    # boundary is already terminal.
+    if checkpoint_callback is not None:
+        scheduled_checkpoints.append(checkpoint_callback(world, planner, result, list(signals)))
     while not result.done:
         if emit_policy_spans:
             log.append(
