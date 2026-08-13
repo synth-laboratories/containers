@@ -258,6 +258,10 @@ def test_live_agentic_mcp_spans_share_the_eval_stream(digbench_http, monkeypatch
     action = kinds.index("action")
     assert opened < action < closed
     assert SEVEN <= set(kinds)
+    mcp_opened = next(item for item in events if item["kind"] == "span.mcp.opened")
+    assert mcp_opened["payload"]["evidence_class"] == "simulated"
+    action_event = next(item for item in events if item["kind"] == "action")
+    assert action_event["payload"]["action_authority"] == "relay_stub"
 
 
 def test_live_reconnect_get_does_not_add_checkpoint_kinds(digbench_http, monkeypatch) -> None:

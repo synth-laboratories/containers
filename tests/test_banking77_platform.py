@@ -267,3 +267,21 @@ def test_tinker_endpoint_does_not_branch_on_target_id() -> None:
         _tinker_endpoint({"inference_target": {"provider_endpoint_id": "tinker://weights"}})
         == "tinker://weights"
     )
+
+
+def test_tinker_error_code_is_typed_without_provider_prose() -> None:
+    from synth_containers.platform.runtimes.banking77 import _error_code
+
+    ProviderError = type("AuthenticationError", (Exception,), {"__module__": "tinker"})
+    error = ProviderError("secret-bearing provider prose request_id=req_live_123")
+    error.status_code = 401
+    code = _error_code(error)
+    assert code == "tinker_authenticationerror_401"
+    assert "secret" not in code
+    assert "request_id" not in code
+
+    missing = ProviderError(
+        "The api_key client option must be set either by passing api_key "
+        "or by setting the TINKER_API_KEY environment variable"
+    )
+    assert _error_code(missing) == "tinker_api_key_missing"

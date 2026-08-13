@@ -196,10 +196,17 @@ def test_digbench_mock_both_harnesses_share_one_eval_stream() -> None:
     assert basic.status_code == 200, basic.text
     basic_events = client.get("/rollouts/roll_digbench_basic/events", params={"after": 0}).json()["events"]
     basic_kinds = [row["kind"] for row in basic_events if not row.get("control")]
+    basic_opened = next(row for row in basic_events if row["kind"] == "trace.opened")
+    assert basic_opened["payload"]["policy_ref"] == {
+        "harness": "react_legal_actions",
+        "config": "react_legal_actions",
+    }
     mutating = [kind for kind in basic_kinds if kind != "trace.opened"]
     assert mutating[0] == "start_session"
     assert "frame" not in basic_kinds
     assert "span.mcp.opened" not in basic_kinds
+    basic_action = next(row for row in basic_events if row["kind"] == "action")
+    assert basic_action["payload"]["action_authority"] == "harness_stub"
     blob = str(basic_events)
     assert "DIGBENCH_API_TOKEN" not in blob
     assert "Bearer " not in blob
@@ -218,6 +225,11 @@ def test_digbench_mock_both_harnesses_share_one_eval_stream() -> None:
     assert agentic.json()["stream"]["id"] != basic.json()["stream"]["id"]
     agentic_events = client.get("/rollouts/roll_digbench_agentic/events", params={"after": 0}).json()["events"]
     agentic_kinds = [row["kind"] for row in agentic_events if not row.get("control")]
+    agentic_opened = next(row for row in agentic_events if row["kind"] == "trace.opened")
+    assert agentic_opened["payload"]["policy_ref"] == {
+        "harness": "codex",
+        "config": "agentic_codex",
+    }
     assert "span.mcp.opened" in agentic_kinds
     assert "span.mcp.closed" in agentic_kinds
     assert "frame" not in agentic_kinds
@@ -225,6 +237,10 @@ def test_digbench_mock_both_harnesses_share_one_eval_stream() -> None:
     action = agentic_kinds.index("action")
     closed = agentic_kinds.index("span.mcp.closed")
     assert opened < action < closed
+    agentic_mcp = next(row for row in agentic_events if row["kind"] == "span.mcp.opened")
+    assert agentic_mcp["payload"]["evidence_class"] == "simulated"
+    agentic_action = next(row for row in agentic_events if row["kind"] == "action")
+    assert agentic_action["payload"]["action_authority"] == "harness_stub"
     assert agentic.json()["stream"]["id"].startswith("stream:")
     assert "optimizer" not in str(agentic_events).lower()
 

@@ -171,6 +171,16 @@ def _error_code(exc: BaseException) -> str | None:
     """Secret-free failure code. The classify policy raises fixed identifiers
     (`tinker_sdk_missing`, `tinker_base_model_missing`, …); anything with
     whitespace or punctuation is provider prose and is not forwarded."""
+    # Provider SDK exception prose can contain request ids, URLs, or other
+    # operational details. Prefer a stable, secret-free class/status code and
+    # only pass through our own deliberately terse snake-case sentinels.
+    if exc.__class__.__module__.split(".", 1)[0] == "tinker":
+        if "TINKER_API_KEY" in str(exc) and "must be set" in str(exc):
+            return "tinker_api_key_missing"
+        status = getattr(exc, "status_code", None)
+        if isinstance(status, int) and 100 <= status <= 599:
+            return f"tinker_{exc.__class__.__name__.lower()}_{status}"
+        return f"tinker_{exc.__class__.__name__.lower()}"
     text = str(exc).strip()
     if not text or len(text) > 64:
         return None

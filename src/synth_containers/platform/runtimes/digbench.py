@@ -67,11 +67,40 @@ class DigbenchRuntime:
         log.append("stats", {"level": 1, "lives": 3, "steps_remaining": 20})
         log.append("invalid_action", {"action": "fly", "reason": "not_legal"})
         if _agentic_mcp(platform, pin):
-            log.append("span.mcp.opened", {"tool": "step", "server": "digbench-mcp"})
-            log.append("action", {"action": "inspect", "step_index": 1})
-            log.append("span.mcp.closed", {"tool": "step"})
+            log.append(
+                "span.mcp.opened",
+                {
+                    "tool": "step",
+                    "server": "digbench-mcp",
+                    "evidence_class": "simulated",
+                },
+            )
+            log.append(
+                "action",
+                {
+                    "action": "inspect",
+                    "step_index": 1,
+                    "action_authority": "harness_stub",
+                    "harness": pin.policy_ref.get("harness"),
+                },
+            )
+            log.append(
+                "span.mcp.closed",
+                {
+                    "tool": "step",
+                    "evidence_class": "simulated",
+                },
+            )
         else:
-            log.append("action", {"action": "inspect", "step_index": 1})
+            log.append(
+                "action",
+                {
+                    "action": "inspect",
+                    "step_index": 1,
+                    "action_authority": "harness_stub",
+                    "harness": pin.policy_ref.get("harness"),
+                },
+            )
         outcome = pin.outcome or "completed"
         log.append("status", {"status": outcome})
         pin.status = outcome
@@ -144,7 +173,14 @@ class DigbenchRuntime:
             action = legal[0]
             agentic = _agentic_mcp(platform, pin)
             if agentic:
-                log.append("span.mcp.opened", {"tool": "step", "server": "digbench-mcp"})
+                log.append(
+                    "span.mcp.opened",
+                    {
+                        "tool": "step",
+                        "server": "digbench-mcp",
+                        "evidence_class": "simulated",
+                    },
+                )
             try:
                 stepped = _live_step(base_url, token, session_id, action, next_index)
                 if stepped.get("invalid_action") is True:
@@ -154,11 +190,19 @@ class DigbenchRuntime:
                     {
                         "action": action,
                         "step_index": _require_step_index(stepped),
+                        "action_authority": "relay_stub",
+                        "harness": pin.policy_ref.get("harness"),
                     },
                 )
             finally:
                 if agentic:
-                    log.append("span.mcp.closed", {"tool": "step"})
+                    log.append(
+                        "span.mcp.closed",
+                        {
+                            "tool": "step",
+                            "evidence_class": "simulated",
+                        },
+                    )
             # get_session is reconnect, not a checkpoint restore. Do not emit
             # restore / true_checkpoint / fork / state kinds.
             view = _live_get_session(base_url, token, session_id)

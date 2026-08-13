@@ -431,7 +431,7 @@ DIGBENCH_PUBLIC = TargetSpec(
     policy_seeds=(
         PolicySeed("react_legal_actions", "react_legal_actions", {"mcp_bind": "unused"}),
         PolicySeed(
-            "agentic_codex", "codex", {"model": "gpt-5.6-codex", "mcp_bind": "digbench-mcp"}
+            "agentic_codex", "codex", {"model": "gpt-5.6-luna", "mcp_bind": "digbench-mcp"}
         ),
     ),
 )
@@ -483,7 +483,7 @@ DIGBENCH_MOCK = TargetSpec(
     policy_seeds=(
         PolicySeed("react_legal_actions", "react_legal_actions", {"mcp_bind": "unused"}),
         PolicySeed(
-            "agentic_codex", "codex", {"model": "gpt-5.6-codex", "mcp_bind": "digbench-mcp"}
+            "agentic_codex", "codex", {"model": "gpt-5.6-luna", "mcp_bind": "digbench-mcp"}
         ),
     ),
 )

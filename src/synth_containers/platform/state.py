@@ -412,7 +412,23 @@ class CompatPlatform:
         self.active_leases += 1
         log = self.logs[rollout_id]
         if not any(item.kind == "trace.opened" for item in log.after(0)):
-            log.append("trace.opened", {"rollout_id": rollout_id, "stream.id": log.stream_id})
+            # Immutable, secret-free lane identity belongs in the durable trace.
+            # In particular, Workshop must be able to distinguish two harnesses
+            # without guessing from rollout ids or from MCP-shaped events.
+            log.append(
+                "trace.opened",
+                {
+                    "rollout_id": rollout_id,
+                    "stream.id": log.stream_id,
+                    "world_ref": pin.world_ref,
+                    "environment_ref": pin.environment_ref,
+                    "task_instance_id": pin.task_instance_id,
+                    "policy_ref": {
+                        "harness": harness,
+                        "config": config_id,
+                    },
+                },
+            )
         pin.started = True
         pin.status = "running"
         if async_mode:
