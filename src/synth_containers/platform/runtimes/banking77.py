@@ -13,7 +13,12 @@ See: workshop/docs/aug_12_update.md (content, not a fold; missing ≠ 0).
 
 from __future__ import annotations
 
+import json
+import os
 import re
+import urllib.error
+import urllib.request
+from urllib.parse import urlsplit
 from typing import Any
 
 from ...event_log import RolloutEventLog
@@ -139,6 +144,10 @@ class Banking77Runtime:
         if endpoint:
             return _sample_tinker(endpoint, observation, config)
 
+        remote_target = _remote_checkpoint_target(config)
+        if remote_target is not None:
+            return _sample_remote_checkpoint(remote_target, observation, config)
+
         if harness != "classify":
             raise ValueError(f"unknown_banking77_harness:{harness}")
         return None, dict(_EMPTY_USAGE)
@@ -185,6 +194,130 @@ def _tinker_endpoint(config: dict[str, Any]) -> str | None:
     if endpoint.startswith("tinker:") or endpoint.startswith("tinker://"):
         return endpoint
     return None
+
+
+def _remote_checkpoint_target(config: dict[str, Any]) -> dict[str, Any] | None:
+    target = config.get("inference_target")
+    if not isinstance(target, dict):
+        return None
+    endpoint = str(target.get("provider_endpoint_id") or "").strip()
+    if endpoint.startswith("http://") or endpoint.startswith("https://"):
+        return dict(target)
+    return None
+
+
+def _sample_remote_checkpoint(
+    target: dict[str, Any],
+    observation: dict[str, Any],
+    config: dict[str, Any],
+) -> tuple[str | None, dict[str, Any]]:
+    endpoint = str(target.get("provider_endpoint_id") or "").strip()
+    _validate_remote_checkpoint_endpoint(endpoint)
+    if str(target.get("provider") or "").strip().lower() != "tinker":
+        raise RuntimeError("remote_checkpoint_provider_unsupported")
+    auth_bearer = str(target.get("auth_bearer") or "").strip()
+    if not auth_bearer or "\r" in auth_bearer or "\n" in auth_bearer:
+        raise RuntimeError("remote_checkpoint_auth_missing")
+    run_id = str(target.get("run_id") or "").strip()
+    checkpoint_id = str(target.get("checkpoint_id") or "").strip()
+    if not run_id or not checkpoint_id:
+        raise RuntimeError("remote_checkpoint_identity_missing")
+    max_tokens = min(max(int(config.get("max_tokens") or 32), 1), 512)
+    messages = [
+        {"role": "system", "content": CLASSIFY_SYSTEM},
+        {"role": "user", "content": user_prompt(str(observation["text"]))},
+    ]
+    body = json.dumps(
+        {
+            "run_id": run_id,
+            "checkpoint_id": checkpoint_id,
+            "messages": messages,
+            "max_tokens": max_tokens,
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        endpoint,
+        data=body,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {auth_bearer}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+    )
+    timeout = min(max(float(config.get("remote_timeout_seconds") or 60.0), 1.0), 120.0)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
+            raw = response.read(1_048_577)
+    except urllib.error.HTTPError as exc:
+        mapping = {
+            401: "remote_checkpoint_auth_refused",
+            404: "remote_checkpoint_not_found",
+            409: "remote_checkpoint_unavailable",
+            422: "remote_checkpoint_request_invalid",
+            502: "remote_checkpoint_sampling_failed",
+        }
+        raise RuntimeError(mapping.get(exc.code, "remote_checkpoint_http_error")) from exc
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise RuntimeError("remote_checkpoint_transport_error") from exc
+    if len(raw) > 1_048_576:
+        raise RuntimeError("remote_checkpoint_response_too_large")
+    try:
+        payload = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("remote_checkpoint_response_invalid") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError("remote_checkpoint_response_invalid")
+    text = payload.get("text")
+    if not isinstance(text, str):
+        raise RuntimeError("remote_checkpoint_response_invalid")
+    usage = _remote_usage(payload.get("usage"))
+    predicted = text.strip().splitlines()[0].strip() if text.strip() else None
+    return predicted, usage
+
+
+def _validate_remote_checkpoint_endpoint(endpoint: str) -> None:
+    try:
+        parsed = urlsplit(endpoint)
+        port = parsed.port
+    except ValueError as exc:
+        raise RuntimeError("remote_checkpoint_endpoint_refused") from exc
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or not parsed.path.startswith("/")
+    ):
+        raise RuntimeError("remote_checkpoint_endpoint_refused")
+    host = parsed.hostname.lower()
+    if host in {"127.0.0.1", "localhost", "::1"} and parsed.scheme == "http":
+        return
+    normalized = f"{parsed.scheme}://{host}"
+    if port is not None:
+        normalized += f":{port}"
+    allowed = {
+        item.strip().rstrip("/")
+        for item in os.environ.get(
+            "SYNTH_CHECKPOINT_INFERENCE_ALLOWED_ENDPOINTS", ""
+        ).split(",")
+        if item.strip()
+    }
+    if normalized not in allowed:
+        raise RuntimeError("remote_checkpoint_endpoint_refused")
+
+
+def _remote_usage(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return dict(_EMPTY_USAGE)
+    usage: dict[str, Any] = {}
+    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        item = value.get(key)
+        usage[key] = item if item is None or (isinstance(item, int) and not isinstance(item, bool) and item >= 0) else None
+    return usage
 
 
 def _sample_tinker(

@@ -1,0 +1,9 @@
+{
+  "schema": "synth.dock-eval-extension.v1",
+  "extension_id": "dock-fixture/gamebench-example",
+  "adapter": "harbor_pinned_bundle",
+  "bundle": {
+    "path": "bundle",
+    "digest": "sha256:d702e5764af4916574c0cabf24ce9d65f416c6539fa1c2805c17a01d5af52749"
+  }
+}
