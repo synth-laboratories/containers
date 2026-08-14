@@ -73,6 +73,29 @@ def test_optimizer_async_rollout_reaches_terminal_record() -> None:
     assert all(event.get("kind") != "heartbeat" for event in first["events"] + second["events"])
 
 
+def test_in_flight_policy_config_allows_only_identical_replay() -> None:
+    client = TestClient(create_compat_app("craftax_engine"))
+    config = {"config_id": "shared", "harness": "react", "config": {"model": "fixture"}}
+    registered = client.post("/policy-configs", json=config)
+    assert registered.status_code == 200
+    request = _optimizer_request(submission_mode="async", seed=9)
+    request["policy"]["config"] = {"model": "fixture"}
+    started = client.post("/rollout", json=request)
+    assert started.status_code == 200
+
+    replayed = client.post("/policy-configs", json=config)
+    assert replayed.status_code == 200
+    assert replayed.json()["replayed"] is True
+    changed = client.post(
+        "/policy-configs",
+        json={**config, "config": {"model": "different"}},
+    )
+    assert changed.status_code == 409
+
+    completed = client.post(f"/rollouts/{started.json()['rollout_id']}/complete")
+    assert completed.status_code == 200
+
+
 def _git(args: list[str], cwd: Path) -> None:
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
 

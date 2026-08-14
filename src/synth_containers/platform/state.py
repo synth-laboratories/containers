@@ -1008,18 +1008,11 @@ class CompatPlatform:
     def register_policy_config(self, config_id: str, body: dict[str, Any]) -> dict[str, Any]:
         if self.spec.affordances.level("bind_policy_config") == "unsupported":
             return {"error": "bind_refused", "status_code": 403, "affordance": "bind_policy_config"}
-        if any(pin.started and not pin.terminal for pin in self.pins.values()):
-            return {
-                "error": "in_flight",
-                "status_code": 409,
-                "detail": "mid-trial bind_policy_config refused",
-            }
         cfg = PolicyConfig(
             config_id=config_id,
             harness=str(body.get("harness") or self.spec.default_policy_harness),
             config=dict(body.get("config") or body),
         )
-        self.policy_configs[config_id] = cfg
         digest = "sha256:" + hashlib.sha256(
             json.dumps(
                 {"harness": cfg.harness, "config": cfg.config},
@@ -1027,6 +1020,22 @@ class CompatPlatform:
                 separators=(",", ":"),
             ).encode("utf-8")
         ).hexdigest()
+        existing = self.policy_configs.get(config_id)
+        if existing is not None and existing.harness == cfg.harness and existing.config == cfg.config:
+            return {
+                "config_id": config_id,
+                "harness": cfg.harness,
+                "digest": digest,
+                "engine_generation": self.engine_generation,
+                "replayed": True,
+            }
+        if any(pin.started and not pin.terminal for pin in self.pins.values()):
+            return {
+                "error": "in_flight",
+                "status_code": 409,
+                "detail": "mid-trial bind_policy_config refused",
+            }
+        self.policy_configs[config_id] = cfg
         return {
             "config_id": config_id,
             "harness": cfg.harness,
