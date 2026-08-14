@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import urllib.error
 
 from synth_containers.platform.eval_examples import run_code_policy, run_react
 from synth_containers.platform.react import OpenRouterReAct
@@ -148,6 +149,30 @@ def test_openrouter_react_uses_forced_tool_arguments(monkeypatch) -> None:
     assert policy._messages[0]["role"] == "system"
     assert policy._messages[1]["role"] == "user"
     assert policy._messages[2]["role"] == "assistant"
+
+
+def test_openrouter_react_retries_transient_transport_failure(monkeypatch) -> None:
+    attempts = 0
+
+    def urlopen(*_args, **_kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise urllib.error.URLError(ConnectionResetError("transient reset"))
+        return _json_response(_tool_body(["do", "noop", "do", "noop", "do"]))
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-only")
+    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+    monkeypatch.setattr("time.sleep", lambda _seconds: None)
+    policy = OpenRouterReAct(
+        config_id="muse_spark_medium",
+        config={"transport_retries": 2},
+    )
+
+    assert policy.plan(
+        {"valid_actions": ["do", "noop"], "observation_text": "obs"}
+    ) == ["do", "noop", "do", "noop", "do"]
+    assert attempts == 2
 
 
 def _json_response(body: dict) -> object:

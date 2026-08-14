@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
@@ -128,6 +129,7 @@ class OpenRouterReAct:
         self.api_key_env = str(config.get("api_key_env") or "OPENROUTER_API_KEY")
         self.max_tokens = min(max(int(config.get("max_tokens") or 768), 64), 4096)
         self.parse_retries = min(max(int(config.get("parse_retries") or 0), 0), 2)
+        self.transport_retries = min(max(int(config.get("transport_retries") or 2), 0), 4)
         self.compact_every = min(max(int(config.get("compact_every") or 16), 1), 64)
         self.compaction_mode = str(config.get("compaction_mode") or "turn_count")
         self.context_token_budget = min(
@@ -173,6 +175,7 @@ class OpenRouterReAct:
             "reasoning_effort": self.reasoning_effort,
             "plan_min": self.plan_min,
             "plan_max": self.plan_max,
+            "transport_retries": self.transport_retries,
             "compact_every": self.compact_every,
             "compaction_mode": self.compaction_mode,
             "compact_threshold": self.compact_threshold,
@@ -515,18 +518,28 @@ class OpenRouterReAct:
             },
             method="POST",
         )
-        try:
-            with urllib.request.urlopen(request, timeout=180) as response:
-                headers = getattr(response, "headers", None)
-                content_type = str(
-                    headers.get("Content-Type") if headers is not None else ""
-                ).lower()
-                if "text/event-stream" in content_type:
-                    return self._consume_sse(response, on_delta)
-                raw = response.read().decode("utf-8")
-        except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")[:1000]
-            raise RuntimeError(f"OpenRouter policy HTTP {exc.code}: {detail}") from exc
+        raw = ""
+        for attempt in range(self.transport_retries + 1):
+            try:
+                with urllib.request.urlopen(request, timeout=180) as response:
+                    headers = getattr(response, "headers", None)
+                    content_type = str(
+                        headers.get("Content-Type") if headers is not None else ""
+                    ).lower()
+                    if "text/event-stream" in content_type:
+                        return self._consume_sse(response, on_delta)
+                    raw = response.read().decode("utf-8")
+                break
+            except urllib.error.HTTPError as exc:
+                detail = exc.read().decode("utf-8", errors="replace")[:1000]
+                raise RuntimeError(f"OpenRouter policy HTTP {exc.code}: {detail}") from exc
+            except (TimeoutError, urllib.error.URLError) as exc:
+                if attempt >= self.transport_retries:
+                    raise RuntimeError(
+                        f"OpenRouter policy transport failed after {attempt + 1} attempts: "
+                        f"{type(exc).__name__}"
+                    ) from exc
+                time.sleep(0.25 * (2**attempt))
         stripped = raw.lstrip()
         if stripped.startswith("data:"):
             return self._consume_sse_text(raw, on_delta)
