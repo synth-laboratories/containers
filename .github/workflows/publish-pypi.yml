@@ -1,0 +1,113 @@
+name: Publish to PyPI
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Release channel to publish
+        required: true
+        default: dev
+        type: choice
+        options:
+          - dev
+          - official
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate release request
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - id: release
+        name: Enforce branch, tag, and version policy
+        env:
+          REQUESTED_CHANNEL: ${{ github.event_name == 'push' && 'official' || inputs.channel }}
+          RELEASE_REF: ${{ github.ref }}
+          RELEASE_REF_NAME: ${{ github.ref_name }}
+          RELEASE_REF_TYPE: ${{ github.ref_type }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          import tomllib
+
+          with open("pyproject.toml", "rb") as handle:
+              version = tomllib.load(handle)["project"]["version"]
+
+          channel = os.environ["REQUESTED_CHANNEL"]
+          ref = os.environ["RELEASE_REF"]
+          ref_name = os.environ["RELEASE_REF_NAME"]
+          ref_type = os.environ["RELEASE_REF_TYPE"]
+
+          if channel == "dev":
+              if ref != "refs/heads/dev":
+                  raise SystemExit("development releases must be dispatched from the dev branch")
+              if not re.fullmatch(r"\d+\.\d+\.\d+\.dev\d+", version):
+                  raise SystemExit(f"development release version is invalid: {version}")
+          elif channel == "official":
+              if ref_type != "tag":
+                  raise SystemExit("official releases must run from a version tag")
+              if ref_name != f"v{version}":
+                  raise SystemExit(f"tag {ref_name} does not match package version v{version}")
+              if not re.fullmatch(r"\d+\.\d+\.\d+(?:\.\d{8})?", version):
+                  raise SystemExit(f"official release version is invalid: {version}")
+          else:
+              raise SystemExit(f"unknown release channel: {channel}")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"version={version}\n")
+          PY
+
+  build:
+    name: Build ${{ needs.validate.outputs.version }}
+    needs: validate
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+        with:
+          enable-cache: true
+          python-version: "3.11"
+
+      - name: Build wheel and source distribution
+        run: uv build
+
+      - name: Validate distributions
+        run: uvx twine check dist/*
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pypi-distributions
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish ${{ needs.validate.outputs.version }}
+    needs:
+      - validate
+      - build
+    runs-on: ubuntu-24.04
+    environment:
+      name: pypi
+      url: https://pypi.org/project/synth-containers/${{ needs.validate.outputs.version }}/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: pypi-distributions
+          path: dist/
+
+      - name: Publish with PyPI Trusted Publishing
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33
+
