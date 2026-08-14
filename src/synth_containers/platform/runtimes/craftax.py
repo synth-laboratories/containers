@@ -14,7 +14,7 @@ from ...event_log import RolloutEventLog
 from ..craftax_world import CraftaxWorld
 from ..episode import PNG_MAGIC, run_episode
 from ..policy_process import DEFAULT_HEURISTIC, IsolatedPolicyProcess
-from ..gold_craftax_world import GoldCraftaxWorld
+from ..gold_craftax_world import GoldCraftaxWorld, GoldWorldUnreachable
 from ..react import OpenRouterReAct, ScriptedReAct
 from ..state import CompatPlatform, RolloutPin
 
@@ -156,7 +156,14 @@ class CraftaxRuntime:
                     "status",
                     {
                         "status": "failed",
-                        "reason": "policy_error",
+                        # An unreachable world dies in reset(), before the policy
+                        # is called. Calling that `policy_error` is what sent two
+                        # diagnoses chasing the model instead of the address.
+                        "reason": (
+                            "environment_error"
+                            if isinstance(exc, GoldWorldUnreachable)
+                            else "policy_error"
+                        ),
                         "error_type": type(exc).__name__,
                     },
                 )

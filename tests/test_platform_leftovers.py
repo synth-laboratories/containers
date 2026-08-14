@@ -95,6 +95,7 @@ def test_craftax_policy_failure_closes_and_seals_the_stream(monkeypatch, tmp_pat
         "synth_containers.platform.runtimes.craftax.run_episode",
         fail_after_open,
     )
+    monkeypatch.setenv("SYNTH_CRAFTAX_URL", "http://127.0.0.1:1")
     platform = CompatPlatform(TARGETS["craftax_react"], storage_root=tmp_path)
     body = platform.start_rollout(
         parse_create_rollout(
@@ -349,6 +350,7 @@ def test_a_raising_rollout_does_not_wedge_later_policy_binds(monkeypatch, tmp_pa
         "synth_containers.platform.runtimes.craftax.CraftaxRuntime.simulate",
         explode,
     )
+    monkeypatch.setenv("SYNTH_CRAFTAX_URL", "http://127.0.0.1:1")
     platform = CompatPlatform(TARGETS["craftax_react"], storage_root=tmp_path)
     request = parse_create_rollout(
         {

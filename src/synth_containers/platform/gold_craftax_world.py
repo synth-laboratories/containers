@@ -23,6 +23,15 @@ from .craftax_world import StepResult
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
 
+class GoldWorldUnreachable(RuntimeError):
+    """The world service could not be reached. Not a policy failure.
+
+    Reported separately because an unreachable world dies in reset(), before
+    the policy is ever called, and labelling that `policy_error` sent two
+    diagnoses chasing the model instead of the address.
+    """
+
+
 class GoldFrameMissing(RuntimeError):
     """live_frames=native requires a PNG copy into the relay. Missing is not ASCII."""
 
@@ -49,10 +58,19 @@ class GoldCraftaxWorld:
         if max_steps <= 0:
             raise ValueError("Craftax gold max_steps must be a positive pin, not a silent default")
         self.max_steps = int(max_steps)
-        self.base_url = (
-            base_url
-            or os.environ.get("SYNTH_CRAFTAX_URL", "http://127.0.0.1:8098")
-        ).rstrip("/")
+        # No default address. Pointing at a port nothing serves produced a
+        # rollout that died in reset() before the policy was ever called, and
+        # the failure surfaced downstream as `policy_error` with zero steps —
+        # so an unconfigured world address read as "this checkpoint scores
+        # zero" and cost several runs to trace. An unset address must say so.
+        resolved = base_url or os.environ.get("SYNTH_CRAFTAX_URL")
+        if not resolved or not resolved.strip():
+            raise ValueError(
+                "Craftax gold world requires an address: pass base_url or set "
+                "SYNTH_CRAFTAX_URL. It is never defaulted, because a wrong "
+                "address is indistinguishable from a failing policy downstream."
+            )
+        self.base_url = resolved.strip().rstrip("/")
         self.require_frames = require_frames
         self.rollout_id: str | None = None
         self.previous_total_reward = 0.0
@@ -231,7 +249,9 @@ class GoldCraftaxWorld:
             with urllib.request.urlopen(request, timeout=60) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except urllib.error.URLError as exc:
-            raise RuntimeError(f"Craftax gold unreachable at {self.base_url}{path}") from exc
+            raise GoldWorldUnreachable(
+                f"Craftax gold unreachable at {self.base_url}{path}"
+            ) from exc
         if not isinstance(payload, dict):
             raise RuntimeError("Craftax gold returned non-object JSON")
         return payload
