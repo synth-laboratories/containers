@@ -267,7 +267,7 @@ def test_engine_is_fixture_not_gold() -> None:
     assert code.environment_ref == "env:craftax_fixture"
     assert code.max_episode_steps == 8
     assert react.environment_ref == "env:craftax_gold"
-    assert react.max_episode_steps == 120
+    assert react.max_episode_steps == 400
     info = TestClient(create_compat_app("craftax_engine")).get("/info").json()
     assert info["environment_ref"] == "env:craftax_fixture"
     assert info["max_episode_steps"] == 8

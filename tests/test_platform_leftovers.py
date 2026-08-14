@@ -37,7 +37,7 @@ def test_metadata_names_runtime_family() -> None:
     assert "harbor" not in craftax.get("adapter_chain", [])
     react = TestClient(create_compat_app("craftax_react")).get("/info").json()
     assert react["environment_ref"] == "env:craftax_gold"
-    assert react["max_episode_steps"] == 120
+    assert react["max_episode_steps"] == 400
     assert banking77["runtime_family"] == "banking77"
     assert banking77["adapter_chain"] == []
     assert banking77["live_frames"] == "unsupported"

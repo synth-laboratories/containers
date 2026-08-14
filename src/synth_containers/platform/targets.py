@@ -197,7 +197,7 @@ CRAFTAX_REACT = TargetSpec(
             },
         ),
     ),
-    max_episode_steps=120,
+    max_episode_steps=400,
 )
 
 # Dedicated GoEx target: same gold Rust environment and paid ReAct harness, but
