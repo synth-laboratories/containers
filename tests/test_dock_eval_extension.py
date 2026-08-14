@@ -56,9 +56,14 @@ def test_dock_extension_uses_pinned_harbor_runtime_and_public_stream(monkeypatch
         environment=None,
         allow_nonzero=False,
         timeout_seconds=120.0,
+        network="none",
     ):
         del timeout_seconds
-        assert allow_nonzero is (role == "verifier")
+        # Both roles tolerate a nonzero exit: the verifier is the scoring
+        # authority, and a failed authoring turn is a task outcome, not infra.
+        assert allow_nonzero is True
+        # This bundle declares no agent network, so both roles stay hermetic.
+        assert network == "none"
         calls.append(
             {
                 "role": role,
@@ -67,6 +72,7 @@ def test_dock_extension_uses_pinned_harbor_runtime_and_public_stream(monkeypatch
                 "volumes": volumes,
                 "name": name,
                 "environment": environment,
+                "network": network,
             }
         )
         bundle_mount = volumes["/harbor/bundle"]
@@ -163,3 +169,112 @@ def test_dock_extension_tampered_bundle_fails_before_docker(monkeypatch, tmp_pat
     reward = client.post("/reward", json={"rollout_id": "dock_tampered", "mode": "terminal"}).json()
     assert reward.get("reward") is None
     assert str(copied) not in json.dumps(events)
+
+
+def test_authoring_agent_gets_declared_egress_while_verifier_stays_hermetic(
+    tmp_path, monkeypatch
+) -> None:
+    """An authoring agent may declare a bridge; the verifier never gets one.
+
+    Credentials are launcher-owned: they mount for the agent only and must not
+    reach the bundle digest or the event log.
+    """
+    copied = tmp_path / "dock"
+    shutil.copytree(FIXTURE.parent, copied)
+    manifest_path = copied / "bundle" / "bundle.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["agent"]["network"] = "bridge"
+    manifest["agent"]["timeout_seconds"] = 900
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    credentials = tmp_path / "codexhome"
+    credentials.mkdir()
+    (credentials / "auth.json").write_text('{"auth_mode":"chatgpt"}', encoding="utf-8")
+
+    extension_path = copied / "extension.json"
+    extension = json.loads(extension_path.read_text(encoding="utf-8"))
+    extension["bundle"]["digest"] = compute_bundle_digest(copied / "bundle")
+    extension["agent_credentials"] = str(credentials)
+    extension_path.write_text(json.dumps(extension, indent=2), encoding="utf-8")
+
+    seen: dict[str, dict] = {}
+
+    monkeypatch.setattr(
+        "synth_containers.platform.runtimes.harbor_docker.docker_runtime_available",
+        lambda: True,
+    )
+
+    def fake_execute(*, role, image, command, volumes, name, environment=None,
+                     allow_nonzero=False, timeout_seconds=120.0, network="none"):
+        del image, command, allow_nonzero
+        seen[role] = {
+            "network": network,
+            "timeout_seconds": timeout_seconds,
+            "environment": dict(environment or {}),
+            "volumes": dict(volumes),
+        }
+        if role == "agent":
+            Path(volumes["/workspace"]).mkdir(parents=True, exist_ok=True)
+            return DockerExecution(role=role, exit_code=0, stdout="wrote\n", name=name)
+        logs = Path(volumes["/logs"]) / "verifier"
+        logs.mkdir(parents=True, exist_ok=True)
+        (logs / "reward.txt").write_text("0.0455\n", encoding="utf-8")
+        (logs / "result.json").write_text(
+            json.dumps(
+                {
+                    "baseline_score": 0.0303,
+                    "best_score": 0.0455,
+                    "best_candidate_id": "fixcraft",
+                    "delta_vs_baseline": 0.0152,
+                    "passed": True,
+                    "leaderboard_path": "/workspace/.harbor_hillclimb/leaderboard.json",
+                }
+            ),
+            encoding="utf-8",
+        )
+        return DockerExecution(role=role, exit_code=0, stdout="", name=name)
+
+    monkeypatch.setattr(
+        "synth_containers.platform.runtimes.harbor_docker.execute_docker_role",
+        fake_execute,
+    )
+
+    client = TestClient(create_dock_eval_app(extension_path))
+    _prepare_subscribe(client, "dock_authoring")
+    started = client.post(
+        "/rollouts",
+        json={
+            "rollout_id": "dock_authoring",
+            "telemetry": TELEMETRY,
+            "policy_ref": {"harness": "harbor_fused", "config": "luna_med"},
+        },
+    ).json()
+    assert started["status"] == "completed"
+
+    # Only the agent gets egress and the longer budget.
+    assert seen["agent"]["network"] == "bridge"
+    assert seen["agent"]["timeout_seconds"] == 900
+    assert seen["verifier"]["network"] == "none"
+
+    # Credentials mount on the agent only, never on the verifier.
+    assert seen["agent"]["environment"]["CODEX_HOME"] == "/codexhome"
+    assert "/codexhome" in seen["agent"]["volumes"]
+    assert "/codexhome" not in seen["verifier"]["volumes"]
+    assert "CODEX_HOME" not in seen["verifier"]["environment"]
+
+    events = client.get("/rollouts/dock_authoring/events", params={"after": 0}).json()["events"]
+    verifier = next(row for row in events if row["kind"] == "verifier")
+    assert verifier["payload"]["reward.txt"] == 0.0455
+    # Scalar projection of result.json reaches the consumer...
+    assert verifier["payload"]["result"]["best_candidate_id"] == "fixcraft"
+    assert verifier["payload"]["result"]["delta_vs_baseline"] == 0.0152
+    assert verifier["payload"]["result"]["passed"] is True
+    # ...without smuggling non-scalar keys through.
+    assert "leaderboard_path" not in verifier["payload"]["result"]
+
+    # A failed authoring turn stays visible as an exit code.
+    agent_closed = next(row for row in events if row["kind"] == "span.agent.closed")
+    assert agent_closed["payload"]["exit_code"] == 0
+
+    # The credential path is never echoed into the durable log.
+    assert str(credentials) not in json.dumps(events)
