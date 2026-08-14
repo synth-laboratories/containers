@@ -783,6 +783,9 @@ class CompatPlatform:
         return False
 
     def _rollout_response(self, pin: RolloutPin, descriptor: dict[str, Any]) -> dict[str, Any]:
+        reward = None
+        if pin.terminal and not any(value is None for value in pin.reward_signals):
+            reward = sum(float(value) for value in pin.reward_signals if value is not None)
         return {
             "rollout_id": pin.rollout_id,
             "status": pin.status,
@@ -801,6 +804,13 @@ class CompatPlatform:
             "truncated": pin.status == "truncated",
             "resume_from_checkpoint_id": pin.resume_from_checkpoint_id,
             "scheduled_checkpoints": pin.scheduled_checkpoints,
+            "reward": reward,
+            "reward_info": {"outcome_reward": reward} if reward is not None else None,
+            "summary": {
+                "outcome_reward": reward,
+                "is_reference_world": pin.environment_ref in {"env:craftax_gold", "env:rogue_gold"},
+            },
+            "success_status": "success" if pin.terminal and pin.status == "completed" else None,
         }
 
     def _simulate(self, pin: RolloutPin, log: RolloutEventLog) -> None:

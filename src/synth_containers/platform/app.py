@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import threading
 import uuid
 from pathlib import Path
 from typing import Any
@@ -397,9 +398,97 @@ def create_compat_app(
 
     @app.post("/rollout", include_in_schema=False)
     async def optimizer_rollout(request: Request) -> Any:
-        if spec.runtime_family.value != "healthbench":
-            return await start(request)
         body = await request.json()
+        if spec.runtime_family.value != "healthbench":
+            if "policy_ref" in body:
+                try:
+                    req = parse_create_rollout(body)
+                except (RequestParseError, ValueError) as exc:
+                    raise _http_from_parse(exc) from exc
+                result = await asyncio.to_thread(platform.start_rollout, req)
+                return _platform_response(result)
+
+            env = body.get("env") if isinstance(body.get("env"), dict) else {}
+            task_payload = (
+                body.get("task_payload") if isinstance(body.get("task_payload"), dict) else {}
+            )
+            example = (
+                task_payload.get("example") if isinstance(task_payload.get("example"), dict) else {}
+            )
+            policy = body.get("policy") if isinstance(body.get("policy"), dict) else {}
+            raw_config = policy.get("config")
+            if raw_config is not None and not isinstance(raw_config, dict):
+                raise HTTPException(status_code=422, detail="policy.config_must_be_an_object")
+            policy_config = dict(raw_config or {})
+            candidate = body.get("candidate") if isinstance(body.get("candidate"), dict) else {}
+            for field in ("react_system_prompt", "system_prompt"):
+                if isinstance(candidate.get(field), str) and candidate[field].strip():
+                    policy_config[field] = candidate[field]
+            config_digest = hashlib.sha256(
+                json.dumps(policy_config, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()[:16]
+            config_id = f"optimizer_{config_digest}"
+            platform.policy_configs.setdefault(
+                config_id,
+                PolicyConfig(config_id=config_id, harness="react", config=policy_config),
+            )
+            seed = int(env.get("seed") or example.get("seed") or body.get("seed") or 0)
+            rollout_id = str(
+                body.get("rollout_id")
+                or body.get("trace_correlation_id")
+                or f"roll_{uuid.uuid4().hex[:12]}"
+            )
+            telemetry = {"enabled": True, "transport": "poll", "retention": "run"}
+            if rollout_id not in platform.logs:
+                platform.prepare(rollout_id, "poll", "run")
+            requested_mode = str(body.get("submission_mode") or "sync").lower()
+            try:
+                req = parse_create_rollout(
+                    {
+                        "rollout_id": rollout_id,
+                        "submission_mode": requested_mode,
+                        "slot": "stream",
+                        "telemetry": telemetry,
+                        "task_instance_id": example.get("task_instance_id")
+                        or body.get("task_instance_id")
+                        or f"seed:{seed}",
+                        "world_ref": body.get("world_ref") or spec.world_ref,
+                        "evaluation_plan_ref": body.get("evaluation_plan_ref")
+                        or spec.evaluation_plan_ref,
+                        "policy_ref": {"harness": "react", "config": config_id},
+                    }
+                )
+            except (RequestParseError, ValueError) as exc:
+                raise _http_from_parse(exc) from exc
+            result = await asyncio.to_thread(platform.start_rollout, req)
+            if "error" in result:
+                return _platform_response(result)
+            if requested_mode == "async":
+                threading.Thread(
+                    target=platform.complete_rollout,
+                    args=(rollout_id,),
+                    daemon=True,
+                    name=f"optimizer-rollout-{rollout_id}",
+                ).start()
+                return result
+            reward = sum(
+                float(value)
+                for value in platform.pins[rollout_id].reward_signals
+                if isinstance(value, (int, float))
+            )
+            events = platform.events_payload(rollout_id, 0, 10_000).get("events", [])
+            return {
+                **result,
+                "success_status": "success",
+                "reward": reward,
+                "reward_info": {"outcome_reward": reward},
+                "summary": {"outcome_reward": reward, "is_reference_world": True},
+                "metadata": {
+                    **(body.get("metadata") if isinstance(body.get("metadata"), dict) else {}),
+                    "is_reference_world": True,
+                },
+                "events": events,
+            }
         task = body.get("task") if isinstance(body.get("task"), dict) else {}
         seed = int(task.get("seed") or 0)
         candidate = body.get("candidate") if isinstance(body.get("candidate"), dict) else {}
@@ -484,6 +573,10 @@ def create_compat_app(
 
     @app.get("/rollouts/{rollout_id}")
     async def rollout_status(rollout_id: str) -> Any:
+        return _platform_response(platform.rollout_status(rollout_id), default_status=404)
+
+    @app.get("/rollouts/{rollout_id}/state")
+    async def rollout_state(rollout_id: str) -> Any:
         return _platform_response(platform.rollout_status(rollout_id), default_status=404)
 
     @app.get("/rollouts/{rollout_id}/events")
