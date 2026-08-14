@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
@@ -257,6 +258,7 @@ class OpenRouterReAct:
             self.base_url = _required_str(config, "base_url", config_id).rstrip("/")
             self.sampler_path = ""
             self.tokenizer_id = ""
+            self.sampler_ready_timeout_s = 0
         else:
             # Tinker samples through its SDK, not an HTTP base_url. The sampler
             # path names the trained weights; the tokenizer must be the base
@@ -265,6 +267,9 @@ class OpenRouterReAct:
             self.base_url = ""
             self.sampler_path = _required_str(config, "sampler_path", config_id)
             self.tokenizer_id = _required_str(config, "tokenizer_id", config_id)
+            self.sampler_ready_timeout_s = _required_bounded_int(
+                config, "sampler_ready_timeout_s", config_id, 0, 900
+            )
             if self.observation_mode != "text":
                 raise PolicyConfigError(
                     f"policy config {config_id!r} sets observation_mode="
@@ -665,9 +670,27 @@ class OpenRouterReAct:
 
             self._tinker = tinker
             self._tokenizer = AutoTokenizer.from_pretrained(self.tokenizer_id)
-            self._sampling_client = tinker.ServiceClient(
-                api_key=api_key
-            ).create_sampling_client(model_path=self.sampler_path)
+            # Checkpoint evaluation starts seconds after save_weights_for_sampler
+            # returns, and the weights are not necessarily servable yet. Failing
+            # on the first attempt reads downstream as "the checkpoint scores
+            # zero", which is the most expensive way to learn about a race.
+            deadline = time.monotonic() + self.sampler_ready_timeout_s
+            attempt = 0
+            while True:
+                attempt += 1
+                try:
+                    self._sampling_client = tinker.ServiceClient(
+                        api_key=api_key
+                    ).create_sampling_client(model_path=self.sampler_path)
+                    break
+                except Exception as exc:
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError(
+                            f"tinker sampler {self.sampler_path!r} was not servable after "
+                            f"{self.sampler_ready_timeout_s}s and {attempt} attempts: "
+                            f"{type(exc).__name__}: {exc}"
+                        ) from exc
+                    time.sleep(min(2.0 * attempt, 10.0))
 
         tinker = self._tinker
         tokenizer = self._tokenizer
@@ -688,17 +711,30 @@ class OpenRouterReAct:
             model_input = model_input_cls.from_ints(tokens=prompt_ids)
         except TypeError:
             model_input = model_input_cls.from_ints(prompt_ids)
-        sequence = (
-            self._sampling_client.sample(
-                prompt=model_input,
-                num_samples=1,
-                sampling_params=tinker.SamplingParams(
-                    max_tokens=self.max_tokens, temperature=0.0
-                ),
-            )
-            .result()
-            .sequences[0]
-        )
+        deadline = time.monotonic() + self.sampler_ready_timeout_s
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                sequence = (
+                    self._sampling_client.sample(
+                        prompt=model_input,
+                        num_samples=1,
+                        sampling_params=tinker.SamplingParams(
+                            max_tokens=self.max_tokens, temperature=0.0
+                        ),
+                    )
+                    .result()
+                    .sequences[0]
+                )
+                break
+            except Exception as exc:
+                if time.monotonic() >= deadline:
+                    raise RuntimeError(
+                        f"tinker sample failed after {attempt} attempts over "
+                        f"{self.sampler_ready_timeout_s}s: {type(exc).__name__}: {exc}"
+                    ) from exc
+                time.sleep(min(2.0 * attempt, 10.0))
         completion_ids = [int(value) for value in sequence.tokens]
         text = tokenizer.decode(completion_ids, skip_special_tokens=True)
         # Token counts are exact here rather than provider-reported, which is

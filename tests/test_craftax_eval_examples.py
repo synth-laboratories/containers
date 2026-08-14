@@ -338,13 +338,14 @@ def _tinker_config(**overrides: object) -> dict[str, object]:
         "system_prompt": "You play Craftax. Reply with JSON only.",
         "sampler_path": "tinker://weights/ckpt-4",
         "tokenizer_id": "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+        "sampler_ready_timeout_s": 0,
     }
     config.update(overrides)
     return config
 
 
 def test_tinker_provider_requires_its_own_endpoint_fields() -> None:
-    for missing in ("sampler_path", "tokenizer_id"):
+    for missing in ("sampler_path", "tokenizer_id", "sampler_ready_timeout_s"):
         config = _tinker_config()
         del config[missing]
         with pytest.raises(PolicyConfigError) as excinfo:
