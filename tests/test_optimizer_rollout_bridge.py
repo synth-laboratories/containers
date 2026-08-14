@@ -38,6 +38,11 @@ def test_optimizer_sync_rollout_translates_and_returns_typed_reward() -> None:
     assert isinstance(body["reward_info"]["outcome_reward"], float)
     assert body["summary"]["is_reference_world"] is True
     assert body["metadata"]["optimizer"] == "ohco"
+    review_rows = body["metadata"]["review_rows"]
+    assert len(review_rows) == 1
+    assert review_rows[0]["verdict"] == "fail"
+    assert review_rows[0]["actionability"] == "candidate_hill"
+    assert review_rows[0]["source_refs"] == [body["rollout_id"]]
     assert any(event["kind"] == "capture.closed" for event in body["events"])
 
 

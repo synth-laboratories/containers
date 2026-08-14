@@ -520,6 +520,25 @@ def create_compat_app(
                 if isinstance(value, (int, float))
             )
             events = platform.events_payload(rollout_id, 0, 10_000).get("events", [])
+            optimizer_metadata = (
+                body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
+            )
+            if optimizer_metadata.get("optimizer") == "ohco":
+                optimizer_metadata = {
+                    **optimizer_metadata,
+                    "review_rows": [
+                        {
+                            "task_id": optimizer_metadata.get("task_id") or example.get("task_id"),
+                            "field_path": "objective:search_uplift",
+                            "expected": "find a candidate that improves the measured objective",
+                            "predicted": {"baseline_reward": reward},
+                            "verdict": "fail",
+                            "failure_kind": "optimization_opportunity",
+                            "actionability": "candidate_hill",
+                            "source_refs": [rollout_id],
+                        }
+                    ],
+                }
             return {
                 **result,
                 "success_status": "success",
@@ -527,7 +546,7 @@ def create_compat_app(
                 "reward_info": {"outcome_reward": reward},
                 "summary": {"outcome_reward": reward, "is_reference_world": True},
                 "metadata": {
-                    **(body.get("metadata") if isinstance(body.get("metadata"), dict) else {}),
+                    **optimizer_metadata,
                     "is_reference_world": True,
                 },
                 "events": events,
