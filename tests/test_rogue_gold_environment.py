@@ -20,9 +20,7 @@ def test_policy_candidate_contract_is_published() -> None:
     assert schema["properties"]["request"]["properties"]["contract"]["const"] == (
         "policy_candidate.v1"
     )
-    assert schema["properties"]["response"]["properties"]["decision"]["required"] == [
-        "actions"
-    ]
+    assert schema["properties"]["response"]["properties"]["decision"]["required"] == ["actions"]
 
 
 def test_rogue_target_publishes_native_harness_affordances() -> None:
@@ -51,9 +49,7 @@ def test_rogue_target_publishes_native_harness_affordances() -> None:
         "harness_code",
     }
 
-    planner = OpenRouterReAct(
-        config_id="rogue_luna_medium", config={"environment_name": "Rogue"}
-    )
+    planner = OpenRouterReAct(config_id="rogue_luna_medium", config={"environment_name": "Rogue"})
     assert "Rogue" in planner._messages[0]["content"]
     assert "Rogue" in planner._observation_prompt(
         {"observation_text": "|@..%|"}, ["h", "j", "k", "l", ">"]
@@ -104,3 +100,39 @@ def test_rogue_gold_adapter_preserves_action_alphabet_and_checkpoint(monkeypatch
     assert world.checkpoint() == {"checkpoint_id": "cp-1", "blob": "encoded", "bytes": 7}
     assert calls[0][2]["task"]["objective"] == "descend"
     assert calls[1] == ("POST", "/rollouts/rogue-1/step", {"action": "l"})
+
+
+def test_rogue_gold_adapter_uses_graded_progress_delta(monkeypatch) -> None:
+    responses = iter(
+        [
+            {
+                "rollout_id": "rogue-graded",
+                "readout": {
+                    "ascii": "|@..%|",
+                    "valid_actions": ["l"],
+                    "public": {},
+                    "private": {"step_index": 0, "total_reward": 0.0},
+                    "progress_metrics": {"synth_shaped_reward": 9.0},
+                },
+            },
+            {
+                "rollout_id": "rogue-graded",
+                "readout": {
+                    "ascii": "|.@.%|",
+                    "valid_actions": ["l"],
+                    "public": {},
+                    "private": {"step_index": 1, "total_reward": 0.0},
+                    "progress_metrics": {"synth_shaped_reward": 13.5},
+                },
+                "reward": 0.0,
+            },
+        ]
+    )
+    world = GoldRogueWorld(max_steps=40)
+    monkeypatch.setattr(world, "_request", lambda *_args, **_kwargs: next(responses))
+
+    opened = world.reset(7)
+    stepped = world.step("l")
+    assert opened.observation["progress_metrics"]["synth_shaped_reward"] == 9.0
+    assert stepped.reward == 4.5
+    assert world.previous_total_reward == 0.0

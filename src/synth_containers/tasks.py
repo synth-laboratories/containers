@@ -13,6 +13,7 @@ class DatasetSplit(StrEnum):
     TRAIN = "train"
     VALIDATION = "validation"
     TEST = "test"
+    HELDOUT = "heldout"
     OTHER = "other"
 
     @classmethod
@@ -26,6 +27,7 @@ class DatasetSplit(StrEnum):
             "val": cls.VALIDATION,
             "dev": cls.VALIDATION,
             "test": cls.TEST,
+            "heldout": cls.HELDOUT,
         }
         return aliases.get(text, cls.OTHER)
 
@@ -110,7 +112,13 @@ class InMemoryTaskCatalog:
         target = str(task_id)
         return [item for item in self._instances.values() if item.task_id == target]
 
-    def query(self, *, split: str | None = None, tags: Iterable[str] | None = None, limit: int | None = None) -> list[TaskInstance]:
+    def query(
+        self,
+        *,
+        split: str | None = None,
+        tags: Iterable[str] | None = None,
+        limit: int | None = None,
+    ) -> list[TaskInstance]:
         required_tags = {str(tag) for tag in (tags or []) if str(tag)}
         rows = list(self._instances.values())
         if split is not None:
@@ -128,13 +136,18 @@ class InMemoryTaskCatalog:
         target_tags = {str(tag) for tag in task_filter.tags if str(tag)}
         for instance in self._instances.values():
             task = self._tasks.get(instance.task_id)
-            if task_filter.task_family and (task is None or task.task_family != task_filter.task_family):
+            if task_filter.task_family and (
+                task is None or task.task_family != task_filter.task_family
+            ):
                 continue
             if target_split is not None and DatasetSplit.parse(instance.split) is not target_split:
                 continue
             if target_tags and not target_tags.issubset(set(instance.tags)):
                 continue
-            if any(instance.metadata.get(key) != value for key, value in task_filter.metadata_equals.items()):
+            if any(
+                instance.metadata.get(key) != value
+                for key, value in task_filter.metadata_equals.items()
+            ):
                 continue
             results.append(instance)
         if task_filter.limit is not None:

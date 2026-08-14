@@ -26,6 +26,7 @@ from .http_requests import (
     to_put_policy_dict,
 )
 from .state import CompatPlatform, PolicyConfig
+from .search_dataset import dataset_manifest, dataset_rows, family_for_target
 from .targets import TARGETS, TargetSpec
 
 
@@ -149,9 +150,7 @@ def create_compat_app(
                 ],
                 "seed_candidate": {"react_system_prompt": seed_prompt},
                 "rollout_task_id": "rogue.singleplayer",
-                "rollout_overlay_schema": {
-                    "react_system_prompt": "policy.config.system_prompt"
-                },
+                "rollout_overlay_schema": {"react_system_prompt": "policy.config.system_prompt"},
             }
         if spec.runtime_family.value == "craftax":
             seed_prompt = (
@@ -179,9 +178,7 @@ def create_compat_app(
                 ],
                 "seed_candidate": {"react_system_prompt": seed_prompt},
                 "rollout_task_id": "craftax.singleplayer",
-                "rollout_overlay_schema": {
-                    "react_system_prompt": "policy.config.system_prompt"
-                },
+                "rollout_overlay_schema": {"react_system_prompt": "policy.config.system_prompt"},
             }
         if spec.runtime_family.value != "healthbench":
             raise HTTPException(status_code=404, detail="program_not_supported")
@@ -261,6 +258,44 @@ def create_compat_app(
             "target_id": spec.target_id,
             "environment_ref": spec.environment_ref,
             "levers": manifest,
+        }
+
+    @app.get("/dataset")
+    async def dataset() -> dict[str, Any]:
+        family = family_for_target(spec)
+        if family is None:
+            raise HTTPException(status_code=404, detail="dataset_not_supported")
+        return dataset_manifest(spec, family)
+
+    @app.post("/dataset/rows")
+    async def search_dataset_rows(request: Request) -> dict[str, Any]:
+        family = family_for_target(spec)
+        if family is None:
+            raise HTTPException(status_code=404, detail="dataset_not_supported")
+        body = await request.json()
+        split = str(body.get("split") or "train").strip().lower()
+        raw_seeds = body.get("seeds")
+        if raw_seeds is not None and not isinstance(raw_seeds, list):
+            raise HTTPException(status_code=422, detail="seeds_must_be_an_array")
+        try:
+            seeds = None if raw_seeds is None else [int(seed) for seed in raw_seeds]
+            offset = max(0, int(body.get("offset") or 0))
+            limit = min(1_000, max(0, int(body.get("limit") or 100)))
+            rows = dataset_rows(
+                spec,
+                family,
+                split=split,
+                requested_seeds=seeds,
+                offset=offset,
+                limit=limit,
+            )
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {
+            "version": "search_dataset_rows.v1",
+            "dataset_id": family.family_id,
+            "split": split,
+            "rows": rows,
         }
 
     @app.get("/taskset")
