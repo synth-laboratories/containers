@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from synth_containers.platform import create_compat_app
@@ -7,6 +10,19 @@ from synth_containers.platform.gold_rogue_world import GoldRogueWorld
 from synth_containers.platform.react import OpenRouterReAct
 from synth_containers.platform.runtime import runtime_for
 from synth_containers.platform.targets import TARGETS
+
+
+def test_policy_candidate_contract_is_published() -> None:
+    schema = json.loads(
+        (Path(__file__).parents[1] / "schemas/policy_candidate.v1.schema.json").read_text()
+    )
+    assert schema["$id"].endswith("policy_candidate.v1.schema.json")
+    assert schema["properties"]["request"]["properties"]["contract"]["const"] == (
+        "policy_candidate.v1"
+    )
+    assert schema["properties"]["response"]["properties"]["decision"]["required"] == [
+        "actions"
+    ]
 
 
 def test_rogue_target_publishes_native_harness_affordances() -> None:

@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://usesynth.ai/schemas/policy_candidate.v1.schema.json",
+  "title": "Synth policy candidate HTTP contract v1",
+  "description": "Request and response envelopes exchanged with an isolated policy service at POST /act.",
+  "type": "object",
+  "required": ["request", "response"],
+  "properties": {
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract", "observation_text", "session", "valid_actions", "ply", "readout"],
+      "properties": {
+        "contract": {"const": "policy_candidate.v1"},
+        "observation_text": {"type": "string"},
+        "session": {"type": "object"},
+        "valid_actions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "ply": {"type": "integer", "minimum": 0},
+        "readout": {"type": "object"}
+      }
+    },
+    "response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "contract", "decision"],
+      "properties": {
+        "ok": {"const": true},
+        "contract": {"const": "policy_candidate.v1"},
+        "decision": {
+          "type": "object",
+          "required": ["actions"],
+          "properties": {
+            "actions": {
+              "type": "array",
+              "minItems": 1,
+              "items": {"type": "string", "minLength": 1}
+            },
+            "policy_reason": {"type": "string"}
+          },
+          "additionalProperties": true
+        }
+      }
+    }
+  }
+}
