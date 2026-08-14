@@ -331,3 +331,26 @@ def test_make_annotation_round_trip_dict() -> None:
     payload = row.to_dict()
     assert payload["kind"] == "token_stats"
     assert payload["payload"]["generated_tokens"] == 10
+
+
+def test_env_progress_accepts_list_shaped_achievements() -> None:
+    """The Craftax Rust compact lane reports achievements as a list of names.
+
+    This branch used to require a Mapping, so every such rollout silently
+    produced an empty `unlocked` — one of annotated_fbc's two deterministic
+    signal channels was dead without anything failing.
+    """
+    from synth_containers.annotations import extract_env_progress
+
+    as_list = extract_env_progress([], summary={"achievements": ["collect_wood", "eat_cow"]})
+    as_map = extract_env_progress(
+        [],
+        summary={"achievements": {"collect_wood": True, "eat_cow": True, "place_stone": False}},
+    )
+
+    assert as_list["achievement_unlocks"]["unlocked"] == ["collect_wood", "eat_cow"]
+    assert as_list["achievement_unlocks"]["unique_achievements"] == 2.0
+    # Both shapes must agree; the list form is not a lossy second-class path.
+    assert as_list["achievement_unlocks"]["unlocked"] == as_map["achievement_unlocks"]["unlocked"]
+    # Absent achievements must stay absent rather than becoming an empty win.
+    assert extract_env_progress([], summary={}).get("achievement_unlocks") is None

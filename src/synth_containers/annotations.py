@@ -386,22 +386,15 @@ def extract_env_progress(
     achievement_unlocks = dict(precomputed.get("achievement_unlocks") or {})
     if not achievement_unlocks:
         final_achievements = summary_map.get("achievements")
-        if not isinstance(final_achievements, Mapping):
+        if not _is_achievement_payload(final_achievements):
             final_achievements = meta_map.get("achievements")
-        if isinstance(final_achievements, Mapping):
-            for name, enabled in final_achievements.items():
-                if enabled and str(name) not in unlock_steps:
-                    # Known unlocked but step unknown — leave step unset via presence in map only if we have steps.
-                    pass
-        if unlock_steps or (
-            isinstance(final_achievements, Mapping)
-            and any(bool(v) for v in final_achievements.values())
-        ):
-            unique = sorted(unlock_steps) or (
-                sorted(str(k) for k, v in final_achievements.items() if v)
-                if isinstance(final_achievements, Mapping)
-                else []
-            )
+        # Accept both shapes. `new_achievements` above already handles a mapping OR a
+        # sequence; this branch used to require a Mapping, so the Craftax Rust compact
+        # lane — which reports a list of unlocked names — fell through silently and
+        # left `unlocked` empty on every rollout.
+        final_names = _achievement_names(final_achievements)
+        if unlock_steps or final_names:
+            unique = sorted(unlock_steps) or sorted(final_names)
             achievement_unlocks = {
                 "unique_achievements": float(len(unique)),
                 "unlocked": unique,
@@ -531,6 +524,22 @@ def _env_progress_annotations(
             )
         )
     return rows
+
+
+def _is_achievement_payload(value: Any) -> bool:
+    """A usable achievements payload is a mapping name→flag or a sequence of names."""
+    if isinstance(value, Mapping):
+        return True
+    return isinstance(value, Sequence) and not isinstance(value, (str, bytes))
+
+
+def _achievement_names(value: Any) -> set[str]:
+    """Unlocked achievement names from either shape; empty for anything else."""
+    if isinstance(value, Mapping):
+        return {str(name) for name, enabled in value.items() if enabled}
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return {str(name) for name in value if name}
+    return set()
 
 
 def _counter_shares(counter: Counter[str]) -> dict[str, float]:
