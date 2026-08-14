@@ -462,6 +462,73 @@ def test_code_policy_put_and_restart_keep_engine_generation() -> None:
     assert body.get("isolation_receipt", {}).get("sandbox") == "process"
 
 
+def test_craftax_gold_exposes_continuous_levers_and_prompt_program() -> None:
+    client = TestClient(create_compat_app("craftax_react"))
+    info = client.get("/info").json()
+    assert info["environment_ref"] == "env:craftax_gold"
+    assert info["affordances"]["environment"]["bind_policy_config"] == "native"
+    assert info["affordances"]["environment"]["update_policy_code"] == "native"
+
+    manifest = client.get("/levers").json()
+    assert manifest["version"] == "lever_manifest.v1"
+    assert {lever["lever_id"] for lever in manifest["levers"]} == {
+        "react_system_prompt",
+        "policy_config",
+        "harness_code",
+    }
+    harness = next(item for item in manifest["levers"] if item["lever_id"] == "harness_code")
+    assert harness["apply_mode"] == "restart"
+    assert harness["schema"]["contract"] == "policy_candidate.v1"
+
+    program = client.get("/program").json()
+    assert program["version"] == "prompt_program.v1"
+    assert program["modules"][0]["module_id"] == "react_system_prompt"
+    assert program["rollout_overlay_schema"] == {
+        "react_system_prompt": "policy.config.system_prompt"
+    }
+
+    config = client.post(
+        "/policy-configs/lane3",
+        json={"config": {"system_prompt": "Collect wood first."}},
+    ).json()
+    assert config["digest"].startswith("sha256:")
+    assert len(config["digest"]) == len("sha256:") + 64
+
+
+def test_nonconforming_candidate_is_rejected_before_routing() -> None:
+    app = create_compat_app("craftax_react")
+    client = TestClient(app)
+    before = app.state.platform.current_policy_revision_id
+    rejected = client.put(
+        "/policy",
+        json={"code": "def choose_actions(**kwargs):\n    return {'action': 'noop'}\n"},
+    )
+    assert rejected.status_code == 422
+    receipt = rejected.json()["conformance_receipt"]
+    assert receipt["contract"] == "policy_candidate.v1"
+    assert receipt["status"] == "rejected"
+    assert app.state.platform.current_policy_revision_id == before
+
+
+def test_conforming_candidate_runs_over_http_and_restarts_on_gold_target() -> None:
+    client = TestClient(create_compat_app("craftax_react"))
+    accepted = client.put(
+        "/policy",
+        json={
+            "code": (
+                "def choose_actions(*, valid_actions, **kwargs):\n"
+                "    return {'actions': [valid_actions[0]], 'policy_reason': 'contract_probe'}\n"
+            )
+        },
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["conformance_receipt"]["status"] == "accepted"
+    assert accepted.json()["isolation_receipt"]["transport"] == "http"
+    restarted = client.post("/policy/restart")
+    assert restarted.status_code == 200
+    assert restarted.json()["isolation_receipt"]["contract"] == "policy_candidate.v1"
+
+
 def test_engine_fixture_frames_are_ascii_not_png() -> None:
     client = TestClient(create_compat_app("craftax_engine"))
     started = client.post(

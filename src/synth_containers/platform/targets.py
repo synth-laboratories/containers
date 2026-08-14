@@ -169,6 +169,7 @@ CRAFTAX_REACT = TargetSpec(
             "live_reward": "native",
             "scale_leases": "native",
             "bind_policy_config": "native",
+            "update_policy_code": "native",
             "restart_policy": "native",
             "token_trace": "derived",
         }

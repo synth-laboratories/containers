@@ -123,6 +123,36 @@ def create_compat_app(
 
     @app.get("/program")
     async def program() -> Any:
+        if spec.runtime_family.value == "craftax":
+            seed_prompt = (
+                "Play Craftax using valid actions. Prioritize survival, wood, stone, "
+                "tools, and measurable achievement progress."
+            )
+            return {
+                "version": "prompt_program.v1",
+                "program_id": "craftax.react.v1",
+                "modules": [
+                    {
+                        "module_id": "react_system_prompt",
+                        "role": "system",
+                        "mutable": True,
+                        "candidate_field": "react_system_prompt",
+                        "content": seed_prompt,
+                    }
+                ],
+                "target_modules": [
+                    {
+                        "module_id": "react_system_prompt",
+                        "candidate_field": "react_system_prompt",
+                        "objective": "craftax_env_sum",
+                    }
+                ],
+                "seed_candidate": {"react_system_prompt": seed_prompt},
+                "rollout_task_id": "craftax.singleplayer",
+                "rollout_overlay_schema": {
+                    "react_system_prompt": "policy.config.system_prompt"
+                },
+            }
         if spec.runtime_family.value != "healthbench":
             raise HTTPException(status_code=404, detail="program_not_supported")
         seed_prompt = (
@@ -152,6 +182,55 @@ def create_compat_app(
             "seed_candidate": {"system_prompt": seed_prompt},
             "rollout_task_id": "healthbench.response",
             "rollout_overlay_schema": {"system_prompt": "policy.system_message"},
+        }
+
+    @app.get("/levers")
+    async def levers() -> dict[str, Any]:
+        environment = spec.affordances.by_role.get("environment", {})
+        manifest: list[dict[str, Any]] = []
+        if environment.get("bind_policy_config") != "unsupported":
+            manifest.extend(
+                [
+                    {
+                        "lever_id": "react_system_prompt",
+                        "kind": "prompt",
+                        "path": "policy.config.system_prompt",
+                        "writable": True,
+                        "apply_mode": "hot",
+                        "schema": {"type": "string", "minLength": 1},
+                        "affordance_level": environment.get("bind_policy_config", "unsupported"),
+                    },
+                    {
+                        "lever_id": "policy_config",
+                        "kind": "config",
+                        "address": "POST /policy-configs/{config_id}",
+                        "writable": True,
+                        "apply_mode": "hot",
+                        "schema": {"type": "object"},
+                        "affordance_level": environment.get("bind_policy_config", "unsupported"),
+                    },
+                ]
+            )
+        if environment.get("update_policy_code") != "unsupported":
+            manifest.append(
+                {
+                    "lever_id": "harness_code",
+                    "kind": "harness_code",
+                    "address": "PUT /policy",
+                    "writable": True,
+                    "apply_mode": "restart",
+                    "schema": {
+                        "contract": "policy_candidate.v1",
+                        "request": {"type": "object", "required": ["code"]},
+                    },
+                    "affordance_level": environment.get("update_policy_code", "unsupported"),
+                }
+            )
+        return {
+            "version": "lever_manifest.v1",
+            "target_id": spec.target_id,
+            "environment_ref": spec.environment_ref,
+            "levers": manifest,
         }
 
     @app.get("/taskset")

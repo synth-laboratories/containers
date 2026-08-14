@@ -860,36 +860,56 @@ class CompatPlatform:
         raw = code if isinstance(code, (bytes, bytearray)) else str(code or "").encode("utf-8")
         digest = hashlib.sha256(raw).hexdigest()[:16]
         revision_id = f"polrev_{digest}"
+        # Conformance is a routing gate: start the candidate service and probe the
+        # published contract before changing the active revision.
+        try:
+            process = IsolatedPolicyProcess(bytes(raw))
+        except Exception as exc:
+            return {
+                "error": "candidate_rejected",
+                "status_code": 422,
+                "policy_revision_id": revision_id,
+                "digest": digest,
+                "conformance_receipt": {
+                    "contract": "policy_candidate.v1",
+                    "status": "rejected",
+                    "reason": str(exc),
+                },
+            }
         revision = PolicyRevision(
             revision_id=revision_id,
             digest=digest,
             harness=harness,
             config_id=None,
             code=bytes(raw),
-            isolation_receipt={"sandbox": "isolated_policy_process", "digest": digest},
+            isolation_receipt={
+                "sandbox": "isolated_policy_process",
+                "digest": digest,
+                **process.isolation_receipt,
+            },
         )
         self.policy_revisions[revision_id] = revision
         self.current_policy_revision_id = revision_id
         self.policy_generation += 1
         self.policy_code = bytes(raw)
         self._close_policy_process()
+        self.policy_process = process
         receipt = dict(revision.isolation_receipt)
-        try:
-            process = self._ensure_policy_process()
-            receipt.update(process.isolation_receipt)
-            revision.isolation_receipt = receipt
-        except Exception as exc:
-            receipt["spawn_error"] = str(exc)
         return {
             "policy_revision_id": revision_id,
             "digest": digest,
             "engine_generation": self.engine_generation,
             "isolation_receipt": receipt,
+            "conformance_receipt": {
+                "contract": "policy_candidate.v1",
+                "status": "accepted",
+                "digest": digest,
+            },
         }
 
     def restart_policy(self) -> dict[str, Any]:
         self._close_policy_process()
-        if self.spec.default_policy_harness == "isolated_policy_process":
+        if self.spec.default_policy_harness == "isolated_policy_process" or self.policy_code:
             self._ensure_policy_process()
         self.policy_generation += 1
         return {
@@ -918,7 +938,19 @@ class CompatPlatform:
             config=dict(body.get("config") or body),
         )
         self.policy_configs[config_id] = cfg
-        return {"config_id": config_id, "harness": cfg.harness, "engine_generation": self.engine_generation}
+        digest = "sha256:" + hashlib.sha256(
+            json.dumps(
+                {"harness": cfg.harness, "config": cfg.config},
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        return {
+            "config_id": config_id,
+            "harness": cfg.harness,
+            "digest": digest,
+            "engine_generation": self.engine_generation,
+        }
 
     def world_stop(self) -> dict[str, Any]:
         self.stopped_worlds.add(self.spec.world_ref)
