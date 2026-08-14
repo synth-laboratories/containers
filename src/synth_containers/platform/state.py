@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
 import tempfile
 import threading
 import uuid
@@ -153,6 +154,7 @@ class CompatPlatform:
         self.pins: dict[str, RolloutPin] = {}
         self.policy_configs: dict[str, PolicyConfig] = {}
         self.policy_revisions: dict[str, PolicyRevision] = {}
+        self.variants: dict[str, str] = {}
         self.current_policy_revision_id: str | None = None
         self.reward_executions: dict[str, dict[str, Any]] = {}
         self.reward_by_execution_id: dict[str, dict[str, Any]] = {}
@@ -682,7 +684,11 @@ class CompatPlatform:
             task_instance_id=task_instance_id,
             stream_id=descriptor["id"],
             engine_generation=self.engine_generation,
-            policy_revision_id=self.current_policy_revision_id,
+            policy_revision_id=(
+                str(policy_ref.code)
+                if isinstance(policy_ref.code, str) and policy_ref.code in self.policy_revisions
+                else self.current_policy_revision_id
+            ),
             seed=seed_i,
             usage=None,
             omit_reward=request.omit_reward,
@@ -916,6 +922,72 @@ class CompatPlatform:
                 "digest": digest,
             },
         }
+
+    def create_variant(self, body: dict[str, Any]) -> dict[str, Any]:
+        git_remote = Path(str(body.get("git_remote") or "")).expanduser()
+        candidate_ref = str(body.get("candidate_ref") or "").strip()
+        if not git_remote.is_absolute() or not git_remote.exists():
+            return {
+                "error": "variant_git_remote_must_be_existing_local_path",
+                "status_code": 422,
+            }
+        if not candidate_ref.startswith("ohco/fix-"):
+            return {"error": "invalid_candidate_ref", "status_code": 422}
+        try:
+            completed = subprocess.run(
+                [
+                    "git",
+                    f"--git-dir={git_remote}",
+                    "show",
+                    f"refs/heads/{candidate_ref}:policy.py",
+                ],
+                check=True,
+                capture_output=True,
+                timeout=15,
+            )
+            code = bytes(completed.stdout)
+            process = IsolatedPolicyProcess(code)
+            isolation = dict(process.isolation_receipt)
+            process.close()
+        except Exception as exc:
+            return {
+                "error": "candidate_rejected",
+                "status_code": 422,
+                "conformance_receipt": {
+                    "contract": "policy_candidate.v1",
+                    "status": "rejected",
+                    "reason": str(exc),
+                },
+            }
+        digest = hashlib.sha256(code).hexdigest()
+        revision_id = f"polrev_{digest[:16]}"
+        variant_id = f"variant_{digest[:16]}"
+        self.policy_revisions[revision_id] = PolicyRevision(
+            revision_id=revision_id,
+            digest=digest,
+            harness=ISOLATED_POLICY_HARNESS,
+            config_id=None,
+            code=code,
+            isolation_receipt=isolation,
+        )
+        self.variants[variant_id] = revision_id
+        return {
+            "status": "ready",
+            "variant_id": variant_id,
+            "policy_revision_id": revision_id,
+            "conformance_receipt": {
+                "contract": "policy_candidate.v1",
+                "status": "accepted",
+                "isolation": isolation,
+            },
+        }
+
+    def delete_variant(self, variant_id: str) -> dict[str, Any]:
+        revision_id = self.variants.pop(variant_id, None)
+        if revision_id is None:
+            return {"error": "unknown_variant", "status_code": 404}
+        self.policy_revisions.pop(revision_id, None)
+        return {"status": "deleted", "variant_id": variant_id}
 
     def restart_policy(self) -> dict[str, Any]:
         self._close_policy_process()

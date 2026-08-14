@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import io
 import json
+import tarfile
 import threading
 import uuid
 from pathlib import Path
@@ -12,7 +14,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
 from ..event_log import RolloutEventLog
 from .http_requests import (
@@ -26,6 +28,7 @@ from .http_requests import (
     to_policy_config_dict,
     to_put_policy_dict,
 )
+from .policy_process import DEFAULT_HEURISTIC
 from .state import CompatPlatform, PolicyConfig
 from .search_dataset import dataset_manifest, dataset_rows, family_for_target
 from .targets import TARGETS, TargetSpec
@@ -299,6 +302,36 @@ def create_compat_app(
             "rows": rows,
         }
 
+    @app.get("/repo/archive")
+    async def repo_archive() -> Response:
+        if spec.affordances.level("update_policy_code") == "unsupported":
+            raise HTTPException(status_code=404, detail="repo_archive_not_supported")
+        buffer = io.BytesIO()
+        with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+            files = {
+                "policy.py": DEFAULT_HEURISTIC.encode(),
+                "README.md": (
+                    b"# OHCO policy surface\n\nEdit policy.py. It must implement "
+                    b"policy_candidate.v1 via choose_actions or act.\n"
+                ),
+            }
+            for name, payload in files.items():
+                info = tarfile.TarInfo(name)
+                info.size = len(payload)
+                info.mode = 0o644
+                info.mtime = 0
+                archive.addfile(info, io.BytesIO(payload))
+        return Response(content=buffer.getvalue(), media_type="application/gzip")
+
+    @app.post("/variants")
+    async def create_variant(request: Request) -> Any:
+        body = await request.json()
+        return _platform_response(platform.create_variant(body))
+
+    @app.delete("/variants/{variant_id}")
+    async def delete_variant(variant_id: str) -> Any:
+        return _platform_response(platform.delete_variant(variant_id), default_status=404)
+
     @app.get("/taskset")
     async def taskset() -> Any:
         if spec.runtime_family.value != "healthbench":
@@ -427,11 +460,17 @@ def create_compat_app(
             config_digest = hashlib.sha256(
                 json.dumps(policy_config, sort_keys=True, separators=(",", ":")).encode()
             ).hexdigest()[:16]
+            variant_id = str(body.get("variant_id") or "")
+            variant_revision_id = platform.variants.get(variant_id)
+            if variant_id and variant_revision_id is None:
+                raise HTTPException(status_code=404, detail="unknown_variant")
+            harness = "isolated_policy_process" if variant_revision_id else "react"
             config_id = f"optimizer_{config_digest}"
-            platform.policy_configs.setdefault(
-                config_id,
-                PolicyConfig(config_id=config_id, harness="react", config=policy_config),
-            )
+            if harness == "react":
+                platform.policy_configs.setdefault(
+                    config_id,
+                    PolicyConfig(config_id=config_id, harness=harness, config=policy_config),
+                )
             seed = int(env.get("seed") or example.get("seed") or body.get("seed") or 0)
             rollout_id = str(
                 body.get("rollout_id")
@@ -455,7 +494,11 @@ def create_compat_app(
                         "world_ref": body.get("world_ref") or spec.world_ref,
                         "evaluation_plan_ref": body.get("evaluation_plan_ref")
                         or spec.evaluation_plan_ref,
-                        "policy_ref": {"harness": "react", "config": config_id},
+                        "policy_ref": {
+                            "harness": harness,
+                            "config": config_id if harness == "react" else None,
+                            "code": variant_revision_id,
+                        },
                     }
                 )
             except (RequestParseError, ValueError) as exc:
