@@ -98,7 +98,7 @@ jobs:
       - build
     runs-on: ubuntu-24.04
     environment:
-      name: pypi
+      name: pypi-release
       url: https://pypi.org/project/synth-containers/${{ needs.validate.outputs.version }}/
     permissions:
       id-token: write
@@ -110,4 +110,3 @@ jobs:
 
       - name: Publish with PyPI Trusted Publishing
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33
-
