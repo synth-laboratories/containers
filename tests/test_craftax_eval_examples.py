@@ -233,6 +233,69 @@ def test_openrouter_react_compacts_every_sixteen_turns(monkeypatch) -> None:
     assert "obs-16" in last_messages[-1]["content"]
 
 
+def test_openrouter_react_uses_images_and_expires_old_frames(monkeypatch) -> None:
+    captured: list[dict] = []
+
+    def fake_urlopen(request, timeout=None):
+        captured.append(json.loads(request.data.decode()))
+        return _json_response(_tool_body(["do"]))
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-only")
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    policy = OpenRouterReAct(
+        config_id="canonical",
+        config={"observation_mode": "both", "keep_recent_frames": 1},
+    )
+    observation = {
+        "valid_actions": ["do"],
+        "observation_text": "symbolic state",
+        "image_data_url": "data:image/png;base64,AAAA",
+    }
+    policy.plan(observation)
+    policy.plan({**observation, "image_data_url": "data:image/png;base64,BBBB"})
+    first_user = captured[0]["messages"][1]["content"]
+    assert first_user[0]["type"] == "text"
+    assert first_user[1]["image_url"]["url"].endswith("AAAA")
+    second_messages = captured[1]["messages"]
+    assert second_messages[1]["content"][-1] == {
+        "type": "text",
+        "text": "<older frame omitted>",
+    }
+    assert second_messages[-1]["content"][-1]["image_url"]["url"].endswith("BBBB")
+
+
+def test_openrouter_react_compacts_at_token_budget(monkeypatch) -> None:
+    captured: list[dict] = []
+
+    def fake_urlopen(request, timeout=None):
+        captured.append(json.loads(request.data.decode()))
+        body = _tool_body(["do"])
+        body["usage"] = {
+            "prompt_tokens": 12_000,
+            "completion_tokens": 3,
+            "total_tokens": 12_003,
+        }
+        return _json_response(body)
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-only")
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    policy = OpenRouterReAct(
+        config_id="canonical",
+        config={
+            "compaction_mode": "token_budget",
+            "context_token_budget": 16_000,
+            "compact_at": 0.7,
+        },
+    )
+    for index in range(4):
+        policy.plan({"valid_actions": ["do"], "observation_text": f"obs-{index}"})
+    assert policy.trace_data()["compact_count"] == 1
+    assert policy.trace_data()["compaction_mode"] == "token_budget"
+    compact = captured[-1]["messages"][1]["content"]
+    assert compact.startswith("[compacted 1 earlier ReAct turns")
+    assert "prompt_tokens=12000 exceeded threshold=11200" in compact
+
+
 def test_openrouter_react_streams_token_deltas_and_skips_empty_reasoning(
     monkeypatch,
 ) -> None:

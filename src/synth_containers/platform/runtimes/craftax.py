@@ -13,9 +13,10 @@ from ...event_log import RolloutEventLog
 from ..craftax_world import CraftaxWorld
 from ..episode import PNG_MAGIC, run_episode
 from ..policy_process import DEFAULT_HEURISTIC, IsolatedPolicyProcess
+from ..react_process import ReactPolicyServiceProcess
 from ..gold_craftax_world import GoldCraftaxWorld
 from ..gold_rogue_world import GoldRogueWorld
-from ..react import OpenRouterReAct, ScriptedReAct
+from ..react import ScriptedReAct
 from ..state import CompatPlatform, RolloutPin
 
 FIXTURE_ENVIRONMENT = "env:craftax_fixture"
@@ -45,11 +46,12 @@ class CraftaxRuntime:
             config = dict(policy.config) if policy is not None else {}
             if platform.spec.environment_ref == ROGUE_GOLD_ENVIRONMENT:
                 config.setdefault("environment_name", "Rogue")
-            planner = (
-                OpenRouterReAct(config_id=config_id, config=config)
-                if platform.spec.environment_ref in {GOLD_ENVIRONMENT, ROGUE_GOLD_ENVIRONMENT}
-                else ScriptedReAct(config_id=config_id)
-            )
+            if platform.spec.environment_ref in {GOLD_ENVIRONMENT, ROGUE_GOLD_ENVIRONMENT}:
+                service = ReactPolicyServiceProcess(config_id=config_id, config=config)
+                planner = service
+                closer = service.close
+            else:
+                planner = ScriptedReAct(config_id=config_id)
         resume_checkpoint = None
         if pin.resume_from_checkpoint_id:
             resume_checkpoint = platform.checkpoints.get(pin.resume_from_checkpoint_id)

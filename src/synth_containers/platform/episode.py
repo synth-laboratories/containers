@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from collections.abc import Callable
 from typing import Any, Protocol
 
@@ -146,7 +147,11 @@ def run_episode(
             if emit_policy_spans and isinstance(payload, dict) and payload:
                 log.append("span.policy.data", payload)
 
-        plan = planner.plan(result.observation, on_delta=on_delta)
+        policy_observation = dict(result.observation)
+        if result.frame_bytes is not None and result.frame_bytes.startswith(PNG_MAGIC):
+            encoded = base64.b64encode(result.frame_bytes).decode("ascii")
+            policy_observation["image_data_url"] = f"data:image/png;base64,{encoded}"
+        plan = planner.plan(policy_observation, on_delta=on_delta)
         if emit_policy_spans:
             trace_data = getattr(planner, "trace_data", None)
             if callable(trace_data):

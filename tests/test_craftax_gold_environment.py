@@ -26,6 +26,11 @@ PNG_1X1 = bytes.fromhex(
 )
 
 
+class ScriptedPolicyService(ScriptedReAct):
+    def close(self) -> None:
+        return
+
+
 class GoldState:
     def __init__(self) -> None:
         self.rollouts: dict[str, dict[str, Any]] = {}
@@ -273,8 +278,10 @@ def test_craftax_react_relays_gold_through_http(gold_http, monkeypatch, tmp_path
     monkeypatch.setenv("SYNTH_CRAFTAX_URL", url)
     monkeypatch.setenv("SYNTH_CRAFTAX_MAX_STEPS", "1")
     monkeypatch.setattr(
-        "synth_containers.platform.runtimes.craftax.OpenRouterReAct",
-        lambda **kwargs: ScriptedReAct(config_id=str(kwargs.get("config_id") or "luna_med")),
+        "synth_containers.platform.runtimes.craftax.ReactPolicyServiceProcess",
+        lambda **kwargs: ScriptedPolicyService(
+            config_id=str(kwargs.get("config_id") or "luna_med")
+        ),
     )
     app = create_compat_app("craftax_react", storage_root=tmp_path)
     client = TestClient(app)
@@ -331,8 +338,10 @@ def test_craftax_goex_captures_and_forks_true_environment_and_policy_state(
     monkeypatch.setenv("SYNTH_CRAFTAX_URL", url)
     monkeypatch.setenv("SYNTH_CRAFTAX_MAX_STEPS", "6")
     monkeypatch.setattr(
-        "synth_containers.platform.runtimes.craftax.OpenRouterReAct",
-        lambda **kwargs: ScriptedReAct(config_id=str(kwargs.get("config_id") or "luna_med")),
+        "synth_containers.platform.runtimes.craftax.ReactPolicyServiceProcess",
+        lambda **kwargs: ScriptedPolicyService(
+            config_id=str(kwargs.get("config_id") or "luna_med")
+        ),
     )
     app = create_compat_app("craftax_goex", storage_root=tmp_path)
     client = TestClient(app)

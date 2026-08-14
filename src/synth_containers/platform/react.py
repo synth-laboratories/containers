@@ -126,11 +126,22 @@ class OpenRouterReAct:
         self.reasoning_effort = str(config.get("effort") or "medium")
         self.base_url = str(config.get("base_url") or "https://openrouter.ai/api/v1").rstrip("/")
         self.api_key_env = str(config.get("api_key_env") or "OPENROUTER_API_KEY")
-        self.max_tokens = min(max(int(config.get("max_tokens") or 768), 64), 2048)
+        self.max_tokens = min(max(int(config.get("max_tokens") or 768), 64), 4096)
         self.parse_retries = min(max(int(config.get("parse_retries") or 0), 0), 2)
         self.compact_every = min(max(int(config.get("compact_every") or 16), 1), 64)
+        self.compaction_mode = str(config.get("compaction_mode") or "turn_count")
+        self.context_token_budget = min(
+            max(int(config.get("context_token_budget") or 16_000), 2_000), 400_000
+        )
+        self.compact_at = min(max(float(config.get("compact_at") or 0.7), 0.1), 0.95)
+        self.compact_threshold = int(self.context_token_budget * self.compact_at)
+        self.observation_mode = str(config.get("observation_mode") or "text")
+        self.keep_recent_frames = min(
+            max(int(config.get("keep_recent_frames") or 2), 1), 16
+        )
         self.calls = 0
         self._compact_count = 0
+        self._last_prompt_tokens = 0
         self._deltas_emitted = 0
         self._usage: dict[str, int | float | None] = {
             "prompt_tokens": None,
@@ -163,6 +174,10 @@ class OpenRouterReAct:
             "plan_min": self.plan_min,
             "plan_max": self.plan_max,
             "compact_every": self.compact_every,
+            "compaction_mode": self.compaction_mode,
+            "compact_threshold": self.compact_threshold,
+            "observation_mode": self.observation_mode,
+            "keep_recent_frames": self.keep_recent_frames,
             "token_trace": "derived",
             "graded": True,
         }
@@ -180,6 +195,7 @@ class OpenRouterReAct:
             "messages": json.loads(json.dumps(self._messages)),
             "calls": self.calls,
             "compact_count": self._compact_count,
+            "last_prompt_tokens": self._last_prompt_tokens,
             "deltas_emitted": self._deltas_emitted,
             "usage": dict(self._usage),
         }
@@ -200,6 +216,7 @@ class OpenRouterReAct:
         self._messages = restored
         self.calls = int(state.get("calls") or 0)
         self._compact_count = int(state.get("compact_count") or 0)
+        self._last_prompt_tokens = int(state.get("last_prompt_tokens") or 0)
         self._deltas_emitted = int(state.get("deltas_emitted") or 0)
         usage = state.get("usage")
         if not isinstance(usage, dict):
@@ -218,7 +235,10 @@ class OpenRouterReAct:
         if not valid:
             raise RuntimeError("Craftax observation omitted valid_actions")
         self._maybe_compact(on_delta)
-        self._messages.append({"role": "user", "content": self._observation_prompt(observation, valid)})
+        self._messages.append(
+            {"role": "user", "content": self._observation_content(observation, valid)}
+        )
+        self._expire_old_frames()
         prior_attempts: list[dict[str, Any]] = []
         assistant = ""
         reasoning = ""
@@ -291,6 +311,10 @@ class OpenRouterReAct:
             "parse_error": parse_error,
             "compact_every": self.compact_every,
             "compact_count": self._compact_count,
+            "compaction_mode": self.compaction_mode,
+            "compact_threshold": self.compact_threshold,
+            "last_prompt_tokens": self._last_prompt_tokens,
+            "observation_mode": self.observation_mode,
             "history_turns": self.calls,
             "deltas_emitted": call_deltas,
             "token_trace": "derived" if call_deltas else None,
@@ -317,8 +341,59 @@ class OpenRouterReAct:
             'Return JSON only: {"actions":["do","right"]}'
         )
 
+    def _observation_content(
+        self, observation: dict[str, Any], valid: list[str]
+    ) -> str | list[dict[str, Any]]:
+        prompt = self._observation_prompt(observation, valid)
+        image_url = observation.get("image_data_url")
+        if self.observation_mode not in {"image", "both"} or not isinstance(image_url, str):
+            return prompt
+        parts: list[dict[str, Any]] = []
+        if self.observation_mode == "both":
+            parts.append({"type": "text", "text": prompt})
+        else:
+            parts.append(
+                {
+                    "type": "text",
+                    "text": (
+                        f"Choose valid {self.environment_name} actions from "
+                        f"valid_actions={json.dumps(valid)}."
+                    ),
+                }
+            )
+        parts.append({"type": "image_url", "image_url": {"url": image_url}})
+        return parts
+
+    def _expire_old_frames(self) -> None:
+        image_messages = [
+            index
+            for index, message in enumerate(self._messages)
+            if isinstance(message.get("content"), list)
+            and any(
+                isinstance(part, dict) and part.get("type") == "image_url"
+                for part in message["content"]
+            )
+        ]
+        for index in image_messages[: -self.keep_recent_frames]:
+            parts = self._messages[index]["content"]
+            self._messages[index]["content"] = [
+                {"type": "text", "text": "<older frame omitted>"}
+                if isinstance(part, dict) and part.get("type") == "image_url"
+                else part
+                for part in parts
+            ]
+
     def _maybe_compact(self, on_delta: DeltaCallback | None) -> None:
-        if self.calls == 0 or self.calls % self.compact_every != 0:
+        token_trigger = (
+            self.compaction_mode == "token_budget"
+            and self._last_prompt_tokens > self.compact_threshold
+        )
+        turn_trigger = (
+            self.compaction_mode != "token_budget"
+            and self.calls > 0
+            and self.calls % self.compact_every == 0
+        )
+        if not token_trigger and not turn_trigger:
             return
         pairs: list[tuple[dict[str, Any], dict[str, Any] | None]] = []
         rest = self._messages[1:]
@@ -337,7 +412,8 @@ class OpenRouterReAct:
             if str(message.get("content") or "").startswith("[compacted "):
                 continue
             pairs.append((message, assistant))
-        if len(pairs) < self.compact_every:
+        minimum_pairs = 3 if token_trigger else self.compact_every
+        if len(pairs) < minimum_pairs:
             return
         keep = pairs[-self.compact_keep_turns :]
         dropped = pairs[: -self.compact_keep_turns]
@@ -350,7 +426,13 @@ class OpenRouterReAct:
             "role": "user",
             "content": (
                 f"[compacted {len(dropped)} earlier ReAct turns; "
-                f"compact_every={self.compact_every}. Mechanical history compact, "
+                + (
+                    f"prompt_tokens={self._last_prompt_tokens} exceeded "
+                    f"threshold={self.compact_threshold}. "
+                    if token_trigger
+                    else f"compact_every={self.compact_every}. "
+                )
+                + "Mechanical history compact, "
                 "not a model-authored summary. Dropped assistant payloads "
                 f"(truncated): {json.dumps(dropped_payloads[-8:])}]"
             ),
@@ -368,6 +450,9 @@ class OpenRouterReAct:
                     "delta": False,
                     "channel": "compact",
                     "compact_every": self.compact_every,
+                    "compaction_mode": self.compaction_mode,
+                    "prompt_tokens": self._last_prompt_tokens,
+                    "compact_threshold": self.compact_threshold,
                     "compact_count": self._compact_count,
                     "dropped_turns": len(dropped),
                     "kept_turns": len(keep),
@@ -545,6 +630,9 @@ class OpenRouterReAct:
         )
 
     def _accumulate_usage(self, usage: dict[str, Any]) -> None:
+        prompt_tokens = usage.get("prompt_tokens")
+        if isinstance(prompt_tokens, int):
+            self._last_prompt_tokens = prompt_tokens
         for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
             value = usage.get(key)
             if isinstance(value, int):
