@@ -123,6 +123,36 @@ def create_compat_app(
 
     @app.get("/program")
     async def program() -> Any:
+        if spec.runtime_family.value == "rogue":
+            seed_prompt = (
+                "Play Rogue using only valid actions. Explore safely, preserve health, "
+                "find the staircase, and descend when it is reachable."
+            )
+            return {
+                "version": "prompt_program.v1",
+                "program_id": "rogue.react.v1",
+                "modules": [
+                    {
+                        "module_id": "react_system_prompt",
+                        "role": "system",
+                        "mutable": True,
+                        "candidate_field": "react_system_prompt",
+                        "content": seed_prompt,
+                    }
+                ],
+                "target_modules": [
+                    {
+                        "module_id": "react_system_prompt",
+                        "candidate_field": "react_system_prompt",
+                        "objective": "rogue_graded_progress",
+                    }
+                ],
+                "seed_candidate": {"react_system_prompt": seed_prompt},
+                "rollout_task_id": "rogue.singleplayer",
+                "rollout_overlay_schema": {
+                    "react_system_prompt": "policy.config.system_prompt"
+                },
+            }
         if spec.runtime_family.value == "craftax":
             seed_prompt = (
                 "Play Craftax using valid actions. Prioritize survival, wood, stone, "

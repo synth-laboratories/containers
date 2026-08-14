@@ -14,11 +14,13 @@ from ..craftax_world import CraftaxWorld
 from ..episode import PNG_MAGIC, run_episode
 from ..policy_process import DEFAULT_HEURISTIC, IsolatedPolicyProcess
 from ..gold_craftax_world import GoldCraftaxWorld
+from ..gold_rogue_world import GoldRogueWorld
 from ..react import OpenRouterReAct, ScriptedReAct
 from ..state import CompatPlatform, RolloutPin
 
 FIXTURE_ENVIRONMENT = "env:craftax_fixture"
 GOLD_ENVIRONMENT = "env:craftax_gold"
+ROGUE_GOLD_ENVIRONMENT = "env:rogue_gold"
 
 
 class CraftaxRuntime:
@@ -41,9 +43,11 @@ class CraftaxRuntime:
                 )
             policy = platform.policy_configs.get(config_id)
             config = dict(policy.config) if policy is not None else {}
+            if platform.spec.environment_ref == ROGUE_GOLD_ENVIRONMENT:
+                config.setdefault("environment_name", "Rogue")
             planner = (
                 OpenRouterReAct(config_id=config_id, config=config)
-                if platform.spec.environment_ref == GOLD_ENVIRONMENT
+                if platform.spec.environment_ref in {GOLD_ENVIRONMENT, ROGUE_GOLD_ENVIRONMENT}
                 else ScriptedReAct(config_id=config_id)
             )
         resume_checkpoint = None
@@ -265,13 +269,18 @@ def _frames_from_log(
 
 
 def _max_steps(platform: CompatPlatform) -> int:
-    override = os.environ.get("SYNTH_CRAFTAX_MAX_STEPS")
+    override_name = (
+        "SYNTH_ROGUE_MAX_STEPS"
+        if platform.spec.environment_ref == ROGUE_GOLD_ENVIRONMENT
+        else "SYNTH_CRAFTAX_MAX_STEPS"
+    )
+    override = os.environ.get(override_name)
     if override:
         return int(override)
     pinned = platform.spec.max_episode_steps
     if pinned is None or pinned <= 0:
         raise ValueError(
-            "Craftax max_episode_steps must be pinned on the target spec; "
+            "max_episode_steps must be pinned on the target spec; "
             "do not inherit gold's silent 120-step world default"
         )
     return int(pinned)
@@ -304,7 +313,9 @@ def _achievement_labels(observation: dict[str, Any]) -> list[str]:
     return sorted(labels)
 
 
-def _world_for(platform: CompatPlatform, *, max_steps: int) -> CraftaxWorld | GoldCraftaxWorld:
+def _world_for(
+    platform: CompatPlatform, *, max_steps: int
+) -> CraftaxWorld | GoldCraftaxWorld | GoldRogueWorld:
     ref = platform.spec.environment_ref
     if ref == GOLD_ENVIRONMENT:
         return GoldCraftaxWorld(
@@ -313,4 +324,6 @@ def _world_for(platform: CompatPlatform, *, max_steps: int) -> CraftaxWorld | Go
         )
     if ref == FIXTURE_ENVIRONMENT:
         return CraftaxWorld(max_steps=max_steps)
+    if ref == ROGUE_GOLD_ENVIRONMENT:
+        return GoldRogueWorld(max_steps=max_steps)
     raise ValueError(f"unknown_craftax_environment:{ref}")

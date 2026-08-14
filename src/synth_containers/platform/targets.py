@@ -13,6 +13,7 @@ class TargetRuntimeKind(StrEnum):
     """Child of TargetRuntime. Not contracts.RuntimeFamily (codex/mcp/http)."""
 
     CRAFTAX = "craftax"
+    ROGUE = "rogue"
     HARBOR = "harbor"
     DIGBENCH = "digbench"
     OPENENV = "openenv"
@@ -248,6 +249,74 @@ CRAFTAX_CODE_POLICY = TargetSpec(
         }
     ),
     max_episode_steps=8,
+)
+
+ROGUE_REACT = TargetSpec(
+    target_id="rogue_react",
+    runtime_family=TargetRuntimeKind.ROGUE,
+    adapter_chain=(),
+    world_ref="world:rogue_default@modern_rogue_core",
+    environment_ref="env:rogue_gold",
+    evaluation_plan_ref="eval:rogue.env_sum",
+    default_policy_harness="react",
+    scale_leases=10,
+    retention="run",
+    reward_kind=RewardKind.ENV_SUM,
+    live_reward=True,
+    live_frames="derived",
+    true_checkpoint="native",
+    blocking_trial="unsupported",
+    mcp_bind="unused",
+    reconnect="derived",
+    event_kinds=(
+        "trace.opened",
+        "env.episode.opened",
+        "observation",
+        "action",
+        "reward_signal",
+        "frame",
+        "rollout.checkpoint",
+        "rollout.restored",
+        "capture.closed",
+        "status",
+    ),
+    affordances=_env(
+        {
+            "step": "native",
+            "live_frames": "derived",
+            "partial_trace": "native",
+            "poll": "native",
+            "sse": "derived",
+            "websocket": "derived",
+            "true_checkpoint": "native",
+            "restore": "native",
+            "fork": "native",
+            "simulate": "native",
+            "live_reward": "native",
+            "scale_leases": "native",
+            "bind_policy_config": "native",
+            "update_policy_code": "native",
+            "restart_policy": "native",
+            "token_trace": "derived",
+        }
+    ),
+    policy_seeds=(
+        PolicySeed(
+            "rogue_luna_medium",
+            "react",
+            {
+                "environment_name": "Rogue",
+                "provider": "openrouter",
+                "model": "meta/muse-spark-1.1",
+                "effort": "medium",
+                "api_key_env": "OPENROUTER_API_KEY",
+                "max_tokens": 2048,
+                "parse_retries": 2,
+                "compact_every": 16,
+            },
+        ),
+    ),
+    max_episode_steps=400,
 )
 
 HARBOR_PUBLIC = TargetSpec(
@@ -632,6 +701,7 @@ TARGETS: dict[str, TargetSpec] = {
         CRAFTAX_REACT,
         CRAFTAX_GOEX,
         CRAFTAX_CODE_POLICY,
+        ROGUE_REACT,
         HARBOR_PUBLIC,
         HARBOR_DOCKER,
         DEO_NESTED,
@@ -656,6 +726,7 @@ PR_TARGETS = (
 PAID_TARGETS = (
     "craftax_react",
     "craftax_goex",
+    "rogue_react",
     "digbench_public",
     "healthbench_chat",
 )

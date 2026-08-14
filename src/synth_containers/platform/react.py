@@ -121,6 +121,7 @@ class OpenRouterReAct:
 
     def __init__(self, *, config_id: str, config: dict[str, Any]) -> None:
         self.config_id = config_id
+        self.environment_name = str(config.get("environment_name") or "Craftax")
         self.model = str(config.get("model") or "meta/muse-spark-1.1")
         self.reasoning_effort = str(config.get("effort") or "medium")
         self.base_url = str(config.get("base_url") or "https://openrouter.ai/api/v1").rstrip("/")
@@ -141,7 +142,7 @@ class OpenRouterReAct:
         system_prompt = str(config.get("system_prompt") or config.get("react_system_prompt") or "").strip()
         if not system_prompt:
             system_prompt = (
-                "You are a careful Craftax ReAct policy. You must call the "
+                f"You are a careful {self.environment_name} ReAct policy. You must call the "
                 "choose_actions tool exactly once; do not answer with prose."
             )
         self._messages: list[dict[str, Any]] = [
@@ -310,7 +311,7 @@ class OpenRouterReAct:
             observation.get("observation_text") or observation.get("ascii") or ""
         )
         return (
-            "Make measurable Craftax achievement progress while staying alive. "
+            f"Make measurable {self.environment_name} objective progress while staying alive. "
             f"Choose {self.plan_min}-{min(self.plan_max, len(valid))} sequential actions from the exact legal list.\n\n"
             f"{observation_text}\n\nvalid_actions={json.dumps(valid)}\n"
             'Return JSON only: {"actions":["do","right"]}'
@@ -395,7 +396,7 @@ class OpenRouterReAct:
                     "type": "function",
                     "function": {
                         "name": "choose_actions",
-                        "description": "Choose the next sequential Craftax actions.",
+                        "description": f"Choose the next sequential {self.environment_name} actions.",
                         "parameters": {
                             "type": "object",
                             "properties": {

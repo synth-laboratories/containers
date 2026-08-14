@@ -16,6 +16,7 @@ from .openenv import OpenEnvRuntime
 
 _BY_FAMILY = {
     TargetRuntimeKind.CRAFTAX: CraftaxRuntime(),
+    TargetRuntimeKind.ROGUE: CraftaxRuntime(),
     TargetRuntimeKind.HARBOR: HarborRuntime(),
     TargetRuntimeKind.DIGBENCH: DigbenchRuntime(),
     TargetRuntimeKind.OPENENV: OpenEnvRuntime(),
