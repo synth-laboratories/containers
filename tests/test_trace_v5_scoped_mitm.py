@@ -204,11 +204,12 @@ def test_scoped_mitm_addon_routes_only_declared_provider_paths(
         capture_proxy_port=43123,
         event_log=event_log,
     )
-    response_factory = lambda status, body, headers: SimpleNamespace(
-        status=status,
-        body=body,
-        headers=dict(headers),
-    )
+    def response_factory(status, body, headers):
+        return SimpleNamespace(
+            status=status,
+            body=body,
+            headers=dict(headers),
+        )
     addon = ScopedProviderAddon(config, response_factory=response_factory)
 
     recognized = SimpleNamespace(

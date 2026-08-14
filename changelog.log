@@ -1,5 +1,10 @@
 # synth-containers changelog
 
+## 2026-07-29
+
+* Prepared `0.4.0.20260729` with the complete Trace V5 capture, store, evidence, annotation, judgment, multi-agent coordination, and live Visual bridge contracts.
+* Hardened capture authentication, child-session lifecycle integrity, tunnel supervision, and streamed response tool-call reconstruction.
+
 ## 2026-06-04
 
 * Published `0.2.0.20260604` to PyPI (first non-dev daily release).

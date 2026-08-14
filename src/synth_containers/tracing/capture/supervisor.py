@@ -89,7 +89,6 @@ from .envelope import RawRecordType
 from .mitm import (
     MITM_LIFECYCLE_SCHEMA_VERSION,
     MitmLifecycleReceiptV1,
-    MitmStartupError,
     ScopedMitmProxy,
 )
 from .websocket import ResponsesWebSocketRelay, ResponsesWebSocketServer

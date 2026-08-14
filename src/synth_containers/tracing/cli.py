@@ -34,7 +34,6 @@ from .validation.schema import all_schemas
 from .validation.validator import validate
 from .adapters.legacy import import_legacy
 from .adapters.native import import_native_to_bundle, write_imported_document
-from .canonical import bytes_digest
 from .native_evaluation import attach_native_evaluation
 from .capture.binding import (
     CaptureMode,

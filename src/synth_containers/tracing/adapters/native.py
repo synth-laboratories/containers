@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Mapping
 
-from ..canonical import bytes_digest, canonical_bytes, record_id
+from ..canonical import bytes_digest, canonical_bytes
 from ..capture.binding import (
     BindingCaptureV1,
     BindingWorkloadV1,
