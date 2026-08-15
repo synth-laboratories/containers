@@ -37,6 +37,10 @@ _DEFAULT_ROLE_TIMEOUT_SEC = 120.0
 _MAX_ROLE_TIMEOUT_SEC = 3600.0
 RUNTIME_CREDENTIALS_KEY = "agent_credentials"
 _CREDENTIALS_MOUNT = "/codexhome"
+# Authority binds at /workspace/<bench>/tasks/<rest>. <bench> is one lowercase
+# identifier (gamebench, cardbench, ...). The public Harbor fixture is not a bench.
+_BENCH_ID = re.compile(r"^[a-z][a-z0-9_]*$")
+_RESERVED_BENCHES = frozenset({"harbor_public"})
 
 
 @dataclass(frozen=True)
@@ -154,10 +158,7 @@ class HarborPinnedBundle:
         if not task_root.is_dir():
             raise HarborBundleError("harbor_bundle_task_tree_missing")
         task_tree_mount = str(task_tree.get("mount") or "").strip()
-        if not task_tree_mount.startswith("/workspace/gamebench/tasks/"):
-            raise HarborBundleError("harbor_bundle_task_tree_mount_invalid")
-        if ":" in task_tree_mount or ".." in Path(task_tree_mount).parts:
-            raise HarborBundleError("harbor_bundle_task_tree_mount_invalid")
+        _validate_task_tree_mount(task_tree_mount)
         expected_tree = str(task_tree.get("digest") or "").strip().lower()
         actual_tree = compute_tree_digest(task_root)
         if expected_tree != actual_tree:
@@ -598,6 +599,26 @@ def _timeout_seconds(value: Any) -> float:
     if not 0 < seconds <= _MAX_ROLE_TIMEOUT_SEC:
         raise HarborBundleError("harbor_bundle_timeout_invalid")
     return seconds
+
+
+def _validate_task_tree_mount(mount: str) -> None:
+    """Refuse mounts that are not `/workspace/<bench>/tasks/<rest>`.
+
+    Empty segments, `.`, `..`, and `:` are rejected on the raw string so Path
+    normalization cannot hide traversal. `/workspace/foo` without `/tasks/` is
+    not a bench bind. `harbor_public` is never a bench id.
+    """
+    if ":" in mount:
+        raise HarborBundleError("harbor_bundle_task_tree_mount_invalid")
+    parts = mount.split("/")
+    if len(parts) < 5 or parts[0] != "" or parts[1] != "workspace" or parts[3] != "tasks":
+        raise HarborBundleError("harbor_bundle_task_tree_mount_invalid")
+    bench = parts[2]
+    if not _BENCH_ID.fullmatch(bench) or bench in _RESERVED_BENCHES:
+        raise HarborBundleError("harbor_bundle_task_tree_mount_invalid")
+    rest = parts[4:]
+    if not rest or any(segment in {"", ".", ".."} for segment in rest):
+        raise HarborBundleError("harbor_bundle_task_tree_mount_invalid")
 
 
 def _safe_relative(value: str, code: str) -> str:

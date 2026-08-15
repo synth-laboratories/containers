@@ -6,6 +6,7 @@ import json
 import shutil
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from synth_containers.platform import create_dock_eval_app
@@ -13,11 +14,17 @@ from synth_containers.platform.extensions.dock import DockEvalExtension
 from synth_containers.platform.runtimes.harbor_docker import (
     DockerExecution,
     DockerVolume,
+    HarborBundleError,
+    HarborPinnedBundle,
     compute_bundle_digest,
+    compute_tree_digest,
 )
 from synth_containers.platform.targets import TARGETS
 
 FIXTURE = Path(__file__).parent / "fixtures" / "dock_extension" / "extension.json"
+CARDBENCH_FIXTURE = (
+    Path(__file__).parent / "fixtures" / "dock_extension" / "cardbench_extension.json"
+)
 TELEMETRY = {"enabled": True, "transport": "sse", "retention": "run"}
 
 
@@ -204,8 +211,18 @@ def test_authoring_agent_gets_declared_egress_while_verifier_stays_hermetic(
         lambda: True,
     )
 
-    def fake_execute(*, role, image, command, volumes, name, environment=None,
-                     allow_nonzero=False, timeout_seconds=120.0, network="none"):
+    def fake_execute(
+        *,
+        role,
+        image,
+        command,
+        volumes,
+        name,
+        environment=None,
+        allow_nonzero=False,
+        timeout_seconds=120.0,
+        network="none",
+    ):
         del image, command, allow_nonzero
         seen[role] = {
             "network": network,
@@ -278,3 +295,107 @@ def test_authoring_agent_gets_declared_egress_while_verifier_stays_hermetic(
 
     # The credential path is never echoed into the durable log.
     assert str(credentials) not in json.dumps(events)
+
+
+def _pin_bundle(root: Path) -> HarborPinnedBundle:
+    return HarborPinnedBundle.from_directory(root, expected_digest=compute_bundle_digest(root))
+
+
+def test_cardbench_task_tree_mount_is_accepted() -> None:
+    extension = DockEvalExtension.from_file(CARDBENCH_FIXTURE)
+    bundle = _pin_bundle(extension.bundle_root)
+    assert bundle.task_tree_mount == "/workspace/cardbench/tasks/pokemon"
+    assert bundle.task_tree_digest == compute_tree_digest(
+        extension.bundle_root / "cardbench" / "tasks" / "pokemon"
+    )
+
+
+@pytest.mark.parametrize(
+    "mount",
+    (
+        "/workspace/evil",
+        "/workspace/gamebench/../x",
+        "/workspace/harbor_public/tasks/example",
+        "/workspace/gamebench",
+        "/workspace/gamebench/tasks",
+        "/workspace/gamebench/tasks/",
+        "/workspace/GameBench/tasks/example",
+    ),
+)
+def test_task_tree_mount_rejects_unscoped_and_traversing_paths(tmp_path: Path, mount: str) -> None:
+    copied = tmp_path / "bundle"
+    shutil.copytree(FIXTURE.parent / "bundle", copied)
+    manifest_path = copied / "bundle.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["task_tree"]["mount"] = mount
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    with pytest.raises(HarborBundleError, match="harbor_bundle_task_tree_mount_invalid"):
+        _pin_bundle(copied)
+
+
+def test_cardbench_pinned_bundle_is_accepted_by_dock_eval(monkeypatch) -> None:
+    extension = DockEvalExtension.from_file(CARDBENCH_FIXTURE)
+    assert extension.bundle_digest == compute_bundle_digest(extension.bundle_root)
+    calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        "synth_containers.platform.runtimes.harbor_docker.docker_runtime_available",
+        lambda: True,
+    )
+
+    def fake_execute(
+        *,
+        role,
+        image,
+        command,
+        volumes,
+        name,
+        environment=None,
+        allow_nonzero=False,
+        timeout_seconds=120.0,
+        network="none",
+    ):
+        del image, command, timeout_seconds, environment
+        assert allow_nonzero is True
+        assert network == "none"
+        calls.append({"role": role, "volumes": volumes, "name": name})
+        task_mount = volumes["/workspace/cardbench/tasks/pokemon"]
+        assert isinstance(task_mount, DockerVolume) and task_mount.read_only
+        if role == "agent":
+            workspace = Path(volumes["/workspace"])
+            workspace.mkdir(parents=True, exist_ok=True)
+            (workspace / "answer.txt").write_text("candidate\n", encoding="utf-8")
+            return DockerExecution(role=role, exit_code=0, stdout="candidate\n", name=name)
+        logs = Path(volumes["/logs"]) / "verifier"
+        logs.mkdir(parents=True, exist_ok=True)
+        (logs / "reward.txt").write_text("1.0\n", encoding="utf-8")
+        return DockerExecution(role=role, exit_code=0, stdout="", name=name)
+
+    monkeypatch.setattr(
+        "synth_containers.platform.runtimes.harbor_docker.execute_docker_role",
+        fake_execute,
+    )
+    client = TestClient(create_dock_eval_app(extension))
+    stream = _prepare_subscribe(client, "dock_cardbench_1")
+    started = client.post(
+        "/rollouts",
+        json={
+            "rollout_id": "dock_cardbench_1",
+            "telemetry": TELEMETRY,
+            "policy_ref": {"harness": "harbor_fused", "config": "luna_med"},
+        },
+    )
+    assert started.status_code == 200, started.text
+    assert started.json()["status"] == "completed"
+    assert [row["role"] for row in calls] == ["agent", "verifier"]
+
+    events = client.get(stream["transports"]["poll"]["url"], params={"after": 0}).json()["events"]
+    planned = next(row["payload"] for row in events if row["kind"] == "trial.planned")
+    assert planned["bundle_digest"] == extension.bundle_digest
+    assert planned["task_tree"]["mount"] == "/workspace/cardbench/tasks/pokemon"
+    verifier = next(row["payload"] for row in events if row["kind"] == "verifier")
+    assert verifier["reward.txt"] == 1.0
+    reward = client.post(
+        "/reward", json={"rollout_id": "dock_cardbench_1", "mode": "terminal"}
+    ).json()
+    assert reward["reward"] == 1.0
