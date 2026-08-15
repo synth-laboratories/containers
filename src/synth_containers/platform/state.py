@@ -33,6 +33,16 @@ def _digest(payload: Any) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
 
+def _effective_max_episode_steps(spec: TargetSpec) -> int | None:
+    override_name = (
+        "SYNTH_ROGUE_MAX_STEPS"
+        if spec.environment_ref == "env:rogue_gold"
+        else "SYNTH_CRAFTAX_MAX_STEPS"
+    )
+    override = os.environ.get(override_name)
+    return int(override) if override else spec.max_episode_steps
+
+
 def _checkpoint_digest(payload: Any) -> str:
     """Return the full content address used for durable checkpoint evidence."""
     blob = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
@@ -467,7 +477,7 @@ class CompatPlatform:
             "event_kinds": list(self.spec.event_kinds),
             "target_id": self.spec.target_id,
             "runtime_family": self.spec.runtime_family.value,
-            "max_episode_steps": self.spec.max_episode_steps,
+            "max_episode_steps": _effective_max_episode_steps(self.spec),
         }
 
     def bind(self, recipe: dict[str, Any] | None) -> dict[str, Any] | None:

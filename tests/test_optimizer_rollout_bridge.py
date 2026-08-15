@@ -96,6 +96,12 @@ def test_in_flight_policy_config_allows_only_identical_replay() -> None:
     assert completed.status_code == 200
 
 
+def test_metadata_reports_runtime_step_override(monkeypatch) -> None:
+    monkeypatch.setenv("SYNTH_CRAFTAX_MAX_STEPS", "24")
+    client = TestClient(create_compat_app("craftax_goex"))
+    assert client.get("/metadata").json()["max_episode_steps"] == 24
+
+
 def _git(args: list[str], cwd: Path) -> None:
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
 
