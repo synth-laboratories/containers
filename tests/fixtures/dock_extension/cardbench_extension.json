@@ -1,0 +1,9 @@
+{
+  "schema": "synth.dock-eval-extension.v1",
+  "extension_id": "dock-fixture/cardbench-pokemon",
+  "adapter": "harbor_pinned_bundle",
+  "bundle": {
+    "path": "cardbench_bundle",
+    "digest": "sha256:60086cf43212deb5f4a581a9f77db60191d1c2737afd43c0a14c8f9edf9ed739"
+  }
+}
