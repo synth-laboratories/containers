@@ -16,6 +16,41 @@ def test_healthbench_declares_thirty_parallel_leases() -> None:
     assert HEALTHBENCH_CHAT.scale_leases == 30
 
 
+def test_healthbench_declares_independent_policy_and_scorer_roles(monkeypatch) -> None:
+    monkeypatch.setenv("HEALTHBENCH_GRADER_API_KEY_ENV", "CUSTOM_GRADER_KEY")
+    metadata = TestClient(create_compat_app("healthbench_chat")).get("/metadata").json()
+    roles = metadata["metadata"]["model_roles"]
+    assert roles["policy"]["configuration_authority"] == "policy_ref"
+    assert roles["policy"]["usage_lane"] == "policy"
+    assert roles["scorer"]["purpose"] == "score_response_against_physician_rubrics"
+    assert roles["scorer"]["api_key_env"] == "CUSTOM_GRADER_KEY"
+    assert roles["scorer"]["usage_lane"] == "grader"
+    assert roles["scorer"]["canonical"] is True
+
+
+def test_healthbench_grader_uses_declared_credential(monkeypatch) -> None:
+    monkeypatch.setenv("HEALTHBENCH_GRADER_API_KEY_ENV", "CUSTOM_GRADER_KEY")
+    captured = []
+
+    def chat(config, messages):
+        captured.append(config)
+        return {
+            "text": '{"explanation":"Appropriate.","criteria_met":true}',
+            "usage": healthbench._usage(
+                "openai", healthbench.GRADER_MODEL, {"prompt_tokens": 1, "completion_tokens": 1}
+            ),
+        }
+
+    monkeypatch.setattr(healthbench, "_chat", chat)
+    healthbench._grade(_row(), "Rest and seek care for red flags.", log=_RecordingLog())
+    assert captured[0]["api_key_env"] == "CUSTOM_GRADER_KEY"
+
+
+class _RecordingLog:
+    def append(self, kind, payload):
+        return None
+
+
 def _row() -> dict:
     return {
         "prompt_id": "health-fixture-1",

@@ -86,12 +86,15 @@ def create_compat_app(
     async def metadata() -> dict[str, Any]:
         payload = platform.metadata_payload()
         if spec.runtime_family.value == "healthbench":
+            from .runtimes.healthbench import model_roles
+
             payload["capabilities"] = {
                 "contract_version": "container_contract.v1",
                 "rollout_modes": ["blocking"],
                 "metadata": {"policy_ready": True},
             }
             payload["metadata"] = {
+                "model_roles": model_roles(),
                 "optimizer_contracts": {
                     "gepa": {
                         "version": "synth_optimizers.gepa.v2",
