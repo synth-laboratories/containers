@@ -576,7 +576,11 @@ class CompatPlatform:
             # rollout identity and must not hold the platform-wide admission
             # lock, otherwise one synchronous rollout makes advertised leases
             # fictitious and blocks prepare/start for every other rollout.
-            self._simulate(pin, log)
+            # Keep the same fail-closed terminalization contract as the
+            # locked synchronous path. Moving execution outside the admission
+            # lock must not turn runtime exceptions into permanently running
+            # pins that block later policy registration or replay.
+            self._simulate_or_fail(pin, log)
         finally:
             with self._state_lock:
                 self.active_leases = max(0, self.active_leases - 1)
