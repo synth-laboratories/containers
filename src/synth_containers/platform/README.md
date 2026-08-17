@@ -50,7 +50,7 @@ Trace Streaming Profile kit: `docs/specs/trace-streaming-profile-v1.md` + `tests
 - `create_compat_app(target)` — HTTP edge
 - `project_envelopes` — honest headless projection
 - `project_harbor_atif` — Harbor-only overlay of the log
-- `examples/serve_banking77.py` — loopback `banking77_classify` (default `:8099`)
+- `examples/serve_banking77.py` — loopback `banking77_classify` (default `:8099`, optional `--storage-root`)
 - `examples/serve_healthbench.py` — loopback `healthbench_chat` (default `:8114`)
 - `examples/serve_craftax_react.py` — loopback gold Craftax ReAct (default `:8097`)
 - `examples/craftax_ten_seeds.py`, `examples/deo_nested_reward.py`, `examples/banking77_datagen.py` — headless C3-01 / C4-06 / Banking77 data gen (no Desktop, no `--paid`)
