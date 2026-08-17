@@ -545,6 +545,10 @@ def create_compat_app(
             raise HTTPException(status_code=404, detail=f"trace_not_sealed:{rollout_id}")
         return seal
 
+    @app.get("/rollouts/{rollout_id}/manifest")
+    async def get_manifest(rollout_id: str) -> Any:
+        return _platform_response(platform.get_execution_manifest(rollout_id), default_status=404)
+
     @app.post("/rollouts/{rollout_id}/drop_session")
     async def drop_session(rollout_id: str) -> Any:
         result = platform.drop_session(rollout_id)

@@ -187,6 +187,7 @@ class CompatPlatform:
         self._state_lock = threading.RLock()
         self._background_done: dict[str, threading.Event] = {}
         self._background_threads: dict[str, threading.Thread] = {}
+        self.execution_manifests: dict[str, dict[str, Any]] = {}
         self._seed_default_policies()
         self._recover_checkpoints()
         self._recover_completed_rollouts()
@@ -966,6 +967,8 @@ class CompatPlatform:
             "resume_from_checkpoint_id": pin.resume_from_checkpoint_id,
             "scheduled_checkpoints": pin.scheduled_checkpoints,
             "trace": self._sealed_trace_reference(pin.rollout_id),
+            "config_digest": pin.config_digest,
+            "capability_digest": pin.capability_digest,
         }
 
     def _sealed_trace_reference(self, rollout_id: str) -> dict[str, Any] | None:
@@ -994,6 +997,7 @@ class CompatPlatform:
     def _simulate(self, pin: RolloutPin, log: RolloutEventLog) -> None:
         pin.env_generation += 1
         runtime_for(self.spec).simulate(self, pin, log)
+        pin.completed_at = pin.completed_at or _utc_now()
         self.seals[pin.rollout_id] = seal_rollout_log(
             log,
             pin={
@@ -1002,6 +1006,8 @@ class CompatPlatform:
                 "policy_ref": pin.policy_ref,
                 "evaluation_plan_ref": pin.evaluation_plan_ref,
                 "task_instance_id": pin.task_instance_id,
+                "config_digest": pin.config_digest,
+                "capability_digest": pin.capability_digest,
             },
         )
         seal_path = self.storage_root / "seals" / f"{pin.rollout_id}.trace-v5.json"
@@ -1025,7 +1031,63 @@ class CompatPlatform:
             os.fsync(directory_fd)
         finally:
             os.close(directory_fd)
+        self._write_execution_manifest(pin, log)
         self._persist_completed_rollout(pin)
+
+    def _execution_manifest_path(self, rollout_id: str) -> Path:
+        return self.storage_root / "seals" / f"{rollout_id}.manifest.json"
+
+    def _taxonomy_counters(self, log: RolloutEventLog) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for item in log.after(0):
+            if item.control:
+                continue
+            counts[item.kind] = counts.get(item.kind, 0) + 1
+        return counts
+
+    def _write_execution_manifest(self, pin: RolloutPin, log: RolloutEventLog) -> dict[str, Any]:
+        """Write-once terminal execution manifest next to the sealed trace."""
+        path = self._execution_manifest_path(pin.rollout_id)
+        if path.is_file():
+            existing = json.loads(path.read_text(encoding="utf-8"))
+            self.execution_manifests[pin.rollout_id] = existing
+            return existing
+        seal = self.seals.get(pin.rollout_id) or {}
+        body = {
+            "schema": "synth.containers.execution-manifest.v1",
+            "rollout_id": pin.rollout_id,
+            "status": pin.status,
+            "taxonomy": {"event_kind_counts": self._taxonomy_counters(log)},
+            "usage": pin.usage,
+            "reward": {
+                "signals": list(pin.reward_signals),
+                "native_script_reward": pin.native_script_reward,
+            },
+            "digests": {
+                "config_digest": pin.config_digest,
+                "capability_digest": pin.capability_digest,
+            },
+            "trace_digest": seal.get("content_digest"),
+            "timestamps": {
+                "accepted_at": pin.accepted_at,
+                "completed_at": pin.completed_at,
+            },
+        }
+        manifest = {**body, "content_digest": _canonical_sha256(body)}
+        self._atomic_json(path, manifest)
+        self.execution_manifests[pin.rollout_id] = manifest
+        return manifest
+
+    def get_execution_manifest(self, rollout_id: str) -> dict[str, Any]:
+        row = self.execution_manifests.get(rollout_id)
+        if row is not None:
+            return row
+        path = self._execution_manifest_path(rollout_id)
+        if path.is_file():
+            row = json.loads(path.read_text(encoding="utf-8"))
+            self.execution_manifests[rollout_id] = row
+            return row
+        return {"error": "manifest_not_sealed", "status_code": 404, "rollout_id": rollout_id}
 
     def _ensure_policy_process(self) -> IsolatedPolicyProcess:
         if self.policy_process is not None and self.policy_process._proc.poll() is None:

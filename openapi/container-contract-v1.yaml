@@ -301,6 +301,52 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+  /rollouts/{rollout_id}/manifest:
+    get:
+      operationId: getRolloutManifest
+      summary: Read the write-once terminal execution manifest
+      parameters:
+        - $ref: '#/components/parameters/RolloutId'
+      responses:
+        '200':
+          description: Self-digested terminal execution manifest
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [rollout_id, status, digests, content_digest]
+                properties:
+                  rollout_id:
+                    type: string
+                  status:
+                    type: string
+                  taxonomy:
+                    type: object
+                    additionalProperties: true
+                  usage:
+                    type: object
+                    additionalProperties: true
+                    nullable: true
+                  reward:
+                    type: object
+                    additionalProperties: true
+                  digests:
+                    type: object
+                    properties:
+                      config_digest:
+                        type: string
+                      capability_digest:
+                        type: string
+                  trace_digest:
+                    type: string
+                  timestamps:
+                    type: object
+                    additionalProperties: true
+                  content_digest:
+                    type: string
+                additionalProperties: true
+        '404':
+          description: Manifest not sealed
   /rollouts/{rollout_id}/artifacts:
     get:
       operationId: getRolloutArtifacts
