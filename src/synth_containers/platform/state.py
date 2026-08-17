@@ -469,7 +469,7 @@ class CompatPlatform:
             role: {name: level != "unsupported" for name, level in items.items()}
             for role, items in advertised.items()
         }
-        return {
+        payload = {
             "world_ref": self.spec.world_ref,
             "environment_ref": self.spec.environment_ref,
             "policy_ref": {
@@ -501,6 +501,31 @@ class CompatPlatform:
             "runtime_family": self.spec.runtime_family.value,
             "max_episode_steps": self.spec.max_episode_steps,
         }
+        if contract := self._gepa_v2_contract():
+            payload["optimizer_contracts"] = {"gepa": contract}
+        return payload
+
+    def _gepa_v2_contract(self) -> dict[str, Any] | None:
+        family = self.spec.runtime_family.value
+        if family == "healthbench":
+            return {
+                "version": "synth_optimizers.gepa.v2",
+                "program_route": "/program",
+                "taskset_route": "/taskset",
+                "taskset_tasks_route": "/taskset/tasks",
+                "rollout_route": "/rollout",
+                "trace_route": "/rollouts/{rollout_id}/events",
+            }
+        if family == "banking77":
+            return {
+                "version": "synth_optimizers.gepa.v2",
+                "program_route": "/program",
+                "taskset_route": "/taskset",
+                "rollout_route": "/rollouts",
+                "prepare_route": "/rollouts/prepare",
+                "trace_route": "/rollouts/{rollout_id}/events",
+            }
+        return None
 
     def bind(self, recipe: dict[str, Any] | None) -> dict[str, Any] | None:
         return bind_recipe(self.spec.affordances, recipe)
@@ -567,9 +592,36 @@ class CompatPlatform:
 
     def start_rollout(self, request: CreateRolloutRequest) -> dict[str, Any]:
         with self._state_lock:
-            return self._start_rollout_locked(request)
+            result = self._start_rollout_locked(request, defer_sync=True)
+            rollout_id = str(result.get("rollout_id") or request.rollout_id or "")
+            pin = self.pins.get(rollout_id)
+            log = self.logs.get(rollout_id)
+            should_run = (
+                request.submission_mode != "async"
+                and pin is not None
+                and log is not None
+                and pin.status == "running"
+                and not bool(result.get("replayed"))
+            )
+        if not should_run:
+            return result
+        try:
+            # Policy and evaluator calls can take minutes. They are isolated by
+            # rollout identity and must not hold the platform-wide admission
+            # lock, otherwise one synchronous rollout makes advertised leases
+            # fictitious and blocks prepare/start for every other rollout.
+            self._simulate(pin, log)
+        finally:
+            with self._state_lock:
+                self.active_leases = max(0, self.active_leases - 1)
+                result = self._rollout_response(
+                    pin, self.stream_descriptor_for(rollout_id)
+                )
+        return result
 
-    def _start_rollout_locked(self, request: CreateRolloutRequest) -> dict[str, Any]:
+    def _start_rollout_locked(
+        self, request: CreateRolloutRequest, *, defer_sync: bool = False
+    ) -> dict[str, Any]:
         slot = request.slot
         if slot in {"live", "jobs"}:
             return {
@@ -748,7 +800,7 @@ class CompatPlatform:
             )
         pin.started = True
         pin.status = "running"
-        if async_mode:
+        if async_mode or defer_sync:
             return self._rollout_response(pin, descriptor)
         try:
             self._simulate_or_fail(pin, log)
@@ -835,6 +887,30 @@ class CompatPlatform:
             "truncated": pin.status == "truncated",
             "resume_from_checkpoint_id": pin.resume_from_checkpoint_id,
             "scheduled_checkpoints": pin.scheduled_checkpoints,
+            "trace": self._sealed_trace_reference(pin.rollout_id),
+        }
+
+    def _sealed_trace_reference(self, rollout_id: str) -> dict[str, Any] | None:
+        """Announce the sealed trace on the authoritative terminal record.
+
+        A seal that only exists at ``/rollouts/{id}/trace`` is a seal the
+        consumer has to already know about. Workshop read terminal rollout
+        records, saw no trace at all, and its own index stayed empty while this
+        process held a complete sealed trace on disk — split authority with no
+        edge between the halves. The terminal record now carries the identity
+        and where to fetch it; the seal itself stays behind its own route.
+        """
+        seal = self.seals.get(rollout_id)
+        if seal is None:
+            return None
+        return {
+            "schema_version": seal.get("schema_version"),
+            "trace_id": seal.get("trace_id"),
+            "content_digest": seal.get("content_digest"),
+            "event_count": len(seal.get("events") or []),
+            "high_water": seal.get("high_water"),
+            "closed": seal.get("closed"),
+            "url": f"/rollouts/{rollout_id}/trace",
         }
 
     def _simulate_or_fail(self, pin: RolloutPin, log: RolloutEventLog) -> None:
@@ -957,12 +1033,11 @@ class CompatPlatform:
     def register_policy_config(self, config_id: str, body: dict[str, Any]) -> dict[str, Any]:
         if self.spec.affordances.level("bind_policy_config") == "unsupported":
             return {"error": "bind_refused", "status_code": 403, "affordance": "bind_policy_config"}
-        if any(pin.started and not pin.terminal for pin in self.pins.values()):
-            return {
-                "error": "in_flight",
-                "status_code": 409,
-                "detail": "mid-trial bind_policy_config refused",
-            }
+        # Policy configs are immutable, named inputs. Registering a new config
+        # does not mutate the config already pinned by an in-flight rollout, so
+        # concurrent optimizer runs may safely add checkpoint configs while
+        # other rollouts are active. The rollout's policy_ref remains the
+        # authority for selecting its config.
         cfg = PolicyConfig(
             config_id=config_id,
             harness=str(body.get("harness") or self.spec.default_policy_harness),

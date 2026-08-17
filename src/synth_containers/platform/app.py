@@ -86,23 +86,42 @@ def create_compat_app(
     async def metadata() -> dict[str, Any]:
         payload = platform.metadata_payload()
         if spec.runtime_family.value == "healthbench":
-            payload["capabilities"] = {
-                "contract_version": "container_contract.v1",
-                "rollout_modes": ["blocking"],
-                "metadata": {"policy_ready": True},
+            from .runtimes.healthbench import model_roles
+
+            gepa = (payload.get("optimizer_contracts") or {}).get("gepa") or {
+                "version": "synth_optimizers.gepa.v2",
+                "program_route": "/program",
+                "taskset_route": "/taskset",
+                "taskset_tasks_route": "/taskset/tasks",
+                "rollout_route": "/rollout",
+                "trace_route": "/rollouts/{rollout_id}/events",
             }
-            payload["metadata"] = {
-                "optimizer_contracts": {
-                    "gepa": {
-                        "version": "synth_optimizers.gepa.v2",
-                        "program_route": "/program",
-                        "taskset_route": "/taskset",
-                        "taskset_tasks_route": "/taskset/tasks",
-                        "rollout_route": "/rollout",
-                        "trace_route": "/rollouts/{rollout_id}/events",
-                    }
-                }
-            }
+            capabilities = payload.get("capabilities")
+            if not isinstance(capabilities, dict):
+                capabilities = {}
+            capabilities.setdefault("contract_version", "container_contract.v1")
+            capabilities.setdefault("rollout_modes", ["blocking"])
+            capabilities.setdefault(
+                "operations",
+                {
+                    "prepare": True,
+                    "start": True,
+                    "get": True,
+                    "poll": True,
+                    "reward": True,
+                },
+            )
+            metadata_blob = capabilities.setdefault("metadata", {})
+            if isinstance(metadata_blob, dict):
+                metadata_blob["policy_ready"] = True
+            capabilities["optimizer_contracts"] = {"gepa": gepa}
+            payload["capabilities"] = capabilities
+            metadata = payload.get("metadata")
+            if not isinstance(metadata, dict):
+                metadata = {}
+            metadata["model_roles"] = model_roles()
+            metadata["optimizer_contracts"] = {"gepa": gepa}
+            payload["metadata"] = metadata
         return payload
 
     @app.get("/task_info")
@@ -260,13 +279,22 @@ def create_compat_app(
         seed = int(task.get("seed") or 0)
         candidate = body.get("candidate") if isinstance(body.get("candidate"), dict) else {}
         policy = body.get("policy") if isinstance(body.get("policy"), dict) else {}
+        policy_provider = str(policy.get("provider") or "groq").lower()
+        default_policy_base_url = (
+            "https://api.groq.com/openai/v1"
+            if policy_provider == "groq"
+            else "https://api.openai.com/v1"
+        )
+        default_policy_api_key_env = (
+            "GROQ_API_KEY" if policy_provider == "groq" else "OPENAI_API_KEY"
+        )
         policy_config = {
-            "provider": policy.get("provider") or "groq",
+            "provider": policy_provider,
             "model": policy.get("model") or "llama-3.1-8b-instant",
             "base_url": policy.get("base_url")
             or policy.get("api_base")
-            or "https://api.groq.com/openai/v1",
-            "api_key_env": policy.get("api_key_env") or "GROQ_API_KEY",
+            or default_policy_base_url,
+            "api_key_env": policy.get("api_key_env") or default_policy_api_key_env,
             "max_tokens": policy.get("max_tokens") or 1536,
             "system_prompt": candidate.get("system_prompt"),
         }

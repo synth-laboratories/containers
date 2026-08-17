@@ -625,6 +625,17 @@ HEALTHBENCH_CHAT = TargetSpec(
                 "max_tokens": 1536,
             },
         ),
+        PolicySeed(
+            "openai_gpt41_mini",
+            "chat_completion",
+            {
+                "provider": "openai",
+                "model": "gpt-4.1-mini-2025-04-14",
+                "api_key_env": "OPENAI_API_KEY",
+                "base_url": "https://api.openai.com/v1",
+                "max_tokens": 1536,
+            },
+        ),
     ),
 )
 

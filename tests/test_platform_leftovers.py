@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,6 +12,21 @@ from synth_containers.platform.runtimes.harbor import atif_is_projection, projec
 from synth_containers.platform.reducer import assert_honest_projection
 from synth_containers.platform.state import CompatPlatform, _seed_from_task_instance_id
 from synth_containers.platform.targets import TARGETS
+
+
+def test_register_policy_config_does_not_mutate_or_block_in_flight_pin(tmp_path) -> None:
+    platform = CompatPlatform(TARGETS["craftax_react"], storage_root=tmp_path)
+    platform.pins["active"] = SimpleNamespace(started=True, terminal=False)
+
+    result = platform.register_policy_config(
+        "checkpoint-b",
+        {"harness": "react", "config": {"model": "checkpoint-b"}},
+    )
+
+    assert result["config_id"] == "checkpoint-b"
+    assert platform.policy_configs["checkpoint-b"].config == {"model": "checkpoint-b"}
+    assert platform.pins["active"].started is True
+    assert platform.pins["active"].terminal is False
 
 
 def test_seed_from_task_instance_id_rules() -> None:
@@ -41,6 +57,10 @@ def test_metadata_names_runtime_family() -> None:
     assert banking77["runtime_family"] == "banking77"
     assert banking77["adapter_chain"] == []
     assert banking77["live_frames"] == "unsupported"
+    gepa = banking77["optimizer_contracts"]["gepa"]
+    assert gepa["version"] == "synth_optimizers.gepa.v2"
+    assert gepa["prepare_route"] == "/rollouts/prepare"
+    assert gepa["rollout_route"] == "/rollouts"
 
 
 def test_start_rollout_reads_create_rollout_request() -> None:
