@@ -801,6 +801,30 @@ class CompatPlatform:
             "truncated": pin.status == "truncated",
             "resume_from_checkpoint_id": pin.resume_from_checkpoint_id,
             "scheduled_checkpoints": pin.scheduled_checkpoints,
+            "trace": self._sealed_trace_reference(pin.rollout_id),
+        }
+
+    def _sealed_trace_reference(self, rollout_id: str) -> dict[str, Any] | None:
+        """Announce the sealed trace on the authoritative terminal record.
+
+        A seal that only exists at ``/rollouts/{id}/trace`` is a seal the
+        consumer has to already know about. Workshop read terminal rollout
+        records, saw no trace at all, and its own index stayed empty while this
+        process held a complete sealed trace on disk — split authority with no
+        edge between the halves. The terminal record now carries the identity
+        and where to fetch it; the seal itself stays behind its own route.
+        """
+        seal = self.seals.get(rollout_id)
+        if seal is None:
+            return None
+        return {
+            "schema_version": seal.get("schema_version"),
+            "trace_id": seal.get("trace_id"),
+            "content_digest": seal.get("content_digest"),
+            "event_count": len(seal.get("events") or []),
+            "high_water": seal.get("high_water"),
+            "closed": seal.get("closed"),
+            "url": f"/rollouts/{rollout_id}/trace",
         }
 
     def _simulate(self, pin: RolloutPin, log: RolloutEventLog) -> None:
