@@ -907,6 +907,16 @@ components:
           type: string
         submission_mode:
           $ref: '#/components/schemas/SubmissionMode'
+        execution:
+          type: string
+          enum: [background, on_complete]
+          description: >
+            Async execution mode. Default is background — the rollout progresses
+            without POST /complete. on_complete defers simulation until /complete
+            so occupancy tests can hold leases.
+        idempotency_key:
+          type: string
+          description: Caller-supplied idempotency key; defaults to rollout_id.
         env:
           $ref: '#/components/schemas/RolloutEnvSpec'
         policy:

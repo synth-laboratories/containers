@@ -272,6 +272,7 @@ def test_concurrent_identical_start_executes_once(tmp_path: Path) -> None:
         "rollout_id": "same-start",
         "slot": "stream",
         "submission_mode": "async",
+        "execution": "on_complete",
         "task_instance_id": "seed:0",
         "policy_ref": _CRAFTAX_PIN,
         "telemetry": {"enabled": True, "transport": "sse", "retention": "run"},
@@ -279,7 +280,7 @@ def test_concurrent_identical_start_executes_once(tmp_path: Path) -> None:
     with ThreadPoolExecutor(max_workers=2) as executor:
         responses = list(executor.map(lambda _: client.post("/rollouts", json=payload), range(2)))
 
-    assert [response.status_code for response in responses] == [200, 200]
+    assert [response.status_code for response in responses] == [202, 202]
     assert sum(bool(response.json().get("replayed")) for response in responses) == 1
     journal = next((tmp_path / "event_logs").glob("*.jsonl"))
     recovered = RolloutEventLog.recover(
@@ -302,6 +303,7 @@ def test_concurrent_distinct_starts_enforce_lease_limit_and_isolate_logs(
                 "rollout_id": f"lease-{index}",
                 "slot": "stream",
                 "submission_mode": "async",
+                "execution": "on_complete",
                 "task_instance_id": f"seed:{index}",
                 "policy_ref": _CRAFTAX_PIN,
                 "telemetry": {"enabled": True, "transport": "sse", "retention": "run"},
@@ -311,10 +313,10 @@ def test_concurrent_distinct_starts_enforce_lease_limit_and_isolate_logs(
     with ThreadPoolExecutor(max_workers=11) as executor:
         responses = list(executor.map(start, range(11)))
 
-    assert sum(response.status_code == 200 for response in responses) == 10
+    assert sum(response.status_code == 202 for response in responses) == 10
     assert sum(response.status_code == 429 for response in responses) == 1
     successful_ids = {
-        response.json()["rollout_id"] for response in responses if response.status_code == 200
+        response.json()["rollout_id"] for response in responses if response.status_code == 202
     }
     assert len(successful_ids) == 10
     for rollout_id in successful_ids:

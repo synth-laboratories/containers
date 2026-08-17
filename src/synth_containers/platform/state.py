@@ -32,10 +32,21 @@ def _digest(payload: Any) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
 
-def _checkpoint_digest(payload: Any) -> str:
-    """Return the full content address used for durable checkpoint evidence."""
+def _canonical_sha256(payload: Any) -> str:
+    """Full sha256 of canonical JSON. Used for config, capability, and manifest digests."""
     blob = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     return "sha256:" + hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _checkpoint_digest(payload: Any) -> str:
+    """Return the full content address used for durable checkpoint evidence."""
+    return _canonical_sha256(payload)
+
+
+def _utc_now() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
 def _seed_from_task_instance_id(task_instance_id: str | None) -> int:
@@ -124,6 +135,13 @@ class RolloutPin:
     checkpoint_schedule: dict[str, Any] | None = None
     resume_from_checkpoint_id: str | None = None
     scheduled_checkpoints: list[dict[str, Any]] = field(default_factory=list)
+    config_digest: str | None = None
+    capability_digest: str | None = None
+    execution: str | None = None
+    idempotency_key: str | None = None
+    accepted_at: str | None = None
+    completed_at: str | None = None
+    simulating: bool = False
 
 
 class CompatPlatform:
@@ -167,6 +185,8 @@ class CompatPlatform:
         self.policy_code: bytes | None = None
         self.policy_process: IsolatedPolicyProcess | None = None
         self._state_lock = threading.RLock()
+        self._background_done: dict[str, threading.Event] = {}
+        self._background_threads: dict[str, threading.Thread] = {}
         self._seed_default_policies()
         self._recover_checkpoints()
         self._recover_completed_rollouts()
@@ -275,6 +295,12 @@ class CompatPlatform:
                 "checkpoint_schedule": pin.checkpoint_schedule,
                 "resume_from_checkpoint_id": pin.resume_from_checkpoint_id,
                 "scheduled_checkpoints": pin.scheduled_checkpoints,
+                "config_digest": pin.config_digest,
+                "capability_digest": pin.capability_digest,
+                "execution": pin.execution,
+                "idempotency_key": pin.idempotency_key,
+                "accepted_at": pin.accepted_at,
+                "completed_at": pin.completed_at,
             },
         }
         self._atomic_json(self._manifest_path(pin.rollout_id), manifest)
@@ -358,6 +384,12 @@ class CompatPlatform:
                 checkpoint_schedule=raw_pin.get("checkpoint_schedule"),
                 resume_from_checkpoint_id=raw_pin.get("resume_from_checkpoint_id"),
                 scheduled_checkpoints=list(raw_pin.get("scheduled_checkpoints") or []),
+                config_digest=raw_pin.get("config_digest"),
+                capability_digest=raw_pin.get("capability_digest"),
+                execution=raw_pin.get("execution"),
+                idempotency_key=raw_pin.get("idempotency_key"),
+                accepted_at=raw_pin.get("accepted_at"),
+                completed_at=raw_pin.get("completed_at"),
             )
             self.logs[rollout_id] = log
             self.stream_bindings[rollout_id] = (str(binding[0]), str(binding[1]))
@@ -421,6 +453,38 @@ class CompatPlatform:
                 "code": None,
             },
         ]
+
+    def capability_metadata(self) -> dict[str, Any]:
+        """Stable capability advertisement hashed into contract.capability_digest."""
+        return {
+            "target_id": self.spec.target_id,
+            "runtime_family": self.spec.runtime_family.value,
+            "environment_ref": self.spec.environment_ref,
+            "event_kinds": list(self.spec.event_kinds),
+            "max_episode_steps": self.spec.max_episode_steps,
+            "policy_refs": self._advertised_policy_refs(),
+            "affordances": self.spec.affordances.advertised(),
+        }
+
+    def capabilities_digest(self) -> str:
+        return _canonical_sha256(self.capability_metadata())
+
+    def _policy_config_digest(
+        self,
+        config_id: str | None,
+        harness: str,
+        code: Any = None,
+    ) -> str:
+        cfg = self.policy_configs.get(config_id) if config_id else None
+        payload: dict[str, Any] = {
+            "config_id": config_id,
+            "harness": cfg.harness if cfg is not None else harness,
+            "config": None if cfg is None else cfg.config,
+        }
+        if code:
+            raw = code if isinstance(code, (bytes, bytearray)) else str(code).encode("utf-8")
+            payload["code_sha256"] = hashlib.sha256(bytes(raw)).hexdigest()
+        return _canonical_sha256(payload)
 
     def metadata_payload(self) -> dict[str, Any]:
         services = {
@@ -532,8 +596,14 @@ class CompatPlatform:
         return None
 
     def start_rollout(self, request: CreateRolloutRequest) -> dict[str, Any]:
+        spawn_id: str | None = None
         with self._state_lock:
-            return self._start_rollout_locked(request)
+            result = self._start_rollout_locked(request)
+            if isinstance(result, dict) and result.pop("_spawn_background", False):
+                spawn_id = str(result.get("rollout_id") or "")
+        if spawn_id:
+            self._spawn_background(spawn_id)
+        return result
 
     def _start_rollout_locked(self, request: CreateRolloutRequest) -> dict[str, Any]:
         slot = request.slot
@@ -583,6 +653,9 @@ class CompatPlatform:
                 and bound_retention == requested_retention
                 and existing_pin.resume_from_checkpoint_id
                 == request.resume_from_checkpoint_id
+                and existing_pin.execution == (
+                    request.execution if request.submission_mode == "async" else existing_pin.execution
+                )
             )
             if not same_identity:
                 return {
@@ -594,6 +667,12 @@ class CompatPlatform:
                 existing_pin, self.stream_descriptor_for(rollout_id)
             )
             replay["replayed"] = True
+            if request.submission_mode == "async":
+                return self._acceptance_payload(
+                    existing_pin,
+                    self.stream_descriptor_for(rollout_id),
+                    replayed=True,
+                )
             return replay
 
         busy = self.occupy_or_busy()
@@ -673,6 +752,10 @@ class CompatPlatform:
         seed_i = _seed_from_task_instance_id(request.task_instance_id)
         task_instance_id = request.task_instance_id or f"seed:{seed_i}"
         async_mode = request.submission_mode == "async"
+        execution = request.execution if async_mode else None
+        config_digest = self._policy_config_digest(config_id, harness, policy_ref.code)
+        capability_digest = self.capabilities_digest()
+        idempotency_key = request.idempotency_key or rollout_id
         pin = RolloutPin(
             rollout_id=rollout_id,
             world_ref=str(request.world_ref or self.spec.world_ref),
@@ -690,6 +773,11 @@ class CompatPlatform:
             reward_kind=self.spec.reward_kind,
             checkpoint_schedule=request.checkpoint_schedule,
             resume_from_checkpoint_id=request.resume_from_checkpoint_id,
+            config_digest=config_digest,
+            capability_digest=capability_digest,
+            execution=execution,
+            idempotency_key=idempotency_key,
+            accepted_at=_utc_now(),
         )
         self.pins[rollout_id] = pin
         self.active_leases += 1
@@ -710,34 +798,110 @@ class CompatPlatform:
                         "harness": harness,
                         "config": config_id,
                     },
+                    "config_digest": config_digest,
+                    "capability_digest": capability_digest,
                 },
             )
         pin.started = True
         pin.status = "running"
         if async_mode:
-            return self._rollout_response(pin, descriptor)
+            accepted = self._acceptance_payload(pin, descriptor)
+            if execution == "background":
+                accepted["_spawn_background"] = True
+            return accepted
         try:
             self._simulate(pin, log)
         finally:
             self.active_leases = max(0, self.active_leases - 1)
         return self._rollout_response(pin, descriptor)
 
-    def complete_rollout(self, rollout_id: str) -> dict[str, Any]:
-        with self._state_lock:
-            return self._complete_rollout_locked(rollout_id)
+    def _acceptance_payload(
+        self,
+        pin: RolloutPin,
+        descriptor: dict[str, Any],
+        *,
+        replayed: bool = False,
+    ) -> dict[str, Any]:
+        """202 async receipt. Same-ID replay returns this record and spawns nothing."""
+        payload = {
+            "accepted": True,
+            "rollout_id": pin.rollout_id,
+            "status": pin.status,
+            "stream": descriptor,
+            "lease": {
+                "held": not pin.terminal,
+                "active_leases": self.active_leases,
+                "scale_leases": self.spec.scale_leases,
+            },
+            "contract": {
+                "config_digest": pin.config_digest,
+                "capability_digest": pin.capability_digest,
+            },
+            "idempotency_key": pin.idempotency_key,
+            "execution": pin.execution,
+        }
+        if replayed:
+            payload["replayed"] = True
+        return payload
 
-    def _complete_rollout_locked(self, rollout_id: str) -> dict[str, Any]:
-        pin = self.pins.get(rollout_id)
-        log = self.logs.get(rollout_id)
-        if pin is None or log is None:
-            return {"error": "unknown_rollout", "status_code": 404}
-        if pin.terminal:
+    def complete_rollout(self, rollout_id: str) -> dict[str, Any]:
+        wait_for: threading.Event | None = None
+        with self._state_lock:
+            pin = self.pins.get(rollout_id)
+            log = self.logs.get(rollout_id)
+            if pin is None or log is None:
+                return {"error": "unknown_rollout", "status_code": 404}
+            if pin.terminal:
+                return self._rollout_response(pin, self.stream_descriptor_for(rollout_id))
+            if pin.execution == "background":
+                wait_for = self._background_done.setdefault(rollout_id, threading.Event())
+            else:
+                try:
+                    self._simulate(pin, log)
+                finally:
+                    self.active_leases = max(0, self.active_leases - 1)
+                return self._rollout_response(pin, self.stream_descriptor_for(rollout_id))
+        wait_for.wait(timeout=120)
+        with self._state_lock:
+            pin = self.pins[rollout_id]
             return self._rollout_response(pin, self.stream_descriptor_for(rollout_id))
+
+    def _spawn_background(self, rollout_id: str) -> None:
+        with self._state_lock:
+            if rollout_id in self._background_threads:
+                return
+            pin = self.pins.get(rollout_id)
+            if pin is None or pin.terminal or pin.execution != "background":
+                return
+            self._background_done.setdefault(rollout_id, threading.Event())
+            thread = threading.Thread(
+                target=self._run_background_rollout,
+                args=(rollout_id,),
+                name=f"rollout-bg-{rollout_id}",
+                daemon=True,
+            )
+            self._background_threads[rollout_id] = thread
+        thread.start()
+
+    def _run_background_rollout(self, rollout_id: str) -> None:
+        done = self._background_done.setdefault(rollout_id, threading.Event())
+        pin: RolloutPin | None = None
+        log: RolloutEventLog | None = None
         try:
-            self._simulate(pin, log)
+            with self._state_lock:
+                pin = self.pins.get(rollout_id)
+                log = self.logs.get(rollout_id)
+                if pin is None or log is None or pin.terminal or pin.simulating:
+                    return
+                pin.simulating = True
+            try:
+                self._simulate(pin, log)
+            finally:
+                with self._state_lock:
+                    pin.simulating = False
+                    self.active_leases = max(0, self.active_leases - 1)
         finally:
-            self.active_leases = max(0, self.active_leases - 1)
-        return self._rollout_response(pin, self.stream_descriptor_for(rollout_id))
+            done.set()
 
     def rollout_status(self, rollout_id: str) -> dict[str, Any]:
         pin = self.pins.get(rollout_id)

@@ -40,6 +40,8 @@ def _platform_response(result: dict[str, Any], *, default_status: int = 400) -> 
     if "error" in result:
         status = int(result["status_code"]) if "status_code" in result else default_status
         return JSONResponse(status_code=status, content=result)
+    if result.get("accepted") is True:
+        return JSONResponse(status_code=202, content=result)
     return result
 
 

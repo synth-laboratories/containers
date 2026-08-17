@@ -257,11 +257,12 @@ def test_optimizer_child_eval_refs_and_occupancy() -> None:
             json={
                 "telemetry": {"enabled": True, "transport": "sse"},
                 "submission_mode": "async",
+                "execution": "on_complete",
                 "task_instance_id": f"seed:{index}",
                 "policy_ref": {"harness": "harbor_fused", "config": "luna_med"},
             },
         )
-        assert started.status_code == 200, started.text
+        assert started.status_code == 202, started.text
         body = started.json()
         stream = body["stream"]
         refs.append(
@@ -276,6 +277,7 @@ def test_optimizer_child_eval_refs_and_occupancy() -> None:
         json={
             "telemetry": {"enabled": True, "transport": "sse"},
             "submission_mode": "async",
+            "execution": "on_complete",
             "task_instance_id": "seed:2",
             "policy_ref": {"harness": "harbor_fused", "config": "luna_med"},
         },
