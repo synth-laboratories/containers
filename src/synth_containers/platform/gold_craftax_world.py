@@ -13,11 +13,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import urllib.error
 import urllib.request
 from typing import Any
 
+from .craftax_taxonomy import GOLD_URL_CONFIG_KEY
 from .craftax_world import StepResult
 
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
@@ -36,6 +36,17 @@ def _event_digest(event: dict[str, Any]) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
+class GoldConnectionError(RuntimeError):
+    """Gold HTTP failed. The attempted URL and the pinned config key travel with it."""
+
+    def __init__(self, *, attempted_url: str, config_key: str, cause: BaseException) -> None:
+        self.attempted_url = attempted_url
+        self.config_key = config_key
+        super().__init__(
+            f"Craftax gold unreachable at {attempted_url} (config_key={config_key}): {cause}"
+        )
+
+
 class GoldCraftaxWorld:
     """EnvironmentService: reset/step/frames/NEV drain against rust gold HTTP."""
 
@@ -43,23 +54,45 @@ class GoldCraftaxWorld:
         self,
         *,
         max_steps: int,
-        base_url: str | None = None,
+        base_url: str,
         require_frames: bool = True,
+        config_key: str = GOLD_URL_CONFIG_KEY,
     ) -> None:
         if max_steps <= 0:
             raise ValueError("Craftax gold max_steps must be a positive pin, not a silent default")
+        pinned = str(base_url or "").strip()
+        if not pinned:
+            raise ValueError(
+                f"Craftax gold address must be pinned on {config_key}; it is not an env var"
+            )
         self.max_steps = int(max_steps)
-        self.base_url = (
-            base_url
-            or os.environ.get("SYNTH_CRAFTAX_URL", "http://127.0.0.1:8098")
-        ).rstrip("/")
+        self.base_url = pinned.rstrip("/")
+        self.config_key = config_key
         self.require_frames = require_frames
         self.rollout_id: str | None = None
         self.previous_total_reward = 0.0
         self._native_digests: list[str] = []
+        self._idempotency_key: str | None = None
+        self._reset_payload: dict[str, Any] | None = None
+        self._reset_identity: dict[str, Any] | None = None
 
     def reset(self, seed: int, *, max_steps: int | None = None) -> StepResult:
         self.max_steps = int(max_steps or self.max_steps)
+        identity = {
+            "task_id": "synth_containers_craftax_react",
+            "seed": int(seed),
+            "max_steps": self.max_steps,
+        }
+        self._idempotency_key = "sha256:" + hashlib.sha256(
+            json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        if (
+            self._reset_payload is not None
+            and self.rollout_id
+            and self._reset_identity == identity
+        ):
+            return self._result(self._reset_payload)
+        self._reset_identity = identity
         payload = self._request(
             "POST",
             "/rollouts",
@@ -79,6 +112,7 @@ class GoldCraftaxWorld:
                 },
                 "seed": int(seed),
                 "telemetry": {"enabled": True},
+                "idempotency_key": self._idempotency_key,
             },
         )
         self.rollout_id = str(payload.get("rollout_id") or "")
@@ -86,6 +120,7 @@ class GoldCraftaxWorld:
             raise RuntimeError("Craftax gold reset omitted rollout_id")
         self.previous_total_reward = 0.0
         self._native_digests = []
+        self._reset_payload = payload
         return self._result(payload)
 
     def drain_native_events(self) -> list[dict[str, Any]]:
@@ -182,6 +217,10 @@ class GoldCraftaxWorld:
             ).hexdigest()[:16]
         )
         done = bool(payload.get("terminated") or payload.get("truncated") or public.get("done"))
+        terminated = bool(payload.get("terminated") or public.get("terminated"))
+        truncated = bool(payload.get("truncated") or public.get("truncated"))
+        if done and not terminated and not truncated:
+            truncated = True
         frame_url = (
             f"{self.base_url}/rollouts/{self.rollout_id}/frames/{env_steps}.png"
             if self.rollout_id is not None
@@ -198,6 +237,8 @@ class GoldCraftaxWorld:
             env_steps=env_steps,
             frame_url=frame_url,
             frame_bytes=frame_bytes,
+            terminated=terminated,
+            truncated=truncated,
         )
 
     def _request_frame(self, url: str) -> bytes | None:
@@ -221,17 +262,31 @@ class GoldCraftaxWorld:
         headers = {"Accept": "application/json"}
         if encoded is not None:
             headers["Content-Type"] = "application/json"
-        request = urllib.request.Request(
-            f"{self.base_url}{path}",
-            data=encoded,
-            headers=headers,
-            method=method,
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=60) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-        except urllib.error.URLError as exc:
-            raise RuntimeError(f"Craftax gold unreachable at {self.base_url}{path}") from exc
-        if not isinstance(payload, dict):
-            raise RuntimeError("Craftax gold returned non-object JSON")
-        return payload
+        if method == "POST" and path == "/rollouts" and self._idempotency_key:
+            headers["Idempotency-Key"] = self._idempotency_key
+        attempted = f"{self.base_url}{path}"
+        last_error: BaseException | None = None
+        for _attempt in range(3):
+            request = urllib.request.Request(
+                attempted,
+                data=encoded,
+                headers=headers,
+                method=method,
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=60) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+                if not isinstance(payload, dict):
+                    raise RuntimeError("Craftax gold returned non-object JSON")
+                return payload
+            except urllib.error.HTTPError:
+                raise
+            except urllib.error.URLError as exc:
+                last_error = exc
+                continue
+        assert last_error is not None
+        raise GoldConnectionError(
+            attempted_url=attempted,
+            config_key=self.config_key,
+            cause=last_error,
+        ) from last_error

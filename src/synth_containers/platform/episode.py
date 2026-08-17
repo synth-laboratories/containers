@@ -6,7 +6,8 @@ from collections.abc import Callable
 from typing import Any, Protocol
 
 from ..event_log import RolloutEventLog
-from .craftax_world import CraftaxWorld, StepResult
+from .craftax_taxonomy import classify_action, classify_completion
+from .craftax_world import ACTIONS, CraftaxWorld, StepResult
 
 
 class Planner(Protocol):
@@ -157,14 +158,44 @@ def run_episode(
             log.append("span.policy.closed", {"length": len(plan)})
         if not plan:
             plan = ["noop"]
-        for action in plan:
+        remaining = max(0, max_steps - result.env_steps)
+        declared = len(plan)
+        accepted = min(declared, remaining)
+        dropped = declared - accepted
+        if dropped > 0:
+            log.append(
+                "plan.truncated",
+                {
+                    "declared": declared,
+                    "accepted": accepted,
+                    "dropped": dropped,
+                    "remaining_steps": remaining,
+                },
+            )
+        for action in plan[:accepted]:
             if result.done:
                 break
             log.append("span.step.opened", {"action": action, "step": result.env_steps})
+            before = result
             result = world.step(action)
+            taxonomy = classify_action(
+                action=action,
+                valid_actions=before.valid_actions,
+                before=before.observation,
+                after=result.observation,
+                vocabulary=ACTIONS,
+            )
             actions.append(action)
             _relay_native(world, log)
-            log.append("action", {"step": result.env_steps, "action": action})
+            log.append(
+                "action",
+                {
+                    "step": result.env_steps,
+                    "action": action,
+                    "class": taxonomy["class"],
+                    "outcome": taxonomy["outcome"],
+                },
+            )
             value: float | None = result.reward
             if omit_reward and result.env_steps == 2:
                 value = None
@@ -175,15 +206,62 @@ def run_episode(
             )
             durable_url = _emit_obs(log, result, seed=seed)
             frames.append(_frame_record(result, durable_url))
-            log.append("span.step.closed", {"action": action, "step": result.env_steps})
+            log.append(
+                "span.step.closed",
+                {
+                    "action": action,
+                    "step": result.env_steps,
+                    "class": taxonomy["class"],
+                    "outcome": taxonomy["outcome"],
+                },
+            )
         if checkpoint_callback is not None:
             scheduled_checkpoints.append(
                 checkpoint_callback(world, planner, result, list(signals))
             )
     if session_open:
         log.append("policy.session.closed", {"calls": planner.usage().get("calls")})
-    log.append("env.episode.closed", {"status": "completed", "steps": result.env_steps})
-    log.append("status", {"status": "completed", "steps": result.env_steps})
+    completion = classify_completion(
+        terminated=bool(getattr(result, "terminated", False)),
+        truncated=bool(getattr(result, "truncated", False)),
+        env_steps=int(result.env_steps),
+        max_steps=max_steps,
+    )
+    log.append(
+        "env.episode.closed",
+        {
+            "status": "completed",
+            "steps": result.env_steps,
+            "completion": completion,
+            "natural_completion": completion == "natural_completion",
+            "truncated": completion == "truncated",
+            "infra_complete": False,
+        },
+    )
+    log.append(
+        "status",
+        {
+            "status": "completed",
+            "steps": result.env_steps,
+            "completion": completion,
+        },
+    )
+    usage = dict(planner.usage())
+    call_events = sum(1 for item in log.after(0) if item.kind == "span.policy.opened")
+    usage["llm_calls"] = int(usage.get("calls") if usage.get("calls") is not None else call_events)
+    usage["llm_call_events"] = call_events
+    log.append(
+        "usage.reconciled",
+        {
+            "llm_calls": usage["llm_calls"],
+            "llm_call_events": call_events,
+            "prompt_tokens": usage.get("prompt_tokens"),
+            "completion_tokens": usage.get("completion_tokens"),
+            "total_tokens": usage.get("total_tokens"),
+            "cost_usd": usage.get("cost_usd"),
+            "usage_status": usage.get("usage_status"),
+        },
+    )
     evidence_high_water = log.high_water
     log.append("capture.high_water", {"high_water": evidence_high_water})
     log.append("capture.closed", {"high_water": evidence_high_water})
@@ -191,9 +269,10 @@ def run_episode(
     return {
         "reward_signals": signals,
         "actions": actions,
-        "usage": planner.usage(),
+        "usage": usage,
         "frame_digest": result.frame_digest,
         "steps": result.env_steps,
         "frames": frames,
         "scheduled_checkpoints": scheduled_checkpoints,
+        "completion": completion,
     }

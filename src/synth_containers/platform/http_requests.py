@@ -22,6 +22,7 @@ _PUT_POLICY = "PUT /policy"
 _TRANSPORTS = frozenset({"poll", "sse", "websocket", "auto"})
 _REWARD_MODES = frozenset({"terminal", "provisional"})
 _SUBMISSION_MODES = frozenset({"sync", "async"})
+_EXECUTION_MODES = frozenset({"background", "on_complete"})
 ISOLATED_POLICY_HARNESS = "isolated_policy_process"
 
 
@@ -63,6 +64,8 @@ class CreateRolloutRequest:
     metadata: dict[str, Any]
     checkpoint_schedule: Optional[dict[str, Any]] = None
     resume_from_checkpoint_id: Optional[str] = None
+    execution: Optional[str] = None
+    idempotency_key: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -142,6 +145,18 @@ def parse_create_rollout(
         raise RequestParseError(
             f"{operation}: submission_mode must be sync or async, got {submission_mode!r}"
         )
+    execution = _optional_str(raw, "execution", operation=operation)
+    if execution is not None and execution not in _EXECUTION_MODES:
+        raise RequestParseError(
+            f"{operation}: execution must be background or on_complete, got {execution!r}"
+        )
+    if submission_mode == "async" and execution is None:
+        # Async defaults to background so a dropped caller / poller reaches
+        # terminal without POST /complete. on_complete is the deferred lease hold.
+        execution = "background"
+    elif submission_mode == "sync":
+        execution = None
+    idempotency_key = _optional_str(raw, "idempotency_key", operation=operation)
     rollout_id = _optional_str(raw, "rollout_id", operation=operation)
     if rollout_id == "":
         rollout_id = None
@@ -168,6 +183,8 @@ def parse_create_rollout(
             raw, "resume_from_checkpoint_id", operation=operation
         )
         or None,
+        execution=execution,
+        idempotency_key=idempotency_key or None,
     )
 
 
@@ -204,6 +221,8 @@ def to_platform_dict(req: CreateRolloutRequest) -> dict[str, Any]:
         "metadata": req.metadata,
         "checkpoint_schedule": req.checkpoint_schedule,
         "resume_from_checkpoint_id": req.resume_from_checkpoint_id,
+        "execution": req.execution,
+        "idempotency_key": req.idempotency_key,
     }
 
 

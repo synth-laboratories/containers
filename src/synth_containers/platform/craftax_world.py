@@ -31,6 +31,8 @@ class StepResult:
     env_steps: int
     frame_url: str | None = None
     frame_bytes: bytes | None = None
+    terminated: bool = False
+    truncated: bool = False
 
 
 @dataclass
@@ -84,8 +86,8 @@ class CraftaxWorld:
             self.wood += 1
             self.collected = True
             reward = 0.5
-        done = self.env_steps >= self.max_steps
-        return self._result(reward=reward, done=done)
+        truncated = self.env_steps >= self.max_steps
+        return self._result(reward=reward, done=truncated, truncated=truncated)
 
     def _ascii(self) -> str:
         rows = []
@@ -101,7 +103,14 @@ class CraftaxWorld:
             rows.append("".join(cells))
         return "\n".join(rows)
 
-    def _result(self, *, reward: float | None, done: bool) -> StepResult:
+    def _result(
+        self,
+        *,
+        reward: float | None,
+        done: bool,
+        terminated: bool = False,
+        truncated: bool = False,
+    ) -> StepResult:
         ascii_map = self._ascii()
         observation = {
             "seed": self.seed,
@@ -122,4 +131,6 @@ class CraftaxWorld:
             ascii_map=ascii_map,
             frame_digest=_digest({"seed": self.seed, "step": self.env_steps, "ascii": ascii_map}),
             env_steps=self.env_steps,
+            terminated=terminated,
+            truncated=truncated or done,
         )
