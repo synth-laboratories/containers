@@ -435,7 +435,7 @@ class CompatPlatform:
             role: {name: level != "unsupported" for name, level in items.items()}
             for role, items in advertised.items()
         }
-        return {
+        payload = {
             "world_ref": self.spec.world_ref,
             "environment_ref": self.spec.environment_ref,
             "policy_ref": {
@@ -467,6 +467,31 @@ class CompatPlatform:
             "runtime_family": self.spec.runtime_family.value,
             "max_episode_steps": self.spec.max_episode_steps,
         }
+        if contract := self._gepa_v2_contract():
+            payload["optimizer_contracts"] = {"gepa": contract}
+        return payload
+
+    def _gepa_v2_contract(self) -> dict[str, Any] | None:
+        family = self.spec.runtime_family.value
+        if family == "healthbench":
+            return {
+                "version": "synth_optimizers.gepa.v2",
+                "program_route": "/program",
+                "taskset_route": "/taskset",
+                "taskset_tasks_route": "/taskset/tasks",
+                "rollout_route": "/rollout",
+                "trace_route": "/rollouts/{rollout_id}/events",
+            }
+        if family == "banking77":
+            return {
+                "version": "synth_optimizers.gepa.v2",
+                "program_route": "/program",
+                "taskset_route": "/taskset",
+                "rollout_route": "/rollouts",
+                "prepare_route": "/rollouts/prepare",
+                "trace_route": "/rollouts/{rollout_id}/events",
+            }
+        return None
 
     def bind(self, recipe: dict[str, Any] | None) -> dict[str, Any] | None:
         return bind_recipe(self.spec.affordances, recipe)
@@ -930,12 +955,11 @@ class CompatPlatform:
     def register_policy_config(self, config_id: str, body: dict[str, Any]) -> dict[str, Any]:
         if self.spec.affordances.level("bind_policy_config") == "unsupported":
             return {"error": "bind_refused", "status_code": 403, "affordance": "bind_policy_config"}
-        if any(pin.started and not pin.terminal for pin in self.pins.values()):
-            return {
-                "error": "in_flight",
-                "status_code": 409,
-                "detail": "mid-trial bind_policy_config refused",
-            }
+        # Policy configs are immutable, named inputs. Registering a new config
+        # does not mutate the config already pinned by an in-flight rollout, so
+        # concurrent optimizer runs may safely add checkpoint configs while
+        # other rollouts are active. The rollout's policy_ref remains the
+        # authority for selecting its config.
         cfg = PolicyConfig(
             config_id=config_id,
             harness=str(body.get("harness") or self.spec.default_policy_harness),

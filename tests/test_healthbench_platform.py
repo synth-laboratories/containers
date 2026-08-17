@@ -16,6 +16,22 @@ def test_healthbench_declares_thirty_parallel_leases() -> None:
     assert HEALTHBENCH_CHAT.scale_leases == 30
 
 
+def test_healthbench_info_merges_operations_and_advertises_gepa_v2() -> None:
+    info = TestClient(create_compat_app("healthbench_chat")).get("/info").json()
+    operations = info["capabilities"]["operations"]
+    assert operations["prepare"] is True
+    assert operations["start"] is True
+    assert operations["get"] is True
+    assert operations["poll"] is True
+    assert operations["reward"] is True
+    gepa = info["capabilities"]["optimizer_contracts"]["gepa"]
+    assert gepa["version"] == "synth_optimizers.gepa.v2"
+    assert info["optimizer_contracts"]["gepa"]["version"] == "synth_optimizers.gepa.v2"
+    configs = {row["config"] for row in info["policy_refs"]}
+    assert "openai_gpt41_mini" in configs
+    assert "groq_llama31_8b" in configs
+
+
 def test_healthbench_declares_independent_policy_and_scorer_roles(monkeypatch) -> None:
     monkeypatch.setenv("HEALTHBENCH_GRADER_API_KEY_ENV", "CUSTOM_GRADER_KEY")
     metadata = TestClient(create_compat_app("healthbench_chat")).get("/metadata").json()

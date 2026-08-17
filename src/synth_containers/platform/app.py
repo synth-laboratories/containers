@@ -88,24 +88,40 @@ def create_compat_app(
         if spec.runtime_family.value == "healthbench":
             from .runtimes.healthbench import model_roles
 
-            payload["capabilities"] = {
-                "contract_version": "container_contract.v1",
-                "rollout_modes": ["blocking"],
-                "metadata": {"policy_ready": True},
+            gepa = (payload.get("optimizer_contracts") or {}).get("gepa") or {
+                "version": "synth_optimizers.gepa.v2",
+                "program_route": "/program",
+                "taskset_route": "/taskset",
+                "taskset_tasks_route": "/taskset/tasks",
+                "rollout_route": "/rollout",
+                "trace_route": "/rollouts/{rollout_id}/events",
             }
-            payload["metadata"] = {
-                "model_roles": model_roles(),
-                "optimizer_contracts": {
-                    "gepa": {
-                        "version": "synth_optimizers.gepa.v2",
-                        "program_route": "/program",
-                        "taskset_route": "/taskset",
-                        "taskset_tasks_route": "/taskset/tasks",
-                        "rollout_route": "/rollout",
-                        "trace_route": "/rollouts/{rollout_id}/events",
-                    }
-                }
-            }
+            capabilities = payload.get("capabilities")
+            if not isinstance(capabilities, dict):
+                capabilities = {}
+            capabilities.setdefault("contract_version", "container_contract.v1")
+            capabilities.setdefault("rollout_modes", ["blocking"])
+            capabilities.setdefault(
+                "operations",
+                {
+                    "prepare": True,
+                    "start": True,
+                    "get": True,
+                    "poll": True,
+                    "reward": True,
+                },
+            )
+            metadata_blob = capabilities.setdefault("metadata", {})
+            if isinstance(metadata_blob, dict):
+                metadata_blob["policy_ready"] = True
+            capabilities["optimizer_contracts"] = {"gepa": gepa}
+            payload["capabilities"] = capabilities
+            metadata = payload.get("metadata")
+            if not isinstance(metadata, dict):
+                metadata = {}
+            metadata["model_roles"] = model_roles()
+            metadata["optimizer_contracts"] = {"gepa": gepa}
+            payload["metadata"] = metadata
         return payload
 
     @app.get("/task_info")
