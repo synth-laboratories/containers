@@ -263,13 +263,22 @@ def create_compat_app(
         seed = int(task.get("seed") or 0)
         candidate = body.get("candidate") if isinstance(body.get("candidate"), dict) else {}
         policy = body.get("policy") if isinstance(body.get("policy"), dict) else {}
+        policy_provider = str(policy.get("provider") or "groq").lower()
+        default_policy_base_url = (
+            "https://api.groq.com/openai/v1"
+            if policy_provider == "groq"
+            else "https://api.openai.com/v1"
+        )
+        default_policy_api_key_env = (
+            "GROQ_API_KEY" if policy_provider == "groq" else "OPENAI_API_KEY"
+        )
         policy_config = {
-            "provider": policy.get("provider") or "groq",
+            "provider": policy_provider,
             "model": policy.get("model") or "llama-3.1-8b-instant",
             "base_url": policy.get("base_url")
             or policy.get("api_base")
-            or "https://api.groq.com/openai/v1",
-            "api_key_env": policy.get("api_key_env") or "GROQ_API_KEY",
+            or default_policy_base_url,
+            "api_key_env": policy.get("api_key_env") or default_policy_api_key_env,
             "max_tokens": policy.get("max_tokens") or 1536,
             "system_prompt": candidate.get("system_prompt"),
         }
