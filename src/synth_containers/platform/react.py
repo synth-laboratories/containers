@@ -13,6 +13,7 @@ import urllib.request
 from collections.abc import Callable
 from typing import Any
 
+from .craftax_taxonomy import usage_from_call_identity
 from .craftax_world import ACTIONS
 
 DeltaCallback = Callable[[dict[str, Any]], None]
@@ -45,12 +46,13 @@ class ScriptedReAct:
         }
 
     def usage(self) -> dict[str, Any]:
-        return {
-            "prompt_tokens": None,
-            "completion_tokens": None,
-            "total_tokens": None,
-            "calls": self.calls,
-        }
+        return usage_from_call_identity(
+            calls=self.calls,
+            prompt_tokens=None,
+            completion_tokens=None,
+            total_tokens=None,
+            kind="scripted",
+        )
 
     def checkpoint_state(self) -> dict[str, Any]:
         return {
@@ -97,7 +99,13 @@ class UniformEnginePolicy:
         return {"harness": "valid_action_uniform", "kind": "baseline", "graded": False}
 
     def usage(self) -> dict[str, Any]:
-        return {"prompt_tokens": None, "completion_tokens": None, "total_tokens": None, "calls": 0}
+        return usage_from_call_identity(
+            calls=0,
+            prompt_tokens=None,
+            completion_tokens=None,
+            total_tokens=None,
+            kind="scripted",
+        )
 
     def plan(self, observation: dict[str, Any], on_delta: DeltaCallback | None = None) -> list[str]:
         del on_delta
@@ -167,7 +175,14 @@ class OpenRouterReAct:
         }
 
     def usage(self) -> dict[str, Any]:
-        return {**self._usage, "calls": self.calls}
+        return usage_from_call_identity(
+            calls=self.calls,
+            prompt_tokens=self._usage.get("prompt_tokens") if isinstance(self._usage.get("prompt_tokens"), int) else None,
+            completion_tokens=self._usage.get("completion_tokens") if isinstance(self._usage.get("completion_tokens"), int) else None,
+            total_tokens=self._usage.get("total_tokens") if isinstance(self._usage.get("total_tokens"), int) else None,
+            cost_usd=self._usage.get("cost_usd") if isinstance(self._usage.get("cost_usd"), (int, float)) else None,
+            kind="model",
+        )
 
     def trace_data(self) -> dict[str, Any]:
         return dict(self._last_trace)
@@ -236,6 +251,7 @@ class OpenRouterReAct:
             )
             tool_arguments = self._tool_arguments(message.get("tool_calls"))
             usage = body.get("usage") if isinstance(body.get("usage"), dict) else {}
+            emitted = bool(usage)
             self._accumulate_usage(usage)
             policy_output = tool_arguments or assistant
             try:
@@ -295,10 +311,11 @@ class OpenRouterReAct:
             "token_trace": "derived" if call_deltas else None,
             "usage": {
                 **{
-                    key: usage.get(key)
+                    key: usage.get(key) if isinstance(usage.get(key), int) else None
                     for key in ("prompt_tokens", "completion_tokens", "total_tokens")
                 },
-                "cost_usd": provider_cost,
+                "cost_usd": provider_cost if isinstance(provider_cost, (int, float)) else None,
+                "usage_status": "reported" if emitted else "provider_omitted",
             },
         }
         if prior_attempts:

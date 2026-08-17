@@ -10,10 +10,11 @@ import os
 from typing import Any
 
 from ...event_log import RolloutEventLog
+from ..craftax_taxonomy import GOLD_URL_CONFIG_KEY, usage_from_call_identity
 from ..craftax_world import CraftaxWorld
 from ..episode import PNG_MAGIC, run_episode
 from ..policy_process import DEFAULT_HEURISTIC, IsolatedPolicyProcess
-from ..gold_craftax_world import GoldCraftaxWorld
+from ..gold_craftax_world import GoldConnectionError, GoldCraftaxWorld
 from ..react import OpenRouterReAct, ScriptedReAct
 from ..state import CompatPlatform, RolloutPin
 
@@ -134,6 +135,11 @@ class CraftaxRuntime:
                 # looking active forever merely because the HTTP start request
                 # returned 500. Persist a secret-free terminal lifecycle and
                 # let CompatPlatform seal it normally.
+                attempted_url = None
+                config_key = None
+                if isinstance(exc, GoldConnectionError):
+                    attempted_url = exc.attempted_url
+                    config_key = exc.config_key
                 log.append(
                     "span.policy.closed",
                     {"status": "failed", "error_type": type(exc).__name__},
@@ -142,15 +148,27 @@ class CraftaxRuntime:
                     "policy.session.closed",
                     {"status": "failed", "calls": planner.usage().get("calls")},
                 )
-                log.append("env.episode.closed", {"status": "failed", "steps": 0})
                 log.append(
-                    "status",
+                    "env.episode.closed",
                     {
                         "status": "failed",
-                        "reason": "policy_error",
-                        "error_type": type(exc).__name__,
+                        "steps": 0,
+                        "completion": "infra_complete",
+                        "natural_completion": False,
+                        "truncated": False,
+                        "infra_complete": True,
                     },
                 )
+                status_payload = {
+                    "status": "failed",
+                    "reason": "policy_error" if not isinstance(exc, GoldConnectionError) else "gold_connection",
+                    "error_type": type(exc).__name__,
+                    "completion": "infra_complete",
+                }
+                if attempted_url is not None:
+                    status_payload["attempted_url"] = attempted_url
+                    status_payload["config_key"] = config_key
+                log.append("status", status_payload)
                 evidence_high_water = log.high_water
                 log.append("capture.high_water", {"high_water": evidence_high_water})
                 log.append("capture.closed", {"high_water": evidence_high_water})
@@ -193,12 +211,13 @@ class CraftaxRuntime:
                 return self.proc.choose(observation, ply=self.ply)
 
             def usage(self) -> dict[str, Any]:
-                return {
-                    "prompt_tokens": None,
-                    "completion_tokens": None,
-                    "total_tokens": None,
-                    "calls": self.ply,
-                }
+                return usage_from_call_identity(
+                    calls=self.ply,
+                    prompt_tokens=None,
+                    completion_tokens=None,
+                    total_tokens=None,
+                    kind="scripted",
+                )
 
             def metadata(self) -> dict[str, Any]:
                 return {"harness": "isolated_policy_process", "kind": "code_policy"}
@@ -307,9 +326,21 @@ def _achievement_labels(observation: dict[str, Any]) -> list[str]:
 def _world_for(platform: CompatPlatform, *, max_steps: int) -> CraftaxWorld | GoldCraftaxWorld:
     ref = platform.spec.environment_ref
     if ref == GOLD_ENVIRONMENT:
+        pinned = (
+            str(platform.runtime_config.get(GOLD_URL_CONFIG_KEY) or "").strip()
+            or str(getattr(platform.spec, "gold_base_url", "") or "").strip()
+        )
+        if not pinned:
+            raise GoldConnectionError(
+                attempted_url="",
+                config_key=GOLD_URL_CONFIG_KEY,
+                cause=ValueError("gold address is not pinned on the target spec or runtime_config"),
+            )
         return GoldCraftaxWorld(
             max_steps=max_steps,
+            base_url=pinned,
             require_frames=platform.spec.live_frames == "native",
+            config_key=GOLD_URL_CONFIG_KEY,
         )
     if ref == FIXTURE_ENVIRONMENT:
         return CraftaxWorld(max_steps=max_steps)
