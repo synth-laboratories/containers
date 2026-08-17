@@ -51,6 +51,9 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
+TASK_INSTANCE_ID_PATTERN = r"^.*:(-?\d+)$"
+
+
 def _seed_from_task_instance_id(task_instance_id: str | None) -> int:
     """Parse seed from `seed:N` or a trailing `:N`. Absent → 0. No integer suffix → 0.
 
@@ -468,10 +471,66 @@ class CompatPlatform:
             "max_episode_steps": self.spec.max_episode_steps,
             "policy_refs": self._advertised_policy_refs(),
             "affordances": self.spec.affordances.advertised(),
+            "input_schema": self._input_schema(),
         }
 
     def capabilities_digest(self) -> str:
         return _canonical_sha256(self.capability_metadata())
+
+    def _action_vocabulary(self) -> list[str]:
+        family = self.spec.runtime_family.value
+        if family == "craftax":
+            from .craftax_world import ACTIONS
+
+            return list(ACTIONS)
+        if family == "banking77":
+            from .banking77_world import HELDOUT_SPLIT, TRAIN_SPLIT, load_row, split_size
+
+            labels: set[str] = set()
+            for split in (TRAIN_SPLIT, HELDOUT_SPLIT):
+                for seed in range(split_size(split)):
+                    row = load_row(split, seed)
+                    if row is not None:
+                        labels.add(row.label)
+            return sorted(labels)
+        return []
+
+    def _seed_range(self) -> dict[str, int]:
+        family = self.spec.runtime_family.value
+        if family == "banking77":
+            from .banking77_world import HELDOUT_SPLIT, TRAIN_SPLIT, split_size
+
+            return {
+                "minimum": 0,
+                "maximum": max(split_size(TRAIN_SPLIT), split_size(HELDOUT_SPLIT)) - 1,
+            }
+        return {"minimum": -2_147_483_648, "maximum": 2_147_483_647}
+
+    def _input_schema(self) -> dict[str, Any]:
+        seed_range = self._seed_range()
+        vocabulary = self._action_vocabulary()
+        properties: dict[str, Any] = {
+            "task_instance_id": {
+                "type": "string",
+                "pattern": TASK_INSTANCE_ID_PATTERN,
+                "examples": ["seed:0"],
+            },
+            "seed": {
+                "type": "integer",
+                "minimum": seed_range["minimum"],
+                "maximum": seed_range["maximum"],
+            },
+        }
+        if vocabulary:
+            properties["action_vocabulary"] = {
+                "type": "array",
+                "items": {"type": "string", "enum": vocabulary},
+            }
+        return {
+            "type": "object",
+            "required": ["task_instance_id"],
+            "properties": properties,
+        }
 
     def _policy_config_digest(
         self,
@@ -503,6 +562,8 @@ class CompatPlatform:
             role: {name: level != "unsupported" for name, level in items.items()}
             for role, items in advertised.items()
         }
+        schema = self._input_schema()
+        digest = self.capabilities_digest()
         return {
             "world_ref": self.spec.world_ref,
             "environment_ref": self.spec.environment_ref,
@@ -534,6 +595,14 @@ class CompatPlatform:
             "target_id": self.spec.target_id,
             "runtime_family": self.spec.runtime_family.value,
             "max_episode_steps": self.spec.max_episode_steps,
+            "input_schema": schema,
+            "capabilities_digest": digest,
+            "capabilities": {
+                self.spec.target_id: {
+                    "runtime_family": self.spec.runtime_family.value,
+                    "input_schema": schema,
+                }
+            },
         }
 
     def bind(self, recipe: dict[str, Any] | None) -> dict[str, Any] | None:

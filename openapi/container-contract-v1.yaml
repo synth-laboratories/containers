@@ -90,7 +90,9 @@ paths:
           required: false
           schema:
             type: string
-          description: Optional concrete task instance selector.
+            pattern: '^.*:(-?\d+)$'
+            example: seed:0
+          description: Optional concrete task instance selector. Trailing `:` + integer seed.
         - name: task_id
           in: query
           required: false
@@ -713,6 +715,13 @@ components:
         capabilities:
           type: object
           additionalProperties: true
+        capabilities_digest:
+          type: string
+          description: sha256 of canonical capability metadata, including per-capability input_schema.
+        input_schema:
+          type: object
+          additionalProperties: true
+          description: Active-capability start contract (task_instance_id pattern, seed range, action vocabulary).
         metadata:
           type: object
           additionalProperties: true
@@ -994,6 +1003,9 @@ components:
           type: string
         task_instance_id:
           type: string
+          pattern: '^.*:(-?\d+)$'
+          example: seed:0
+          description: Task instance identity. Trailing colon plus integer seed, for example seed:0.
         task_metadata:
           type: object
           additionalProperties: true

@@ -93,11 +93,16 @@ def create_compat_app(
     async def metadata() -> dict[str, Any]:
         payload = platform.metadata_payload()
         if spec.runtime_family.value == "healthbench":
-            payload["capabilities"] = {
+            existing = payload.get("capabilities")
+            overlay = {
                 "contract_version": "container_contract.v1",
                 "rollout_modes": ["blocking"],
                 "metadata": {"policy_ready": True},
             }
+            if isinstance(existing, dict):
+                payload["capabilities"] = {**existing, **overlay}
+            else:
+                payload["capabilities"] = overlay
             payload["metadata"] = {
                 "optimizer_contracts": {
                     "gepa": {
