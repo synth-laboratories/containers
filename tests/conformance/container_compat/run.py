@@ -908,10 +908,20 @@ class Runner:
         held = self._start(submission_mode="async", policy_ref={"harness": "harbor_fused", "config": "luna_med"})
         mid = self.client.post("/policy-configs", json={"config_id": "other", "config": {}})
         self.client.post(f"/rollouts/{_json(held)['rollout_id']}/complete")
-        if a.status_code == 200 and b.status_code == 200 and mid.status_code == 409:
+        held_id = _json(held)["rollout_id"]
+        held_policy = _json(self.client.get(f"/rollouts/{held_id}")).get("policy_ref")
+        if (
+            a.status_code == 200
+            and b.status_code == 200
+            and mid.status_code == 200
+            and held_policy == {"harness": "harbor_fused", "config": "luna_med", "code": None}
+        ):
             self.suite.ok("C5-02")
         else:
-            self.suite.fail("C5-02", f"{a.status_code} {b.status_code} mid={mid.status_code}")
+            self.suite.fail(
+                "C5-02",
+                f"{a.status_code} {b.status_code} mid={mid.status_code} held={held_policy}",
+            )
         started = self._start(policy_ref={"harness": "harbor_fused", "config": "luna_med"})
         events = _json(self.client.get(_json(started)["stream"]["transports"]["poll"]["url"], params={"after": 0}))["events"]
         kinds = _kinds(events)
