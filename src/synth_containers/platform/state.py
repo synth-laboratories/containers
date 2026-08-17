@@ -14,6 +14,8 @@ from typing import Any
 
 from ..event_log import (
     CONTROL_SUBSCRIBED,
+    MAX_STREAMS_PER_ROLLOUT,
+    STREAM_RETRY_AFTER_S,
     RolloutEventLog,
     stream_descriptor,
     validate_rollout_id,
@@ -188,6 +190,7 @@ class CompatPlatform:
         self._background_done: dict[str, threading.Event] = {}
         self._background_threads: dict[str, threading.Thread] = {}
         self.execution_manifests: dict[str, dict[str, Any]] = {}
+        self._stream_occupancy: dict[str, int] = {}
         self._seed_default_policies()
         self._recover_checkpoints()
         self._recover_completed_rollouts()
@@ -946,6 +949,29 @@ class CompatPlatform:
         if transport == "websocket":
             return bound == "websocket"
         return False
+
+    def acquire_stream(self, rollout_id: str) -> dict[str, Any] | None:
+        with self._state_lock:
+            current = self._stream_occupancy.get(rollout_id, 0)
+            if current >= MAX_STREAMS_PER_ROLLOUT:
+                return {
+                    "error": "stream_backpressure",
+                    "status_code": 429,
+                    "retry_after": STREAM_RETRY_AFTER_S,
+                    "max_streams": MAX_STREAMS_PER_ROLLOUT,
+                    "active_streams": current,
+                    "rollout_id": rollout_id,
+                }
+            self._stream_occupancy[rollout_id] = current + 1
+            return None
+
+    def release_stream(self, rollout_id: str) -> None:
+        with self._state_lock:
+            current = self._stream_occupancy.get(rollout_id, 0)
+            if current <= 1:
+                self._stream_occupancy.pop(rollout_id, None)
+            else:
+                self._stream_occupancy[rollout_id] = current - 1
 
     def _rollout_response(self, pin: RolloutPin, descriptor: dict[str, Any]) -> dict[str, Any]:
         return {
