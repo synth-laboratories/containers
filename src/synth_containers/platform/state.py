@@ -930,12 +930,11 @@ class CompatPlatform:
     def register_policy_config(self, config_id: str, body: dict[str, Any]) -> dict[str, Any]:
         if self.spec.affordances.level("bind_policy_config") == "unsupported":
             return {"error": "bind_refused", "status_code": 403, "affordance": "bind_policy_config"}
-        if any(pin.started and not pin.terminal for pin in self.pins.values()):
-            return {
-                "error": "in_flight",
-                "status_code": 409,
-                "detail": "mid-trial bind_policy_config refused",
-            }
+        # Policy configs are immutable, named inputs. Registering a new config
+        # does not mutate the config already pinned by an in-flight rollout, so
+        # concurrent optimizer runs may safely add checkpoint configs while
+        # other rollouts are active. The rollout's policy_ref remains the
+        # authority for selecting its config.
         cfg = PolicyConfig(
             config_id=config_id,
             harness=str(body.get("harness") or self.spec.default_policy_harness),
