@@ -558,9 +558,36 @@ class CompatPlatform:
 
     def start_rollout(self, request: CreateRolloutRequest) -> dict[str, Any]:
         with self._state_lock:
-            return self._start_rollout_locked(request)
+            result = self._start_rollout_locked(request, defer_sync=True)
+            rollout_id = str(result.get("rollout_id") or request.rollout_id or "")
+            pin = self.pins.get(rollout_id)
+            log = self.logs.get(rollout_id)
+            should_run = (
+                request.submission_mode != "async"
+                and pin is not None
+                and log is not None
+                and pin.status == "running"
+                and not bool(result.get("replayed"))
+            )
+        if not should_run:
+            return result
+        try:
+            # Policy and evaluator calls can take minutes. They are isolated by
+            # rollout identity and must not hold the platform-wide admission
+            # lock, otherwise one synchronous rollout makes advertised leases
+            # fictitious and blocks prepare/start for every other rollout.
+            self._simulate(pin, log)
+        finally:
+            with self._state_lock:
+                self.active_leases = max(0, self.active_leases - 1)
+                result = self._rollout_response(
+                    pin, self.stream_descriptor_for(rollout_id)
+                )
+        return result
 
-    def _start_rollout_locked(self, request: CreateRolloutRequest) -> dict[str, Any]:
+    def _start_rollout_locked(
+        self, request: CreateRolloutRequest, *, defer_sync: bool = False
+    ) -> dict[str, Any]:
         slot = request.slot
         if slot in {"live", "jobs"}:
             return {
@@ -739,7 +766,7 @@ class CompatPlatform:
             )
         pin.started = True
         pin.status = "running"
-        if async_mode:
+        if async_mode or defer_sync:
             return self._rollout_response(pin, descriptor)
         try:
             self._simulate(pin, log)

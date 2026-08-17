@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+
 from fastapi.testclient import TestClient
 
 from synth_containers.platform import create_compat_app
@@ -159,6 +163,60 @@ def test_normalized_lifecycle_streams_rubrics_and_reward(monkeypatch) -> None:
     usage = started.json()["usage"]
     assert usage["cost_usd"] > 0
     assert usage["cost_kind"] == "estimated_from_tokens"
+
+
+def test_synchronous_healthbench_rollouts_use_advertised_parallel_leases(monkeypatch) -> None:
+    row = _row()
+    row["rubrics"] = [row["rubrics"][0]]
+    monkeypatch.setattr(healthbench, "load_row", lambda seed: row)
+    lock = threading.Lock()
+    active = 0
+    max_active = 0
+
+    def chat(config, messages):
+        nonlocal active, max_active
+        with lock:
+            active += 1
+            max_active = max(max_active, active)
+        time.sleep(0.05)
+        with lock:
+            active -= 1
+        if config["model"] == healthbench.GRADER_MODEL:
+            text = '{"explanation":"Appropriate.","criteria_met":true}'
+        else:
+            text = "Rest and seek care for red flags."
+        return {
+            "text": text,
+            "usage": healthbench._usage(
+                config["provider"], config["model"], {"prompt_tokens": 1, "completion_tokens": 1}
+            ),
+        }
+
+    monkeypatch.setattr(healthbench, "_chat", chat)
+    client = TestClient(create_compat_app("healthbench_chat"))
+    for seed in (0, 1):
+        prepared = client.post(
+            "/rollouts/prepare",
+            json={"rollout_id": f"hb-parallel-{seed}", "telemetry": TELEMETRY},
+        )
+        assert prepared.status_code == 200, prepared.text
+
+    def start(seed):
+        return client.post(
+            "/rollouts",
+            json={
+                "rollout_id": f"hb-parallel-{seed}",
+                "slot": "stream",
+                "telemetry": TELEMETRY,
+                "task_instance_id": f"seed:{seed}",
+                "policy_ref": {"harness": "chat_completion", "config": "groq_llama31_8b"},
+            },
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(pool.map(start, (0, 1)))
+    assert all(response.status_code == 200 for response in responses)
+    assert max_active >= 2, "synchronous rollout execution was serialized by the platform lock"
 
 
 def test_failed_grader_does_not_fabricate_zero_reward(monkeypatch) -> None:
