@@ -406,6 +406,22 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+  /rollouts/{rollout_id}/trace/bundle:
+    get:
+      operationId: getRolloutTraceBundle
+      summary: Read a capture-supervisor Trace V5 bundle archive when one exists
+      parameters:
+        - $ref: '#/components/parameters/RolloutId'
+      responses:
+        '200':
+          description: Self-contained Trace V5 bundle zip. Absent bundles 404 so Workshop can fall back to the lite seal.
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: No capture-supervisor bundle; caller should GET /rollouts/{id}/trace
   /rollouts/{rollout_id}/checkpoints:
     get:
       operationId: listRolloutCheckpoints

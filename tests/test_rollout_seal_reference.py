@@ -44,6 +44,9 @@ def test_terminal_record_names_the_sealed_trace(tmp_path) -> None:
     assert reference["high_water"] == seal["high_water"]
     assert reference["closed"] is True
     assert reference["url"] == f"/rollouts/{BODY['rollout_id']}/trace"
+    assert reference["bundle_url"] == f"/rollouts/{BODY['rollout_id']}/trace/bundle"
+    assert reference["kind"] == "lite_seal"
+    assert reference["inspectable"] is False
 
 
 def test_prepared_but_unstarted_rollout_announces_no_trace(tmp_path) -> None:

@@ -81,12 +81,7 @@ def create_compat_app(
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
-        return {
-            "status": "ok",
-            "target": spec.target_id,
-            "runtime_family": spec.runtime_family.value,
-            "environment_ref": spec.environment_ref,
-        }
+        return platform.health_payload()
 
     @app.get("/metadata")
     @app.get("/info")
@@ -595,6 +590,17 @@ def create_compat_app(
             raise HTTPException(status_code=404, detail=f"trace_not_sealed:{rollout_id}")
         return seal
 
+    @app.get("/rollouts/{rollout_id}/trace/bundle")
+    async def get_trace_bundle(rollout_id: str) -> Any:
+        result = platform.get_trace_bundle(rollout_id)
+        if "error" in result:
+            return _platform_response(result, default_status=404)
+        return FileResponse(
+            result["path"],
+            media_type=result["media_type"],
+            filename=f"{rollout_id}.trace-bundle.zip",
+        )
+
     @app.get("/rollouts/{rollout_id}/manifest")
     async def get_manifest(rollout_id: str) -> Any:
         return _platform_response(platform.get_execution_manifest(rollout_id), default_status=404)
@@ -603,5 +609,30 @@ def create_compat_app(
     async def drop_session(rollout_id: str) -> Any:
         result = platform.drop_session(rollout_id)
         return _platform_response(result)
+
+    @app.post("/rollouts/{rollout_id}/cancel")
+    async def cancel_rollout(rollout_id: str, request: Request) -> Any:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        owner_id = None
+        if isinstance(body, dict):
+            owner_id = body.get("owner_id") or (body.get("metadata") or {}).get("owner_id")
+        result = platform.cancel_rollout(
+            rollout_id,
+            owner_id=str(owner_id) if owner_id else None,
+        )
+        return _platform_response(result, default_status=404)
+
+    @app.post("/cleanup")
+    async def cleanup(request: Request) -> Any:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        owner_id = body.get("owner_id") if isinstance(body, dict) else None
+        result = platform.cleanup_owned(str(owner_id) if owner_id else "")
+        return _platform_response(result, default_status=422)
 
     return app

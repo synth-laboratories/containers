@@ -54,6 +54,20 @@ def _utc_now() -> str:
 TASK_INSTANCE_ID_PATTERN = r"^.*:(-?\d+)$"
 
 
+def _owner_from_metadata(metadata: dict[str, Any] | None) -> tuple[str | None, str | None]:
+    if not isinstance(metadata, dict):
+        return None, None
+    owner_id = (
+        metadata.get("owner_id")
+        or metadata.get("workshop_instance_id")
+        or metadata.get("service_instance_id")
+    )
+    if owner_id is None or str(owner_id).strip() == "":
+        return None, None
+    kind = str(metadata.get("owner_kind") or "workshop_instance").strip() or "workshop_instance"
+    return str(owner_id).strip(), kind
+
+
 def _seed_from_task_instance_id(task_instance_id: str | None) -> int:
     """Parse seed from `seed:N` or a trailing `:N`. Absent → 0. No integer suffix → 0.
 
@@ -147,6 +161,8 @@ class RolloutPin:
     accepted_at: str | None = None
     completed_at: str | None = None
     simulating: bool = False
+    owner_id: str | None = None
+    owner_kind: str | None = None
 
 
 class CompatPlatform:
@@ -194,15 +210,28 @@ class CompatPlatform:
         self._background_threads: dict[str, threading.Thread] = {}
         self.execution_manifests: dict[str, dict[str, Any]] = {}
         self._stream_occupancy: dict[str, int] = {}
+        self.instance_id = str(
+            (self.runtime_config.get("instance_id") if self.runtime_config else None)
+            or uuid.uuid4()
+        )
         self._seed_default_policies()
         self._recover_checkpoints()
         self._recover_completed_rollouts()
+        self._recover_orphaned_leases()
 
     def _durable_key(self, rollout_id: str) -> str:
         return hashlib.sha256(rollout_id.encode("utf-8")).hexdigest()
 
     def _manifest_path(self, rollout_id: str) -> Path:
         return self.storage_root / "run_manifests" / f"{self._durable_key(rollout_id)}.json"
+
+    def _lease_path(self, rollout_id: str) -> Path:
+        return self.storage_root / "leases" / f"{self._durable_key(rollout_id)}.json"
+
+    def _trace_bundle_path(self, rollout_id: str) -> Path:
+        configured = self.runtime_config.get("trace_bundle_root")
+        root = Path(configured) if configured else (self.storage_root / "seals")
+        return root / f"{rollout_id}.trace-bundle.zip"
 
     def _reward_path(self, rollout_id: str) -> Path:
         return self.storage_root / "reward_receipts" / f"{self._durable_key(rollout_id)}.json"
@@ -308,6 +337,8 @@ class CompatPlatform:
                 "idempotency_key": pin.idempotency_key,
                 "accepted_at": pin.accepted_at,
                 "completed_at": pin.completed_at,
+                "owner_id": pin.owner_id,
+                "owner_kind": pin.owner_kind,
             },
         }
         self._atomic_json(self._manifest_path(pin.rollout_id), manifest)
@@ -397,6 +428,8 @@ class CompatPlatform:
                 idempotency_key=raw_pin.get("idempotency_key"),
                 accepted_at=raw_pin.get("accepted_at"),
                 completed_at=raw_pin.get("completed_at"),
+                owner_id=raw_pin.get("owner_id"),
+                owner_kind=raw_pin.get("owner_kind"),
             )
             self.logs[rollout_id] = log
             self.stream_bindings[rollout_id] = (str(binding[0]), str(binding[1]))
@@ -418,6 +451,67 @@ class CompatPlatform:
                 execution_id = reward.get("execution_id")
                 if execution_id:
                     self.reward_by_execution_id[str(execution_id)] = reward
+
+    def _persist_lease(self, pin: RolloutPin) -> None:
+        self._atomic_json(
+            self._lease_path(pin.rollout_id),
+            {
+                "schema": "synth.containers.lease.v1",
+                "target_id": self.spec.target_id,
+                "instance_id": self.instance_id,
+                "rollout_id": pin.rollout_id,
+                "owner_id": pin.owner_id,
+                "owner_kind": pin.owner_kind,
+                "status": pin.status,
+                "accepted_at": pin.accepted_at,
+            },
+        )
+
+    def _drop_lease(self, rollout_id: str) -> None:
+        path = self._lease_path(rollout_id)
+        if path.is_file():
+            path.unlink()
+
+    def _recover_orphaned_leases(self) -> None:
+        root = self.storage_root / "leases"
+        if not root.is_dir():
+            return
+        for path in sorted(root.glob("*.json")):
+            record = json.loads(path.read_text(encoding="utf-8"))
+            if record.get("schema") != "synth.containers.lease.v1":
+                continue
+            if record.get("target_id") != self.spec.target_id:
+                continue
+            rollout_id = str(record.get("rollout_id") or "")
+            if not rollout_id:
+                continue
+            existing = self.pins.get(rollout_id)
+            if existing is not None and existing.terminal:
+                path.unlink()
+                continue
+            if existing is not None and not existing.terminal:
+                continue
+            pin = RolloutPin(
+                rollout_id=rollout_id,
+                world_ref=self.spec.world_ref,
+                environment_ref=self.spec.environment_ref,
+                policy_ref={},
+                evaluation_plan_ref=self.spec.evaluation_plan_ref,
+                task_instance_id="seed:0",
+                stream_id=f"stream:{rollout_id}",
+                engine_generation=self.engine_generation,
+                policy_revision_id=None,
+                seed=0,
+                terminal=True,
+                status="crashed",
+                started=True,
+                owner_id=record.get("owner_id"),
+                owner_kind=record.get("owner_kind"),
+                accepted_at=record.get("accepted_at"),
+                completed_at=_utc_now(),
+            )
+            self.pins[rollout_id] = pin
+            path.unlink()
 
     def _seed_default_policies(self) -> None:
         if self.spec.default_policy_harness == "isolated_policy_process":
@@ -603,6 +697,53 @@ class CompatPlatform:
                     "input_schema": schema,
                 }
             },
+            "identity": {
+                "target_id": self.spec.target_id,
+                "instance_id": self.instance_id,
+            },
+            "capacity": self._capacity_snapshot(),
+        }
+
+    def _capacity_snapshot(self) -> dict[str, Any]:
+        active = sum(1 for pin in self.pins.values() if pin.started and not pin.terminal and pin.simulating)
+        reserved = int(self.active_leases)
+        by_owner: dict[str, dict[str, int]] = {}
+        for pin in self.pins.values():
+            if not pin.started or pin.terminal:
+                continue
+            key = pin.owner_id or "unowned"
+            row = by_owner.setdefault(key, {"active": 0, "reserved": 0})
+            row["reserved"] += 1
+            if pin.simulating:
+                row["active"] += 1
+        return {
+            "declared": self.spec.scale_leases,
+            "active": active,
+            "reserved": reserved,
+            "by_owner": by_owner,
+        }
+
+    def health_payload(self) -> dict[str, Any]:
+        crashed = [
+            {
+                "rollout_id": pin.rollout_id,
+                "owner_id": pin.owner_id,
+                "status": pin.status,
+            }
+            for pin in self.pins.values()
+            if pin.status == "crashed"
+        ]
+        return {
+            "status": "ok",
+            "target": self.spec.target_id,
+            "runtime_family": self.spec.runtime_family.value,
+            "environment_ref": self.spec.environment_ref,
+            "identity": {
+                "target_id": self.spec.target_id,
+                "instance_id": self.instance_id,
+            },
+            "capacity": self._capacity_snapshot(),
+            "crash_signals": crashed,
         }
 
     def bind(self, recipe: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -829,6 +970,7 @@ class CompatPlatform:
         config_digest = self._policy_config_digest(config_id, harness, policy_ref.code)
         capability_digest = self.capabilities_digest()
         idempotency_key = request.idempotency_key or rollout_id
+        owner_id, owner_kind = _owner_from_metadata(request.metadata)
         pin = RolloutPin(
             rollout_id=rollout_id,
             world_ref=str(request.world_ref or self.spec.world_ref),
@@ -851,9 +993,12 @@ class CompatPlatform:
             execution=execution,
             idempotency_key=idempotency_key,
             accepted_at=_utc_now(),
+            owner_id=owner_id,
+            owner_kind=owner_kind,
         )
         self.pins[rollout_id] = pin
         self.active_leases += 1
+        self._persist_lease(pin)
         log = self.logs[rollout_id]
         if not any(item.kind == "trace.opened" for item in log.after(0)):
             # Immutable, secret-free lane identity belongs in the durable trace.
@@ -873,6 +1018,9 @@ class CompatPlatform:
                     },
                     "config_digest": config_digest,
                     "capability_digest": capability_digest,
+                    "owner_id": owner_id,
+                    "owner_kind": owner_kind,
+                    "instance_id": self.instance_id,
                 },
             )
         pin.started = True
@@ -912,6 +1060,8 @@ class CompatPlatform:
             },
             "idempotency_key": pin.idempotency_key,
             "execution": pin.execution,
+            "owner_id": pin.owner_id,
+            "owner_kind": pin.owner_kind,
         }
         if replayed:
             payload["replayed"] = True
@@ -1064,6 +1214,8 @@ class CompatPlatform:
             "trace": self._sealed_trace_reference(pin.rollout_id),
             "config_digest": pin.config_digest,
             "capability_digest": pin.capability_digest,
+            "owner_id": pin.owner_id,
+            "owner_kind": pin.owner_kind,
         }
 
     def _sealed_trace_reference(self, rollout_id: str) -> dict[str, Any] | None:
@@ -1079,6 +1231,8 @@ class CompatPlatform:
         seal = self.seals.get(rollout_id)
         if seal is None:
             return None
+        bundle_path = self._trace_bundle_path(rollout_id)
+        has_bundle = bundle_path.is_file()
         return {
             "schema_version": seal.get("schema_version"),
             "trace_id": seal.get("trace_id"),
@@ -1087,6 +1241,9 @@ class CompatPlatform:
             "high_water": seal.get("high_water"),
             "closed": seal.get("closed"),
             "url": f"/rollouts/{rollout_id}/trace",
+            "bundle_url": f"/rollouts/{rollout_id}/trace/bundle",
+            "kind": "trace_v5_bundle" if has_bundle else "lite_seal",
+            "inspectable": has_bundle,
         }
 
     def _simulate(self, pin: RolloutPin, log: RolloutEventLog) -> None:
@@ -1128,6 +1285,7 @@ class CompatPlatform:
             os.close(directory_fd)
         self._write_execution_manifest(pin, log)
         self._persist_completed_rollout(pin)
+        self._drop_lease(pin.rollout_id)
 
     def _execution_manifest_path(self, rollout_id: str) -> Path:
         return self.storage_root / "seals" / f"{rollout_id}.manifest.json"
@@ -1261,6 +1419,22 @@ class CompatPlatform:
             harness=str(body.get("harness") or self.spec.default_policy_harness),
             config=dict(body.get("config") or body),
         )
+        existing = self.policy_configs.get(config_id)
+        if existing is not None:
+            same = existing.harness == cfg.harness and existing.config == cfg.config
+            if not same:
+                return {
+                    "error": "policy_config_conflict",
+                    "status_code": 409,
+                    "config_id": config_id,
+                    "detail": "policy configs are immutable; a different body for the same id is refused",
+                }
+            return {
+                "config_id": config_id,
+                "harness": existing.harness,
+                "engine_generation": self.engine_generation,
+                "replayed": True,
+            }
         self.policy_configs[config_id] = cfg
         return {"config_id": config_id, "harness": cfg.harness, "engine_generation": self.engine_generation}
 
@@ -1304,6 +1478,84 @@ class CompatPlatform:
             return {"error": "unknown_rollout", "status_code": 404}
         pin.session_dropped = True
         return {"dropped": True, "rollout_id": rollout_id}
+
+    def get_trace_bundle(self, rollout_id: str) -> dict[str, Any]:
+        """Serve a capture-supervisor Trace V5 bundle archive when one exists.
+
+        Lite seals are not bundles. Workshop tries this route first and treats
+        404 as fallback to GET /rollouts/{id}/trace. Lying with a zip of the
+        lite seal would make the inspector claim inspectability it does not have.
+        """
+        if rollout_id not in self.pins and rollout_id not in self.seals:
+            return {"error": "unknown_rollout", "status_code": 404, "rollout_id": rollout_id}
+        path = self._trace_bundle_path(rollout_id)
+        if not path.is_file():
+            return {
+                "error": "trace_bundle_absent",
+                "status_code": 404,
+                "rollout_id": rollout_id,
+                "kind": "lite_seal",
+                "inspectable": False,
+                "fallback": f"/rollouts/{rollout_id}/trace",
+            }
+        return {"path": str(path), "media_type": "application/zip"}
+
+    def cancel_rollout(self, rollout_id: str, *, owner_id: str | None = None) -> dict[str, Any]:
+        pin = self.pins.get(rollout_id)
+        log = self.logs.get(rollout_id)
+        if pin is None:
+            return {"error": "unknown_rollout", "status_code": 404, "rollout_id": rollout_id}
+        if owner_id is not None and pin.owner_id and pin.owner_id != owner_id:
+            return {
+                "error": "owner_mismatch",
+                "status_code": 403,
+                "rollout_id": rollout_id,
+                "owner_id": pin.owner_id,
+            }
+        if pin.terminal:
+            return self._rollout_response(pin, self.stream_descriptor_for(rollout_id) if log else {"id": pin.stream_id})
+        held = not pin.terminal
+        pin.status = "cancelled"
+        pin.terminal = True
+        pin.completed_at = pin.completed_at or _utc_now()
+        if log is not None and not log.closed:
+            log.append(
+                "status",
+                {
+                    "status": "cancelled",
+                    "completion": "infra_complete",
+                    "owner_id": pin.owner_id,
+                },
+            )
+            log.mark_closed()
+        if held:
+            self.active_leases = max(0, self.active_leases - 1)
+        self._drop_lease(rollout_id)
+        descriptor = self.stream_descriptor_for(rollout_id) if log else {"id": pin.stream_id}
+        return self._rollout_response(pin, descriptor)
+
+    def cleanup_owned(self, owner_id: str) -> dict[str, Any]:
+        if not str(owner_id or "").strip():
+            return {"error": "owner_id_required", "status_code": 422}
+        cancelled: list[str] = []
+        skipped: list[str] = []
+        for pin in list(self.pins.values()):
+            if pin.owner_id != owner_id:
+                skipped.append(pin.rollout_id)
+                continue
+            if pin.terminal:
+                continue
+            result = self.cancel_rollout(pin.rollout_id, owner_id=owner_id)
+            if result.get("error"):
+                skipped.append(pin.rollout_id)
+            else:
+                cancelled.append(pin.rollout_id)
+        return {
+            "owner_id": owner_id,
+            "cancelled": cancelled,
+            "skipped": [rid for rid in skipped if self.pins.get(rid) and self.pins[rid].owner_id != owner_id],
+            "instance_id": self.instance_id,
+        }
 
     def compute_reward(
         self,
