@@ -140,6 +140,10 @@ class Banking77Runtime:
         if isinstance(forced, str) and forced.strip():
             return forced.strip(), dict(_EMPTY_USAGE)
 
+        responses_endpoint = _responses_endpoint(config)
+        if responses_endpoint:
+            return _sample_responses(responses_endpoint, observation, config)
+
         endpoint = _tinker_endpoint(config)
         if endpoint:
             return _sample_tinker(endpoint, observation, config)
@@ -194,6 +198,139 @@ def _error_code(exc: BaseException) -> str | None:
     if not text or len(text) > 64:
         return None
     return text if re.fullmatch(r"[a-z0-9_.:-]+", text) else None
+
+
+def _responses_endpoint(config: dict[str, Any]) -> str | None:
+    if str(config.get("api_family") or "").strip().lower() != "responses":
+        return None
+    base = str(config.get("responses_base_url") or "").strip().rstrip("/")
+    if not base:
+        raise RuntimeError("responses_base_url_missing")
+    return f"{base}/responses"
+
+
+def _sample_responses(
+    endpoint: str,
+    observation: dict[str, Any],
+    config: dict[str, Any],
+) -> tuple[str | None, dict[str, Any]]:
+    _validate_responses_endpoint(endpoint)
+    api_key = str(config.get("responses_api_key") or "").strip()
+    idempotency_key = str(config.get("responses_idempotency_key") or "").strip()
+    model = str(config.get("responses_model") or "policy").strip()
+    if not api_key or "\r" in api_key or "\n" in api_key:
+        raise RuntimeError("responses_api_key_missing")
+    if not idempotency_key or "\r" in idempotency_key or "\n" in idempotency_key:
+        raise RuntimeError("responses_idempotency_key_missing")
+    maximum = min(max(int(config.get("max_tokens") or 32), 1), 512)
+    body = json.dumps(
+        {
+            "model": model,
+            "instructions": CLASSIFY_SYSTEM,
+            "input": user_prompt(str(observation["text"])),
+            "max_output_tokens": maximum,
+            "temperature": 0,
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        endpoint,
+        data=body,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Idempotency-Key": idempotency_key,
+            "X-Policy-Pin": str(config.get("policy_pin") or "generation"),
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+    )
+    timeout = min(max(float(config.get("responses_timeout_seconds") or 120.0), 1.0), 300.0)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
+            raw = response.read(1_048_577)
+    except urllib.error.HTTPError as exc:
+        mapping = {
+            401: "responses_auth_refused",
+            404: "responses_policy_not_found",
+            409: "responses_policy_conflict",
+            422: "responses_request_invalid",
+            429: "responses_backpressure",
+            502: "responses_sampling_failed",
+            503: "responses_sampler_unavailable",
+        }
+        raise RuntimeError(mapping.get(exc.code, "responses_http_error")) from exc
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise RuntimeError("responses_transport_error") from exc
+    if len(raw) > 1_048_576:
+        raise RuntimeError("responses_response_too_large")
+    try:
+        payload = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("responses_response_invalid") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError("responses_response_invalid")
+    text = payload.get("output_text")
+    if not isinstance(text, str):
+        fragments: list[str] = []
+        for item in payload.get("output") or []:
+            if not isinstance(item, dict) or item.get("type") != "message":
+                continue
+            for part in item.get("content") or []:
+                if isinstance(part, dict) and part.get("type") == "output_text":
+                    fragments.append(str(part.get("text") or ""))
+        text = "".join(fragments)
+    if not isinstance(text, str):
+        raise RuntimeError("responses_response_invalid")
+    predicted = text.strip().splitlines()[0].strip() if text.strip() else None
+    return predicted, _responses_usage(payload.get("usage"))
+
+
+def _validate_responses_endpoint(endpoint: str) -> None:
+    try:
+        parsed = urlsplit(endpoint)
+        port = parsed.port
+    except ValueError as exc:
+        raise RuntimeError("responses_endpoint_refused") from exc
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or not parsed.path.endswith("/responses")
+    ):
+        raise RuntimeError("responses_endpoint_refused")
+    host = parsed.hostname.lower()
+    if host in {"127.0.0.1", "localhost", "::1"} and parsed.scheme == "http":
+        return
+    normalized = f"{parsed.scheme}://{host}"
+    if port is not None:
+        normalized += f":{port}"
+    allowed = {
+        item.strip().rstrip("/")
+        for item in os.environ.get("SYNTH_RESPONSES_ALLOWED_ENDPOINTS", "").split(",")
+        if item.strip()
+    }
+    if normalized not in allowed:
+        raise RuntimeError("responses_endpoint_refused")
+
+
+def _responses_usage(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return dict(_EMPTY_USAGE)
+    mapped = {
+        "prompt_tokens": value.get("input_tokens"),
+        "completion_tokens": value.get("output_tokens"),
+        "total_tokens": value.get("total_tokens"),
+    }
+    return {
+        key: item
+        if item is None or (isinstance(item, int) and not isinstance(item, bool) and item >= 0)
+        else None
+        for key, item in mapped.items()
+    }
 
 
 def _tinker_endpoint(config: dict[str, Any]) -> str | None:

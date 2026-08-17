@@ -96,6 +96,13 @@ def test_unknown_cost_is_null_but_real_zero_is_preserved() -> None:
     assert unknown["cost_kind"] is None
     assert known["cost_usd"] == 0.0
     assert known["cost_kind"] == "estimated_from_tokens"
+    mini = healthbench._usage(
+        "openai",
+        "gpt-4.1-mini-2025-04-14",
+        {"prompt_tokens": 1000, "completion_tokens": 1000},
+    )
+    assert mini["cost_usd"] == 0.002
+    assert mini["cost_kind"] == "estimated_from_tokens"
 
 
 def test_normalized_lifecycle_streams_rubrics_and_reward(monkeypatch) -> None:
