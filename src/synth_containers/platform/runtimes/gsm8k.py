@@ -42,10 +42,12 @@ from ..gsm8k_world import (
     user_prompt,
 )
 from ..local_provider import (
+    CHAT_COMPLETIONS,
     RESPONSES,
     is_local_provider,
     local_endpoint,
     normalize_api_family,
+    token_capture_ref,
 )
 from ..state import CompatPlatform, RolloutPin
 from .banking77 import _error_code
@@ -90,7 +92,7 @@ class Gsm8kRuntime:
             {"harness": harness, "config": pin.policy_ref.get("config")},
         )
         try:
-            completion, usage = self._act(platform, pin, harness, observation)
+            completion, usage, token_capture = self._act(platform, pin, harness, observation)
             if isinstance(completion, str) and not completion.strip():
                 completion = None
         except Exception as exc:
@@ -128,6 +130,12 @@ class Gsm8kRuntime:
                 "parse_source": parsed.source,
             },
         )
+        if token_capture is not None:
+            # The join key. The proxy owns the authoritative token ids and
+            # rollout logprobs; this container owns the reward. Without this
+            # event nothing connects the two, and an on-policy trace is
+            # unusable no matter how complete each half is on its own.
+            log.append("token_capture", dict(token_capture))
         log.append(
             "span.policy.closed",
             {
@@ -170,19 +178,25 @@ class Gsm8kRuntime:
         pin: RolloutPin,
         harness: str,
         observation: dict[str, Any],
-    ) -> tuple[str | None, dict[str, Any]]:
+    ) -> tuple[str | None, dict[str, Any], dict[str, Any] | None]:
+        """Returns (completion, usage, token_capture_reference).
+
+        The third element is the join key. It is None for a gold or forced
+        action and for a hosted provider: those have no proxy record to join to,
+        which is different from having one and losing it.
+        """
         if harness == "dataset_gold":
             row = load_row(str(observation["split"]), int(observation["seed"]))
             if row is None:
-                return None, dict(_EMPTY_USAGE)
-            return row.answer_text, dict(_EMPTY_USAGE)
+                return None, dict(_EMPTY_USAGE), None
+            return row.answer_text, dict(_EMPTY_USAGE), None
 
         config_id = str(pin.policy_ref.get("config") or "").strip()
         policy = platform.policy_configs.get(config_id)
         config = dict(policy.config) if policy is not None else {}
         forced = config.get("forced_completion")
         if isinstance(forced, str) and forced.strip():
-            return forced, dict(_EMPTY_USAGE)
+            return forced, dict(_EMPTY_USAGE), None
 
         provider = str(config.get("provider") or "").strip().lower()
         if provider:
@@ -192,7 +206,7 @@ class Gsm8kRuntime:
 
         if harness != "solve":
             raise ValueError(f"unknown_gsm8k_harness:{harness}")
-        return None, dict(_EMPTY_USAGE)
+        return None, dict(_EMPTY_USAGE), None
 
     def _close_missing(
         self,
@@ -299,7 +313,11 @@ def _sample_chat_completion(
         float(config.get("timeout_seconds", 120)),
     )
     text = str(((body.get("choices") or [{}])[0].get("message") or {}).get("content") or "")
-    return (text or None), _usage(body.get("usage"), input_key="prompt_tokens", output_key="completion_tokens")
+    return (
+        (text or None),
+        _usage(body.get("usage"), input_key="prompt_tokens", output_key="completion_tokens"),
+        token_capture_ref(body, api_family=CHAT_COMPLETIONS),
+    )
 
 
 def _sample_responses(
@@ -331,7 +349,11 @@ def _sample_responses(
                 if isinstance(part, dict) and part.get("type") == "output_text":
                     fragments.append(str(part.get("text") or ""))
         text = "".join(fragments)
-    return (text or None), _usage(body.get("usage"), input_key="input_tokens", output_key="output_tokens")
+    return (
+        (text or None),
+        _usage(body.get("usage"), input_key="input_tokens", output_key="output_tokens"),
+        token_capture_ref(body, api_family=RESPONSES),
+    )
 
 
 def _usage(value: Any, *, input_key: str, output_key: str) -> dict[str, Any]:

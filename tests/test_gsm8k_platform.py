@@ -537,3 +537,94 @@ def test_local_mlx_provider_refuses_a_public_origin_before_the_network(monkeypat
         "/reward", json={"rollout_id": "gsm8k_local_refused", "mode": "terminal"}
     ).json()
     assert scored["reward"] is None
+
+
+def test_the_proxy_request_id_is_sealed_into_the_trace(monkeypatch) -> None:
+    """The join key between this container's reward and the proxy's token record.
+
+    The proxy owns the authoritative token ids and rollout logprobs; the
+    container owns the reward. If the container does not seal the proxy request
+    id, nothing connects the two and an on-policy trace is unusable however
+    complete each half is on its own.
+    """
+    client = _client()
+    captured: dict[str, object] = {}
+
+    class Response:
+        headers = {"Content-Type": "application/json"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+        def read(self, *_):
+            return json.dumps(
+                {
+                    "choices": [{"message": {"content": "the answer is #### 18"}}],
+                    "usage": {"prompt_tokens": 40, "completion_tokens": 9, "total_tokens": 49},
+                    "synth": {
+                        "proxy_request_ids": ["prid_abc123"],
+                        "policy_snapshot_id": "snap_v7",
+                        "training_version": 7,
+                        "tokenizer_digest": "tok_digest",
+                        "template_digest": "tpl_digest",
+                        "api_family": "chat_completions",
+                    },
+                }
+            ).encode()
+
+    def fake_urlopen(request, *, timeout):
+        captured["url"] = request.full_url
+        del timeout
+        return Response()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    _register(
+        client,
+        "local_join",
+        {
+            "provider": "synth_mlx_rl",
+            "model": "Qwen/Qwen3.5-0.8B",
+            "base_url": "http://127.0.0.1:8765/v1",
+            "max_tokens": 256,
+        },
+    )
+    _prepare_start(
+        client,
+        rollout_id="gsm8k_join",
+        body={
+            "world_ref": "world:gsm8k@train",
+            "task_instance_id": "seed:0",
+            "policy_ref": {"harness": "solve", "config": "local_join"},
+        },
+    )
+    capture = next(
+        row for row in _events(client, "gsm8k_join") if row["kind"] == "token_capture"
+    )
+    payload = capture["payload"]
+    assert payload["proxy_request_ids"] == ["prid_abc123"]
+    assert payload["policy_snapshot_id"] == "snap_v7"
+    assert payload["tokenizer_digest"] == "tok_digest"
+    # A reference, never the tokens themselves: a container must not relay a
+    # training record it does not own.
+    assert "rollout_logprobs" not in payload and "completion_token_ids" not in payload
+    assert payload["provenance"] == "observed_provider"
+
+
+def test_no_join_key_is_emitted_when_there_is_no_proxy_record() -> None:
+    """A gold action has no proxy call. Emitting an empty capture would be worse
+    than none: it would claim a record exists that never did."""
+    client = _client()
+    _prepare_start(
+        client,
+        rollout_id="gsm8k_gold_nojoin",
+        body={
+            "world_ref": "world:gsm8k@train",
+            "task_instance_id": "seed:0",
+            "policy_ref": {"harness": "dataset_gold", "config": "dataset_gold"},
+        },
+    )
+    kinds = [row["kind"] for row in _events(client, "gsm8k_gold_nojoin")]
+    assert "token_capture" not in kinds

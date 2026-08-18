@@ -589,6 +589,7 @@ GSM8K_SOLVE = TargetSpec(
         "env.episode.opened",
         "observation",
         "action",
+        "token_capture",
         "reward_signal",
         "span.policy.opened",
         "span.policy.closed",

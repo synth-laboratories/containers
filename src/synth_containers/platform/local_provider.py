@@ -131,3 +131,49 @@ def local_endpoint(base_url: object, *, api_family: str = CHAT_COMPLETIONS) -> s
     endpoint = base if base.endswith(suffix) else f"{base}{suffix}"
     validate_local_endpoint(endpoint, api_family=family)
     return endpoint
+
+
+def token_capture_ref(body: object, *, api_family: str) -> dict[str, object] | None:
+    """The join key between a container rollout and the proxy's token record.
+
+    The proxy owns the authoritative token ids and rollout logprobs; the
+    container owns the reward. Nothing joins them unless the container seals the
+    proxy request id, so this lifts the `synth` block off a response into a
+    reference the trace can carry.
+
+    Deliberately a *reference*, never the tokens themselves: `TokenCaptureV5`
+    already refuses a sequence that is both inline and artifact-backed, and a
+    container relaying a training record it does not own is the thing the whole
+    proxy design exists to avoid.
+
+    Returns None when the response carries no `synth` block — a hosted provider
+    is not a defect, it simply has no record to join to.
+    """
+    if not isinstance(body, dict):
+        return None
+    synth = body.get("synth")
+    if not isinstance(synth, dict):
+        return None
+    ids = [
+        str(item)
+        for item in (synth.get("proxy_request_ids") or [])
+        if isinstance(item, (str, int))
+    ]
+    if not ids:
+        return None
+    reference: dict[str, object] = {
+        "provenance": "observed_provider",
+        "proxy_request_ids": ids,
+        "api_family": normalize_api_family(synth.get("api_family") or api_family),
+    }
+    for key in (
+        "policy_snapshot_id",
+        "training_version",
+        "tokenizer_digest",
+        "template_digest",
+        "render_digest",
+    ):
+        value = synth.get(key)
+        if value is not None:
+            reference[key] = value
+    return reference
