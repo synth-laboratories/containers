@@ -160,7 +160,24 @@ def test_fixture_episode_emits_taxonomy_truncation_and_reconciled_usage() -> Non
 
 
 def test_openrouter_omitted_usage_is_null_not_zero() -> None:
-    planner = OpenRouterReAct(config_id="luna_med", config={"model": "meta/muse-spark-1.1"})
+    planner = OpenRouterReAct(
+        config_id="luna_med",
+        config={
+            "model": "meta/muse-spark-1.1",
+            "effort": "medium",
+            "max_tokens": 1024,
+            "context_token_budget": 16000,
+            "compact_at": 0.7,
+            "keep_recent_messages": 8,
+            "keep_recent_frames": 2,
+            "observation_mode": "text",
+            "provider": "openrouter",
+            "base_url": "https://openrouter.ai/api/v1",
+            "api_key_env": "OPENROUTER_API_KEY",
+            "parse_retries": 0,
+            "system_prompt": "Choose the best valid Craftax action.",
+        },
+    )
     planner.calls = 3
     usage = planner.usage()
     assert usage["llm_calls"] == 3

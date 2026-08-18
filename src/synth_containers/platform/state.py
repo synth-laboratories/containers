@@ -1145,6 +1145,13 @@ class CompatPlatform:
             "accepted": True,
             "rollout_id": pin.rollout_id,
             "status": pin.status,
+            # Admission freezes these identities. Async callers must not need
+            # a second GET to learn which exact policy and runtime generation
+            # accepted their work, especially while configs continue to be
+            # registered for other optimizer candidates.
+            "policy_ref": dict(pin.policy_ref),
+            "engine_generation": pin.engine_generation,
+            "policy_revision_id": pin.policy_revision_id,
             "stream": descriptor,
             "lease": {
                 "held": not pin.terminal,
