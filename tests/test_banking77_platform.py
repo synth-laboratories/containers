@@ -346,6 +346,61 @@ def test_scoped_responses_policy_calls_gateway_without_exposing_token(monkeypatc
     }
 
 
+def test_openai_chat_policy_scores_and_reports_usage(monkeypatch) -> None:
+    client = _client()
+    gold = load_row("train", 0)
+    assert gold is not None
+    captured: dict[str, object] = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _limit: int) -> bytes:
+            return json.dumps({
+                "choices": [{"message": {"content": gold.label}}],
+                "usage": {"prompt_tokens": 20, "completion_tokens": 3, "total_tokens": 23},
+            }).encode()
+
+    def fake_urlopen(request, *, timeout):
+        captured["url"] = request.full_url
+        captured["authorization"] = request.get_header("Authorization")
+        captured["body"] = json.loads(request.data)
+        captured["timeout"] = timeout
+        return Response()
+
+    monkeypatch.setenv("BANKING77_TEST_OPENAI_KEY", "opaque-test-key")
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    registered = client.post("/policy-configs", json={
+        "config_id": "banking77_gpt_4_1_nano",
+        "harness": "classify",
+        "config": {
+            "provider": "openai",
+            "model": "gpt-4.1-nano",
+            "api_key_env": "BANKING77_TEST_OPENAI_KEY",
+            "base_url": "https://api.openai.com/v1",
+            "temperature": 0,
+            "max_tokens": 32,
+        },
+    })
+    assert registered.status_code == 200
+    _, started = _prepare_start(client, rollout_id="b77_openai", body={
+        "world_ref": "world:banking77@train",
+        "task_instance_id": "seed:0",
+        "policy_ref": {"harness": "classify", "config": "banking77_gpt_4_1_nano"},
+    })
+    assert started["status"] == "completed"
+    assert started["usage"]["total_tokens"] == 23
+    scored = client.post("/reward", json={"rollout_id": "b77_openai", "mode": "terminal"}).json()
+    assert scored["reward"] == 1.0
+    assert captured["url"] == "https://api.openai.com/v1/chat/completions"
+    assert captured["authorization"] == "Bearer opaque-test-key"
+    assert captured["body"]["model"] == "gpt-4.1-nano"
+
+
 def test_tinker_error_code_is_typed_without_provider_prose() -> None:
     from synth_containers.platform.runtimes.banking77 import _error_code
 
