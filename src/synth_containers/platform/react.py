@@ -830,7 +830,6 @@ class OpenRouterReAct:
             "messages": list(self._messages),
             "temperature": 0,
             "max_tokens": self.max_tokens,
-            "reasoning": {"effort": self.reasoning_effort},
             "stream": True,
             "stream_options": {"include_usage": True},
             "tools": [
@@ -861,6 +860,13 @@ class OpenRouterReAct:
             # named forced choice.
             "tool_choice": "auto",
         }
+        if self.provider == "openrouter":
+            # `reasoning` is an OpenRouter extension, not part of the OpenAI
+            # chat schema. Sending it to another provider is a request for a
+            # field that provider never defined; a strict server rejects the
+            # whole call with a 422 that reads as a policy failure. Found
+            # against the local synth_mlx_rl service, which forbids extras.
+            payload["reasoning"] = {"effort": self.reasoning_effort}
         request = urllib.request.Request(
             self.chat_endpoint,
             data=json.dumps(payload).encode("utf-8"),

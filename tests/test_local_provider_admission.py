@@ -583,3 +583,35 @@ def test_httpx_is_still_the_healthbench_transport() -> None:
     # Guards the stub above: if `_client` stops returning an httpx client the
     # stub would be testing nothing.
     assert isinstance(healthbench._client("http://127.0.0.1:1/v1"), httpx.Client)
+
+
+def test_openrouter_only_fields_do_not_reach_other_providers(monkeypatch) -> None:
+    """`reasoning` is an OpenRouter extension, not part of the OpenAI chat
+    schema. Sending it to another provider asks for a field that provider never
+    defined; a strict server rejects the whole call with a 422 that reads as a
+    policy failure. Found against the real local service, which forbids extras.
+    """
+    sent: dict[str, object] = {}
+    _stub_urlopen(
+        monkeypatch,
+        sent,
+        json.dumps({"choices": [{"message": {"content": '{"actions":["noop"]}'}}]}),
+        content_type="application/json",
+    )
+    local = OpenRouterReAct(config_id="mlx_r", config=_react_config())
+    local._complete("k", ["noop"], None)
+    assert "reasoning" not in sent["json"]
+
+    sent.clear()
+    _stub_urlopen(
+        monkeypatch,
+        sent,
+        json.dumps({"choices": [{"message": {"content": '{"actions":["noop"]}'}}]}),
+        content_type="application/json",
+    )
+    hosted = OpenRouterReAct(
+        config_id="luna",
+        config=_react_config(provider="openrouter", base_url="https://openrouter.ai/api/v1"),
+    )
+    hosted._complete("k", ["noop"], None)
+    assert sent["json"]["reasoning"] == {"effort": "medium"}
