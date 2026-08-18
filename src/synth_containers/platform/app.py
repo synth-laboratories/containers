@@ -111,15 +111,21 @@ def create_compat_app(
                     "reward": True,
                 },
             )
+            roles = model_roles()
             metadata_blob = capabilities.setdefault("metadata", {})
             if isinstance(metadata_blob, dict):
-                metadata_blob["policy_ready"] = True
+                metadata_blob["policy_ready"] = bool(
+                    roles["policy"]["credential_present"]
+                )
+                metadata_blob["grader_ready"] = bool(
+                    roles["scorer"]["credential_present"]
+                )
             capabilities["optimizer_contracts"] = {"gepa": gepa}
             payload["capabilities"] = capabilities
             metadata = payload.get("metadata")
             if not isinstance(metadata, dict):
                 metadata = {}
-            metadata["model_roles"] = model_roles()
+            metadata["model_roles"] = roles
             metadata["optimizer_contracts"] = {"gepa": gepa}
             payload["metadata"] = metadata
         return payload

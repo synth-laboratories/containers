@@ -36,10 +36,14 @@ def model_roles() -> dict[str, dict[str, Any]]:
     """Describe the two independent paid model roles without exposing credentials."""
 
     grader_model = os.environ.get("HEALTHBENCH_GRADER_MODEL", GRADER_MODEL)
+    policy_key_env = os.environ.get("HEALTHBENCH_POLICY_API_KEY_ENV", "OPENAI_API_KEY")
+    grader_key_env = os.environ.get("HEALTHBENCH_GRADER_API_KEY_ENV", "OPENAI_API_KEY")
     return {
         "policy": {
             "purpose": "generate_candidate_response",
             "configuration_authority": "policy_ref",
+            "api_key_env": policy_key_env,
+            "credential_present": bool(os.environ.get(policy_key_env, "").strip()),
             "usage_lane": "policy",
             "required": True,
         },
@@ -47,9 +51,8 @@ def model_roles() -> dict[str, dict[str, Any]]:
             "purpose": "score_response_against_physician_rubrics",
             "provider": "openai",
             "model": grader_model,
-            "api_key_env": os.environ.get(
-                "HEALTHBENCH_GRADER_API_KEY_ENV", "OPENAI_API_KEY"
-            ),
+            "api_key_env": grader_key_env,
+            "credential_present": bool(os.environ.get(grader_key_env, "").strip()),
             "base_url": os.environ.get(
                 "HEALTHBENCH_GRADER_BASE_URL", "https://api.openai.com/v1"
             ),
