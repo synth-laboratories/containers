@@ -7,11 +7,15 @@ in ``runtimes/banking77.py``, which is the in-repo precedent:
 
 - reject userinfo, query and fragment outright — a base URL carrying a password
   is a credential in a config field that is echoed back on ``/policy-configs``;
-- permit ``http://`` unconditionally for ``127.0.0.1`` / ``localhost`` / ``::1``
-  and for ``host.docker.internal``, because a container cannot reach the host's
-  own loopback and would otherwise have no admissible address at all;
-- require every other origin (including every ``https://`` origin, unchanged
-  from the precedent) to be named in ``SYNTH_MLX_RL_ALLOWED_ENDPOINTS``;
+- permit ``http://`` unconditionally for ``127.0.0.1`` / ``localhost`` / ``::1``,
+  matching the precedent exactly;
+- require every other origin to be named in ``SYNTH_MLX_RL_ALLOWED_ENDPOINTS``.
+  That includes ``host.docker.internal``, which is deliberately NOT blanket
+  loopback: it resolves to the host from inside a container, so admitting it on
+  any port would hand a policy config a container-to-host probe across every
+  service on the machine. The Docker case is enabled by naming the one origin,
+  e.g. ``SYNTH_MLX_RL_ALLOWED_ENDPOINTS=http://host.docker.internal:8787``,
+  which is an explicit act rather than a default;
 - refuse with terse, secret-free snake_case codes so ``_error_code`` in
   ``runtimes/banking77.py`` forwards them instead of dropping them as prose.
 
@@ -38,11 +42,12 @@ _ENDPOINT_SUFFIX = {
     RESPONSES: "/responses",
 }
 
-# Loopback plus the Docker host alias. `host.docker.internal` is not loopback,
-# but from inside a container it is the only name that resolves to the host that
-# is running the proxy, so refusing it would make the container case impossible
-# rather than merely inconvenient.
-_LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "host.docker.internal"})
+# Loopback only. `host.docker.internal` is the name a container uses to reach the
+# host, which is exactly why it is not in this set: blanket-admitting it would
+# admit every port on the host, not just the proxy's. It goes through the
+# allowlist instead, where the port is named.
+_LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+DOCKER_HOST_ALIAS = "host.docker.internal"
 
 ENDPOINT_REFUSED = f"{PROVIDER_ID}_endpoint_refused"
 API_FAMILY_UNSUPPORTED = f"{PROVIDER_ID}_api_family_unsupported"

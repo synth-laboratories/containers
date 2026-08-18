@@ -55,15 +55,37 @@ def _react_config(**overrides: object) -> dict[str, object]:
 # --- the validator itself ---------------------------------------------------
 
 
-@pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "::1", "host.docker.internal"])
+@pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "::1"])
 @pytest.mark.parametrize("family", [CHAT_COMPLETIONS, RESPONSES])
-def test_loopback_and_docker_host_are_admitted_over_http(host: str, family: str) -> None:
+def test_loopback_is_admitted_over_http(host: str, family: str) -> None:
     authority = f"[{host}]" if host == "::1" else host
     suffix = "/chat/completions" if family == CHAT_COMPLETIONS else "/responses"
     validate_local_endpoint(f"http://{authority}:8765/v1{suffix}", api_family=family)
     assert local_endpoint(f"http://{authority}:8765/v1", api_family=family) == (
         f"http://{authority}:8765/v1{suffix}"
     )
+
+
+@pytest.mark.parametrize("family", [CHAT_COMPLETIONS, RESPONSES])
+def test_docker_host_alias_is_refused_unless_allowlisted(monkeypatch, family: str) -> None:
+    """`host.docker.internal` resolves to the host from inside a container. Blanket
+    admission would hand a policy config a probe across every port on the machine, so
+    it goes through the allowlist where the port is named."""
+    suffix = "/chat/completions" if family == CHAT_COMPLETIONS else "/responses"
+    endpoint = f"http://host.docker.internal:8787/v1{suffix}"
+
+    monkeypatch.delenv(ALLOWLIST_ENV, raising=False)
+    with pytest.raises(RuntimeError, match="synth_mlx_rl_endpoint_refused"):
+        validate_local_endpoint(endpoint, api_family=family)
+
+    monkeypatch.setenv(ALLOWLIST_ENV, "http://host.docker.internal:8787")
+    validate_local_endpoint(endpoint, api_family=family)
+
+    # The allowlist names an origin including its port: a different port stays refused.
+    with pytest.raises(RuntimeError, match="synth_mlx_rl_endpoint_refused"):
+        validate_local_endpoint(
+            f"http://host.docker.internal:5432/v1{suffix}", api_family=family
+        )
 
 
 def test_a_public_http_origin_is_refused(monkeypatch) -> None:
@@ -394,6 +416,7 @@ def test_healthbench_admits_the_local_provider_on_both_families(monkeypatch) -> 
     assert captured["headers"] == {}
 
     captured.clear()
+    monkeypatch.setenv(ALLOWLIST_ENV, "http://host.docker.internal:8765")
     _stub_client(monkeypatch, captured, {"output_text": "hello responses"})
     result = healthbench._chat(
         {
