@@ -11,9 +11,14 @@ Three honesty rules, all with a Banking77 precedent:
 - the reference answer never enters the public observation;
 - a missing completion leaves the reward ``None`` (``_close_missing`` /
   ``reward_signals = [None]``), and ``omit_reward`` does the same;
-- an *unparseable* completion is not a wrong answer. It keeps the reward ``None``
-  and records ``parse_status`` and the raw text separately, so "the policy never
-  stated a number" cannot be read later as "the policy answered zero".
+- a completion the policy *did* produce but that states no parseable number
+  scores ``0.0``: the policy attempted the task and failed it. ``parse_status``
+  and the raw text are recorded separately so a format failure is still
+  distinguishable from a wrong number, but it is counted, not dropped.
+  Scoring it ``None`` would be worse than wrong — the eval layer excludes
+  missing metrics from the denominator, so a model that rambles instead of
+  answering would have its bad trials deleted and its accuracy computed over
+  only the subset where it happened to emit a number.
 
 See: workshop/docs/aug_12_update.md (content, not a fold; missing ≠ 0).
 """
@@ -133,11 +138,18 @@ class Gsm8kRuntime:
         )
 
         reference = row.answer
-        if pin.omit_reward or completion is None or not parsed.parsed or not reference:
-            # Absent, unparseable, or an env row whose own reference will not
-            # parse: none of these is a zero. `_close_missing` is not used here
-            # because the episode itself completed — only the signal is absent.
+        if pin.omit_reward or completion is None or not reference:
+            # Genuinely absent signal: the policy produced nothing at all, the
+            # caller suppressed the reward, or the env's own reference will not
+            # parse (an env defect, not a policy failure). None of these is a
+            # zero. `_close_missing` is not used here because the episode itself
+            # completed — only the signal is absent.
             value: float | None = None
+        elif not parsed.parsed:
+            # The policy answered, but stated no parseable number. That is a
+            # failed attempt, not an absent signal, and it must stay in the
+            # denominator — see the module docstring.
+            value = 0.0
         else:
             value = 1.0 if parsed.value == reference else 0.0
         log.append(

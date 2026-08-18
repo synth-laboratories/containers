@@ -222,7 +222,7 @@ def test_dataset_gold_scores_exact_match() -> None:
     assert action["payload"]["parse_status"] == "parsed"
 
 
-def test_wrong_answer_scores_zero_and_unparseable_stays_null() -> None:
+def test_wrong_answer_and_unparseable_answer_both_score_zero() -> None:
     client = _client()
     _register(client, "forced_right", {"forced_completion": "reasoning...\n#### 72"})
     _register(client, "forced_wrong", {"forced_completion": "reasoning...\n#### 71"})
@@ -247,9 +247,11 @@ def test_wrong_answer_scores_zero_and_unparseable_stays_null() -> None:
     assert right["reward"] == 1.0
     assert wrong["reward"] == 0.0
     assert wrong["status"] == "scored"
-    # The one that matters: an unparseable completion is absent, not zero.
-    assert prose["reward"] is None
-    assert prose["status"] == "absent"
+    # The one that matters: a completion the policy DID produce, that states no
+    # number, is a failed attempt and scores 0.0. Scoring it None would let the
+    # eval layer drop it from the denominator and inflate the model's accuracy.
+    assert prose["reward"] == 0.0
+    assert prose["status"] == "scored"
 
     action = next(row for row in _events(client, "gsm8k_prose") if row["kind"] == "action")
     assert action["payload"]["answer"] is None
@@ -257,7 +259,46 @@ def test_wrong_answer_scores_zero_and_unparseable_stays_null() -> None:
     # The raw completion is kept next to the failed parse, not thrown away.
     assert action["payload"]["text"] == "I would rather not say."
     signal = next(row for row in _events(client, "gsm8k_prose") if row["kind"] == "reward_signal")
-    assert signal["payload"]["value"] is None
+    assert signal["payload"]["value"] == 0.0
+
+
+def test_a_failed_attempt_and_an_absent_signal_are_not_the_same_thing() -> None:
+    """The distinction the eval layer depends on.
+
+    `absent` is excluded from the denominator; `scored` is not. So "the policy
+    produced text that stated no number" must be 0.0 (it tried and failed) while
+    "the policy produced nothing at all" must be None (there is no attempt to
+    score). Collapsing these in the null direction silently inflates accuracy by
+    deleting a model's worst trials.
+    """
+    client = _client()
+    _register(client, "forced_prose2", {"forced_completion": "hmm, unclear."})
+    _prepare_start(
+        client,
+        rollout_id="gsm8k_attempted",
+        body={
+            "world_ref": "world:gsm8k@train",
+            "task_instance_id": "seed:0",
+            "policy_ref": {"harness": "solve", "config": "forced_prose2"},
+        },
+    )
+    _prepare_start(
+        client,
+        rollout_id="gsm8k_no_attempt",
+        body={
+            "world_ref": "world:gsm8k@train",
+            "task_instance_id": "seed:0",
+            "policy_ref": {"harness": "solve", "config": "solve"},
+        },
+    )
+    attempted = client.post(
+        "/reward", json={"rollout_id": "gsm8k_attempted", "mode": "terminal"}
+    ).json()
+    no_attempt = client.post(
+        "/reward", json={"rollout_id": "gsm8k_no_attempt", "mode": "terminal"}
+    ).json()
+    assert (attempted["reward"], attempted["status"]) == (0.0, "scored")
+    assert (no_attempt["reward"], no_attempt["status"]) == (None, "absent")
 
 
 def test_solve_without_a_sampler_is_absent_not_zero() -> None:
