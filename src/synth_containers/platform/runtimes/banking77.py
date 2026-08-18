@@ -19,7 +19,7 @@ import re
 import urllib.error
 import urllib.request
 from urllib.parse import urlsplit
-from typing import Any
+from typing import Any, Callable
 
 from ...event_log import RolloutEventLog
 from ..banking77_world import (
@@ -29,6 +29,14 @@ from ..banking77_world import (
     public_observation,
     split_from_world_ref,
     user_prompt,
+)
+from ..local_provider import (
+    CHAT_COMPLETIONS,
+    RESPONSES,
+    is_local_provider,
+    local_endpoint,
+    normalize_api_family,
+    validate_local_endpoint,
 )
 from ..state import CompatPlatform, RolloutPin
 
@@ -140,7 +148,22 @@ class Banking77Runtime:
         if isinstance(forced, str) and forced.strip():
             return forced.strip(), dict(_EMPTY_USAGE)
 
-        if str(config.get("provider") or "").strip():
+        provider = str(config.get("provider") or "").strip()
+        if is_local_provider(provider) and normalize_api_family(config.get("api_family")) == RESPONSES:
+            # `synth_mlx_rl` is admitted on both InferenceApiFamily members. The
+            # family decides the route, so a config cannot name one and be
+            # sampled on the other.
+            endpoint = local_endpoint(
+                config.get("responses_base_url") or config.get("base_url"),
+                api_family=RESPONSES,
+            )
+            return _sample_responses(
+                endpoint,
+                observation,
+                config,
+                validate=_validate_local_responses_endpoint,
+            )
+        if provider:
             return _sample_chat_completion(observation, config)
 
         responses_endpoint = _responses_endpoint(config)
@@ -189,21 +212,34 @@ def _sample_chat_completion(
 ) -> tuple[str, dict[str, Any]]:
     provider = str(config.get("provider") or "openai").strip().lower()
     model = str(config.get("model") or "").strip()
-    base_url = str(config.get("base_url") or "https://api.openai.com/v1").rstrip("/")
-    key_env = str(config.get("api_key_env") or "OPENAI_API_KEY").strip()
-    api_key = os.environ.get(key_env, "").strip()
     allowed_bases = {
         "openai": "https://api.openai.com/v1",
         "openrouter": "https://openrouter.ai/api/v1",
     }
-    if provider not in allowed_bases:
-        raise RuntimeError("banking77_provider_unsupported")
-    if not model:
-        raise RuntimeError("banking77_model_missing")
-    if not api_key:
-        raise RuntimeError("openai_api_key_missing")
-    if base_url != allowed_bases[provider]:
-        raise RuntimeError("banking77_chat_endpoint_refused")
+    if is_local_provider(provider):
+        # The local MLX proxy is not a hosted origin with a fixed base URL, so
+        # the shared validator decides admission instead of an equality check:
+        # loopback (and the Docker host alias) over http, or an origin named in
+        # SYNTH_MLX_RL_ALLOWED_ENDPOINTS. Everything else is refused before any
+        # socket is opened.
+        endpoint = local_endpoint(config.get("base_url"), api_family=CHAT_COMPLETIONS)
+        key_env = str(config.get("api_key_env") or "").strip()
+        api_key = os.environ.get(key_env, "").strip() if key_env else ""
+        if not model:
+            raise RuntimeError("banking77_model_missing")
+    else:
+        base_url = str(config.get("base_url") or "https://api.openai.com/v1").rstrip("/")
+        key_env = str(config.get("api_key_env") or "OPENAI_API_KEY").strip()
+        api_key = os.environ.get(key_env, "").strip()
+        if provider not in allowed_bases:
+            raise RuntimeError("banking77_provider_unsupported")
+        if not model:
+            raise RuntimeError("banking77_model_missing")
+        if not api_key:
+            raise RuntimeError("openai_api_key_missing")
+        if base_url != allowed_bases[provider]:
+            raise RuntimeError("banking77_chat_endpoint_refused")
+        endpoint = f"{base_url}/chat/completions"
     payload = json.dumps(
         {
             "model": model,
@@ -215,10 +251,13 @@ def _sample_chat_completion(
             "max_completion_tokens": int(config.get("max_tokens", 32)),
         }
     ).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
     request = urllib.request.Request(
-        f"{base_url}/chat/completions",
+        endpoint,
         data=payload,
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
     try:
@@ -269,12 +308,21 @@ def _responses_endpoint(config: dict[str, Any]) -> str | None:
     return f"{base}/responses"
 
 
+def _validate_local_responses_endpoint(endpoint: str) -> None:
+    validate_local_endpoint(endpoint, api_family=RESPONSES)
+
+
 def _sample_responses(
     endpoint: str,
     observation: dict[str, Any],
     config: dict[str, Any],
+    *,
+    validate: Callable[[str], None] | None = None,
 ) -> tuple[str | None, dict[str, Any]]:
-    _validate_responses_endpoint(endpoint)
+    # The hosted responses lane and the local `synth_mlx_rl` lane share this
+    # sampler but not their admission rule, so the validator is chosen by the
+    # caller rather than inferred from the URL.
+    (validate or _validate_responses_endpoint)(endpoint)
     api_key = str(config.get("responses_api_key") or "").strip()
     idempotency_key = str(config.get("responses_idempotency_key") or "").strip()
     model = str(config.get("responses_model") or "policy").strip()

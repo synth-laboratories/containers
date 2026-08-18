@@ -17,6 +17,13 @@ import httpx
 
 from ...event_log import RolloutEventLog
 from ..healthbench_world import load_row, public_observation
+from ..local_provider import (
+    RESPONSES,
+    endpoint_suffix,
+    is_local_provider,
+    local_endpoint,
+    normalize_api_family,
+)
 from ..state import CompatPlatform, RolloutPin
 
 
@@ -194,8 +201,16 @@ class HealthBenchRuntime:
 
 
 def _chat(config: dict[str, Any], messages: list[dict[str, Any]]) -> dict[str, Any]:
+    """Sample one completion. Hosted providers stay unrestricted, as before.
+
+    `synth_mlx_rl` is the one provider whose endpoint is checked here, because
+    it is the one whose base URL is not a known origin: it goes through the same
+    shared admission the Banking77 and ReAct call sites use, on either
+    InferenceApiFamily member.
+    """
     provider = str(config.get("provider") or "groq").lower()
     model = str(config.get("model") or POLICY_MODEL)
+    api_family = normalize_api_family(config.get("api_family"))
     base = str(
         config.get("base_url")
         or ("https://api.groq.com/openai/v1" if provider == "groq" else "https://api.openai.com/v1")
@@ -204,25 +219,57 @@ def _chat(config: dict[str, Any], messages: list[dict[str, Any]]) -> dict[str, A
         config.get("api_key_env") or ("GROQ_API_KEY" if provider == "groq" else "OPENAI_API_KEY")
     )
     api_key = os.environ.get(key_env, "")
-    if not api_key:
-        raise RuntimeError(f"{provider}_api_key_missing")
-    response = _client(base).post(
-        "/chat/completions",
-        headers={"Authorization": f"Bearer {api_key}"},
-        json={
+    if is_local_provider(provider):
+        # A loopback proxy issues no bearer of its own; the URL check is the
+        # admission, so a missing key is not a refusal here.
+        target = local_endpoint(base, api_family=api_family)
+    else:
+        if not api_key:
+            raise RuntimeError(f"{provider}_api_key_missing")
+        target = endpoint_suffix(api_family)
+    if api_family == RESPONSES:
+        payload: dict[str, Any] = {
+            "model": model,
+            "input": messages,
+            "temperature": float(config.get("temperature", 0.2)),
+            "max_output_tokens": int(config.get("max_tokens", 1536)),
+        }
+    else:
+        payload = {
             "model": model,
             "messages": messages,
             "temperature": float(config.get("temperature", 0.2)),
             "max_completion_tokens": int(config.get("max_tokens", 1536)),
-        },
+        }
+    response = _client(base).post(
+        target,
+        headers={"Authorization": f"Bearer {api_key}"} if api_key else {},
+        json=payload,
         timeout=float(config.get("timeout_seconds", 90)),
     )
     response.raise_for_status()
     body = response.json()
-    text = str((body.get("choices") or [{}])[0].get("message", {}).get("content") or "")
+    if api_family == RESPONSES:
+        text = _responses_text(body)
+    else:
+        text = str((body.get("choices") or [{}])[0].get("message", {}).get("content") or "")
     if not text.strip():
         raise RuntimeError("empty_policy_completion")
     return {"text": text, "usage": _usage(provider, model, body.get("usage"))}
+
+
+def _responses_text(body: dict[str, Any]) -> str:
+    text = body.get("output_text")
+    if isinstance(text, str):
+        return text
+    fragments: list[str] = []
+    for item in body.get("output") or []:
+        if not isinstance(item, dict) or item.get("type") != "message":
+            continue
+        for part in item.get("content") or []:
+            if isinstance(part, dict) and part.get("type") == "output_text":
+                fragments.append(str(part.get("text") or ""))
+    return "".join(fragments)
 
 
 def _grade(

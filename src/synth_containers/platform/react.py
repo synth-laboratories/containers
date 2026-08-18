@@ -16,6 +16,12 @@ from typing import Any
 
 from .craftax_taxonomy import usage_from_call_identity
 from .craftax_world import ACTIONS
+from .local_provider import (
+    API_FAMILIES,
+    RESPONSES,
+    local_endpoint,
+)
+from .local_provider import PROVIDER_ID as LOCAL_PROVIDER_ID
 
 DeltaCallback = Callable[[dict[str, Any]], None]
 
@@ -258,21 +264,49 @@ class OpenRouterReAct:
         # and every rollout died on turn 0 with `policy_error` after zero steps.
         # A missing endpoint must say so, not pick one.
         self.provider = _required_choice(
-            config, "provider", config_id, ("openrouter", "tinker")
+            config, "provider", config_id, ("openrouter", LOCAL_PROVIDER_ID, "tinker")
         )
         self.api_key_env = _required_str(config, "api_key_env", config_id)
         self.parse_retries = _required_bounded_int(config, "parse_retries", config_id, 0, 2)
-        if self.provider == "openrouter":
+        if self.provider in {"openrouter", LOCAL_PROVIDER_ID}:
             self.base_url = _required_str(config, "base_url", config_id).rstrip("/")
+            self.chat_endpoint = f"{self.base_url}/chat/completions"
             self.sampler_path = ""
             self.tokenizer_id = ""
             self.sampler_ready_timeout_s = 0
+            if self.provider == LOCAL_PROVIDER_ID:
+                # The local proxy has no fixed origin, so admission is the shared
+                # `synth_mlx_rl` check rather than a hosted base URL: loopback or
+                # the Docker host alias over http, or an origin named in
+                # SYNTH_MLX_RL_ALLOWED_ENDPOINTS. Refusing at config time rather
+                # than at sample time keeps a bad endpoint from reading later as
+                # a policy that scored zero.
+                family = _required_choice(config, "api_family", config_id, API_FAMILIES)
+                if family == RESPONSES:
+                    # This planner renders a chat-completions body carrying a
+                    # `choose_actions` tool and reads streamed tool calls back.
+                    # A responses-family route takes neither, and forwarding the
+                    # chat body to it would evaluate a transcript the policy was
+                    # never given. Name the gap; do not translate silently.
+                    raise PolicyConfigError(
+                        f"policy config {config_id!r} sets api_family='responses', but the "
+                        "ReAct planner renders a chat-completions tool-call body and has no "
+                        "responses-family renderer; use api_family='chat_completions'"
+                    )
+                try:
+                    self.chat_endpoint = local_endpoint(self.base_url, api_family=family)
+                except RuntimeError as exc:
+                    raise PolicyConfigError(
+                        f"policy config {config_id!r} names a base_url the local "
+                        f"{LOCAL_PROVIDER_ID} provider refuses: {exc}"
+                    ) from exc
         else:
             # Tinker samples through its SDK, not an HTTP base_url. The sampler
             # path names the trained weights; the tokenizer must be the base
             # model's, or the chat template renders a prompt the student never
             # saw in training.
             self.base_url = ""
+            self.chat_endpoint = ""
             self.sampler_path = _required_str(config, "sampler_path", config_id)
             self.tokenizer_id = _required_str(config, "tokenizer_id", config_id)
             self.sampler_ready_timeout_s = _required_bounded_int(
@@ -652,7 +686,7 @@ class OpenRouterReAct:
                 f"{len(transcript)} messages dropped]"
             )
         request = urllib.request.Request(
-            f"{self.base_url}/chat/completions",
+            self.chat_endpoint,
             data=json.dumps(payload).encode("utf-8"),
             headers={
                 "authorization": f"Bearer {api_key}",
@@ -811,7 +845,7 @@ class OpenRouterReAct:
             "tool_choice": "auto",
         }
         request = urllib.request.Request(
-            f"{self.base_url}/chat/completions",
+            self.chat_endpoint,
             data=json.dumps(payload).encode("utf-8"),
             headers={
                 "Authorization": f"Bearer {api_key}",
