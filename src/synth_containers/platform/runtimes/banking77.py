@@ -140,6 +140,9 @@ class Banking77Runtime:
         if isinstance(forced, str) and forced.strip():
             return forced.strip(), dict(_EMPTY_USAGE)
 
+        if str(config.get("provider") or "").strip():
+            return _sample_chat_completion(observation, config)
+
         responses_endpoint = _responses_endpoint(config)
         if responses_endpoint:
             return _sample_responses(responses_endpoint, observation, config)
@@ -155,6 +158,7 @@ class Banking77Runtime:
         if harness != "classify":
             raise ValueError(f"unknown_banking77_harness:{harness}")
         return None, dict(_EMPTY_USAGE)
+
 
     def _close_missing(
         self,
@@ -178,6 +182,58 @@ class Banking77Runtime:
         log.append("capture.high_water", {"high_water": evidence_high_water})
         log.append("capture.closed", {"high_water": evidence_high_water})
         log.mark_closed()
+
+
+def _sample_chat_completion(
+    observation: dict[str, Any], config: dict[str, Any]
+) -> tuple[str, dict[str, Any]]:
+    provider = str(config.get("provider") or "openai").strip().lower()
+    model = str(config.get("model") or "").strip()
+    base_url = str(config.get("base_url") or "https://api.openai.com/v1").rstrip("/")
+    key_env = str(config.get("api_key_env") or "OPENAI_API_KEY").strip()
+    api_key = os.environ.get(key_env, "").strip()
+    if provider != "openai":
+        raise RuntimeError("banking77_provider_unsupported")
+    if not model:
+        raise RuntimeError("banking77_model_missing")
+    if not api_key:
+        raise RuntimeError("openai_api_key_missing")
+    if not base_url.startswith("https://api.openai.com/"):
+        raise RuntimeError("banking77_chat_endpoint_refused")
+    payload = json.dumps(
+        {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": str(observation.get("system") or CLASSIFY_SYSTEM)},
+                {"role": "user", "content": str(observation.get("prompt") or "")},
+            ],
+            "temperature": float(config.get("temperature", 0)),
+            "max_completion_tokens": int(config.get("max_tokens", 32)),
+        }
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        f"{base_url}/chat/completions",
+        data=payload,
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=float(config.get("timeout_seconds", 90))) as response:
+            body = json.loads(response.read(1_000_000))
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"openai_http_{exc.code}") from exc
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise RuntimeError("openai_transport_error") from exc
+    text = str(((body.get("choices") or [{}])[0].get("message") or {}).get("content") or "")
+    prediction = normalize_label(text)
+    if not prediction:
+        raise RuntimeError("empty_policy_completion")
+    raw_usage = body.get("usage") or {}
+    return prediction, {
+        "prompt_tokens": raw_usage.get("prompt_tokens"),
+        "completion_tokens": raw_usage.get("completion_tokens"),
+        "total_tokens": raw_usage.get("total_tokens"),
+    }
 
 
 def _error_code(exc: BaseException) -> str | None:
