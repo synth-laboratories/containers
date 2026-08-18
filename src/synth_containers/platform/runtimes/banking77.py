@@ -192,13 +192,17 @@ def _sample_chat_completion(
     base_url = str(config.get("base_url") or "https://api.openai.com/v1").rstrip("/")
     key_env = str(config.get("api_key_env") or "OPENAI_API_KEY").strip()
     api_key = os.environ.get(key_env, "").strip()
-    if provider != "openai":
+    allowed_bases = {
+        "openai": "https://api.openai.com/v1",
+        "openrouter": "https://openrouter.ai/api/v1",
+    }
+    if provider not in allowed_bases:
         raise RuntimeError("banking77_provider_unsupported")
     if not model:
         raise RuntimeError("banking77_model_missing")
     if not api_key:
         raise RuntimeError("openai_api_key_missing")
-    if not base_url.startswith("https://api.openai.com/"):
+    if base_url != allowed_bases[provider]:
         raise RuntimeError("banking77_chat_endpoint_refused")
     payload = json.dumps(
         {
