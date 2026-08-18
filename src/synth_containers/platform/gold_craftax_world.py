@@ -23,6 +23,15 @@ from .craftax_world import StepResult
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
 
+class GoldWorldUnreachable(RuntimeError):
+    """The world service could not be reached. Not a policy failure.
+
+    Reported separately because an unreachable world dies in reset(), before
+    the policy is ever called, and labelling that `policy_error` sent two
+    diagnoses chasing the model instead of the address.
+    """
+
+
 class GoldFrameMissing(RuntimeError):
     """live_frames=native requires a PNG copy into the relay. Missing is not ASCII."""
 

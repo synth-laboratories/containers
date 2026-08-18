@@ -20,6 +20,7 @@ from ..event_log import (
     stream_descriptor,
     validate_rollout_id,
 )
+from .react import CRAFTAX_REACT_SYSTEM_PROMPT
 from .affordances import bind_recipe
 from .http_requests import CreateRolloutRequest, ISOLATED_POLICY_HARNESS
 from .policy_process import DEFAULT_HEURISTIC, IsolatedPolicyProcess
@@ -516,15 +517,48 @@ class CompatPlatform:
     def _seed_default_policies(self) -> None:
         if self.spec.default_policy_harness == "isolated_policy_process":
             return
+        # Seeded configs must name every policy-identity field. A partial seed
+        # is worse than none: the harness would fill the gaps from its own
+        # defaults, and a result reported for "luna_med" would describe a
+        # policy nobody chose. `sol_med` previously omitted compact_every and
+        # both omitted max_tokens.
         self.policy_configs["luna_med"] = PolicyConfig(
             config_id="luna_med",
             harness=self.spec.default_policy_harness,
-            config={"model": "gpt-5.6-luna", "effort": "medium", "compact_every": 16},
+            config={
+                "model": "gpt-5.6-luna",
+                "effort": "medium",
+                "max_tokens": 1024,
+                "context_token_budget": 16000,
+                "compact_at": 0.7,
+                "keep_recent_messages": 8,
+                "keep_recent_frames": 2,
+                "observation_mode": "text",
+                "provider": "openrouter",
+                "base_url": "https://openrouter.ai/api/v1",
+                "api_key_env": "OPENROUTER_API_KEY",
+                "parse_retries": 0,
+                "system_prompt": CRAFTAX_REACT_SYSTEM_PROMPT,
+            },
         )
         self.policy_configs["sol_med"] = PolicyConfig(
             config_id="sol_med",
             harness=self.spec.default_policy_harness,
-            config={"model": "gpt-5.6-sol", "effort": "medium"},
+            config={
+                "model": "gpt-5.6-sol",
+                "effort": "medium",
+                "max_tokens": 1024,
+                "context_token_budget": 16000,
+                "compact_at": 0.7,
+                "keep_recent_messages": 8,
+                "keep_recent_frames": 2,
+                "observation_mode": "text",
+                "provider": "openrouter",
+                "base_url": "https://openrouter.ai/api/v1",
+                "api_key_env": "OPENROUTER_API_KEY",
+                "parse_retries": 0,
+                "system_prompt": CRAFTAX_REACT_SYSTEM_PROMPT,
+            },
         )
         for seed in self.spec.policy_seeds:
             self.policy_configs[seed.config_id] = PolicyConfig(
@@ -658,7 +692,7 @@ class CompatPlatform:
         }
         schema = self._input_schema()
         digest = self.capabilities_digest()
-        return {
+        payload = {
             "world_ref": self.spec.world_ref,
             "environment_ref": self.spec.environment_ref,
             "policy_ref": {
@@ -703,6 +737,9 @@ class CompatPlatform:
             },
             "capacity": self._capacity_snapshot(),
         }
+        if contract := self._gepa_v2_contract():
+            payload["optimizer_contracts"] = {"gepa": contract}
+        return payload
 
     def _capacity_snapshot(self) -> dict[str, Any]:
         active = sum(1 for pin in self.pins.values() if pin.started and not pin.terminal and pin.simulating)
@@ -745,6 +782,27 @@ class CompatPlatform:
             "capacity": self._capacity_snapshot(),
             "crash_signals": crashed,
         }
+    def _gepa_v2_contract(self) -> dict[str, Any] | None:
+        family = self.spec.runtime_family.value
+        if family == "healthbench":
+            return {
+                "version": "synth_optimizers.gepa.v2",
+                "program_route": "/program",
+                "taskset_route": "/taskset",
+                "taskset_tasks_route": "/taskset/tasks",
+                "rollout_route": "/rollout",
+                "trace_route": "/rollouts/{rollout_id}/events",
+            }
+        if family == "banking77":
+            return {
+                "version": "synth_optimizers.gepa.v2",
+                "program_route": "/program",
+                "taskset_route": "/taskset",
+                "rollout_route": "/rollouts",
+                "prepare_route": "/rollouts/prepare",
+                "trace_route": "/rollouts/{rollout_id}/events",
+            }
+        return None
 
     def bind(self, recipe: dict[str, Any] | None) -> dict[str, Any] | None:
         return bind_recipe(self.spec.affordances, recipe)
@@ -811,15 +869,52 @@ class CompatPlatform:
 
     def start_rollout(self, request: CreateRolloutRequest) -> dict[str, Any]:
         spawn_id: str | None = None
+        should_run = False
+        pin: RolloutPin | None = None
+        log: RolloutEventLog | None = None
+        rollout_id = ""
         with self._state_lock:
-            result = self._start_rollout_locked(request)
+            result = self._start_rollout_locked(request, defer_sync=True)
             if isinstance(result, dict) and result.pop("_spawn_background", False):
                 spawn_id = str(result.get("rollout_id") or "")
+            else:
+                rollout_id = str(result.get("rollout_id") or request.rollout_id or "")
+                pin = self.pins.get(rollout_id)
+                log = self.logs.get(rollout_id)
+                should_run = (
+                    request.submission_mode != "async"
+                    and pin is not None
+                    and log is not None
+                    and pin.status == "running"
+                    and not bool(result.get("replayed"))
+                )
         if spawn_id:
             self._spawn_background(spawn_id)
+            return result
+        if not should_run:
+            return result
+        assert pin is not None and log is not None
+        try:
+            # Policy and evaluator calls can take minutes. They are isolated by
+            # rollout identity and must not hold the platform-wide admission
+            # lock, otherwise one synchronous rollout makes advertised leases
+            # fictitious and blocks prepare/start for every other rollout.
+            # Keep the same fail-closed terminalization contract as the
+            # locked synchronous path. Moving execution outside the admission
+            # lock must not turn runtime exceptions into permanently running
+            # pins that block later policy registration or replay.
+            self._simulate_or_fail(pin, log)
+        finally:
+            with self._state_lock:
+                self.active_leases = max(0, self.active_leases - 1)
+                result = self._rollout_response(
+                    pin, self.stream_descriptor_for(rollout_id)
+                )
         return result
 
-    def _start_rollout_locked(self, request: CreateRolloutRequest) -> dict[str, Any]:
+    def _start_rollout_locked(
+        self, request: CreateRolloutRequest, *, defer_sync: bool = False
+    ) -> dict[str, Any]:
         slot = request.slot
         if slot in {"live", "jobs"}:
             return {
@@ -1030,8 +1125,10 @@ class CompatPlatform:
             if execution == "background":
                 accepted["_spawn_background"] = True
             return accepted
+        if defer_sync:
+            return self._rollout_response(pin, descriptor)
         try:
-            self._simulate(pin, log)
+            self._simulate_or_fail(pin, log)
         finally:
             self.active_leases = max(0, self.active_leases - 1)
         return self._rollout_response(pin, descriptor)
@@ -1118,7 +1215,7 @@ class CompatPlatform:
                     return
                 pin.simulating = True
             try:
-                self._simulate(pin, log)
+                self._simulate_or_fail(pin, log)
             finally:
                 with self._state_lock:
                     pin.simulating = False
@@ -1245,6 +1342,23 @@ class CompatPlatform:
             "kind": "trace_v5_bundle" if has_bundle else "lite_seal",
             "inspectable": has_bundle,
         }
+
+    def _simulate_or_fail(self, pin: RolloutPin, log: RolloutEventLog) -> None:
+        """Run the rollout, terminalizing the pin even when it raises.
+
+        `register_policy_config` refuses while any pin is started and not
+        terminal. A rollout that raised before its runtime could record an
+        outcome — a malformed policy config, say — left its pin pinned forever,
+        so every later bind returned 409 and the container had to be restarted
+        to accept work again. The error still propagates; it just no longer
+        takes the container down with it.
+        """
+        try:
+            self._simulate(pin, log)
+        except BaseException:
+            pin.status = "failed"
+            pin.terminal = True
+            raise
 
     def _simulate(self, pin: RolloutPin, log: RolloutEventLog) -> None:
         pin.env_generation += 1

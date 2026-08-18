@@ -667,8 +667,8 @@ class Runner:
 
         self._c3_02_occupancy(meta, ids, stream_ids, generations)
 
-        cfg = self.client.post("/policy-configs", json={"config_id": "luna_med", "config": {"model": "luna"}})
-        cfg2 = self.client.post("/policy-configs", json={"config_id": "sol_med", "config": {"model": "sol"}})
+        cfg = self.client.post("/policy-configs", json={"config_id": "luna_med", "config": {"model": "luna", "effort": "medium", "max_tokens": 1024, "context_token_budget": 16000, "compact_at": 0.7, "keep_recent_messages": 8, "keep_recent_frames": 2, "observation_mode": "text"}})
+        cfg2 = self.client.post("/policy-configs", json={"config_id": "sol_med", "config": {"model": "sol", "effort": "medium", "max_tokens": 1024, "context_token_budget": 16000, "compact_at": 0.7, "keep_recent_messages": 8, "keep_recent_frames": 2, "observation_mode": "text"}})
         nxt = self._start(policy_ref={"harness": "react", "config": "sol_med"}, task_instance_id="seed:0")
         if cfg.status_code == 200 and cfg2.status_code == 200 and _json(nxt)["policy_ref"]["config"] == "sol_med":
             self.suite.ok("C3-05")
@@ -840,7 +840,7 @@ class Runner:
                 self.suite.ok("C4-04")
             else:
                 self.suite.fail("C4-04", f"{_json(nxt)} {scored}")
-            bind = self.client.post("/policy-configs", json={"config_id": "luna_med", "config": {}})
+            bind = self.client.post("/policy-configs", json={"config_id": "luna_med", "config": {"model": "gpt-5.6-luna", "effort": "medium", "max_tokens": 1024, "context_token_budget": 16000, "compact_at": 0.7, "keep_recent_messages": 8, "keep_recent_frames": 2, "observation_mode": "text"}})
             start_cfg = self._start(policy_ref={"harness": "isolated_policy_process", "config": "luna_med"})
             if bind.status_code == 403 and start_cfg.status_code == 403:
                 self.suite.ok("C4-05")
@@ -903,15 +903,25 @@ class Runner:
             self.suite.fail("C5-01", f"{meta.get('blocking_trial')}")
         else:
             self.suite.ok("C5-01")
-        a = self.client.post("/policy-configs", json={"config_id": "luna_med", "config": {"model": "luna"}})
-        b = self.client.post("/policy-configs", json={"config_id": "sol_med", "config": {"model": "sol"}})
+        a = self.client.post("/policy-configs", json={"config_id": "luna_med", "config": {"model": "luna", "effort": "medium", "max_tokens": 1024, "context_token_budget": 16000, "compact_at": 0.7, "keep_recent_messages": 8, "keep_recent_frames": 2, "observation_mode": "text"}})
+        b = self.client.post("/policy-configs", json={"config_id": "sol_med", "config": {"model": "sol", "effort": "medium", "max_tokens": 1024, "context_token_budget": 16000, "compact_at": 0.7, "keep_recent_messages": 8, "keep_recent_frames": 2, "observation_mode": "text"}})
         held = self._start(submission_mode="async", policy_ref={"harness": "harbor_fused", "config": "luna_med"})
         mid = self.client.post("/policy-configs", json={"config_id": "other", "config": {}})
         self.client.post(f"/rollouts/{_json(held)['rollout_id']}/complete")
-        if a.status_code == 200 and b.status_code == 200 and mid.status_code == 409:
+        held_id = _json(held)["rollout_id"]
+        held_policy = _json(self.client.get(f"/rollouts/{held_id}")).get("policy_ref")
+        if (
+            a.status_code == 200
+            and b.status_code == 200
+            and mid.status_code == 200
+            and held_policy == {"harness": "harbor_fused", "config": "luna_med", "code": None}
+        ):
             self.suite.ok("C5-02")
         else:
-            self.suite.fail("C5-02", f"{a.status_code} {b.status_code} mid={mid.status_code}")
+            self.suite.fail(
+                "C5-02",
+                f"{a.status_code} {b.status_code} mid={mid.status_code} held={held_policy}",
+            )
         started = self._start(policy_ref={"harness": "harbor_fused", "config": "luna_med"})
         events = _json(self.client.get(_json(started)["stream"]["transports"]["poll"]["url"], params={"after": 0}))["events"]
         kinds = _kinds(events)

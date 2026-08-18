@@ -7,6 +7,7 @@ max_episode_steps is pinned on the TargetSpec; SYNTH_CRAFTAX_MAX_STEPS may overr
 from __future__ import annotations
 
 import os
+import traceback
 from typing import Any
 
 from ...event_log import RolloutEventLog
@@ -130,6 +131,14 @@ class CraftaxRuntime:
                     checkpoint_callback=checkpoint_callback,
                 )
             except Exception as exc:
+                # The event log is durable and shippable, so it carries the
+                # exception *class* only — a provider SDK may embed a key in a
+                # message. But the class alone is not diagnosable: a missing
+                # API key, a sampler path that is not yet servable and a
+                # malformed response all arrive as RuntimeError and each needs
+                # a different fix. Put the detail on stderr, which is
+                # process-local and never shipped.
+                traceback.print_exc()
                 # The stream is the durable authority. A provider/configuration
                 # failure after span.policy.opened must not leave the rollout
                 # looking active forever merely because the HTTP start request
@@ -157,6 +166,15 @@ class CraftaxRuntime:
                         "natural_completion": False,
                         "truncated": False,
                         "infra_complete": True,
+                        # An unreachable world dies in reset(), before the policy
+                        # is called. Calling that `policy_error` is what sent two
+                        # diagnoses chasing the model instead of the address.
+                        "reason": (
+                            "environment_error"
+                            if isinstance(exc, GoldConnectionError)
+                            else "policy_error"
+                        ),
+                        "error_type": type(exc).__name__,
                     },
                 )
                 status_payload = {

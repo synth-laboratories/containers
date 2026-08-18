@@ -147,6 +147,24 @@ class AttachedSynthTunnelLease:
             if self._closed or self._closing.is_set():
                 raise SynthTunnelRelayError("SynthTunnel lease is closed")
 
+    def update_credentials(
+        self,
+        *,
+        worker_token: str,
+        expires_at: str | None,
+        agent_token: str,
+    ) -> None:
+        """Adopt heartbeat-rotated credentials without replacing the relay."""
+
+        normalized_worker_token = _required_text(worker_token, "worker token")
+        normalized_agent_token = _required_text(agent_token, "agent token")
+        with self._ready_lock:
+            if self._closed or self._closing.is_set():
+                raise SynthTunnelRelayError("SynthTunnel lease is closed")
+            self.worker_token = normalized_worker_token
+            self.expires_at = expires_at or self.expires_at
+            self._agent.update_agent_token(normalized_agent_token)
+
     def close(self) -> None:
         self._closing.set()
         with self._close_lock:
@@ -326,6 +344,13 @@ class SynthTunnelRelayAgent:
         self._websocket: Any | None = None
         self._connection_generation = 0
         self._startup_error: str | None = None
+
+    def update_agent_token(self, token: str) -> None:
+        """Use a rotated agent token for the next relay connection."""
+
+        normalized = _required_text(token, "agent token")
+        with self._lifecycle_lock:
+            self._agent_token = normalized
 
     def start(
         self,

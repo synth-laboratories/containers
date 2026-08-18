@@ -31,6 +31,16 @@ RUNTIME_BUNDLE_KEY = "harbor_pinned_bundle"
 _STDOUT_LIMIT = 4096
 _NAME_SAFE = re.compile(r"[^a-zA-Z0-9_.-]+")
 _IMAGE_DIGEST = re.compile(r"^.+@sha256:[0-9a-f]{64}$")
+# The verifier is always hermetic. Only an authoring agent may request egress.
+_ALLOWED_AGENT_NETWORKS = frozenset({"none", "bridge"})
+_DEFAULT_ROLE_TIMEOUT_SEC = 120.0
+_MAX_ROLE_TIMEOUT_SEC = 3600.0
+RUNTIME_CREDENTIALS_KEY = "agent_credentials"
+_CREDENTIALS_MOUNT = "/codexhome"
+# Authority binds at /workspace/<bench>/tasks/<rest>. <bench> is one lowercase
+# identifier (gamebench, cardbench, ...). The public Harbor fixture is not a bench.
+_BENCH_ID = re.compile(r"^[a-z][a-z0-9_]*$")
+_RESERVED_BENCHES = frozenset({"harbor_public"})
 
 
 @dataclass(frozen=True)
@@ -70,6 +80,9 @@ class HarborPinnedBundle:
     required_paths: tuple[str, ...]
     reward_path: str
     tests: str
+    agent_network: str = "none"
+    agent_timeout_seconds: float = 120.0
+    verifier_timeout_seconds: float = 120.0
 
     @classmethod
     def from_runtime_config(cls, config: Mapping[str, Any]) -> "HarborPinnedBundle | None":
@@ -130,6 +143,14 @@ class HarborPinnedBundle:
         if not tests or len(tests) > 256:
             raise HarborBundleError("harbor_bundle_verifier_invalid")
 
+        # An authoring agent (a real model turn) needs egress; a verifier never
+        # does. Only the agent role may opt in, and only to a named bridge.
+        agent_network = str(agent.get("network") or "none").strip()
+        if agent_network not in _ALLOWED_AGENT_NETWORKS:
+            raise HarborBundleError("harbor_bundle_agent_network_invalid")
+        agent_timeout = _timeout_seconds(agent.get("timeout_seconds"))
+        verifier_timeout = _timeout_seconds(verifier.get("timeout_seconds"))
+
         task_tree_path = _safe_relative(
             str(task_tree.get("path") or ""), "harbor_bundle_task_tree_invalid"
         )
@@ -137,10 +158,7 @@ class HarborPinnedBundle:
         if not task_root.is_dir():
             raise HarborBundleError("harbor_bundle_task_tree_missing")
         task_tree_mount = str(task_tree.get("mount") or "").strip()
-        if not task_tree_mount.startswith("/workspace/gamebench/tasks/"):
-            raise HarborBundleError("harbor_bundle_task_tree_mount_invalid")
-        if ":" in task_tree_mount or ".." in Path(task_tree_mount).parts:
-            raise HarborBundleError("harbor_bundle_task_tree_mount_invalid")
+        _validate_task_tree_mount(task_tree_mount)
         expected_tree = str(task_tree.get("digest") or "").strip().lower()
         actual_tree = compute_tree_digest(task_root)
         if expected_tree != actual_tree:
@@ -172,6 +190,9 @@ class HarborPinnedBundle:
             required_paths=tuple(required_paths),
             reward_path=reward_path,
             tests=tests,
+            agent_network=agent_network,
+            agent_timeout_seconds=agent_timeout,
+            verifier_timeout_seconds=verifier_timeout,
         )
 
 
@@ -204,10 +225,13 @@ def execute_docker_role(
     name: str,
     environment: Mapping[str, str] | None = None,
     allow_nonzero: bool = False,
-    timeout_seconds: float = 120.0,
+    timeout_seconds: float = _DEFAULT_ROLE_TIMEOUT_SEC,
+    network: str = "none",
 ) -> DockerExecution:
     """One short-lived `docker run --rm`. Tests may replace this."""
-    argv = ["docker", "run", "--rm", "--network", "none", "--name", name]
+    if network not in _ALLOWED_AGENT_NETWORKS:
+        raise DockerRunError("harbor_docker_network_invalid")
+    argv = ["docker", "run", "--rm", "--network", network, "--name", name]
     for key, value in sorted((environment or {}).items()):
         if not re.fullmatch(r"[A-Z_][A-Z0-9_]*", key):
             raise DockerRunError("harbor_docker_environment_invalid")
@@ -266,6 +290,7 @@ def run_docker_trial(platform: CompatPlatform, pin: RolloutPin, log: RolloutEven
                 bundle=bundle,
                 workspace_root=workspace_root,
                 logs_root=logs_root,
+                credentials_host_path=_credentials_host_path(platform.runtime_config),
             )
     except DockerRunError as exc:
         _fail(
@@ -283,6 +308,7 @@ def _run_pinned_bundle(
     bundle: HarborPinnedBundle,
     workspace_root: str,
     logs_root: str,
+    credentials_host_path: str | None = None,
 ) -> None:
     agent_name = _container_name("harbor-agent", pin.rollout_id)
     verifier_name = _container_name("harbor-verifier", pin.rollout_id)
@@ -315,21 +341,36 @@ def _run_pinned_bundle(
             "bundle_digest": bundle.bundle_digest,
         },
     )
-    log.append("span.agent.opened", {"role": "agent", "execution": "distinct"})
+    log.append(
+        "span.agent.opened",
+        {"role": "agent", "execution": "distinct", "network": bundle.agent_network},
+    )
+    agent_volumes = dict(shared_volumes)
+    agent_environment = {
+        "SYNTH_POLICY_HARNESS": str(pin.policy_ref.get("harness") or ""),
+        "SYNTH_POLICY_CONFIG": str(pin.policy_ref.get("config") or ""),
+    }
+    if credentials_host_path:
+        # Operator-supplied, never part of the digest-pinned bundle and never
+        # echoed into the event log — only the mount point is observable.
+        agent_volumes[_CREDENTIALS_MOUNT] = DockerVolume(credentials_host_path, read_only=False)
+        agent_environment["CODEX_HOME"] = _CREDENTIALS_MOUNT
     agent = execute_docker_role(
         role="agent",
         image=bundle.image,
         command=list(bundle.agent_command),
-        volumes=shared_volumes,
+        volumes=agent_volumes,
         name=agent_name,
-        environment={
-            "SYNTH_POLICY_HARNESS": str(pin.policy_ref.get("harness") or ""),
-            "SYNTH_POLICY_CONFIG": str(pin.policy_ref.get("config") or ""),
-        },
+        environment=agent_environment,
+        timeout_seconds=bundle.agent_timeout_seconds,
+        network=bundle.agent_network,
+        allow_nonzero=True,
     )
     log.append("tools", {"name": "bundle_agent", "stdout": agent.stdout, "execution": agent.name})
     log.append("stdout", {"text": agent.stdout})
-    log.append("span.agent.closed", {"role": "agent"})
+    # A failed authoring turn is a task outcome for the verifier to score, not an
+    # infrastructure error — but it must stay visible rather than silently pass.
+    log.append("span.agent.closed", {"role": "agent", "exit_code": agent.exit_code})
 
     log.append("span.verifier.opened", {"role": "verifier", "execution": "distinct"})
     verifier_volumes = dict(shared_volumes)
@@ -341,22 +382,28 @@ def _run_pinned_bundle(
         volumes=verifier_volumes,
         name=verifier_name,
         allow_nonzero=True,
+        timeout_seconds=bundle.verifier_timeout_seconds,
+        network="none",
     )
     reward = _read_reward_txt(Path(logs_root) / bundle.reward_path)
     if reward is None:
         log.append("span.verifier.closed", {"role": "verifier", "status": "failed"})
         _fail(pin, log, "harbor_docker_reward_missing", error_type="harbor_docker_reward_missing")
         return
-    log.append(
-        "verifier",
-        {
-            "script": bundle.tests,
-            "reward.txt": reward,
-            "bundle_digest": bundle.bundle_digest,
-            "task_tree_digest": bundle.task_tree_digest,
-            "exit_code": verifier.exit_code,
-        },
-    )
+    verifier_event: dict[str, Any] = {
+        "script": bundle.tests,
+        "reward.txt": reward,
+        "bundle_digest": bundle.bundle_digest,
+        "task_tree_digest": bundle.task_tree_digest,
+        "exit_code": verifier.exit_code,
+    }
+    # The verifier's own result.json is the only authority on candidate scores.
+    # Project a bounded, scalar-only view so a consumer can show candidate vs
+    # baseline without re-deriving it from the child.
+    result = _read_verifier_result(Path(logs_root) / bundle.reward_path)
+    if result is not None:
+        verifier_event["result"] = result
+    log.append("verifier", verifier_event)
     log.append("span.verifier.closed", {"role": "verifier"})
     pin.native_script_reward = reward
     pin.status = "completed"
@@ -432,6 +479,48 @@ def _run_public_fixture(
     log.mark_closed()
 
 
+_RESULT_SCALAR_KEYS = (
+    "baseline_score",
+    "best_score",
+    "best_candidate_id",
+    "delta_vs_baseline",
+    "passed",
+    "evaluated_policy_count",
+    "score_metric",
+    "heldout_suite_id",
+    "baseline_mean_heldout_score",
+    "best_mean_heldout_score",
+    "baseline_mean_train_score",
+    "best_mean_train_score",
+    "error",
+)
+
+
+def _read_verifier_result(reward_path: Path) -> dict[str, Any] | None:
+    """Bounded scalar projection of the verifier's result.json beside reward.txt.
+
+    Only known scalar keys are forwarded, so a large or attacker-shaped result
+    file cannot inflate the event log or smuggle nested structures into it.
+    """
+    path = reward_path.parent / "result.json"
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, Mapping):
+        return None
+    projected: dict[str, Any] = {}
+    for key in _RESULT_SCALAR_KEYS:
+        value = payload.get(key)
+        if isinstance(value, bool) or isinstance(value, (int, float)):
+            projected[key] = value
+        elif isinstance(value, str):
+            projected[key] = value[:200]
+    return projected or None
+
+
 def _read_reward_txt(path: Path) -> float | None:
     """Parse verifier-authored reward.txt. Missing/unparseable stays null, never 0."""
     if not path.is_file():
@@ -483,6 +572,53 @@ def _required_text(manifest: Mapping[str, Any], field: str, code: str) -> str:
     if not value or len(value) > 512:
         raise HarborBundleError(code)
     return value
+
+
+def _credentials_host_path(config: Mapping[str, Any]) -> str | None:
+    """Resolve the operator-supplied agent credential directory, if any.
+
+    This is deliberately not bundle content: a digest-pinned bundle must stay
+    portable and secret-free, so the host path lives in the launcher manifest.
+    """
+    raw = config.get(RUNTIME_CREDENTIALS_KEY)
+    if raw is None:
+        return None
+    path = Path(str(raw)).expanduser()
+    if not path.is_absolute() or not path.is_dir():
+        raise DockerRunError("harbor_docker_credentials_invalid")
+    return str(path.resolve())
+
+
+def _timeout_seconds(value: Any) -> float:
+    if value is None:
+        return _DEFAULT_ROLE_TIMEOUT_SEC
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        raise HarborBundleError("harbor_bundle_timeout_invalid") from None
+    if not 0 < seconds <= _MAX_ROLE_TIMEOUT_SEC:
+        raise HarborBundleError("harbor_bundle_timeout_invalid")
+    return seconds
+
+
+def _validate_task_tree_mount(mount: str) -> None:
+    """Refuse mounts that are not `/workspace/<bench>/tasks/<rest>`.
+
+    Empty segments, `.`, `..`, and `:` are rejected on the raw string so Path
+    normalization cannot hide traversal. `/workspace/foo` without `/tasks/` is
+    not a bench bind. `harbor_public` is never a bench id.
+    """
+    if ":" in mount:
+        raise HarborBundleError("harbor_bundle_task_tree_mount_invalid")
+    parts = mount.split("/")
+    if len(parts) < 5 or parts[0] != "" or parts[1] != "workspace" or parts[3] != "tasks":
+        raise HarborBundleError("harbor_bundle_task_tree_mount_invalid")
+    bench = parts[2]
+    if not _BENCH_ID.fullmatch(bench) or bench in _RESERVED_BENCHES:
+        raise HarborBundleError("harbor_bundle_task_tree_mount_invalid")
+    rest = parts[4:]
+    if not rest or any(segment in {"", ".", ".."} for segment in rest):
+        raise HarborBundleError("harbor_bundle_task_tree_mount_invalid")
 
 
 def _safe_relative(value: str, code: str) -> str:
