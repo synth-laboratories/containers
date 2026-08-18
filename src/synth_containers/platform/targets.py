@@ -61,6 +61,7 @@ class TargetSpec:
     policy_seeds: tuple[PolicySeed, ...] = ()
     script_node: ScriptNode = ScriptNode.REWARD_TXT
     max_episode_steps: int | None = None
+    gold_base_url: str | None = None
 
 
 def _env(items: dict[str, str]) -> AffordanceMap:
@@ -196,6 +197,7 @@ CRAFTAX_REACT = TargetSpec(
         ),
     ),
     max_episode_steps=120,
+    gold_base_url="http://127.0.0.1:8098",
 )
 
 # Dedicated GoEx target: same gold Rust environment and paid ReAct harness, but

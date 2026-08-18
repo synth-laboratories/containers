@@ -90,7 +90,9 @@ paths:
           required: false
           schema:
             type: string
-          description: Optional concrete task instance selector.
+            pattern: '^.*:(-?\d+)$'
+            example: seed:0
+          description: Optional concrete task instance selector. Trailing `:` + integer seed.
         - name: task_id
           in: query
           required: false
@@ -301,6 +303,52 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+  /rollouts/{rollout_id}/manifest:
+    get:
+      operationId: getRolloutManifest
+      summary: Read the write-once terminal execution manifest
+      parameters:
+        - $ref: '#/components/parameters/RolloutId'
+      responses:
+        '200':
+          description: Self-digested terminal execution manifest
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [rollout_id, status, digests, content_digest]
+                properties:
+                  rollout_id:
+                    type: string
+                  status:
+                    type: string
+                  taxonomy:
+                    type: object
+                    additionalProperties: true
+                  usage:
+                    type: object
+                    additionalProperties: true
+                    nullable: true
+                  reward:
+                    type: object
+                    additionalProperties: true
+                  digests:
+                    type: object
+                    properties:
+                      config_digest:
+                        type: string
+                      capability_digest:
+                        type: string
+                  trace_digest:
+                    type: string
+                  timestamps:
+                    type: object
+                    additionalProperties: true
+                  content_digest:
+                    type: string
+                additionalProperties: true
+        '404':
+          description: Manifest not sealed
   /rollouts/{rollout_id}/artifacts:
     get:
       operationId: getRolloutArtifacts
@@ -358,6 +406,22 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+  /rollouts/{rollout_id}/trace/bundle:
+    get:
+      operationId: getRolloutTraceBundle
+      summary: Read a capture-supervisor Trace V5 bundle archive when one exists
+      parameters:
+        - $ref: '#/components/parameters/RolloutId'
+      responses:
+        '200':
+          description: Self-contained Trace V5 bundle zip. Absent bundles 404 so Workshop can fall back to the lite seal.
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: No capture-supervisor bundle; caller should GET /rollouts/{id}/trace
   /rollouts/{rollout_id}/checkpoints:
     get:
       operationId: listRolloutCheckpoints
@@ -667,6 +731,13 @@ components:
         capabilities:
           type: object
           additionalProperties: true
+        capabilities_digest:
+          type: string
+          description: sha256 of canonical capability metadata, including per-capability input_schema.
+        input_schema:
+          type: object
+          additionalProperties: true
+          description: Active-capability start contract (task_instance_id pattern, seed range, action vocabulary).
         metadata:
           type: object
           additionalProperties: true
@@ -907,6 +978,16 @@ components:
           type: string
         submission_mode:
           $ref: '#/components/schemas/SubmissionMode'
+        execution:
+          type: string
+          enum: [background, on_complete]
+          description: >
+            Async execution mode. Default is background — the rollout progresses
+            without POST /complete. on_complete defers simulation until /complete
+            so occupancy tests can hold leases.
+        idempotency_key:
+          type: string
+          description: Caller-supplied idempotency key; defaults to rollout_id.
         env:
           $ref: '#/components/schemas/RolloutEnvSpec'
         policy:
@@ -938,6 +1019,9 @@ components:
           type: string
         task_instance_id:
           type: string
+          pattern: '^.*:(-?\d+)$'
+          example: seed:0
+          description: Task instance identity. Trailing colon plus integer seed, for example seed:0.
         task_metadata:
           type: object
           additionalProperties: true

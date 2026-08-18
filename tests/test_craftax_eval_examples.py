@@ -106,6 +106,7 @@ def test_openrouter_react_preserves_empty_response_as_labeled_fallback(
         "completion_tokens": 3,
         "total_tokens": 13,
         "cost_usd": None,
+        "usage_status": "reported",
     }
 
 

@@ -41,6 +41,8 @@ def seal_rollout_log(log: RolloutEventLog, *, pin: dict[str, Any] | None = None)
         "events": events,
         "pin": pin or {},
         "capture.closed": True,
+        "kind": "lite_seal",
+        "inspectable": False,
     }
     sealed = {**body, "content_digest": _digest(body)}
     return sealed

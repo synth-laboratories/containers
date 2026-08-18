@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from synth_containers.platform import create_compat_app
 from synth_containers.platform.gold_craftax_world import (
     GoldCraftaxWorld,
+    GoldConnectionError,
     GoldEventLogCorrupt,
     GoldFrameMissing,
 )
@@ -66,12 +67,20 @@ def _gold_handler(state: GoldState) -> type[BaseHTTPRequestHandler]:
             length = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
             if self.path == "/rollouts":
+                key = self.headers.get("Idempotency-Key") or body.get("idempotency_key")
+                if key and any(row.get("idempotency_key") == key for row in state.rollouts.values()):
+                    existing_id = next(
+                        rid for rid, row in state.rollouts.items() if row.get("idempotency_key") == key
+                    )
+                    self._json(_readout(existing_id, steps=state.rollouts[existing_id]["steps"], terminated=False))
+                    return
                 state.next_rollout += 1
                 rollout_id = f"gold_roll_{state.next_rollout}"
                 max_steps = int(((body.get("task") or {}).get("max_steps")) or 1)
                 state.rollouts[rollout_id] = {
                     "steps": 0,
                     "max_steps": max_steps,
+                    "idempotency_key": key,
                     "events": [
                         {"kind": "task_resolved", "task": "craftax", "seed": body.get("seed")}
                     ],
@@ -191,13 +200,14 @@ def test_gold_world_requires_explicit_max_steps() -> None:
     with pytest.raises(TypeError):
         GoldCraftaxWorld()  # type: ignore[call-arg]
     with pytest.raises(ValueError, match="positive pin"):
-        GoldCraftaxWorld(max_steps=0)
+        GoldCraftaxWorld(max_steps=0, base_url="http://127.0.0.1:8098")
+    with pytest.raises(ValueError, match="pinned"):
+        GoldCraftaxWorld(max_steps=1, base_url="  ")
 
 
 def test_gold_relays_nev_and_strips_producer_cursor(gold_http, monkeypatch) -> None:
     state, url = gold_http
-    monkeypatch.setenv("SYNTH_CRAFTAX_URL", url)
-    world = GoldCraftaxWorld(max_steps=1, require_frames=True)
+    world = GoldCraftaxWorld(max_steps=1, base_url=url, require_frames=True)
     reset = world.reset(0)
     assert reset.frame_bytes == PNG_1X1
     first = world.drain_native_events()
@@ -213,8 +223,7 @@ def test_gold_relays_nev_and_strips_producer_cursor(gold_http, monkeypatch) -> N
 def test_gold_prefix_mutation_fails_closed(gold_http, monkeypatch) -> None:
     state, url = gold_http
     state.mutate_prefix = True
-    monkeypatch.setenv("SYNTH_CRAFTAX_URL", url)
-    world = GoldCraftaxWorld(max_steps=1, require_frames=True)
+    world = GoldCraftaxWorld(max_steps=1, base_url=url, require_frames=True)
     world.reset(0)
     world.drain_native_events()
     world.step("do")
@@ -225,8 +234,7 @@ def test_gold_prefix_mutation_fails_closed(gold_http, monkeypatch) -> None:
 def test_gold_log_shrink_fails_closed(gold_http, monkeypatch) -> None:
     state, url = gold_http
     state.shrink_log = True
-    monkeypatch.setenv("SYNTH_CRAFTAX_URL", url)
-    world = GoldCraftaxWorld(max_steps=1, require_frames=True)
+    world = GoldCraftaxWorld(max_steps=1, base_url=url, require_frames=True)
     world.reset(0)
     world.drain_native_events()
     world.step("do")
@@ -237,8 +245,7 @@ def test_gold_log_shrink_fails_closed(gold_http, monkeypatch) -> None:
 def test_gold_missing_events_fails_closed(gold_http, monkeypatch) -> None:
     state, url = gold_http
     state.omit_events = True
-    monkeypatch.setenv("SYNTH_CRAFTAX_URL", url)
-    world = GoldCraftaxWorld(max_steps=1, require_frames=True)
+    world = GoldCraftaxWorld(max_steps=1, base_url=url, require_frames=True)
     world.reset(0)
     with pytest.raises(GoldEventLogCorrupt, match="omitted events"):
         world.drain_native_events()
@@ -247,8 +254,7 @@ def test_gold_missing_events_fails_closed(gold_http, monkeypatch) -> None:
 def test_gold_missing_frame_fails_closed(gold_http, monkeypatch) -> None:
     state, url = gold_http
     state.omit_frames = True
-    monkeypatch.setenv("SYNTH_CRAFTAX_URL", url)
-    world = GoldCraftaxWorld(max_steps=1, require_frames=True)
+    world = GoldCraftaxWorld(max_steps=1, base_url=url, require_frames=True)
     with pytest.raises(GoldFrameMissing):
         world.reset(0)
 
@@ -270,13 +276,14 @@ def test_engine_is_fixture_not_gold() -> None:
 
 def test_craftax_react_relays_gold_through_http(gold_http, monkeypatch, tmp_path) -> None:
     state, url = gold_http
-    monkeypatch.setenv("SYNTH_CRAFTAX_URL", url)
     monkeypatch.setenv("SYNTH_CRAFTAX_MAX_STEPS", "1")
     monkeypatch.setattr(
         "synth_containers.platform.runtimes.craftax.OpenRouterReAct",
         lambda **kwargs: ScriptedReAct(config_id=str(kwargs.get("config_id") or "luna_med")),
     )
-    app = create_compat_app("craftax_react", storage_root=tmp_path)
+    app = create_compat_app(
+        "craftax_react", storage_root=tmp_path, runtime_config={"gold_base_url": url}
+    )
     client = TestClient(app)
     started = client.post(
         "/rollouts",
@@ -328,13 +335,14 @@ def test_craftax_goex_captures_and_forks_true_environment_and_policy_state(
     gold_http, monkeypatch, tmp_path
 ) -> None:
     _state, url = gold_http
-    monkeypatch.setenv("SYNTH_CRAFTAX_URL", url)
     monkeypatch.setenv("SYNTH_CRAFTAX_MAX_STEPS", "6")
     monkeypatch.setattr(
         "synth_containers.platform.runtimes.craftax.OpenRouterReAct",
         lambda **kwargs: ScriptedReAct(config_id=str(kwargs.get("config_id") or "luna_med")),
     )
-    app = create_compat_app("craftax_goex", storage_root=tmp_path)
+    app = create_compat_app(
+        "craftax_goex", storage_root=tmp_path, runtime_config={"gold_base_url": url}
+    )
     client = TestClient(app)
     info = client.get("/info").json()
     assert info["target_id"] == "craftax_goex"
@@ -476,3 +484,14 @@ def test_engine_fixture_frames_are_ascii_not_png() -> None:
     assert artifacts
     assert all(row.get("format") == "ascii" for row in artifacts.values())
     assert all(row["bytes"] == b"ASCII" for row in artifacts.values())
+
+
+def test_gold_reset_retry_is_idempotent(gold_http) -> None:
+    state, url = gold_http
+    world = GoldCraftaxWorld(max_steps=1, base_url=url, require_frames=True)
+    first = world.reset(7)
+    second = world.reset(7)
+    assert first.observation == second.observation
+    assert state.next_rollout == 1
+    world.reset(8)
+    assert state.next_rollout == 2

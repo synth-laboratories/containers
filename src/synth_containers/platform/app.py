@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -13,7 +14,11 @@ from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
-from ..event_log import RolloutEventLog
+from ..event_log import (
+    STREAM_HEARTBEAT_INTERVAL_S,
+    STREAM_TERMINAL_GRACE_S,
+    RolloutEventLog,
+)
 from .http_requests import (
     RequestParseError,
     parse_combine_reward,
@@ -40,6 +45,8 @@ def _platform_response(result: dict[str, Any], *, default_status: int = 400) -> 
     if "error" in result:
         status = int(result["status_code"]) if "status_code" in result else default_status
         return JSONResponse(status_code=status, content=result)
+    if result.get("accepted") is True:
+        return JSONResponse(status_code=202, content=result)
     return result
 
 
@@ -74,12 +81,7 @@ def create_compat_app(
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
-        return {
-            "status": "ok",
-            "target": spec.target_id,
-            "runtime_family": spec.runtime_family.value,
-            "environment_ref": spec.environment_ref,
-        }
+        return platform.health_payload()
 
     @app.get("/metadata")
     @app.get("/info")
@@ -396,10 +398,17 @@ def create_compat_app(
         return FileResponse(frame_path, media_type="image/png")
 
     @app.get("/rollouts/{rollout_id}/stream")
-    async def sse(rollout_id: str, request: Request) -> StreamingResponse:
+    async def sse(rollout_id: str, request: Request) -> Any:
         log = platform.logs.get(rollout_id)
         if log is None or not platform.transport_is_bound(rollout_id, "sse"):
             raise HTTPException(status_code=404, detail=f"telemetry_not_enabled:{rollout_id}")
+        busy = platform.acquire_stream(rollout_id)
+        if busy:
+            return JSONResponse(
+                status_code=429,
+                content=busy,
+                headers={"Retry-After": str(int(busy["retry_after"]))},
+            )
         raw_last = request.headers.get("last-event-id", "0")
         try:
             after = int(raw_last)
@@ -409,26 +418,39 @@ def create_compat_app(
 
         async def generate():
             nonlocal after
-            while not await request.is_disconnected():
-                emitted = False
-                for envelope in log.after(after):
-                    sse_id = envelope.sequence if envelope.sequence is not None else 0
-                    if envelope.sequence is not None:
-                        after = envelope.sequence
-                    event = _sse_event(rollout_id, envelope)
-                    yield (
-                        f"id: {sse_id}\n"
-                        f"event: {event['kind']}\n"
-                        f"data: {json.dumps(event, separators=(',', ':'))}\n\n"
-                    )
-                    emitted = True
-                if log.closed:
-                    break
-                # Heartbeats must not end the stream. Luna plan calls are idle
-                # for seconds; cutting SSE after 1s dropped span.policy.data.
-                if not emitted:
-                    yield ": heartbeat\n\n"
-                await asyncio.sleep(0.05)
+            terminal_since: float | None = None
+            try:
+                while not await request.is_disconnected():
+                    emitted = False
+                    for envelope in log.after(after):
+                        sse_id = envelope.sequence if envelope.sequence is not None else 0
+                        if envelope.sequence is not None:
+                            after = envelope.sequence
+                        event = _sse_event(rollout_id, envelope)
+                        yield (
+                            f"id: {sse_id}\n"
+                            f"event: {event['kind']}\n"
+                            f"data: {json.dumps(event, separators=(',', ':'))}\n\n"
+                        )
+                        emitted = True
+                    pin = platform.pins.get(rollout_id)
+                    terminal = bool((pin is not None and pin.terminal) or log.closed)
+                    now = time.monotonic()
+                    if terminal and terminal_since is None:
+                        terminal_since = now
+                    if log.closed:
+                        break
+                    if (
+                        terminal
+                        and terminal_since is not None
+                        and (now - terminal_since) >= STREAM_TERMINAL_GRACE_S
+                    ):
+                        break
+                    if not emitted:
+                        yield ": heartbeat\n\n"
+                    await asyncio.sleep(STREAM_HEARTBEAT_INTERVAL_S)
+            finally:
+                platform.release_stream(rollout_id)
 
         return StreamingResponse(
             generate(),
@@ -442,8 +464,13 @@ def create_compat_app(
         if log is None or not platform.transport_is_bound(rollout_id, "websocket"):
             await websocket.close(code=4404, reason="telemetry_not_enabled")
             return
+        busy = platform.acquire_stream(rollout_id)
+        if busy:
+            await websocket.close(code=1013, reason="stream_backpressure")
+            return
         await websocket.accept()
         after = 0
+        terminal_since: float | None = None
         try:
             while True:
                 emitted = False
@@ -452,13 +479,28 @@ def create_compat_app(
                         after = envelope.sequence
                     await websocket.send_json(_sse_event(rollout_id, envelope))
                     emitted = True
+                pin = platform.pins.get(rollout_id)
+                terminal = bool((pin is not None and pin.terminal) or log.closed)
+                now = time.monotonic()
+                if terminal and terminal_since is None:
+                    terminal_since = now
                 if log.closed:
                     await websocket.close(code=1000)
                     return
+                if (
+                    terminal
+                    and terminal_since is not None
+                    and (now - terminal_since) >= STREAM_TERMINAL_GRACE_S
+                ):
+                    await websocket.close(code=1000)
+                    return
                 if not emitted:
-                    await asyncio.sleep(0.05)
+                    await websocket.send_json({"kind": "stream.heartbeat", "control": True})
+                await asyncio.sleep(STREAM_HEARTBEAT_INTERVAL_S)
         except WebSocketDisconnect:
             return
+        finally:
+            platform.release_stream(rollout_id)
 
     @app.get("/reward")
     async def get_reward(rollout_id: str = Query(...)) -> dict[str, Any]:
@@ -577,9 +619,49 @@ def create_compat_app(
             raise HTTPException(status_code=404, detail=f"trace_not_sealed:{rollout_id}")
         return seal
 
+    @app.get("/rollouts/{rollout_id}/trace/bundle")
+    async def get_trace_bundle(rollout_id: str) -> Any:
+        result = platform.get_trace_bundle(rollout_id)
+        if "error" in result:
+            return _platform_response(result, default_status=404)
+        return FileResponse(
+            result["path"],
+            media_type=result["media_type"],
+            filename=f"{rollout_id}.trace-bundle.zip",
+        )
+
+    @app.get("/rollouts/{rollout_id}/manifest")
+    async def get_manifest(rollout_id: str) -> Any:
+        return _platform_response(platform.get_execution_manifest(rollout_id), default_status=404)
+
     @app.post("/rollouts/{rollout_id}/drop_session")
     async def drop_session(rollout_id: str) -> Any:
         result = platform.drop_session(rollout_id)
         return _platform_response(result)
+
+    @app.post("/rollouts/{rollout_id}/cancel")
+    async def cancel_rollout(rollout_id: str, request: Request) -> Any:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        owner_id = None
+        if isinstance(body, dict):
+            owner_id = body.get("owner_id") or (body.get("metadata") or {}).get("owner_id")
+        result = platform.cancel_rollout(
+            rollout_id,
+            owner_id=str(owner_id) if owner_id else None,
+        )
+        return _platform_response(result, default_status=404)
+
+    @app.post("/cleanup")
+    async def cleanup(request: Request) -> Any:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        owner_id = body.get("owner_id") if isinstance(body, dict) else None
+        result = platform.cleanup_owned(str(owner_id) if owner_id else "")
+        return _platform_response(result, default_status=422)
 
     return app
