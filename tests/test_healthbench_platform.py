@@ -48,6 +48,40 @@ def test_healthbench_declares_independent_policy_and_scorer_roles(monkeypatch) -
     assert roles["scorer"]["canonical"] is True
 
 
+def test_healthbench_info_reports_missing_policy_credential(monkeypatch) -> None:
+    monkeypatch.setenv("HEALTHBENCH_POLICY_API_KEY_ENV", "MISSING_POLICY_KEY")
+    monkeypatch.setenv("HEALTHBENCH_GRADER_API_KEY_ENV", "PRESENT_GRADER_KEY")
+    monkeypatch.setenv("PRESENT_GRADER_KEY", "present")
+    info = TestClient(create_compat_app("healthbench_chat")).get("/info").json()
+    assert info["metadata"]["model_roles"]["policy"]["credential_present"] is False
+    assert info["metadata"]["model_roles"]["scorer"]["credential_present"] is True
+    assert info["capabilities"]["metadata"]["policy_ready"] is False
+    assert info["capabilities"]["metadata"]["grader_ready"] is True
+
+
+def test_healthbench_info_reports_missing_grader_credential(monkeypatch) -> None:
+    monkeypatch.setenv("HEALTHBENCH_POLICY_API_KEY_ENV", "PRESENT_POLICY_KEY")
+    monkeypatch.setenv("HEALTHBENCH_GRADER_API_KEY_ENV", "MISSING_GRADER_KEY")
+    monkeypatch.setenv("PRESENT_POLICY_KEY", "present")
+    info = TestClient(create_compat_app("healthbench_chat")).get("/info").json()
+    assert info["metadata"]["model_roles"]["policy"]["credential_present"] is True
+    assert info["metadata"]["model_roles"]["scorer"]["credential_present"] is False
+    assert info["capabilities"]["metadata"]["policy_ready"] is True
+    assert info["capabilities"]["metadata"]["grader_ready"] is False
+
+
+def test_healthbench_info_reports_both_credentials_present(monkeypatch) -> None:
+    monkeypatch.setenv("HEALTHBENCH_POLICY_API_KEY_ENV", "PRESENT_POLICY_KEY")
+    monkeypatch.setenv("HEALTHBENCH_GRADER_API_KEY_ENV", "PRESENT_GRADER_KEY")
+    monkeypatch.setenv("PRESENT_POLICY_KEY", "present")
+    monkeypatch.setenv("PRESENT_GRADER_KEY", "present")
+    info = TestClient(create_compat_app("healthbench_chat")).get("/info").json()
+    assert info["metadata"]["model_roles"]["policy"]["credential_present"] is True
+    assert info["metadata"]["model_roles"]["scorer"]["credential_present"] is True
+    assert info["capabilities"]["metadata"]["policy_ready"] is True
+    assert info["capabilities"]["metadata"]["grader_ready"] is True
+
+
 def test_healthbench_grader_uses_declared_credential(monkeypatch) -> None:
     monkeypatch.setenv("HEALTHBENCH_GRADER_API_KEY_ENV", "CUSTOM_GRADER_KEY")
     captured = []
