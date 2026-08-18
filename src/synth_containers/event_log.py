@@ -19,6 +19,16 @@ CONTROL_SUBSCRIBED = "stream.subscribed"
 SCHEMA_STREAM_EVENT = "synth.trace-stream-event.v1"
 _ROLLOUT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
+STREAM_HEARTBEAT_INTERVAL_S = 5.0
+STREAM_TERMINAL_GRACE_S = 5.0
+MAX_STREAMS_PER_ROLLOUT = 2
+STREAM_RETRY_AFTER_S = 5
+DEFAULT_STREAM_RECONNECT = {
+    "min_backoff_s": 1.0,
+    "max_backoff_s": 30.0,
+    "jitter": 0.2,
+}
+
 
 def validate_rollout_id(value: str) -> str:
     if not _ROLLOUT_ID.fullmatch(value):
@@ -293,11 +303,13 @@ def stream_descriptor(
     stream_id: str,
     bound_transport: str,
     retention: str = "run",
+    reconnect: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     validate_rollout_id(rollout_id)
     poll_url = f"/rollouts/{rollout_id}/events"
     sse_url = f"/rollouts/{rollout_id}/stream"
     ws_url = f"/rollouts/{rollout_id}/ws"
+    policy = dict(reconnect or DEFAULT_STREAM_RECONNECT)
     return {
         "schema": "synth.rollout.stream.v1",
         "id": stream_id,
@@ -310,4 +322,9 @@ def stream_descriptor(
         "reward": {"url": f"/rollouts/{rollout_id}/reward"},
         "auth": {"mode": "none"},
         "retention": retention,
+        "reconnect": {
+            "min_backoff_s": float(policy["min_backoff_s"]),
+            "max_backoff_s": float(policy["max_backoff_s"]),
+            "jitter": float(policy["jitter"]),
+        },
     }

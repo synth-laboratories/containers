@@ -92,7 +92,12 @@ class RouteHints(JsonDataclassMixin):
     summary_routes: list[str] = field(default_factory=lambda: ["/rollouts/{rollout_id}/summary"])
     usage_routes: list[str] = field(default_factory=lambda: ["/rollouts/{rollout_id}/usage"])
     event_routes: list[str] = field(default_factory=lambda: ["/rollouts/{rollout_id}/events"])
-    trace_routes: list[str] = field(default_factory=lambda: ["/rollouts/{rollout_id}/trace"])
+    trace_routes: list[str] = field(
+        default_factory=lambda: [
+            "/rollouts/{rollout_id}/trace",
+            "/rollouts/{rollout_id}/trace/bundle",
+        ]
+    )
     artifact_routes: list[str] = field(default_factory=lambda: ["/rollouts/{rollout_id}/artifacts"])
     annotation_routes: list[str] = field(
         default_factory=lambda: ["/rollouts/{rollout_id}/annotations"]

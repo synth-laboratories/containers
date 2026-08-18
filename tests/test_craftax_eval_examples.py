@@ -4,8 +4,14 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from synth_containers.platform.eval_examples import run_code_policy, run_react
-from synth_containers.platform.react import OpenRouterReAct
+from synth_containers.platform.react import (
+    OpenRouterReAct,
+    PolicyConfigError,
+    CRAFTAX_REACT_SYSTEM_PROMPT,
+)
 
 
 def test_react_ten_seeds_through_containers_http() -> None:
@@ -42,7 +48,7 @@ def test_openrouter_react_normalizes_craftax_direction_aliases() -> None:
 def test_openrouter_react_binds_candidate_system_prompt() -> None:
     policy = OpenRouterReAct(
         config_id="goex_candidate_test",
-        config={"system_prompt": "Prioritize wood before stone."},
+        config={"model": "gpt-5.6-luna", "effort": "medium", "max_tokens": 1024, "context_token_budget": 16000, "compact_at": 0.7, "keep_recent_messages": 8, "keep_recent_frames": 2, "observation_mode": "text", "provider": "openrouter", "base_url": "https://openrouter.ai/api/v1", "api_key_env": "OPENROUTER_API_KEY", "parse_retries": 0, "system_prompt": CRAFTAX_REACT_SYSTEM_PROMPT, "system_prompt": "Prioritize wood before stone."},
     )
     assert policy._messages[0] == {
         "role": "system",
@@ -74,7 +80,7 @@ def test_openrouter_react_preserves_empty_response_as_labeled_fallback(
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-only")
     monkeypatch.setattr("urllib.request.urlopen", lambda *_args, **_kwargs: Response())
-    policy = OpenRouterReAct(config_id="muse_spark_medium", config={})
+    policy = OpenRouterReAct(config_id="muse_spark_medium", config={"model": "gpt-5.6-luna", "effort": "medium", "max_tokens": 1024, "context_token_budget": 16000, "compact_at": 0.7, "keep_recent_messages": 8, "keep_recent_frames": 2, "observation_mode": "text", "provider": "openrouter", "base_url": "https://openrouter.ai/api/v1", "api_key_env": "OPENROUTER_API_KEY", "parse_retries": 0, "system_prompt": CRAFTAX_REACT_SYSTEM_PROMPT, })
     actions = policy.plan(
         {
             "valid_actions": ["up", "do"],
@@ -89,7 +95,8 @@ def test_openrouter_react_preserves_empty_response_as_labeled_fallback(
     assert trace["reasoning"] == "thinking"
     assert trace["tool_arguments"] == ""
     assert trace["actions"] == ["do"]
-    assert trace["compact_every"] == 16
+    assert trace["context_token_budget"] == 16000
+    assert trace["compact_at"] == 0.7
     assert trace["compact_count"] == 0
     assert trace["history_turns"] == 1
     assert trace["deltas_emitted"] == 0
@@ -99,6 +106,7 @@ def test_openrouter_react_preserves_empty_response_as_labeled_fallback(
         "completion_tokens": 3,
         "total_tokens": 13,
         "cost_usd": None,
+        "usage_status": "reported",
     }
 
 
@@ -134,7 +142,7 @@ def test_openrouter_react_uses_forced_tool_arguments(monkeypatch) -> None:
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-only")
     monkeypatch.setattr("urllib.request.urlopen", lambda *_args, **_kwargs: Response())
-    policy = OpenRouterReAct(config_id="muse_spark_medium", config={})
+    policy = OpenRouterReAct(config_id="muse_spark_medium", config={"model": "gpt-5.6-luna", "effort": "medium", "max_tokens": 1024, "context_token_budget": 16000, "compact_at": 0.7, "keep_recent_messages": 8, "keep_recent_frames": 2, "observation_mode": "text", "provider": "openrouter", "base_url": "https://openrouter.ai/api/v1", "api_key_env": "OPENROUTER_API_KEY", "parse_retries": 0, "system_prompt": CRAFTAX_REACT_SYSTEM_PROMPT, })
     assert policy.plan({"valid_actions": ["right", "do"], "observation_text": "obs"}) == [
         "right",
         "do",
@@ -143,7 +151,8 @@ def test_openrouter_react_uses_forced_tool_arguments(monkeypatch) -> None:
     assert trace["action_authority"] == "policy"
     assert trace["fallback"] is False
     assert trace["tool_arguments"] == '{"actions":["east","do"]}'
-    assert trace["compact_every"] == 16
+    assert trace["context_token_budget"] == 16000
+    assert trace["compact_at"] == 0.7
     assert len(policy._messages) == 3
     assert policy._messages[0]["role"] == "system"
     assert policy._messages[1]["role"] == "user"
@@ -194,7 +203,7 @@ def test_openrouter_react_keeps_history_across_turns(monkeypatch) -> None:
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-only")
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-    policy = OpenRouterReAct(config_id="luna_med", config={"compact_every": 16})
+    policy = OpenRouterReAct(config_id="luna_med", config={"model": "gpt-5.6-luna", "effort": "medium", "max_tokens": 1024, "context_token_budget": 16000, "compact_at": 0.7, "keep_recent_messages": 8, "keep_recent_frames": 2, "observation_mode": "text", "provider": "openrouter", "base_url": "https://openrouter.ai/api/v1", "api_key_env": "OPENROUTER_API_KEY", "parse_retries": 0, "system_prompt": CRAFTAX_REACT_SYSTEM_PROMPT})
     observation = {"valid_actions": ["right", "do"], "observation_text": "first"}
     policy.plan(observation)
     policy.plan({**observation, "observation_text": "second"})
@@ -211,26 +220,58 @@ def test_openrouter_react_keeps_history_across_turns(monkeypatch) -> None:
     assert captured[0]["stream"] is True
 
 
-def test_openrouter_react_compacts_every_sixteen_turns(monkeypatch) -> None:
+def test_openrouter_react_compacts_on_token_threshold_with_a_model_summary(monkeypatch) -> None:
+    """Compaction fires on real prompt_tokens and the middle is model-written.
+
+    Replaces the old every-16-turns behaviour. A turn count is a poor proxy once
+    frames and long observations are in the transcript, and pasting truncated
+    payloads is not a summary — it drops the map knowledge the agent needs.
+    Mirrors craftax_gold.rs so a checkpoint is evaluated under the same policy
+    its teacher data was collected with.
+    """
     captured: list[dict] = []
 
     def fake_urlopen(request, timeout=None):
-        captured.append(json.loads(request.data.decode()))
-        return _json_response(_tool_body(["do"]))
+        body = json.loads(request.data.decode())
+        captured.append(body)
+        if body.get("tools") is None:
+            # the summarizer call
+            return _json_response(
+                {"choices": [{"message": {"content": "Trees west, stone north. Have wood."}}]}
+            )
+        # report a prompt size over the threshold (16000 * 0.7 = 11200)
+        payload = _tool_body(["do"])
+        payload["usage"] = {"prompt_tokens": 12000, "completion_tokens": 5, "total_tokens": 12005}
+        return _json_response(payload)
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-only")
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-    policy = OpenRouterReAct(config_id="luna_med", config={"compact_every": 16})
-    observation = {"valid_actions": ["do"], "observation_text": "obs"}
-    for index in range(17):
+    policy = OpenRouterReAct(
+        config_id="luna_med",
+        config={
+            "model": "gpt-5.6-luna", "effort": "medium", "max_tokens": 1024,
+            "context_token_budget": 16000, "compact_at": 0.7,
+            "keep_recent_messages": 8, "keep_recent_frames": 2,
+            "observation_mode": "text",
+            "provider": "openrouter",
+            "base_url": "https://openrouter.ai/api/v1",
+            "api_key_env": "OPENROUTER_API_KEY",
+            "parse_retries": 0,
+            "system_prompt": CRAFTAX_REACT_SYSTEM_PROMPT,
+        },
+    )
+    observation = {"valid_actions": ["do"]}
+    for index in range(12):
         policy.plan({**observation, "observation_text": f"obs-{index}"})
-    assert policy.trace_data()["compact_count"] == 1
-    last_messages = captured[-1]["messages"]
-    assert last_messages[1]["content"].startswith("[compacted 14 earlier ReAct turns")
-    assert "compact_every=16" in last_messages[1]["content"]
-    user_turns = [message for message in last_messages if message["role"] == "user"]
-    assert len(user_turns) == 4  # compact + 2 kept + current
-    assert "obs-16" in last_messages[-1]["content"]
+
+    assert policy.trace_data()["compact_count"] >= 1
+    action_calls = [body for body in captured if body.get("tools") is not None]
+    last_messages = action_calls[-1]["messages"]
+    assert last_messages[1]["content"].startswith("[context compacted")
+    assert "Trees west, stone north" in last_messages[1]["content"]
+    # the mechanical paste is gone
+    assert "earlier ReAct turns" not in last_messages[1]["content"]
+    assert "obs-11" in str(last_messages[-1]["content"])
 
 
 def test_openrouter_react_streams_token_deltas_and_skips_empty_reasoning(
@@ -266,7 +307,7 @@ def test_openrouter_react_streams_token_deltas_and_skips_empty_reasoning(
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-only")
     monkeypatch.setattr("urllib.request.urlopen", lambda *_args, **_kwargs: StreamResponse())
     deltas: list[dict] = []
-    policy = OpenRouterReAct(config_id="luna_med", config={})
+    policy = OpenRouterReAct(config_id="luna_med", config={"model": "gpt-5.6-luna", "effort": "medium", "max_tokens": 1024, "context_token_budget": 16000, "compact_at": 0.7, "keep_recent_messages": 8, "keep_recent_frames": 2, "observation_mode": "text", "provider": "openrouter", "base_url": "https://openrouter.ai/api/v1", "api_key_env": "OPENROUTER_API_KEY", "parse_retries": 0, "system_prompt": CRAFTAX_REACT_SYSTEM_PROMPT})
     actions = policy.plan(
         {"valid_actions": ["right", "do"], "observation_text": "obs"},
         on_delta=deltas.append,
@@ -280,3 +321,86 @@ def test_openrouter_react_streams_token_deltas_and_skips_empty_reasoning(
     assert trace["token_trace"] == "derived"
     assert trace["deltas_emitted"] == 1
     assert trace["usage"]["total_tokens"] == 13
+
+
+def _tinker_config(**overrides: object) -> dict[str, object]:
+    config: dict[str, object] = {
+        "model": "tinker-infer:ckpt-4",
+        "effort": "medium",
+        "max_tokens": 1024,
+        "context_token_budget": 16000,
+        "compact_at": 0.7,
+        "keep_recent_messages": 8,
+        "keep_recent_frames": 2,
+        "observation_mode": "text",
+        "provider": "tinker",
+        "api_key_env": "TINKER_API_KEY",
+        "parse_retries": 0,
+        "system_prompt": "You play Craftax. Reply with JSON only.",
+        "sampler_path": "tinker://weights/ckpt-4",
+        "tokenizer_id": "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+        "sampler_ready_timeout_s": 0,
+    }
+    config.update(overrides)
+    return config
+
+
+def test_tinker_provider_requires_its_own_endpoint_fields() -> None:
+    for missing in ("sampler_path", "tokenizer_id", "sampler_ready_timeout_s"):
+        config = _tinker_config()
+        del config[missing]
+        with pytest.raises(PolicyConfigError) as excinfo:
+            OpenRouterReAct(config_id="ckpt", config=config)
+        assert missing in str(excinfo.value)
+    # base_url is meaningless on this path and must not be demanded...
+    config = _tinker_config()
+    assert OpenRouterReAct(config_id="ckpt", config=config).base_url == ""
+    # ...while the OpenRouter path still requires it.
+    config = _tinker_config(provider="openrouter")
+    with pytest.raises(PolicyConfigError) as excinfo:
+        OpenRouterReAct(config_id="ckpt", config=config)
+    assert "base_url" in str(excinfo.value)
+
+
+def test_tinker_provider_refuses_frames_rather_than_dropping_them() -> None:
+    # Silently ignoring the frame would measure a text policy and report it as
+    # the multimodal one that was asked for.
+    for mode in ("image", "both"):
+        with pytest.raises(PolicyConfigError) as excinfo:
+            OpenRouterReAct(config_id="ckpt", config=_tinker_config(observation_mode=mode))
+        assert "cannot carry frames" in str(excinfo.value)
+
+
+def test_tinker_sample_is_parsed_by_the_shared_action_parser(monkeypatch) -> None:
+    policy = OpenRouterReAct(config_id="ckpt", config=_tinker_config())
+    # The SFT targets are raw `{"actions":[...]}` text, and Tinker has no
+    # tool-calling API — so the sample must survive the same parse path.
+    monkeypatch.setattr(
+        policy,
+        "_tinker_sample",
+        lambda api_key: {
+            "choices": [{"message": {"content": '{"actions":["left","do","do"]}', "tool_calls": None}}],
+            "usage": {"prompt_tokens": 41, "completion_tokens": 9, "total_tokens": 50},
+        },
+    )
+    monkeypatch.setenv("TINKER_API_KEY", "test-only")
+    actions = policy.plan({"valid_actions": ["left", "do"], "observation_text": "obs"})
+    assert actions == ["left", "do", "do"]
+    assert policy.usage()["prompt_tokens"] == 41
+
+
+def test_tinker_provider_names_the_missing_summary_instead_of_borrowing_a_model(
+    monkeypatch,
+) -> None:
+    policy = OpenRouterReAct(config_id="ckpt", config=_tinker_config())
+    called = False
+
+    def _fail(*_args, **_kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("summarizer must not issue an HTTP request")
+
+    monkeypatch.setattr("urllib.request.urlopen", _fail)
+    summary = policy._summarize("test-only", [{"role": "user", "content": "x"}])
+    assert not called
+    assert "summary unavailable" in summary and "tinker" in summary

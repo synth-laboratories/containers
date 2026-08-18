@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,6 +12,21 @@ from synth_containers.platform.runtimes.harbor import atif_is_projection, projec
 from synth_containers.platform.reducer import assert_honest_projection
 from synth_containers.platform.state import CompatPlatform, _seed_from_task_instance_id
 from synth_containers.platform.targets import TARGETS
+
+
+def test_register_policy_config_does_not_mutate_or_block_in_flight_pin(tmp_path) -> None:
+    platform = CompatPlatform(TARGETS["craftax_react"], storage_root=tmp_path)
+    platform.pins["active"] = SimpleNamespace(started=True, terminal=False)
+
+    result = platform.register_policy_config(
+        "checkpoint-b",
+        {"harness": "react", "config": {"model": "checkpoint-b"}},
+    )
+
+    assert result["config_id"] == "checkpoint-b"
+    assert platform.policy_configs["checkpoint-b"].config == {"model": "checkpoint-b"}
+    assert platform.pins["active"].started is True
+    assert platform.pins["active"].terminal is False
 
 
 def test_seed_from_task_instance_id_rules() -> None:
@@ -41,6 +57,10 @@ def test_metadata_names_runtime_family() -> None:
     assert banking77["runtime_family"] == "banking77"
     assert banking77["adapter_chain"] == []
     assert banking77["live_frames"] == "unsupported"
+    gepa = banking77["optimizer_contracts"]["gepa"]
+    assert gepa["version"] == "synth_optimizers.gepa.v2"
+    assert gepa["prepare_route"] == "/rollouts/prepare"
+    assert gepa["rollout_route"] == "/rollouts"
 
 
 def test_start_rollout_reads_create_rollout_request() -> None:
@@ -95,6 +115,7 @@ def test_craftax_policy_failure_closes_and_seals_the_stream(monkeypatch, tmp_pat
         "synth_containers.platform.runtimes.craftax.run_episode",
         fail_after_open,
     )
+    monkeypatch.setenv("SYNTH_CRAFTAX_URL", "http://127.0.0.1:1")
     platform = CompatPlatform(TARGETS["craftax_react"], storage_root=tmp_path)
     body = platform.start_rollout(
         parse_create_rollout(
@@ -115,6 +136,7 @@ def test_craftax_policy_failure_closes_and_seals_the_stream(monkeypatch, tmp_pat
         "status": "failed",
         "reason": "policy_error",
         "error_type": "RuntimeError",
+        "completion": "infra_complete",
     }
     assert "provider secret" not in str(events)
     assert log.closed is True
@@ -241,11 +263,12 @@ def test_optimizer_child_eval_refs_and_occupancy() -> None:
             json={
                 "telemetry": {"enabled": True, "transport": "sse"},
                 "submission_mode": "async",
+                "execution": "on_complete",
                 "task_instance_id": f"seed:{index}",
                 "policy_ref": {"harness": "harbor_fused", "config": "luna_med"},
             },
         )
-        assert started.status_code == 200, started.text
+        assert started.status_code == 202, started.text
         body = started.json()
         stream = body["stream"]
         refs.append(
@@ -260,6 +283,7 @@ def test_optimizer_child_eval_refs_and_occupancy() -> None:
         json={
             "telemetry": {"enabled": True, "transport": "sse"},
             "submission_mode": "async",
+            "execution": "on_complete",
             "task_instance_id": "seed:2",
             "policy_ref": {"harness": "harbor_fused", "config": "luna_med"},
         },
@@ -330,3 +354,45 @@ def test_craftax_ten_seeds_distinct_rewards_field() -> None:
             assert row["reward"] is None
         else:
             assert row["reward"] is None or isinstance(row["reward"], (int, float))
+
+
+def test_a_raising_rollout_does_not_wedge_later_policy_binds(monkeypatch, tmp_path) -> None:
+    """A rollout that raises must terminalize its pin.
+
+    `register_policy_config` refuses while any pin is started and not terminal.
+    An exception raised before the runtime could record an outcome — a
+    malformed policy config, for instance — used to leave the pin pinned
+    forever, so every later bind returned 409 and the only recovery was
+    restarting the container.
+    """
+
+    def explode(*_args, **_kwargs):
+        raise RuntimeError("policy config is malformed")
+
+    monkeypatch.setattr(
+        "synth_containers.platform.runtimes.craftax.CraftaxRuntime.simulate",
+        explode,
+    )
+    monkeypatch.setenv("SYNTH_CRAFTAX_URL", "http://127.0.0.1:1")
+    platform = CompatPlatform(TARGETS["craftax_react"], storage_root=tmp_path)
+    request = parse_create_rollout(
+        {
+            "task_instance_id": "seed:0",
+            "policy_ref": {"harness": "react", "config": "luna_med"},
+        }
+    )
+
+    # The error still reaches the caller — it is not swallowed.
+    with pytest.raises(RuntimeError, match="policy config is malformed"):
+        platform.start_rollout(request)
+
+    pin = next(iter(platform.pins.values()))
+    assert pin.terminal is True
+    assert pin.status == "failed"
+
+    # ...and the container still accepts work.
+    result = platform.register_policy_config(
+        "next_policy", {"harness": "react", "config": {"model": "m"}}
+    )
+    assert result.get("error") != "in_flight", result
+    assert result["config_id"] == "next_policy"

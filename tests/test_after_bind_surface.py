@@ -118,17 +118,19 @@ def test_craftax_eleventh_lease_is_typed_429() -> None:
                 json={
                     "telemetry": TELEMETRY,
                     "submission_mode": "async",
+                    "execution": "on_complete",
                     "task_instance_id": f"seed:{index}",
                     "policy_ref": {"harness": "react", "config": "luna_med"},
                 },
             )
-            assert started.status_code == 200, started.text
+            assert started.status_code == 202, started.text
             held.append(started.json()["rollout_id"])
         eleventh = client.post(
             "/rollouts",
             json={
                 "telemetry": TELEMETRY,
                 "submission_mode": "async",
+                "execution": "on_complete",
                 "task_instance_id": "seed:10",
                 "policy_ref": {"harness": "react", "config": "luna_med"},
             },

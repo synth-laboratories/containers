@@ -60,6 +60,11 @@ def _json(response: Any) -> dict[str, Any]:
     return body if isinstance(body, dict) else {"_value": body}
 
 
+def _accepted(response: Any) -> bool:
+    """Async admission is an HTTP 202 receipt; sync completion is HTTP 200."""
+    return getattr(response, "status_code", None) in {200, 202}
+
+
 def _kinds(events: list[dict[str, Any]]) -> list[str]:
     return [str(item.get("kind")) for item in events]
 
@@ -318,12 +323,16 @@ class Runner:
         held = []
         busy_ok = False
         for index in range(leases + 1):
-            response = self._start(submission_mode="async", task_instance_id=f"seed:{index}")
+            response = self._start(
+                submission_mode="async",
+                execution="on_complete",
+                task_instance_id=f"seed:{index}",
+            )
             if response.status_code == 429:
                 body = _json(response)
                 busy_ok = body.get("affordance") == "scale_leases"
                 break
-            if response.status_code == 200:
+            if _accepted(response):
                 held.append(_json(response)["rollout_id"])
         for rollout_id in held:
             self.client.post(f"/rollouts/{rollout_id}/complete")
@@ -493,8 +502,8 @@ class Runner:
             else:
                 self.suite.fail("C1-07", f"missing filled {scored.get('reward')}")
         else:
-            live = self._start(submission_mode="async", task_instance_id="seed:8")
-            if live.status_code != 200:
+            live = self._start(submission_mode="async", execution="on_complete", task_instance_id="seed:8")
+            if not _accepted(live):
                 self.suite.fail("C1-07", f"async {live.status_code}")
             else:
                 rid = _json(live)["rollout_id"]
@@ -521,7 +530,7 @@ class Runner:
         else:
             self.suite.fail("C2-01", f"{absent.status_code} {body}")
 
-        live = self._start(submission_mode="async", task_instance_id="seed:3")
+        live = self._start(submission_mode="async", execution="on_complete", task_instance_id="seed:3")
         live_id = _json(live)["rollout_id"]
         premature = self.client.post("/reward", json={"rollout_id": live_id, "mode": "terminal"})
         premature_body = _json(premature)
@@ -667,10 +676,10 @@ class Runner:
 
         self._c3_02_occupancy(meta, ids, stream_ids, generations)
 
-        cfg = self.client.post("/policy-configs", json={"config_id": "luna_med", "config": {"model": "luna"}})
-        cfg2 = self.client.post("/policy-configs", json={"config_id": "sol_med", "config": {"model": "sol"}})
+        cfg = self.client.post("/policy-configs", json={"config_id": "luna_med", "config": {"model": "luna", "effort": "medium", "max_tokens": 1024, "context_token_budget": 16000, "compact_at": 0.7, "keep_recent_messages": 8, "keep_recent_frames": 2, "observation_mode": "text"}})
+        cfg2 = self.client.post("/policy-configs", json={"config_id": "sol_med", "config": {"model": "sol", "effort": "medium", "max_tokens": 1024, "context_token_budget": 16000, "compact_at": 0.7, "keep_recent_messages": 8, "keep_recent_frames": 2, "observation_mode": "text"}})
         nxt = self._start(policy_ref={"harness": "react", "config": "sol_med"}, task_instance_id="seed:0")
-        if cfg.status_code == 200 and cfg2.status_code == 200 and _json(nxt)["policy_ref"]["config"] == "sol_med":
+        if cfg.status_code in {200, 409} and cfg2.status_code in {200, 409} and _json(nxt)["policy_ref"]["config"] == "sol_med":
             self.suite.ok("C3-05")
         else:
             self.suite.fail("C3-05", f"{cfg.status_code} {cfg2.status_code} {_json(nxt)}")
@@ -727,7 +736,7 @@ class Runner:
         held: list[str] = []
         try:
             if isinstance(active, int) and active >= leases:
-                eleventh = self._start(submission_mode="async", task_instance_id="seed:10")
+                eleventh = self._start(submission_mode="async", execution="on_complete", task_instance_id="seed:10")
                 body = _json(eleventh)
                 if eleventh.status_code == 429 and body.get("affordance") == "scale_leases":
                     self.suite.ok(
@@ -741,14 +750,14 @@ class Runner:
                     )
                 return
             for index in range(leases):
-                response = self._start(submission_mode="async", task_instance_id=f"seed:occ:{index}")
-                if response.status_code != 200:
+                response = self._start(submission_mode="async", execution="on_complete", task_instance_id=f"seed:occ:{index}")
+                if not _accepted(response):
                     self.suite.fail("C3-02", f"could not occupy slot {index}: {response.status_code}")
                     return
                 held.append(_json(response)["rollout_id"])
-            eleventh = self._start(submission_mode="async", task_instance_id="seed:occ:overflow")
+            eleventh = self._start(submission_mode="async", execution="on_complete", task_instance_id="seed:occ:overflow")
             body = _json(eleventh)
-            if eleventh.status_code == 200:
+            if _accepted(eleventh):
                 extra = _json(eleventh).get("rollout_id")
                 if extra:
                     held.append(extra)
@@ -815,7 +824,7 @@ class Runner:
 
     def _c4(self, meta: dict[str, Any]) -> None:
         if self.target == "craftax_code_policy":
-            held = self._start(submission_mode="async", policy_ref={"harness": "isolated_policy_process"})
+            held = self._start(submission_mode="async", execution="on_complete", policy_ref={"harness": "isolated_policy_process"})
             held_id = _json(held)["rollout_id"]
             old_rev = _json(held).get("policy_revision_id")
             put = self.client.put("/policy", json={"code": "def act(obs): return 0\n"})
@@ -840,7 +849,7 @@ class Runner:
                 self.suite.ok("C4-04")
             else:
                 self.suite.fail("C4-04", f"{_json(nxt)} {scored}")
-            bind = self.client.post("/policy-configs", json={"config_id": "luna_med", "config": {}})
+            bind = self.client.post("/policy-configs", json={"config_id": "luna_med", "config": {"model": "gpt-5.6-luna", "effort": "medium", "max_tokens": 1024, "context_token_budget": 16000, "compact_at": 0.7, "keep_recent_messages": 8, "keep_recent_frames": 2, "observation_mode": "text"}})
             start_cfg = self._start(policy_ref={"harness": "isolated_policy_process", "config": "luna_med"})
             if bind.status_code == 403 and start_cfg.status_code == 403:
                 self.suite.ok("C4-05")
@@ -903,15 +912,25 @@ class Runner:
             self.suite.fail("C5-01", f"{meta.get('blocking_trial')}")
         else:
             self.suite.ok("C5-01")
-        a = self.client.post("/policy-configs", json={"config_id": "luna_med", "config": {"model": "luna"}})
-        b = self.client.post("/policy-configs", json={"config_id": "sol_med", "config": {"model": "sol"}})
-        held = self._start(submission_mode="async", policy_ref={"harness": "harbor_fused", "config": "luna_med"})
+        a = self.client.post("/policy-configs", json={"config_id": "luna_med", "config": {"model": "luna", "effort": "medium", "max_tokens": 1024, "context_token_budget": 16000, "compact_at": 0.7, "keep_recent_messages": 8, "keep_recent_frames": 2, "observation_mode": "text"}})
+        b = self.client.post("/policy-configs", json={"config_id": "sol_med", "config": {"model": "sol", "effort": "medium", "max_tokens": 1024, "context_token_budget": 16000, "compact_at": 0.7, "keep_recent_messages": 8, "keep_recent_frames": 2, "observation_mode": "text"}})
+        held = self._start(submission_mode="async", execution="on_complete", policy_ref={"harness": "harbor_fused", "config": "luna_med"})
         mid = self.client.post("/policy-configs", json={"config_id": "other", "config": {}})
         self.client.post(f"/rollouts/{_json(held)['rollout_id']}/complete")
-        if a.status_code == 200 and b.status_code == 200 and mid.status_code == 409:
+        held_id = _json(held)["rollout_id"]
+        held_policy = _json(self.client.get(f"/rollouts/{held_id}")).get("policy_ref")
+        if (
+            a.status_code in {200, 409}
+            and b.status_code in {200, 409}
+            and mid.status_code == 200
+            and held_policy == {"harness": "harbor_fused", "config": "luna_med", "code": None}
+        ):
             self.suite.ok("C5-02")
         else:
-            self.suite.fail("C5-02", f"{a.status_code} {b.status_code} mid={mid.status_code}")
+            self.suite.fail(
+                "C5-02",
+                f"{a.status_code} {b.status_code} mid={mid.status_code} held={held_policy}",
+            )
         started = self._start(policy_ref={"harness": "harbor_fused", "config": "luna_med"})
         events = _json(self.client.get(_json(started)["stream"]["transports"]["poll"]["url"], params={"after": 0}))["events"]
         kinds = _kinds(events)
@@ -1097,9 +1116,9 @@ class Runner:
         else:
             self.suite.fail("C7-O01", f"{child_ref}")
 
-        a = self._start(submission_mode="async", task_instance_id="seed:0")
-        b = self._start(submission_mode="async", task_instance_id="seed:1")
-        if a.status_code == 200 and b.status_code == 200:
+        a = self._start(submission_mode="async", execution="on_complete", task_instance_id="seed:0")
+        b = self._start(submission_mode="async", execution="on_complete", task_instance_id="seed:1")
+        if _accepted(a) and _accepted(b):
             aid, bid = _json(a)["rollout_id"], _json(b)["rollout_id"]
             ae = _json(self.client.get(f"/rollouts/{aid}/events", params={"after": 0}))
             be = _json(self.client.get(f"/rollouts/{bid}/events", params={"after": 0}))
@@ -1113,12 +1132,12 @@ class Runner:
                 self.suite.fail("C7-O02", "logs crossed")
         elif b.status_code == 429:
             self.suite.ok("C7-O02", "honestly queued")
-            if a.status_code == 200:
+            if _accepted(a):
                 self.client.post(f"/rollouts/{_json(a)['rollout_id']}/complete")
         else:
             self.suite.fail("C7-O02", f"{a.status_code} {b.status_code}")
 
-        held = self._start(submission_mode="async", task_instance_id="seed:9")
+        held = self._start(submission_mode="async", execution="on_complete", task_instance_id="seed:9")
         held_id = _json(held)["rollout_id"]
         pin_before = _json(held).get("policy_ref")
         if self.target == "craftax_code_policy":
@@ -1137,8 +1156,8 @@ class Runner:
 
             self.client.put("/policy", json={"code": DEFAULT_HEURISTIC})
 
-        incomplete = self._start(submission_mode="async", task_instance_id="seed:absent")
-        if incomplete.status_code != 200:
+        incomplete = self._start(submission_mode="async", execution="on_complete", task_instance_id="seed:absent")
+        if not _accepted(incomplete):
             self.suite.fail("C7-O04", f"absent child {incomplete.status_code}")
         else:
             incomplete_id = _json(incomplete)["rollout_id"]
@@ -1216,7 +1235,7 @@ class Runner:
             "/policy-configs",
             json={"config_id": "agentic_codex", "harness": "codex", "config": {"mcp_bind": "digbench-mcp"}},
         )
-        if basic.status_code == 200 and agentic.status_code == 200:
+        if basic.status_code in {200, 409} and agentic.status_code in {200, 409}:
             if self.target == "digbench_mock" and not self.paid:
                 self.suite.ok("C8-04", "agentic MCP skipped on mock")
             else:
@@ -1231,7 +1250,7 @@ class Runner:
 
         win = self._start(outcome="completed")
         loss = self._start(outcome="game_over")
-        live = self._start(submission_mode="async")
+        live = self._start(submission_mode="async", execution="on_complete")
         win_r = _json(self.client.post("/reward", json={"rollout_id": _json(win)["rollout_id"], "mode": "terminal"}))
         loss_r = _json(self.client.post("/reward", json={"rollout_id": _json(loss)["rollout_id"], "mode": "terminal"}))
         live_r = self.client.post("/reward", json={"rollout_id": _json(live)["rollout_id"], "mode": "terminal"})
@@ -1270,15 +1289,15 @@ class Runner:
         else:
             self.suite.ok("C8-08")
 
-        a = self._start(submission_mode="async")
-        b = self._start(submission_mode="async")
-        if a.status_code == 200 and b.status_code == 200:
+        a = self._start(submission_mode="async", execution="on_complete")
+        b = self._start(submission_mode="async", execution="on_complete")
+        if _accepted(a) and _accepted(b):
             self.suite.ok("C8-09")
             self.client.post(f"/rollouts/{_json(a)['rollout_id']}/complete")
             self.client.post(f"/rollouts/{_json(b)['rollout_id']}/complete")
         elif b.status_code == 429:
             self.suite.ok("C8-09", "queued")
-            if a.status_code == 200:
+            if _accepted(a):
                 self.client.post(f"/rollouts/{_json(a)['rollout_id']}/complete")
         else:
             self.suite.fail("C8-09", f"{a.status_code} {b.status_code}")

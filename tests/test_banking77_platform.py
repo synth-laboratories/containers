@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import urllib.error
 
+import pytest
 from fastapi.testclient import TestClient
 
 from synth_containers.platform import create_compat_app
@@ -275,6 +276,131 @@ def test_tinker_endpoint_does_not_branch_on_target_id() -> None:
     )
 
 
+def test_scoped_responses_policy_calls_gateway_without_exposing_token(monkeypatch) -> None:
+    client = _client()
+    gold = load_row("heldout", 0)
+    assert gold is not None
+    captured: dict[str, object] = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _limit: int) -> bytes:
+            return json.dumps(
+                {
+                    "output_text": gold.label,
+                    "usage": {"input_tokens": 10, "output_tokens": 2, "total_tokens": 12},
+                }
+            ).encode()
+
+    def fake_urlopen(request, *, timeout):
+        captured["url"] = request.full_url
+        captured["authorization"] = request.get_header("Authorization")
+        captured["idempotency"] = request.get_header("Idempotency-key")
+        captured["body"] = json.loads(request.data)
+        captured["timeout"] = timeout
+        return Response()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    token = "rollout-scoped-token"
+    response = client.post(
+        "/policy-configs",
+        json={
+            "config_id": "scoped_responses",
+            "harness": "classify",
+            "config": {
+                "api_family": "responses",
+                "responses_base_url": "http://127.0.0.1:8080/runs/run/rollouts/roll/attempts/a/v1",
+                "responses_api_key": token,
+                "responses_model": "policy",
+                "responses_idempotency_key": "roll-a-generation-1",
+                "policy_pin": "episode",
+            },
+        },
+    )
+    assert response.status_code == 200
+    _, started = _prepare_start(
+        client,
+        rollout_id="b77_responses",
+        body={
+            "world_ref": "world:banking77@heldout",
+            "task_instance_id": "seed:0",
+            "policy_ref": {"harness": "classify", "config": "scoped_responses"},
+        },
+    )
+    scored = client.post("/reward", json={"rollout_id": "b77_responses", "mode": "terminal"})
+    assert scored.json()["reward"] == 1.0
+    assert captured["url"].endswith("/v1/responses")
+    assert captured["authorization"] == f"Bearer {token}"
+    assert captured["idempotency"] == "roll-a-generation-1"
+    assert captured["body"]["model"] == "policy"
+    assert token not in json.dumps(started)
+    assert started["usage"] == {
+        "prompt_tokens": 10,
+        "completion_tokens": 2,
+        "total_tokens": 12,
+    }
+
+
+def test_openai_chat_policy_scores_and_reports_usage(monkeypatch) -> None:
+    client = _client()
+    gold = load_row("train", 0)
+    assert gold is not None
+    captured: dict[str, object] = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _limit: int) -> bytes:
+            return json.dumps({
+                "choices": [{"message": {"content": gold.label}}],
+                "usage": {"prompt_tokens": 20, "completion_tokens": 3, "total_tokens": 23},
+            }).encode()
+
+    def fake_urlopen(request, *, timeout):
+        captured["url"] = request.full_url
+        captured["authorization"] = request.get_header("Authorization")
+        captured["body"] = json.loads(request.data)
+        captured["timeout"] = timeout
+        return Response()
+
+    monkeypatch.setenv("BANKING77_TEST_OPENAI_KEY", "opaque-test-key")
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    registered = client.post("/policy-configs", json={
+        "config_id": "banking77_gpt_4_1_nano",
+        "harness": "classify",
+        "config": {
+            "provider": "openai",
+            "model": "gpt-4.1-nano",
+            "api_key_env": "BANKING77_TEST_OPENAI_KEY",
+            "base_url": "https://api.openai.com/v1",
+            "temperature": 0,
+            "max_tokens": 32,
+        },
+    })
+    assert registered.status_code == 200
+    _, started = _prepare_start(client, rollout_id="b77_openai", body={
+        "world_ref": "world:banking77@train",
+        "task_instance_id": "seed:0",
+        "policy_ref": {"harness": "classify", "config": "banking77_gpt_4_1_nano"},
+    })
+    assert started["status"] == "completed"
+    assert started["usage"]["total_tokens"] == 23
+    scored = client.post("/reward", json={"rollout_id": "b77_openai", "mode": "terminal"}).json()
+    assert scored["reward"] == 1.0
+    assert captured["url"] == "https://api.openai.com/v1/chat/completions"
+    assert captured["authorization"] == "Bearer opaque-test-key"
+    assert captured["body"]["model"] == "gpt-4.1-nano"
+
+
 def test_tinker_error_code_is_typed_without_provider_prose() -> None:
     from synth_containers.platform.runtimes.banking77 import _error_code
 
@@ -291,6 +417,18 @@ def test_tinker_error_code_is_typed_without_provider_prose() -> None:
         "or by setting the TINKER_API_KEY environment variable"
     )
     assert _error_code(missing) == "tinker_api_key_missing"
+
+
+def test_responses_endpoint_refuses_unallowlisted_hosts() -> None:
+    from synth_containers.platform.runtimes.banking77 import _validate_responses_endpoint
+
+    _validate_responses_endpoint("http://127.0.0.1:8080/runs/r/v1/responses")
+    with pytest.raises(RuntimeError, match="responses_endpoint_refused"):
+        _validate_responses_endpoint("https://evil.example/v1/responses")
+    with pytest.raises(RuntimeError, match="responses_endpoint_refused"):
+        _validate_responses_endpoint("http://127.0.0.1:8080/v1/chat/completions")
+
+
 def test_remote_checkpoint_sampler_is_loopback_only_and_secret_free(monkeypatch) -> None:
     client = _client()
     gold = load_row("heldout", 0)

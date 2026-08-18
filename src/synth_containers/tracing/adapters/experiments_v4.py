@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from ..canonical import bytes_digest, canonical_bytes, record_id, utc_now
+from ..canonical import bytes_digest, canonical_bytes, record_id
 from ..models.actors import (
     ActorKind,
     ActorV5,

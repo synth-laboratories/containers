@@ -61,6 +61,7 @@ class TargetSpec:
     policy_seeds: tuple[PolicySeed, ...] = ()
     script_node: ScriptNode = ScriptNode.REWARD_TXT
     max_episode_steps: int | None = None
+    gold_base_url: str | None = None
 
 
 def _env(items: dict[str, str]) -> AffordanceMap:
@@ -187,11 +188,16 @@ CRAFTAX_REACT = TargetSpec(
                 # the reasoning budget with no model-authored content.
                 "max_tokens": 2048,
                 "parse_retries": 2,
-                "compact_every": 16,
+                "context_token_budget": 16000,
+                "compact_at": 0.7,
+                "keep_recent_messages": 8,
+                "keep_recent_frames": 2,
+                "observation_mode": "text",
             },
         ),
     ),
     max_episode_steps=120,
+    gold_base_url="http://127.0.0.1:8098",
 )
 
 # Dedicated GoEx target: same gold Rust environment and paid ReAct harness, but
@@ -618,6 +624,17 @@ HEALTHBENCH_CHAT = TargetSpec(
                 "model": "llama-3.1-8b-instant",
                 "api_key_env": "GROQ_API_KEY",
                 "base_url": "https://api.groq.com/openai/v1",
+                "max_tokens": 1536,
+            },
+        ),
+        PolicySeed(
+            "openai_gpt41_mini",
+            "chat_completion",
+            {
+                "provider": "openai",
+                "model": "gpt-4.1-mini-2025-04-14",
+                "api_key_env": "OPENAI_API_KEY",
+                "base_url": "https://api.openai.com/v1",
                 "max_tokens": 1536,
             },
         ),

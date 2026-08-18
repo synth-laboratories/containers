@@ -32,6 +32,43 @@ PRICES = {
 }
 
 
+def model_roles() -> dict[str, dict[str, Any]]:
+    """Describe the two independent paid model roles without exposing credentials."""
+
+    grader_model = os.environ.get("HEALTHBENCH_GRADER_MODEL", GRADER_MODEL)
+    policy_key_env = os.environ.get("HEALTHBENCH_POLICY_API_KEY_ENV", "OPENAI_API_KEY")
+    grader_key_env = os.environ.get("HEALTHBENCH_GRADER_API_KEY_ENV", "OPENAI_API_KEY")
+    return {
+        "policy": {
+            "purpose": "generate_candidate_response",
+            "configuration_authority": "policy_ref",
+            "api_key_env": policy_key_env,
+            "credential_present": bool(os.environ.get(policy_key_env, "").strip()),
+            "usage_lane": "policy",
+            "required": True,
+        },
+        "scorer": {
+            "purpose": "score_response_against_physician_rubrics",
+            "provider": "openai",
+            "model": grader_model,
+            "api_key_env": grader_key_env,
+            "credential_present": bool(os.environ.get(grader_key_env, "").strip()),
+            "base_url": os.environ.get(
+                "HEALTHBENCH_GRADER_BASE_URL", "https://api.openai.com/v1"
+            ),
+            "evaluation_plan_ref": (
+                "healthbench_eval.v1"
+                if grader_model == GRADER_MODEL
+                else "healthbench_scaled_grader.v1"
+            ),
+            "canonical": grader_model == GRADER_MODEL,
+            "usage_lane": "grader",
+            "call_pattern": "one_call_per_rubric_item",
+            "required": True,
+        },
+    }
+
+
 @lru_cache(maxsize=8)
 def _client(base_url: str) -> httpx.Client:
     """Reuse provider connections and retry only failures before a response exists.
@@ -195,6 +232,8 @@ def _grade(
     *,
     messages: list[dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    roles = model_roles()
+    scorer = roles["scorer"]
     conversation_messages = list(messages or row.get("prompt") or []) + [
         {"role": "assistant", "content": completion}
     ]
@@ -212,12 +251,10 @@ def _grade(
         )
         result = _chat(
             {
-                "provider": "openai",
-                "model": os.environ.get("HEALTHBENCH_GRADER_MODEL", GRADER_MODEL),
-                "base_url": os.environ.get(
-                    "HEALTHBENCH_GRADER_BASE_URL", "https://api.openai.com/v1"
-                ),
-                "api_key_env": "OPENAI_API_KEY",
+                "provider": scorer["provider"],
+                "model": scorer["model"],
+                "base_url": scorer["base_url"],
+                "api_key_env": scorer["api_key_env"],
                 "temperature": 0,
                 "max_tokens": 512,
             },
