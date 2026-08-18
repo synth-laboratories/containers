@@ -1,9 +1,9 @@
 """`synth_mlx_rl` admission: one shared validator, three call sites.
 
 The validator is the security boundary for a local MLX proxy. It fails closed:
-loopback (and the Docker host alias) over http are admitted unconditionally,
-everything else — https included, exactly as the `_validate_responses_endpoint`
-precedent already behaves — must be named in SYNTH_MLX_RL_ALLOWED_ENDPOINTS.
+loopback over http is admitted unconditionally, exactly matching the
+`_validate_responses_endpoint` precedent; everything else — https, and the
+Docker host alias — must be named in SYNTH_MLX_RL_ALLOWED_ENDPOINTS.
 """
 
 from __future__ import annotations
@@ -50,6 +50,42 @@ def _react_config(**overrides: object) -> dict[str, object]:
     }
     config.update(overrides)
     return config
+
+
+class _FakeHTTPResponse:
+    def __init__(self, text: str, content_type: str) -> None:
+        self._data = text.encode("utf-8")
+        self._offset = 0
+        self.headers = {"Content-Type": content_type}
+
+    def read(self, amount: int | None = None) -> bytes:
+        if amount is None:
+            chunk, self._offset = self._data[self._offset :], len(self._data)
+            return chunk
+        chunk = self._data[self._offset : self._offset + amount]
+        self._offset += len(chunk)
+        return chunk
+
+    def __enter__(self) -> "_FakeHTTPResponse":
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        return None
+
+
+def _stub_urlopen(monkeypatch, captured: dict, text: str, *, content_type: str) -> None:
+    import urllib.request
+
+    from synth_containers.platform import react as react_module
+
+    def fake_urlopen(request, timeout=None):  # noqa: ANN001
+        captured["url"] = request.full_url
+        captured["headers"] = dict(request.headers)
+        captured["json"] = json.loads(request.data.decode("utf-8"))
+        return _FakeHTTPResponse(text, content_type)
+
+    monkeypatch.setattr(react_module.urllib.request, "urlopen", fake_urlopen)
+    del urllib
 
 
 # --- the validator itself ---------------------------------------------------
@@ -354,13 +390,90 @@ def test_react_refuses_a_public_origin_and_a_userinfo_url(monkeypatch) -> None:
         )
 
 
-def test_react_never_defaults_the_api_family_and_names_the_responses_gap() -> None:
+def test_react_never_defaults_the_api_family() -> None:
     with pytest.raises(PolicyConfigError, match="api_family"):
         config = _react_config()
         del config["api_family"]
         OpenRouterReAct(config_id="mlx_nofamily", config=config)
-    with pytest.raises(PolicyConfigError, match="responses-family renderer"):
-        OpenRouterReAct(config_id="mlx_responses", config=_react_config(api_family=RESPONSES))
+
+
+def test_react_speaks_the_responses_family(monkeypatch) -> None:
+    """The planner renders a Responses body and reads a function call back.
+
+    Three things differ from chat and each one silently breaks a rollout if
+    missed: the tool is flat rather than nested under `function`, the cap is
+    `max_output_tokens`, and usage arrives as input/output_tokens.
+    """
+    policy = OpenRouterReAct(config_id="mlx_resp", config=_react_config(api_family=RESPONSES))
+    assert policy.chat_endpoint == "http://127.0.0.1:8765/v1/responses"
+
+    sent: dict[str, object] = {}
+    arguments = '{"actions":["noop"]}'
+    # Built with json.dumps rather than hand-escaped: the tool arguments are a
+    # JSON string nested inside a JSON event, and getting that wrong in a
+    # fixture produces a test that fails for a reason the code never had.
+    events = "\n\n".join(
+        [
+            "data: " + json.dumps({"type": "response.output_text.delta", "delta": "thinking"}),
+            "data: "
+            + json.dumps(
+                {"type": "response.function_call_arguments.delta", "delta": arguments}
+            ),
+            "data: "
+            + json.dumps(
+                {
+                    "type": "response.completed",
+                    "response": {"usage": {"input_tokens": 11, "output_tokens": 4}},
+                }
+            ),
+            "data: [DONE]",
+        ]
+    )
+    _stub_urlopen(monkeypatch, sent, events, content_type="text/event-stream")
+
+    body = policy._complete("k", ["noop"], None)
+
+    assert sent["url"] == "http://127.0.0.1:8765/v1/responses"
+    payload = sent["json"]
+    assert "input" in payload and "messages" not in payload
+    assert payload["max_output_tokens"] == 1024 and "max_tokens" not in payload
+    tool = payload["tools"][0]
+    # Flat, not {"type":"function","function":{...}} as chat requires.
+    assert tool["type"] == "function" and tool["name"] == "choose_actions"
+    assert "function" not in tool
+
+    message = body["choices"][0]["message"]
+    assert message["content"] == "thinking"
+    assert message["tool_calls"][0]["function"]["arguments"] == arguments
+    # Compaction triggers on prompt_tokens; an unmapped usage block reads as a
+    # context that never grows, so the transcript would never be compacted.
+    assert body["usage"]["prompt_tokens"] == 11
+    assert body["usage"]["completion_tokens"] == 4
+    assert body["usage"]["total_tokens"] == 15
+
+
+def test_react_responses_reads_a_terminal_body_with_no_argument_deltas(monkeypatch) -> None:
+    """A server may stream nothing and emit only the final response. The plan
+    must still survive, or the turn silently falls back to text parsing."""
+    policy = OpenRouterReAct(config_id="mlx_resp2", config=_react_config(api_family=RESPONSES))
+    sent: dict[str, object] = {}
+    body_json = json.dumps(
+        {
+            "output": [
+                {
+                    "type": "function_call",
+                    "name": "choose_actions",
+                    "arguments": '{"actions":["noop","noop"]}',
+                }
+            ],
+            "usage": {"input_tokens": 7, "output_tokens": 3},
+        }
+    )
+    _stub_urlopen(monkeypatch, sent, body_json, content_type="application/json")
+    result = policy._complete("k", ["noop"], None)
+    calls = result["choices"][0]["message"]["tool_calls"]
+    assert calls[0]["function"]["arguments"] == '{"actions":["noop","noop"]}'
+    assert result["usage"]["prompt_tokens"] == 7
 
 
 def test_react_openrouter_and_tinker_paths_are_unchanged() -> None:
