@@ -73,6 +73,7 @@ class Banking77Runtime:
         )
         try:
             predicted, usage = self._act(platform, pin, harness, observation)
+            training_action = usage.pop("_training_action", None)
             if isinstance(predicted, str) and not predicted.strip():
                 predicted = None
         except Exception as exc:
@@ -96,7 +97,10 @@ class Banking77Runtime:
             )
             return
 
-        log.append("action", {"label": predicted, "text": predicted})
+        action_payload = {"label": predicted, "text": predicted}
+        if isinstance(training_action, dict):
+            action_payload["training_action"] = training_action
+        log.append("action", action_payload)
         log.append("span.policy.closed", {"status": "completed" if predicted else "empty"})
 
         if pin.omit_reward or predicted is None:
@@ -158,7 +162,6 @@ class Banking77Runtime:
         if harness != "classify":
             raise ValueError(f"unknown_banking77_harness:{harness}")
         return None, dict(_EMPTY_USAGE)
-
 
     def _close_missing(
         self,
@@ -222,7 +225,9 @@ def _sample_chat_completion(
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=float(config.get("timeout_seconds", 90))) as response:
+        with urllib.request.urlopen(
+            request, timeout=float(config.get("timeout_seconds", 90))
+        ) as response:
             body = json.loads(response.read(1_000_000))
     except urllib.error.HTTPError as exc:
         raise RuntimeError(f"openai_http_{exc.code}") from exc
@@ -419,7 +424,8 @@ def _sample_remote_checkpoint(
     config: dict[str, Any],
 ) -> tuple[str | None, dict[str, Any]]:
     endpoint = str(target.get("provider_endpoint_id") or "").strip()
-    _validate_remote_checkpoint_endpoint(endpoint)
+    if config.get("training_sampler_endpoint") is not True:
+        return _sample_remote_checkpoint_legacy(target, observation, config)
     if str(target.get("provider") or "").strip().lower() != "tinker":
         raise RuntimeError("remote_checkpoint_provider_unsupported")
     auth_bearer = str(target.get("auth_bearer") or "").strip()
@@ -434,11 +440,79 @@ def _sample_remote_checkpoint(
         {"role": "system", "content": CLASSIFY_SYSTEM},
         {"role": "user", "content": user_prompt(str(observation["text"]))},
     ]
+    timeout = min(max(float(config.get("remote_timeout_seconds") or 60.0), 1.0), 120.0)
+    from ...training_rollout import (
+        ROLLOUT_ACTION_SCHEMA_VERSION,
+        HostedSamplerClient,
+        SamplerEndpoint,
+        canonical_sha256,
+    )
+
+    message_digest = canonical_sha256({"messages": messages})
+    with HostedSamplerClient(
+        SamplerEndpoint(
+            endpoint,
+            auth_bearer,
+            str(target.get("connection_mode") or "keep_alive"),
+        ),
+        timeout_seconds=timeout,
+    ) as client:
+        sampled = client.sample(
+            {
+                "schema_version": ROLLOUT_ACTION_SCHEMA_VERSION,
+                "job_id": config.get("job_id") or run_id,
+                "attempt_id": config.get("attempt_id"),
+                "rollout_id": config.get("rollout_id"),
+                "run_id": run_id,
+                "checkpoint_id": checkpoint_id,
+                "policy_version": config.get("policy_version") or checkpoint_id,
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "temperature": 0.0,
+            },
+            idempotency_key=(
+                f"{config.get('rollout_id') or run_id}:{checkpoint_id}:{message_digest}"
+            ),
+        )
+    usage = _remote_usage(dict(sampled.usage))
+    usage["_training_action"] = {
+        "schema_version": ROLLOUT_ACTION_SCHEMA_VERSION,
+        "policy_version": config.get("policy_version") or checkpoint_id,
+        "prompt_token_ids": list(sampled.prompt_token_ids),
+        "token_ids": list(sampled.token_ids),
+        "log_probs": list(sampled.log_probs),
+    }
+    predicted = sampled.text.strip().splitlines()[0].strip() if sampled.text.strip() else None
+    return predicted, usage
+
+
+def _sample_remote_checkpoint_legacy(
+    target: dict[str, Any],
+    observation: dict[str, Any],
+    config: dict[str, Any],
+) -> tuple[str | None, dict[str, Any]]:
+    """Preserve the existing loopback/allowlisted SFT checkpoint contract."""
+
+    endpoint = str(target.get("provider_endpoint_id") or "").strip()
+    _validate_remote_checkpoint_endpoint(endpoint)
+    if str(target.get("provider") or "").strip().lower() != "tinker":
+        raise RuntimeError("remote_checkpoint_provider_unsupported")
+    auth_bearer = str(target.get("auth_bearer") or "").strip()
+    if not auth_bearer or "\r" in auth_bearer or "\n" in auth_bearer:
+        raise RuntimeError("remote_checkpoint_auth_missing")
+    run_id = str(target.get("run_id") or "").strip()
+    checkpoint_id = str(target.get("checkpoint_id") or "").strip()
+    if not run_id or not checkpoint_id:
+        raise RuntimeError("remote_checkpoint_identity_missing")
+    max_tokens = min(max(int(config.get("max_tokens") or 32), 1), 512)
     body = json.dumps(
         {
             "run_id": run_id,
             "checkpoint_id": checkpoint_id,
-            "messages": messages,
+            "messages": [
+                {"role": "system", "content": CLASSIFY_SYSTEM},
+                {"role": "user", "content": user_prompt(str(observation["text"]))},
+            ],
             "max_tokens": max_tokens,
         },
         separators=(",", ":"),
@@ -474,14 +548,11 @@ def _sample_remote_checkpoint(
         payload = json.loads(raw)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise RuntimeError("remote_checkpoint_response_invalid") from exc
-    if not isinstance(payload, dict):
+    if not isinstance(payload, dict) or not isinstance(payload.get("text"), str):
         raise RuntimeError("remote_checkpoint_response_invalid")
-    text = payload.get("text")
-    if not isinstance(text, str):
-        raise RuntimeError("remote_checkpoint_response_invalid")
-    usage = _remote_usage(payload.get("usage"))
+    text = payload["text"]
     predicted = text.strip().splitlines()[0].strip() if text.strip() else None
-    return predicted, usage
+    return predicted, _remote_usage(payload.get("usage"))
 
 
 def _validate_remote_checkpoint_endpoint(endpoint: str) -> None:
@@ -508,9 +579,7 @@ def _validate_remote_checkpoint_endpoint(endpoint: str) -> None:
         normalized += f":{port}"
     allowed = {
         item.strip().rstrip("/")
-        for item in os.environ.get(
-            "SYNTH_CHECKPOINT_INFERENCE_ALLOWED_ENDPOINTS", ""
-        ).split(",")
+        for item in os.environ.get("SYNTH_CHECKPOINT_INFERENCE_ALLOWED_ENDPOINTS", "").split(",")
         if item.strip()
     }
     if normalized not in allowed:
@@ -523,7 +592,11 @@ def _remote_usage(value: Any) -> dict[str, Any]:
     usage: dict[str, Any] = {}
     for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
         item = value.get(key)
-        usage[key] = item if item is None or (isinstance(item, int) and not isinstance(item, bool) and item >= 0) else None
+        usage[key] = (
+            item
+            if item is None or (isinstance(item, int) and not isinstance(item, bool) and item >= 0)
+            else None
+        )
     return usage
 
 
@@ -537,7 +610,9 @@ def _sample_tinker(
     except ImportError as exc:
         raise RuntimeError("tinker_sdk_missing") from exc
 
-    target = config.get("inference_target") if isinstance(config.get("inference_target"), dict) else {}
+    target = (
+        config.get("inference_target") if isinstance(config.get("inference_target"), dict) else {}
+    )
     base_model = str(target.get("base_model") or config.get("base_model") or "").strip()
     if not base_model:
         raise RuntimeError("tinker_base_model_missing")
@@ -560,9 +635,7 @@ def _sample_tinker(
             enable_thinking=False,
         )
     except TypeError:
-        prompt = tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
-        )
+        prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
     prompt_ids = list(map(int, tokenizer(prompt, add_special_tokens=False)["input_ids"]))
     model_input_cls = getattr(tinker, "ModelInput", None) or tinker.types.ModelInput
     try:
