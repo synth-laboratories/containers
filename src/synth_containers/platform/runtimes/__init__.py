@@ -10,6 +10,7 @@ from ..targets import TargetRuntimeKind, TargetSpec
 from .banking77 import Banking77Runtime
 from .craftax import CraftaxRuntime
 from .digbench import DigbenchRuntime
+from .gsm8k import Gsm8kRuntime
 from .harbor import HarborRuntime
 from .healthbench import HealthBenchRuntime
 from .openenv import OpenEnvRuntime
@@ -20,6 +21,7 @@ _BY_FAMILY = {
     TargetRuntimeKind.DIGBENCH: DigbenchRuntime(),
     TargetRuntimeKind.OPENENV: OpenEnvRuntime(),
     TargetRuntimeKind.BANKING77: Banking77Runtime(),
+    TargetRuntimeKind.GSM8K: Gsm8kRuntime(),
     TargetRuntimeKind.HEALTHBENCH: HealthBenchRuntime(),
 }
 

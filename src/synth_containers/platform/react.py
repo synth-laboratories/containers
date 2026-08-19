@@ -16,6 +16,13 @@ from typing import Any
 
 from .craftax_taxonomy import usage_from_call_identity
 from .craftax_world import ACTIONS
+from .local_provider import (
+    API_FAMILIES,
+    CHAT_COMPLETIONS,
+    RESPONSES,
+    local_endpoint,
+)
+from .local_provider import PROVIDER_ID as LOCAL_PROVIDER_ID
 
 DeltaCallback = Callable[[dict[str, Any]], None]
 
@@ -258,21 +265,43 @@ class OpenRouterReAct:
         # and every rollout died on turn 0 with `policy_error` after zero steps.
         # A missing endpoint must say so, not pick one.
         self.provider = _required_choice(
-            config, "provider", config_id, ("openrouter", "tinker")
+            config, "provider", config_id, ("openrouter", LOCAL_PROVIDER_ID, "tinker")
         )
         self.api_key_env = _required_str(config, "api_key_env", config_id)
         self.parse_retries = _required_bounded_int(config, "parse_retries", config_id, 0, 2)
-        if self.provider == "openrouter":
+        # OpenRouter and Tinker speak chat-completions only. `synth_mlx_rl` may
+        # name either family and overrides this below.
+        self.api_family = CHAT_COMPLETIONS
+        self.policy_snapshot_id = str(config.get("policy_snapshot_id") or "").strip()
+        if self.provider in {"openrouter", LOCAL_PROVIDER_ID}:
             self.base_url = _required_str(config, "base_url", config_id).rstrip("/")
+            self.chat_endpoint = f"{self.base_url}/chat/completions"
             self.sampler_path = ""
             self.tokenizer_id = ""
             self.sampler_ready_timeout_s = 0
+            if self.provider == LOCAL_PROVIDER_ID:
+                # The local proxy has no fixed origin, so admission is the shared
+                # `synth_mlx_rl` check rather than a hosted base URL: loopback or
+                # the Docker host alias over http, or an origin named in
+                # SYNTH_MLX_RL_ALLOWED_ENDPOINTS. Refusing at config time rather
+                # than at sample time keeps a bad endpoint from reading later as
+                # a policy that scored zero.
+                family = _required_choice(config, "api_family", config_id, API_FAMILIES)
+                self.api_family = family
+                try:
+                    self.chat_endpoint = local_endpoint(self.base_url, api_family=family)
+                except RuntimeError as exc:
+                    raise PolicyConfigError(
+                        f"policy config {config_id!r} names a base_url the local "
+                        f"{LOCAL_PROVIDER_ID} provider refuses: {exc}"
+                    ) from exc
         else:
             # Tinker samples through its SDK, not an HTTP base_url. The sampler
             # path names the trained weights; the tokenizer must be the base
             # model's, or the chat template renders a prompt the student never
             # saw in training.
             self.base_url = ""
+            self.chat_endpoint = ""
             self.sampler_path = _required_str(config, "sampler_path", config_id)
             self.tokenizer_id = _required_str(config, "tokenizer_id", config_id)
             self.sampler_ready_timeout_s = _required_bounded_int(
@@ -651,8 +680,25 @@ class OpenRouterReAct:
                 f"[summary unavailable; provider={self.provider!r} does not summarize; "
                 f"{len(transcript)} messages dropped]"
             )
+        if self.api_family == RESPONSES:
+            # Same prose request on the peer surface. `messages` -> `input`,
+            # `max_tokens` -> `max_output_tokens`; a chat body posted to a
+            # `/responses` route is a 4xx, and a failed summary silently drops
+            # the compacted turns.
+            payload = {
+                "model": payload["model"],
+                "input": [
+                    {
+                        "role": message["role"],
+                        "content": [{"type": "input_text", "text": message["content"]}],
+                    }
+                    for message in payload["messages"]
+                ],
+                "temperature": 0,
+                "max_output_tokens": 700,
+            }
         request = urllib.request.Request(
-            f"{self.base_url}/chat/completions",
+            self.chat_endpoint,
             data=json.dumps(payload).encode("utf-8"),
             headers={
                 "authorization": f"Bearer {api_key}",
@@ -663,9 +709,12 @@ class OpenRouterReAct:
         try:
             with urllib.request.urlopen(request, timeout=120) as response:
                 body = json.loads(response.read().decode("utf-8"))
-            text = self._message_text(
-                (body.get("choices") or [{}])[0].get("message", {}).get("content")
-            )
+            if self.api_family == RESPONSES:
+                text = self._responses_output(body)["content"]
+            else:
+                text = self._message_text(
+                    (body.get("choices") or [{}])[0].get("message", {}).get("content")
+                )
         except (urllib.error.URLError, OSError, ValueError, KeyError, IndexError):
             # A failed summary must not end the rollout. Name what was dropped
             # rather than silently losing the turns.
@@ -774,12 +823,13 @@ class OpenRouterReAct:
         if self.provider == "tinker":
             del valid, on_delta  # no tool schema and no token stream on this path
             return self._tinker_sample(api_key)
+        if self.api_family == RESPONSES:
+            return self._responses_complete(api_key, valid, on_delta)
         payload = {
             "model": self.model,
             "messages": list(self._messages),
             "temperature": 0,
             "max_tokens": self.max_tokens,
-            "reasoning": {"effort": self.reasoning_effort},
             "stream": True,
             "stream_options": {"include_usage": True},
             "tools": [
@@ -810,8 +860,15 @@ class OpenRouterReAct:
             # named forced choice.
             "tool_choice": "auto",
         }
+        if self.provider == "openrouter":
+            # `reasoning` is an OpenRouter extension, not part of the OpenAI
+            # chat schema. Sending it to another provider is a request for a
+            # field that provider never defined; a strict server rejects the
+            # whole call with a 422 that reads as a policy failure. Found
+            # against the local synth_mlx_rl service, which forbids extras.
+            payload["reasoning"] = {"effort": self.reasoning_effort}
         request = urllib.request.Request(
-            f"{self.base_url}/chat/completions",
+            self.chat_endpoint,
             data=json.dumps(payload).encode("utf-8"),
             headers={
                 "Authorization": f"Bearer {api_key}",
@@ -837,6 +894,261 @@ class OpenRouterReAct:
         if stripped.startswith("data:"):
             return self._consume_sse_text(raw, on_delta)
         return json.loads(raw)
+
+    # ---- responses family ---------------------------------------------
+    #
+    # The Responses API is a peer surface, not a translation layer over chat.
+    # Three concrete differences, each of which silently breaks a rollout if
+    # missed: a tool is FLAT (`type`/`name`/`parameters` at the top level, not
+    # nested under `function`), the cap is `max_output_tokens`, and usage is
+    # reported as `input_tokens`/`output_tokens`. The last one matters most
+    # here — compaction triggers on `prompt_tokens`, so an unmapped usage block
+    # reads as a context that never grows and the transcript is never compacted.
+    #
+    # Everything is normalized back into the same chat-shaped dict the rest of
+    # this class consumes, exactly as `_tinker_sample` already does, so parse,
+    # retry, usage and compaction stay on one path.
+
+    def _responses_input(self) -> list[dict[str, Any]]:
+        """Translate chat `messages` into Responses `input` items."""
+        items: list[dict[str, Any]] = []
+        for message in self._messages:
+            content = message.get("content")
+            role = message.get("role")
+            if isinstance(content, str):
+                items.append({"role": role, "content": [{"type": "input_text", "text": content}]})
+                continue
+            parts: list[dict[str, Any]] = []
+            for part in content or []:
+                if not isinstance(part, dict):
+                    continue
+                if part.get("type") == "image_url":
+                    url = (part.get("image_url") or {}).get("url")
+                    if url:
+                        parts.append({"type": "input_image", "image_url": url})
+                elif isinstance(part.get("text"), str):
+                    parts.append({"type": "input_text", "text": part["text"]})
+            items.append({"role": role, "content": parts})
+        return items
+
+    def _responses_complete(
+        self,
+        api_key: str,
+        valid: list[str],
+        on_delta: DeltaCallback | None,
+    ) -> dict[str, Any]:
+        payload = {
+            "model": self.model,
+            "input": self._responses_input(),
+            "temperature": 0,
+            "max_output_tokens": self.max_tokens,
+            "stream": True,
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "choose_actions",
+                    "description": "Choose the next sequential Craftax actions.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "actions": {
+                                "type": "array",
+                                "items": {"type": "string", "enum": valid},
+                                "minItems": self.plan_min,
+                                "maxItems": self.plan_max,
+                            }
+                        },
+                        "required": ["actions"],
+                        "additionalProperties": False,
+                    },
+                }
+            ],
+            "tool_choice": "auto",
+        }
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+        }
+        if self.policy_snapshot_id:
+            # D9: on this family the pinned snapshot rides in the header, so a
+            # mid-episode sampler refresh cannot change what this call sampled.
+            headers["X-Policy-Pin"] = self.policy_snapshot_id
+        request = urllib.request.Request(
+            self.chat_endpoint,
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=180) as response:
+                response_headers = getattr(response, "headers", None)
+                content_type = str(
+                    response_headers.get("Content-Type") if response_headers is not None else ""
+                ).lower()
+                if "text/event-stream" in content_type:
+                    return self._consume_responses_sse(response, on_delta)
+                raw = response.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")[:1000]
+            raise RuntimeError(f"responses policy HTTP {exc.code}: {detail}") from exc
+        stripped = raw.lstrip()
+        if stripped.startswith("data:") or stripped.startswith("event:"):
+            return self._consume_responses_sse_text(raw, on_delta)
+        return self._normalize_responses_body(json.loads(raw))
+
+    def _consume_responses_sse(
+        self, response: Any, on_delta: DeltaCallback | None
+    ) -> dict[str, Any]:
+        chunks: list[bytes] = []
+        while True:
+            piece = response.read(256)
+            if not piece:
+                break
+            chunks.append(piece if isinstance(piece, bytes) else str(piece).encode("utf-8"))
+        return self._consume_responses_sse_text(
+            b"".join(chunks).decode("utf-8", errors="replace"), on_delta
+        )
+
+    def _consume_responses_sse_text(
+        self, raw: str, on_delta: DeltaCallback | None
+    ) -> dict[str, Any]:
+        assistant = ""
+        reasoning = ""
+        tool_arguments = ""
+        usage: dict[str, Any] = {}
+        completed: dict[str, Any] | None = None
+        for block_text in raw.split("\n\n"):
+            data_lines = [
+                line[5:].strip() if line.startswith("data:") else line[5:].lstrip()
+                for line in block_text.splitlines()
+                if line.startswith("data:")
+            ]
+            if not data_lines:
+                continue
+            payload_text = "\n".join(data_lines).strip()
+            if not payload_text or payload_text == "[DONE]":
+                continue
+            try:
+                event = json.loads(payload_text)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(event, dict):
+                continue
+            kind = str(event.get("type") or "")
+            delta = event.get("delta")
+            if kind == "response.output_text.delta" and isinstance(delta, str):
+                assistant += delta
+                self._emit_delta(on_delta, "content", delta)
+            elif kind == "response.function_call_arguments.delta" and isinstance(delta, str):
+                tool_arguments += delta
+                self._emit_delta(on_delta, "tool", delta)
+            elif kind in {
+                "response.reasoning_summary_text.delta",
+                "response.reasoning_text.delta",
+            } and isinstance(delta, str):
+                reasoning += delta
+                self._emit_delta(on_delta, "reasoning", delta)
+            elif kind in {"response.completed", "response.incomplete"}:
+                body = event.get("response")
+                if isinstance(body, dict):
+                    completed = body
+                    if isinstance(body.get("usage"), dict):
+                        usage = body["usage"]
+
+        if completed is not None:
+            # A server that streams no argument deltas but does emit a terminal
+            # response must still produce a tool call, or the plan is lost.
+            final = self._responses_output(completed)
+            assistant = assistant or final["content"]
+            reasoning = reasoning or final["reasoning"]
+            tool_arguments = tool_arguments or final["tool_arguments"]
+        return self._responses_shaped(assistant, reasoning, tool_arguments, usage)
+
+    @staticmethod
+    def _responses_output(body: dict[str, Any]) -> dict[str, str]:
+        """Pull text, reasoning and function-call arguments out of `output`."""
+        content = ""
+        reasoning = ""
+        tool_arguments = ""
+        direct = body.get("output_text")
+        if isinstance(direct, str):
+            content = direct
+        for item in body.get("output") or []:
+            if not isinstance(item, dict):
+                continue
+            item_type = str(item.get("type") or "")
+            if item_type == "function_call":
+                if str(item.get("name") or "") == "choose_actions":
+                    arguments = item.get("arguments")
+                    if isinstance(arguments, str):
+                        tool_arguments += arguments
+            elif item_type == "reasoning":
+                for part in item.get("summary") or []:
+                    if isinstance(part, dict) and isinstance(part.get("text"), str):
+                        reasoning += part["text"]
+            elif item_type == "message":
+                for part in item.get("content") or []:
+                    if isinstance(part, dict) and part.get("type") == "output_text":
+                        if not direct and isinstance(part.get("text"), str):
+                            content += part["text"]
+        return {"content": content, "reasoning": reasoning, "tool_arguments": tool_arguments}
+
+    def _normalize_responses_body(self, body: dict[str, Any]) -> dict[str, Any]:
+        final = self._responses_output(body)
+        usage = body.get("usage") if isinstance(body.get("usage"), dict) else {}
+        return self._responses_shaped(
+            final["content"], final["reasoning"], final["tool_arguments"], usage
+        )
+
+    @staticmethod
+    def _responses_usage(usage: dict[str, Any]) -> dict[str, Any]:
+        """`input_tokens`/`output_tokens` -> the `prompt_tokens` names the rest
+        of this class (and compaction in particular) reads."""
+        if not usage:
+            return {}
+        mapped = dict(usage)
+        if "prompt_tokens" not in mapped and usage.get("input_tokens") is not None:
+            mapped["prompt_tokens"] = usage["input_tokens"]
+        if "completion_tokens" not in mapped and usage.get("output_tokens") is not None:
+            mapped["completion_tokens"] = usage["output_tokens"]
+        if "total_tokens" not in mapped:
+            prompt = mapped.get("prompt_tokens")
+            completion = mapped.get("completion_tokens")
+            if isinstance(prompt, int) and isinstance(completion, int):
+                mapped["total_tokens"] = prompt + completion
+        return mapped
+
+    def _responses_shaped(
+        self,
+        content: str,
+        reasoning: str,
+        tool_arguments: str,
+        usage: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": content,
+                        "reasoning": reasoning,
+                        "tool_calls": (
+                            [
+                                {
+                                    "function": {
+                                        "name": "choose_actions",
+                                        "arguments": tool_arguments,
+                                    }
+                                }
+                            ]
+                            if tool_arguments
+                            else []
+                        ),
+                    }
+                }
+            ],
+            "usage": self._responses_usage(usage),
+        }
 
     def _consume_sse(self, response: Any, on_delta: DeltaCallback | None) -> dict[str, Any]:
         chunks: list[bytes] = []
