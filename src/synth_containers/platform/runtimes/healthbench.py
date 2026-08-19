@@ -7,6 +7,7 @@ as provider-settled invoices.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -53,9 +54,7 @@ def model_roles() -> dict[str, dict[str, Any]]:
             "model": grader_model,
             "api_key_env": grader_key_env,
             "credential_present": bool(os.environ.get(grader_key_env, "").strip()),
-            "base_url": os.environ.get(
-                "HEALTHBENCH_GRADER_BASE_URL", "https://api.openai.com/v1"
-            ),
+            "base_url": os.environ.get("HEALTHBENCH_GRADER_BASE_URL", "https://api.openai.com/v1"),
             "evaluation_plan_ref": (
                 "healthbench_eval.v1"
                 if grader_model == GRADER_MODEL
@@ -79,7 +78,9 @@ def _client(base_url: str) -> httpx.Client:
     response connection exists is safe and fixes transient TLS churn.
     """
 
-    max_connections = max(1, min(64, int(os.environ.get("HEALTHBENCH_PROVIDER_MAX_CONNECTIONS", "30"))))
+    max_connections = max(
+        1, min(64, int(os.environ.get("HEALTHBENCH_PROVIDER_MAX_CONNECTIONS", "30")))
+    )
     return httpx.Client(
         base_url=base_url,
         transport=httpx.HTTPTransport(retries=2),
@@ -113,14 +114,14 @@ class HealthBenchRuntime:
             if isinstance(system_prompt, str) and system_prompt.strip():
                 messages = [{"role": "system", "content": system_prompt.strip()}, *messages]
             completion = _chat(config, messages)
-            log.append(
-                "action",
-                {
-                    "role": "assistant",
-                    "content": completion["text"],
-                    "usage": completion["usage"],
-                },
-            )
+            action_payload = {
+                "role": "assistant",
+                "content": completion["text"],
+                "usage": completion["usage"],
+            }
+            if isinstance(completion.get("training_action"), dict):
+                action_payload["training_action"] = completion["training_action"]
+            log.append("action", action_payload)
             log.append("span.policy.closed", {"status": "completed", "usage": completion["usage"]})
             grader_model = os.environ.get("HEALTHBENCH_GRADER_MODEL", GRADER_MODEL)
             log.append(
@@ -194,6 +195,50 @@ class HealthBenchRuntime:
 
 
 def _chat(config: dict[str, Any], messages: list[dict[str, Any]]) -> dict[str, Any]:
+    inference_target = config.get("inference_target")
+    if isinstance(inference_target, dict):
+        from ...training_rollout import (
+            ROLLOUT_ACTION_SCHEMA_VERSION,
+            HostedSamplerClient,
+            SamplerEndpoint,
+        )
+
+        endpoint = SamplerEndpoint(
+            url=str(inference_target.get("provider_endpoint_id") or ""),
+            bearer_token=str(inference_target.get("auth_bearer") or ""),
+            connection_mode=str(inference_target.get("connection_mode") or "keep_alive"),
+        )
+        policy_version = str(config.get("policy_version") or inference_target.get("checkpoint_id"))
+        with HostedSamplerClient(endpoint) as client:
+            sampled = client.sample(
+                {
+                    "schema_version": ROLLOUT_ACTION_SCHEMA_VERSION,
+                    "job_id": config.get("job_id"),
+                    "attempt_id": config.get("attempt_id"),
+                    "rollout_id": config.get("rollout_id"),
+                    "run_id": config.get("job_id"),
+                    "checkpoint_id": policy_version,
+                    "messages": messages,
+                    "max_tokens": int(config.get("max_tokens") or 1536),
+                    "temperature": float(config.get("temperature") or 0.2),
+                    "policy_version": policy_version,
+                },
+                idempotency_key=(
+                    f"{config.get('rollout_id') or 'healthbench'}:"
+                    f"{policy_version}:{canonical_messages_digest(messages)}"
+                ),
+            )
+        return {
+            "text": sampled.text,
+            "usage": dict(sampled.usage),
+            "training_action": {
+                "schema_version": ROLLOUT_ACTION_SCHEMA_VERSION,
+                "policy_version": policy_version,
+                "prompt_token_ids": list(sampled.prompt_token_ids),
+                "token_ids": list(sampled.token_ids),
+                "log_probs": list(sampled.log_probs),
+            },
+        }
     provider = str(config.get("provider") or "groq").lower()
     model = str(config.get("model") or POLICY_MODEL)
     base = str(
@@ -223,6 +268,12 @@ def _chat(config: dict[str, Any], messages: list[dict[str, Any]]) -> dict[str, A
     if not text.strip():
         raise RuntimeError("empty_policy_completion")
     return {"text": text, "usage": _usage(provider, model, body.get("usage"))}
+
+
+def canonical_messages_digest(messages: list[dict[str, Any]]) -> str:
+    return hashlib.sha256(
+        json.dumps(messages, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()[:24]
 
 
 def _grade(

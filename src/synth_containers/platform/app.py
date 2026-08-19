@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import math
 import time
 import uuid
 from pathlib import Path
@@ -32,6 +33,13 @@ from .http_requests import (
 )
 from .state import CompatPlatform, PolicyConfig
 from .targets import TARGETS, TargetSpec
+from ..training_rollout import (
+    ROLLOUT_REQUEST_SCHEMA_VERSION,
+    ROLLOUT_REWARD_SCHEMA_VERSION,
+    ROLLOUT_SUMMARY_SCHEMA_VERSION,
+    canonical_sha256,
+    training_capabilities,
+)
 
 
 def _raise_platform(result: dict[str, Any]) -> dict[str, Any]:
@@ -73,6 +81,7 @@ def create_compat_app(
     )
     app.state.platform = platform
     app.state.spec = spec
+    app.state.training_rollout_results = {}
 
     def _sse_event(rollout_id: str, envelope: Any) -> dict[str, Any]:
         row = envelope.to_dict()
@@ -87,6 +96,13 @@ def create_compat_app(
     @app.get("/info")
     async def metadata() -> dict[str, Any]:
         payload = platform.metadata_payload()
+        container_digest = platform.capabilities_digest()
+        payload["training"] = training_capabilities(
+            target_id=spec.target_id,
+            runtime_family=spec.runtime_family.value,
+            container_digest=container_digest,
+            max_concurrency=spec.scale_leases,
+        )
         if spec.runtime_family.value == "healthbench":
             from .runtimes.healthbench import model_roles
 
@@ -116,12 +132,8 @@ def create_compat_app(
             roles = model_roles()
             metadata_blob = capabilities.setdefault("metadata", {})
             if isinstance(metadata_blob, dict):
-                metadata_blob["policy_ready"] = bool(
-                    roles["policy"]["credential_present"]
-                )
-                metadata_blob["grader_ready"] = bool(
-                    roles["scorer"]["credential_present"]
-                )
+                metadata_blob["policy_ready"] = bool(roles["policy"]["credential_present"])
+                metadata_blob["grader_ready"] = bool(roles["scorer"]["credential_present"])
             capabilities["optimizer_contracts"] = {"gepa": gepa}
             payload["capabilities"] = capabilities
             metadata = payload.get("metadata")
@@ -131,6 +143,179 @@ def create_compat_app(
             metadata["optimizer_contracts"] = {"gepa": gepa}
             payload["metadata"] = metadata
         return payload
+
+    @app.get("/training/capabilities")
+    async def hosted_training_capabilities() -> dict[str, Any]:
+        return training_capabilities(
+            target_id=spec.target_id,
+            runtime_family=spec.runtime_family.value,
+            container_digest=platform.capabilities_digest(),
+            max_concurrency=spec.scale_leases,
+        )
+
+    @app.post("/training/rollouts")
+    async def hosted_training_rollout(request: Request) -> Any:
+        body = await request.json()
+        if (
+            not isinstance(body, dict)
+            or body.get("schema_version") != ROLLOUT_REQUEST_SCHEMA_VERSION
+        ):
+            raise HTTPException(status_code=422, detail="training_rollout_schema_unsupported")
+        required = ("job_id", "attempt_id", "rollout_id", "idempotency_key", "policy_version")
+        for field_name in required:
+            if not isinstance(body.get(field_name), str) or not body[field_name].strip():
+                raise HTTPException(
+                    status_code=422, detail=f"training_rollout_{field_name}_required"
+                )
+        task = body.get("task")
+        sampler = body.get("sampler")
+        if not isinstance(task, dict) or not isinstance(sampler, dict):
+            raise HTTPException(
+                status_code=422, detail="training_rollout_task_and_sampler_required"
+            )
+        sampler_url = str(sampler.get("url") or "").strip()
+        sampler_token = str(sampler.get("bearer_token") or "").strip()
+        if not sampler_url.startswith("https://") or not sampler_token:
+            raise HTTPException(status_code=422, detail="training_rollout_https_sampler_required")
+        try:
+            max_tokens = int(task.get("max_tokens") or 1536)
+            temperature = float(task.get("temperature") or 0.0)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=422, detail="training_rollout_sampling_config_invalid"
+            ) from exc
+        if (
+            not 1 <= max_tokens <= 16_384
+            or not math.isfinite(temperature)
+            or not 0 <= temperature <= 2
+        ):
+            raise HTTPException(status_code=422, detail="training_rollout_sampling_config_invalid")
+        rollout_id = body["rollout_id"].strip()
+        idempotency_key = body["idempotency_key"].strip()
+        identity_digest = canonical_sha256(
+            {
+                "job_id": body["job_id"],
+                "attempt_id": body["attempt_id"],
+                "rollout_id": rollout_id,
+                "idempotency_key": idempotency_key,
+                "policy_version": body["policy_version"],
+            }
+        )
+        cached = app.state.training_rollout_results.get(idempotency_key)
+        if cached is not None:
+            if cached["identity_digest"] != identity_digest:
+                raise HTTPException(status_code=409, detail="training_rollout_idempotency_conflict")
+            return cached["result"]
+
+        config_id = f"training_{hashlib.sha256(identity_digest.encode()).hexdigest()[:16]}"
+        platform.policy_configs[config_id] = PolicyConfig(
+            config_id=config_id,
+            harness=spec.default_policy_harness,
+            config={
+                "inference_target": {
+                    "provider": "tinker",
+                    "provider_endpoint_id": sampler_url,
+                    "auth_bearer": sampler_token,
+                    "run_id": body["job_id"],
+                    "checkpoint_id": body["policy_version"],
+                    "connection_mode": str(sampler.get("connection_mode") or "keep_alive"),
+                },
+                "policy_version": body["policy_version"],
+                "job_id": body["job_id"],
+                "attempt_id": body["attempt_id"],
+                "rollout_id": rollout_id,
+                # This flag is set only by the typed training boundary after
+                # it has required an authenticated HTTPS sampler endpoint.
+                "training_sampler_endpoint": True,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+            },
+        )
+        rollout_payload = {
+            "rollout_id": rollout_id,
+            "telemetry": task.get("telemetry")
+            or {"enabled": True, "transport": "sse", "retention": "run"},
+            "world_ref": task.get("world_ref") or spec.world_ref,
+            "task_instance_id": task.get("task_instance_id") or "seed:0",
+            "evaluation_plan_ref": task.get("evaluation_plan_ref") or spec.evaluation_plan_ref,
+            "policy_ref": {
+                "harness": spec.default_policy_harness,
+                "config": config_id,
+            },
+            "slot": "stream",
+        }
+        try:
+            rollout_request = parse_create_rollout(rollout_payload)
+        except (RequestParseError, ValueError) as exc:
+            raise _http_from_parse(exc) from exc
+        started = await asyncio.to_thread(platform.start_rollout, rollout_request)
+        if started.get("error"):
+            return _platform_response(started)
+        reward = platform.compute_reward(
+            rollout_id=rollout_id,
+            evidence=None,
+            mode="terminal",
+            rescore=False,
+            plan_ref=None,
+        )
+        capabilities = await hosted_training_capabilities()
+        actions = []
+        event_log = platform.logs.get(rollout_id)
+        if event_log is not None:
+            observation_digest = ""
+            for envelope in event_log.after(0):
+                if envelope.kind == "observation":
+                    observation_digest = envelope.digest
+                    continue
+                if envelope.kind != "action":
+                    continue
+                training_action = envelope.payload.get("training_action")
+                if isinstance(training_action, dict):
+                    actions.append(
+                        {
+                            **training_action,
+                            "rollout_id": rollout_id,
+                            "action_index": len(actions),
+                            "completion": str(
+                                envelope.payload.get("content")
+                                or envelope.payload.get("text")
+                                or ""
+                            ),
+                            "observation_digest": observation_digest,
+                        }
+                    )
+        result = {
+            "schema_version": ROLLOUT_SUMMARY_SCHEMA_VERSION,
+            "rollout_id": rollout_id,
+            "policy_version": body["policy_version"],
+            "container_digest": capabilities["container_digest"],
+            "capability_hash": capabilities["capability_hash"],
+            "status": started.get("status") or reward.get("status") or "unknown",
+            "steps": max(1, int(started.get("steps") or 1)),
+            "reward": {
+                "schema_version": ROLLOUT_REWARD_SCHEMA_VERSION,
+                "rollout_id": rollout_id,
+                "policy_version": body["policy_version"],
+                "reward": reward.get("reward"),
+                "components": reward.get("node_results") or [],
+                "grader_provenance": None,
+            },
+            "usage": started.get("usage") or {},
+            "actions": actions,
+            "evidence": {
+                "stream": started.get("stream"),
+                "evaluation_execution_id": reward.get("execution_id"),
+            },
+        }
+        if spec.runtime_family.value == "healthbench":
+            from .runtimes.healthbench import model_roles
+
+            result["reward"]["grader_provenance"] = {"model_roles": model_roles()}
+        app.state.training_rollout_results[idempotency_key] = {
+            "identity_digest": identity_digest,
+            "result": result,
+        }
+        return result
 
     @app.get("/task_info")
     async def task_info() -> Any:
@@ -299,9 +484,7 @@ def create_compat_app(
         policy_config = {
             "provider": policy_provider,
             "model": policy.get("model") or "llama-3.1-8b-instant",
-            "base_url": policy.get("base_url")
-            or policy.get("api_base")
-            or default_policy_base_url,
+            "base_url": policy.get("base_url") or policy.get("api_base") or default_policy_base_url,
             "api_key_env": policy.get("api_key_env") or default_policy_api_key_env,
             "max_tokens": policy.get("max_tokens") or 1536,
             "system_prompt": candidate.get("system_prompt"),
