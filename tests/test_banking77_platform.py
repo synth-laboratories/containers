@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from synth_containers.platform import create_compat_app
 from synth_containers.platform.banking77_world import (
+    public_observation,
     CLASSIFY_SYSTEM,
     load_row,
     split_size,
@@ -100,9 +101,21 @@ def test_dataset_gold_keeps_label_out_of_observation() -> None:
     action = next(row for row in semantic if row["kind"] == "action")
     gold = load_row("train", 0)
     assert gold is not None
-    payload = json.dumps(obs["payload"])
-    assert gold.label not in payload
+    # The observation carries the full 77-label action space, so the gold label
+    # necessarily appears in it. That is not leakage: the vocabulary is
+    # identical for every item and therefore carries no per-item signal about
+    # which label is correct. What must never appear is anything identifying
+    # THIS item's answer.
     assert "label" not in obs["payload"]
+    assert "gold" not in json.dumps(obs["payload"]).lower()
+    labels = obs["payload"]["labels"]
+    assert gold.label in labels, "the action space must contain the answer"
+    other = load_row("train", 1)
+    assert other is not None and other.label != gold.label, "need two distinct golds"
+    other_obs = public_observation(other, seed=1, split="train")
+    # Identical vocabulary across items with different answers is the property
+    # that makes including it safe.
+    assert other_obs["labels"] == labels
     assert obs["payload"]["text"] == gold.text
     assert action["payload"]["label"] == gold.label
     assert "capture.closed" in kinds
@@ -623,3 +636,33 @@ def test_remote_checkpoint_refuses_unapproved_endpoint_before_network(monkeypatc
     ).json()["events"]
     closed = next(row for row in events if row["kind"] == "span.policy.closed")
     assert closed["payload"]["error_code"] == "remote_checkpoint_endpoint_refused"
+
+
+def test_the_action_space_is_in_the_observation() -> None:
+    """Withholding the vocabulary does not make the task harder, it makes it
+    unanswerable: the policy is asked for one exact string out of 77 it has
+    never seen. Measured on Qwen3.5-0.8B, the base model scored 0/40 without it
+    and 18/40 with it, and every miss without it was a plausible intent name
+    (`locate_card`, `delivery_timing`) that simply is not in the vocabulary.
+    """
+    row = load_row("train", 0)
+    assert row is not None
+    obs = public_observation(row, seed=0, split="train")
+    labels = obs["labels"]
+    assert len(labels) == len(set(labels)) and len(labels) >= 16
+    assert labels == sorted(labels)
+    # The prompt the policy actually sees must carry it, not just the payload.
+    for label in labels:
+        assert label in obs["prompt"]
+
+
+def test_hf_rows_are_deterministically_shuffled_before_seeds_index_them() -> None:
+    """PolyAI/banking77 ships label-sorted, so seeds 0..N in dataset order draw
+    N consecutive items of the same class. An accuracy over that slice is one
+    class sampled N times, not a benchmark number."""
+    import os
+
+    if os.environ.get("SYNTH_BANKING77_SOURCE", "").lower() not in {"hf", "huggingface", "polyai"}:
+        pytest.skip("fixture source; the ordering hazard is specific to the HF split")
+    golds = [load_row("heldout", seed).label for seed in range(8)]
+    assert len(set(golds)) > 1, f"first 8 held-out seeds are all one class: {golds[0]}"

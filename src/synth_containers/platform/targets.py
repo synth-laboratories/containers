@@ -17,6 +17,7 @@ class TargetRuntimeKind(StrEnum):
     DIGBENCH = "digbench"
     OPENENV = "openenv"
     BANKING77 = "banking77"
+    GSM8K = "gsm8k"
     HEALTHBENCH = "healthbench"
 
 
@@ -566,6 +567,58 @@ BANKING77_CLASSIFY = TargetSpec(
     ),
 )
 
+GSM8K_SOLVE = TargetSpec(
+    target_id="gsm8k_solve",
+    runtime_family=TargetRuntimeKind.GSM8K,
+    adapter_chain=(),
+    world_ref="world:gsm8k@heldout",
+    environment_ref="env:gsm8k_dataset",
+    evaluation_plan_ref="gsm8k_eval.v1",
+    default_policy_harness="solve",
+    scale_leases=8,
+    retention="run",
+    reward_kind=RewardKind.ENV_SUM,
+    live_reward=True,
+    live_frames="unsupported",
+    true_checkpoint="unsupported",
+    blocking_trial="unsupported",
+    mcp_bind="unused",
+    reconnect="derived",
+    event_kinds=(
+        "trace.opened",
+        "env.episode.opened",
+        "observation",
+        "action",
+        "token_capture",
+        "reward_signal",
+        "span.policy.opened",
+        "span.policy.closed",
+        "env.episode.closed",
+        "capture.closed",
+        "status",
+    ),
+    affordances=_env(
+        {
+            "step": "native",
+            "poll": "native",
+            "sse": "derived",
+            "websocket": "derived",
+            "live_frames": "unsupported",
+            "true_checkpoint": "unsupported",
+            "restore": "unsupported",
+            "fork": "unsupported",
+            "live_reward": "native",
+            "scale_leases": "native",
+            "bind_policy_config": "native",
+            "restart_policy": "native",
+        }
+    ),
+    policy_seeds=(
+        PolicySeed("dataset_gold", "dataset_gold", {"source": "environment"}),
+        PolicySeed("solve", "solve", {"source": "policy"}),
+    ),
+)
+
 HEALTHBENCH_CHAT = TargetSpec(
     target_id="healthbench_chat",
     runtime_family=TargetRuntimeKind.HEALTHBENCH,
@@ -655,6 +708,7 @@ TARGETS: dict[str, TargetSpec] = {
         DIGBENCH_MOCK,
         DIGBENCH_PUBLIC,
         BANKING77_CLASSIFY,
+        GSM8K_SOLVE,
         HEALTHBENCH_CHAT,
     )
 }
@@ -667,6 +721,7 @@ PR_TARGETS = (
     "openenv_echo",
     "digbench_mock",
     "banking77_classify",
+    "gsm8k_solve",
 )
 
 PAID_TARGETS = (

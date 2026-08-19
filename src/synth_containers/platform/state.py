@@ -632,6 +632,13 @@ class CompatPlatform:
                 "minimum": 0,
                 "maximum": max(split_size(TRAIN_SPLIT), split_size(HELDOUT_SPLIT)) - 1,
             }
+        if family == "gsm8k":
+            from .gsm8k_world import HELDOUT_SPLIT, TRAIN_SPLIT, split_size
+
+            return {
+                "minimum": 0,
+                "maximum": max(split_size(TRAIN_SPLIT), split_size(HELDOUT_SPLIT)) - 1,
+            }
         return {"minimum": -2_147_483_648, "maximum": 2_147_483_647}
 
     def _input_schema(self) -> dict[str, Any]:

@@ -9,6 +9,7 @@ See: workshop/docs/aug_12_update.md §2.2 (Environment / Policy / TaskWorld).
 from __future__ import annotations
 
 import os
+import random
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
@@ -75,9 +76,12 @@ _HELDOUT_FIXTURE: tuple[Banking77Row, ...] = (
 )
 
 
-def user_prompt(text: str) -> str:
+def user_prompt(text: str, *, labels: tuple[str, ...] | None = None) -> str:
+    vocabulary = ""
+    if labels:
+        vocabulary = "Allowed labels:\n" + "\n".join(labels) + "\n\n"
     return (
-        f"Customer query:\n{text}\n\n"
+        f"{vocabulary}Customer query:\n{text}\n\n"
         "Return EXACTLY one Banking77 intent label as written, no other text."
     )
 
@@ -98,14 +102,30 @@ def split_from_world_ref(world_ref: str | None) -> str:
     return HELDOUT_SPLIT
 
 
+def label_vocabulary() -> tuple[str, ...]:
+    """The full action space, sorted. Not gold: it is identical for every item.
+
+    Withholding it does not make the task harder, it makes it unanswerable --
+    the policy is asked to emit one exact string out of 77 it has never seen.
+    Measured on Qwen3.5-0.8B without it: 0/40, with every prediction a plausible
+    intent name (`locate_card`, `delivery_timing`) that is simply not in the
+    vocabulary. That is a measurement of the prompt, not of the model.
+    """
+
+    return tuple(sorted({row.label for row in _rows_for(TRAIN_SPLIT)} |
+                        {row.label for row in _rows_for(HELDOUT_SPLIT)}))
+
+
 def public_observation(row: Banking77Row, *, seed: int, split: str) -> dict[str, Any]:
-    """Query only. Gold is env-private and must not appear here."""
+    """Query plus the action space. Gold is env-private and must not appear here."""
+    labels = label_vocabulary()
     return {
         "text": row.text,
         "seed": seed,
         "split": split,
         "system": CLASSIFY_SYSTEM,
-        "prompt": user_prompt(row.text),
+        "labels": list(labels),
+        "prompt": user_prompt(row.text, labels=labels),
     }
 
 
@@ -152,4 +172,24 @@ def _hf_rows(split: str) -> tuple[Banking77Row, ...]:
                 label=str(names[int(item["label"])]),
             )
         )
-    return tuple(rows)
+    return _deterministic_order(rows, split)
+
+
+#: Fixed forever. Changing it renumbers every seed and silently invalidates any
+#: comparison against a previously reported number.
+_SHUFFLE_SEED = 20260818
+
+
+def _deterministic_order(rows: list[Banking77Row], split: str) -> tuple[Banking77Row, ...]:
+    """Shuffle once, deterministically, before seeds index into the split.
+
+    PolyAI/banking77 ships label-sorted. Taking seeds 0..N in dataset order
+    therefore draws N consecutive items of the SAME class -- measured: seeds 0-3
+    of the test split are all `card_arrival`. An accuracy over such a slice is
+    not a benchmark number, it is one class sampled N times, and it moves wildly
+    with N for reasons that have nothing to do with the policy.
+    """
+
+    ordered = list(rows)
+    random.Random(f"{_SHUFFLE_SEED}:{split}").shuffle(ordered)
+    return tuple(ordered)
