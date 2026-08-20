@@ -11,3 +11,7 @@ __pycache__/
 
 # Scratch eval artifacts (runner/config in temp/ stay tracked)
 temp/_runs/
+
+# Local rollout store from a loopback training run
+.b77-store/
+.venv/
