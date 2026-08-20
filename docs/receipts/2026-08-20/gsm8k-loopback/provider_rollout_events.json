@@ -1,0 +1,215 @@
+[
+  {
+    "control": true,
+    "digest": "5bdab05741882d7f",
+    "event_id": "stream.subscribed",
+    "kind": "stream.subscribed",
+    "payload": {
+      "next_sequence": 1,
+      "ready": true,
+      "rollout_id": "gsm8k_provider_seed0",
+      "stream.id": "stream:gsm8k_provider_seed0",
+      "type": "stream.subscribed"
+    },
+    "rollout_id": "gsm8k_provider_seed0",
+    "schema": "synth.trace-stream-event.v1",
+    "ts": "2026-08-20T17:44:01.065592Z"
+  },
+  {
+    "control": false,
+    "digest": "413808aee81a9d5b",
+    "event_id": "1",
+    "kind": "trace.opened",
+    "payload": {
+      "capability_digest": "sha256:396719e96d02af3e693c837f96c3096c8963ce95d8c3d9b227f35d9b9cb96b66",
+      "config_digest": "sha256:e8c6aa1c8fa8c3d00915bae264943c68e5f0f1b77bce04177ab18654a3ef609d",
+      "environment_ref": "env:gsm8k_dataset",
+      "instance_id": "834587a9-ddbe-46f9-a71b-241c759a9937",
+      "owner_id": null,
+      "owner_kind": null,
+      "policy_ref": {
+        "config": "mlx_loopback_chat",
+        "harness": "solve"
+      },
+      "rollout_id": "gsm8k_provider_seed0",
+      "stream.id": "stream:gsm8k_provider_seed0",
+      "task_instance_id": "seed:0",
+      "world_ref": "world:gsm8k@heldout"
+    },
+    "rollout_id": "gsm8k_provider_seed0",
+    "schema": "synth.trace-stream-event.v1",
+    "sequence": 1,
+    "ts": "2026-08-20T17:44:01.071050Z"
+  },
+  {
+    "control": false,
+    "digest": "b819681496e130b3",
+    "event_id": "2",
+    "kind": "env.episode.opened",
+    "payload": {
+      "seed": 0,
+      "split": "heldout",
+      "world_ref": "world:gsm8k@heldout"
+    },
+    "rollout_id": "gsm8k_provider_seed0",
+    "schema": "synth.trace-stream-event.v1",
+    "sequence": 2,
+    "ts": "2026-08-20T17:44:01.071593Z"
+  },
+  {
+    "control": false,
+    "digest": "93fb0b006ed5cd42",
+    "event_id": "3",
+    "kind": "observation",
+    "payload": {
+      "prompt": "Problem:\nTogether, Sofie, Anne, and Fawn have 85 books. If Sofie has 25 more books than Anne, and Anne has 12 fewer books than Fawn does, how many books does Fawn have?\n\nShow your reasoning, then end with a line of the form '#### <answer>'.",
+      "question": "Together, Sofie, Anne, and Fawn have 85 books. If Sofie has 25 more books than Anne, and Anne has 12 fewer books than Fawn does, how many books does Fawn have?",
+      "seed": 0,
+      "split": "heldout",
+      "system": "Solve the grade-school math word problem. Reason step by step, then state the final numeric answer on its own last line in the form '#### <answer>'. The final answer must be a bare number with no units, no currency symbol and no words."
+    },
+    "rollout_id": "gsm8k_provider_seed0",
+    "schema": "synth.trace-stream-event.v1",
+    "sequence": 3,
+    "ts": "2026-08-20T17:44:01.071955Z"
+  },
+  {
+    "control": false,
+    "digest": "4e755377a7fb76df",
+    "event_id": "4",
+    "kind": "span.policy.opened",
+    "payload": {
+      "config": "mlx_loopback_chat",
+      "harness": "solve"
+    },
+    "rollout_id": "gsm8k_provider_seed0",
+    "schema": "synth.trace-stream-event.v1",
+    "sequence": 4,
+    "ts": "2026-08-20T17:44:01.072466Z"
+  },
+  {
+    "control": false,
+    "digest": "5924a187ec90a7ce",
+    "event_id": "5",
+    "kind": "action",
+    "payload": {
+      "answer": "28",
+      "format_compliant": true,
+      "parse_mode": "exact",
+      "parse_source": "hash_marker",
+      "parse_status": "parsed",
+      "text": "Let $x$ be the number of books Fawn has.\nAccording to the problem, Anne has 12 fewer books than Fawn, so Anne has $x - 12$ books.\nThe problem states that Sofie has 25 more books than Anne. Therefore, Sofie has $(x - 12) + 25 = x + 13$ books.\n\nWe know the total number of books they have together is 85. We can set up the following equation:\n$$x + (x - 12) + (x + 13) = 85$$\n\nCombine like terms:\n$$3x - 12 + 13 = 85$$\n$$3x + 1 = 85$$\n\nSubtract 1 from both sides:\n$$3x = 84$$\n\nDivide by 3:\n$$x = 28$$\n\nSo, Fawn has 28 books.\n\n#### 28"
+    },
+    "rollout_id": "gsm8k_provider_seed0",
+    "schema": "synth.trace-stream-event.v1",
+    "sequence": 5,
+    "ts": "2026-08-20T17:44:05.437032Z"
+  },
+  {
+    "control": false,
+    "digest": "0f9552d42e3e187c",
+    "event_id": "6",
+    "kind": "token_capture",
+    "payload": {
+      "api_family": "chat_completions",
+      "policy_snapshot_id": "snap_f6d46912f0ff48caa3faa5ae99668805",
+      "provenance": "observed_provider",
+      "proxy_request_ids": [
+        "prid_fb7f31184ebd4da8937149464a72dd26"
+      ],
+      "render_digest": "4a121ce0fb8d75c500b197ffb7dcf3f0ac8dfdcaf9ba7641f6fd688afb3e0710",
+      "template_digest": "a0846d856ba37affa1bd937d47664f6183425e9fc4ec032fd11aa77de3b0b304",
+      "tokenizer_digest": "d2162fc733a8e44c7363ab0567ec616a0d7e7a3d7f80c27fdd9e76b970e40c7d",
+      "training_version": 0
+    },
+    "rollout_id": "gsm8k_provider_seed0",
+    "schema": "synth.trace-stream-event.v1",
+    "sequence": 6,
+    "ts": "2026-08-20T17:44:05.488275Z"
+  },
+  {
+    "control": false,
+    "digest": "9bb90b5cdfe6d892",
+    "event_id": "7",
+    "kind": "span.policy.closed",
+    "payload": {
+      "parse_mode": "exact",
+      "parse_source": "hash_marker",
+      "parse_status": "parsed",
+      "status": "completed"
+    },
+    "rollout_id": "gsm8k_provider_seed0",
+    "schema": "synth.trace-stream-event.v1",
+    "sequence": 7,
+    "ts": "2026-08-20T17:44:05.503862Z"
+  },
+  {
+    "control": false,
+    "digest": "fe72be0592fe1098",
+    "event_id": "8",
+    "kind": "reward_signal",
+    "payload": {
+      "authority": "environment",
+      "kind": "exact_match_numeric",
+      "value": 1.0
+    },
+    "rollout_id": "gsm8k_provider_seed0",
+    "schema": "synth.trace-stream-event.v1",
+    "sequence": 8,
+    "ts": "2026-08-20T17:44:05.528318Z"
+  },
+  {
+    "control": false,
+    "digest": "86619d8450685046",
+    "event_id": "9",
+    "kind": "env.episode.closed",
+    "payload": {
+      "seed": 0,
+      "split": "heldout",
+      "status": "completed"
+    },
+    "rollout_id": "gsm8k_provider_seed0",
+    "schema": "synth.trace-stream-event.v1",
+    "sequence": 9,
+    "ts": "2026-08-20T17:44:05.529164Z"
+  },
+  {
+    "control": false,
+    "digest": "7519461159aa95f7",
+    "event_id": "10",
+    "kind": "status",
+    "payload": {
+      "status": "completed"
+    },
+    "rollout_id": "gsm8k_provider_seed0",
+    "schema": "synth.trace-stream-event.v1",
+    "sequence": 10,
+    "ts": "2026-08-20T17:44:05.543938Z"
+  },
+  {
+    "control": false,
+    "digest": "fd0601a2e7f6270a",
+    "event_id": "11",
+    "kind": "capture.high_water",
+    "payload": {
+      "high_water": 10
+    },
+    "rollout_id": "gsm8k_provider_seed0",
+    "schema": "synth.trace-stream-event.v1",
+    "sequence": 11,
+    "ts": "2026-08-20T17:44:05.551831Z"
+  },
+  {
+    "control": false,
+    "digest": "98656aee387e3372",
+    "event_id": "12",
+    "kind": "capture.closed",
+    "payload": {
+      "high_water": 10
+    },
+    "rollout_id": "gsm8k_provider_seed0",
+    "schema": "synth.trace-stream-event.v1",
+    "sequence": 12,
+    "ts": "2026-08-20T17:44:05.559867Z"
+  }
+]
