@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
+from urllib.parse import urlparse
 import json
 import math
 import time
@@ -61,6 +63,31 @@ def _platform_response(result: dict[str, Any], *, default_status: int = 400) -> 
 def _http_from_parse(exc: BaseException) -> HTTPException:
     status = exc.status_code if isinstance(exc, RequestParseError) else 422
     return HTTPException(status_code=status, detail=str(exc))
+
+
+def allow_loopback_sampler() -> bool:
+    """Whether a plaintext loopback sampler is admissible on this host.
+
+    Off unless explicitly enabled. The hosted lane always reaches its sampler
+    over public HTTPS and must keep requiring it; a wholly local training run
+    has both ends on one machine, where demanding TLS to 127.0.0.1 buys nothing
+    and blocks the lane entirely. `SamplerEndpoint.validate` still checks that
+    the host really is loopback, so this flag cannot admit a remote plaintext
+    endpoint.
+    """
+
+    return str(
+        os.environ.get("SYNTH_CONTAINERS_ALLOW_LOOPBACK_SAMPLER") or ""
+    ).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _sampler_scheme_allowed(url: str) -> bool:
+    if url.startswith("https://"):
+        return True
+    if not allow_loopback_sampler():
+        return False
+    parsed = urlparse(url)
+    return parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost", "::1"}
 
 
 def create_compat_app(
@@ -175,7 +202,7 @@ def create_compat_app(
             )
         sampler_url = str(sampler.get("url") or "").strip()
         sampler_token = str(sampler.get("bearer_token") or "").strip()
-        if not sampler_url.startswith("https://") or not sampler_token:
+        if not sampler_token or not _sampler_scheme_allowed(sampler_url):
             raise HTTPException(status_code=422, detail="training_rollout_https_sampler_required")
         try:
             max_tokens = int(task.get("max_tokens") or 1536)

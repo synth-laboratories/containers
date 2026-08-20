@@ -497,6 +497,8 @@ def _sample_remote_checkpoint(
     )
 
     message_digest = canonical_sha256({"messages": messages})
+    from ..app import allow_loopback_sampler
+
     with HostedSamplerClient(
         SamplerEndpoint(
             endpoint,
@@ -504,6 +506,7 @@ def _sample_remote_checkpoint(
             str(target.get("connection_mode") or "keep_alive"),
         ),
         timeout_seconds=timeout,
+        allow_loopback_http=allow_loopback_sampler(),
     ) as client:
         sampled = client.sample(
             {
@@ -516,7 +519,15 @@ def _sample_remote_checkpoint(
                 "policy_version": config.get("policy_version") or checkpoint_id,
                 "messages": messages,
                 "max_tokens": max_tokens,
-                "temperature": 0.0,
+                # The training boundary validates and passes a temperature, and
+                # it has to be honoured. Hardcoding 0.0 makes every sample in a
+                # group identical, so the group has no reward variance, so
+                # group-relative advantages are undefined and the step is
+                # filtered -- which is exactly what a bounded CISPO canary saw
+                # when eight rollouts across four groups produced no optimizer
+                # step at all. Greedy stays the default for callers that do not
+                # ask for anything else.
+                "temperature": float(config.get("temperature") or 0.0),
             },
             idempotency_key=(
                 f"{config.get('rollout_id') or run_id}:{checkpoint_id}:{message_digest}"
