@@ -4,7 +4,15 @@ Harnesses:
 - ``dataset_gold`` — the env's own reference solution as the action (container
   authored train traces)
 - ``solve`` — live policy from ``policy_ref.config``; ``forced_completion`` is
-  test-only
+  test-only. A config may name a provider (``synth_mlx_rl`` over loopback, or
+  a hosted one) or carry the typed training boundary's ``inference_target``
+  (``/training/rollouts``), which is sampled through the hosted sampler
+  contract exactly as Banking77 does.
+
+Every ``action`` carries ``parse_mode`` (``exact`` / ``trailing_number`` /
+``unparsed``) next to ``parse_status``: a trial that scored through the
+last-number fallback is counted, but it is not format compliance, and a reader
+must be able to tell the two apart per trial rather than from a summary.
 
 Three honesty rules, all with a Banking77 precedent:
 
@@ -93,6 +101,7 @@ class Gsm8kRuntime:
         )
         try:
             completion, usage, token_capture = self._act(platform, pin, harness, observation)
+            training_action = usage.pop("_training_action", None)
             if isinstance(completion, str) and not completion.strip():
                 completion = None
         except Exception as exc:
@@ -117,19 +126,23 @@ class Gsm8kRuntime:
             return
 
         parsed = parse_answer(completion) if completion is not None else ParsedAnswer(None, "absent", "")
-        log.append(
-            "action",
-            {
-                # The parsed value and the text the policy actually produced are
-                # separate fields on purpose: one is a claim, the other is
-                # evidence, and a grader that sees only the first cannot tell an
-                # unparseable answer from a wrong one.
-                "answer": parsed.value,
-                "text": completion,
-                "parse_status": "parsed" if parsed.parsed else "unparsed",
-                "parse_source": parsed.source,
-            },
-        )
+        action_payload: dict[str, Any] = {
+            # The parsed value and the text the policy actually produced are
+            # separate fields on purpose: one is a claim, the other is
+            # evidence, and a grader that sees only the first cannot tell an
+            # unparseable answer from a wrong one.
+            "answer": parsed.value,
+            "text": completion,
+            "parse_status": "parsed" if parsed.parsed else "unparsed",
+            "parse_source": parsed.source,
+            # Per trial, so "0% parse failures" can never be read as "100%
+            # followed the format": only `exact` trials did.
+            "parse_mode": parsed.parse_mode,
+            "format_compliant": parsed.format_compliant,
+        }
+        if isinstance(training_action, dict):
+            action_payload["training_action"] = training_action
+        log.append("action", action_payload)
         if token_capture is not None:
             # The join key. The proxy owns the authoritative token ids and
             # rollout logprobs; this container owns the reward. Without this
@@ -142,6 +155,7 @@ class Gsm8kRuntime:
                 "status": "completed" if completion else "empty",
                 "parse_status": "parsed" if parsed.parsed else "unparsed",
                 "parse_source": parsed.source,
+                "parse_mode": parsed.parse_mode,
             },
         )
 
@@ -198,6 +212,11 @@ class Gsm8kRuntime:
         if isinstance(forced, str) and forced.strip():
             return forced, dict(_EMPTY_USAGE), None
 
+        sampler_target = _training_sampler_target(config)
+        if sampler_target is not None:
+            text, usage = _sample_training_sampler(sampler_target, observation, config)
+            return text, usage, None
+
         provider = str(config.get("provider") or "").strip().lower()
         if provider:
             if is_local_provider(provider) and normalize_api_family(config.get("api_family")) == RESPONSES:
@@ -236,6 +255,108 @@ _HOSTED_BASES = {
     "openai": "https://api.openai.com/v1",
     "openrouter": "https://openrouter.ai/api/v1",
 }
+
+#: GSM8K completions reason before they answer; a 32-token clamp (Banking77's)
+#: would cut every trial before the `#### N` line. The boundary already bounds
+#: the request at 16_384; this is the container's own ceiling under it.
+_SAMPLER_MAX_TOKENS = 4096
+
+
+def _training_sampler_target(config: dict[str, Any]) -> dict[str, Any] | None:
+    """The typed training boundary's target, or None for every other config.
+
+    Only a config the boundary itself stamped (`training_sampler_endpoint` is
+    True) is sampled this way. The legacy loopback/allowlisted checkpoint path
+    Banking77 still carries is deliberately not admitted here: GSM8K has no
+    callers on it and a second admission path is a second thing to audit.
+    """
+    if config.get("training_sampler_endpoint") is not True:
+        return None
+    target = config.get("inference_target")
+    if not isinstance(target, dict):
+        return None
+    endpoint = str(target.get("provider_endpoint_id") or "").strip()
+    if not (endpoint.startswith("http://") or endpoint.startswith("https://")):
+        return None
+    return dict(target)
+
+
+def _sample_training_sampler(
+    target: dict[str, Any],
+    observation: dict[str, Any],
+    config: dict[str, Any],
+) -> tuple[str | None, dict[str, Any]]:
+    """One sample through the hosted sampler contract (``/v1/training/sample``).
+
+    Same shape as Banking77's `_sample_remote_checkpoint`: the boundary has
+    already required an authenticated sampler (HTTPS, or loopback when the
+    host explicitly allows it), so this only builds the request and relays the
+    token record the contract obliges the container to carry.
+    """
+    endpoint = str(target.get("provider_endpoint_id") or "").strip()
+    if str(target.get("provider") or "").strip().lower() != "tinker":
+        raise RuntimeError("remote_checkpoint_provider_unsupported")
+    auth_bearer = str(target.get("auth_bearer") or "").strip()
+    if not auth_bearer or "\r" in auth_bearer or "\n" in auth_bearer:
+        raise RuntimeError("remote_checkpoint_auth_missing")
+    run_id = str(target.get("run_id") or "").strip()
+    checkpoint_id = str(target.get("checkpoint_id") or "").strip()
+    if not run_id or not checkpoint_id:
+        raise RuntimeError("remote_checkpoint_identity_missing")
+    max_tokens = min(max(int(config.get("max_tokens") or 512), 1), _SAMPLER_MAX_TOKENS)
+    messages = [
+        {"role": "system", "content": str(observation.get("system") or SOLVE_SYSTEM)},
+        {"role": "user", "content": user_prompt(str(observation["question"]))},
+    ]
+    timeout = min(max(float(config.get("remote_timeout_seconds") or 120.0), 1.0), 600.0)
+    from ...training_rollout import (
+        ROLLOUT_ACTION_SCHEMA_VERSION,
+        HostedSamplerClient,
+        SamplerEndpoint,
+        canonical_sha256,
+    )
+    from ..app import allow_loopback_sampler
+
+    message_digest = canonical_sha256({"messages": messages})
+    with HostedSamplerClient(
+        SamplerEndpoint(
+            endpoint,
+            auth_bearer,
+            str(target.get("connection_mode") or "keep_alive"),
+        ),
+        timeout_seconds=timeout,
+        allow_loopback_http=allow_loopback_sampler(),
+    ) as client:
+        sampled = client.sample(
+            {
+                "schema_version": ROLLOUT_ACTION_SCHEMA_VERSION,
+                "job_id": config.get("job_id") or run_id,
+                "attempt_id": config.get("attempt_id"),
+                "rollout_id": config.get("rollout_id"),
+                "run_id": run_id,
+                "checkpoint_id": checkpoint_id,
+                "policy_version": config.get("policy_version") or checkpoint_id,
+                "messages": messages,
+                "max_tokens": max_tokens,
+                # Honoured, not hardcoded: a group sampled at 0.0 has no reward
+                # variance and no optimizer step (the Banking77 canary).
+                "temperature": float(config.get("temperature") or 0.0),
+            },
+            idempotency_key=(
+                f"{config.get('rollout_id') or run_id}:{checkpoint_id}:{message_digest}"
+            ),
+        )
+    usage = _usage(
+        dict(sampled.usage), input_key="prompt_tokens", output_key="completion_tokens"
+    )
+    usage["_training_action"] = {
+        "schema_version": ROLLOUT_ACTION_SCHEMA_VERSION,
+        "policy_version": config.get("policy_version") or checkpoint_id,
+        "prompt_token_ids": list(sampled.prompt_token_ids),
+        "token_ids": list(sampled.token_ids),
+        "log_probs": list(sampled.log_probs),
+    }
+    return (sampled.text or None), usage
 
 
 def _endpoint(config: dict[str, Any], *, api_family: str) -> tuple[str, str]:

@@ -1,0 +1,83 @@
+{
+  "capabilities_digest": "sha256:396719e96d02af3e693c837f96c3096c8963ce95d8c3d9b227f35d9b9cb96b66",
+  "containers_commit": "9ed2597a614826037784204e7339991e1638c91b",
+  "dataset": {
+    "dataset": "openai/gsm8k",
+    "pinned": true,
+    "profile": "hf",
+    "profile_source": "declared",
+    "revision": "740312add88f781978c0658806c59bc2815b9866",
+    "shuffle_seed": 20260820,
+    "splits": {
+      "heldout": {
+        "digest": "sha256:32c548f08195e19e33408b844dd7be6aa4bcae457d957bc05909ff4bd4a00595",
+        "hf_split": "test",
+        "rows": 1319
+      },
+      "train": {
+        "digest": "sha256:dca449882e67a1e7716b5da453650a7b16588a1f2d1a0d82394a43d75ea7e9ca",
+        "hf_split": "train",
+        "rows": 7473
+      }
+    }
+  },
+  "files": [
+    "join_check.json",
+    "metadata.json",
+    "provider_rollout.json",
+    "provider_rollout_events.json",
+    "service.json",
+    "training_rollout.json",
+    "training_rollout_events.json"
+  ],
+  "host": {
+    "platform": "macOS-26.4-arm64-arm-64bit-Mach-O",
+    "python": "3.13.14"
+  },
+  "join": {
+    "aligned": true,
+    "container_policy_snapshot_id": "snap_f6d46912f0ff48caa3faa5ae99668805",
+    "provider_sampled_published_snapshot": true,
+    "proxy_request_id": "prid_fb7f31184ebd4da8937149464a72dd26",
+    "published_snapshot_id": "snap_f6d46912f0ff48caa3faa5ae99668805",
+    "service_completion_tokens": 215,
+    "service_policy_snapshot_id": "snap_f6d46912f0ff48caa3faa5ae99668805",
+    "service_rollout_logprobs": 215,
+    "snapshot_ids_agree": true
+  },
+  "kind": "mechanism receipt (not a score)",
+  "provider_rollout": {
+    "format_compliant": true,
+    "parse_mode": "exact",
+    "reward": 1.0,
+    "reward_status": "scored",
+    "rollout_id": "gsm8k_provider_seed0",
+    "status": "completed",
+    "token_capture": {
+      "policy_snapshot_id": "snap_f6d46912f0ff48caa3faa5ae99668805",
+      "provenance": "observed_provider",
+      "proxy_request_ids": [
+        "prid_fb7f31184ebd4da8937149464a72dd26"
+      ]
+    },
+    "wall_seconds": 4.68
+  },
+  "schema_version": "gsm8k.loopback-receipt.v1",
+  "service": {
+    "base_url": "http://127.0.0.1:8791",
+    "model": "Qwen/Qwen3.5-0.8B",
+    "published_snapshot_id": "snap_f6d46912f0ff48caa3faa5ae99668805",
+    "version": "0.6.0"
+  },
+  "started_at": "2026-08-20T17:43:47Z",
+  "training_rollout": {
+    "completion_tokens": 215,
+    "format_compliant": true,
+    "parse_mode": "exact",
+    "policy_version": "snap_f6d46912f0ff48caa3faa5ae99668805",
+    "reward": 1.0,
+    "rollout_id": "gsm8k_training_seed0",
+    "status": "completed",
+    "wall_seconds": 9.49
+  }
+}
