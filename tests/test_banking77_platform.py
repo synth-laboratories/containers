@@ -16,10 +16,17 @@ from synth_containers.platform import create_compat_app
 from synth_containers.platform.banking77_world import (
     public_observation,
     CLASSIFY_SYSTEM,
+    extract_answer,
     load_row,
     split_size,
     user_prompt,
 )
+
+
+def test_extract_answer_handles_collapsed_final_channel_marker() -> None:
+    assert extract_answer("finalcancel_transfer") == "cancel_transfer"
+    assert extract_answer("assistantfinalcancel_transfer") == "cancel_transfer"
+    assert extract_answer("cash_withdrawal_not_recognised") == "cash_withdrawal_not_recognised"
 
 
 TELEMETRY = {"enabled": True, "transport": "sse", "retention": "run"}
