@@ -404,3 +404,87 @@ def test_tinker_provider_names_the_missing_summary_instead_of_borrowing_a_model(
     summary = policy._summarize("test-only", [{"role": "user", "content": "x"}])
     assert not called
     assert "summary unavailable" in summary and "tinker" in summary
+
+
+def test_tinker_and_hosted_paths_honour_sampler_temperature() -> None:
+    greedy = OpenRouterReAct(config_id="ckpt", config=_tinker_config())
+    assert greedy.temperature == 0.0
+    sampled = OpenRouterReAct(
+        config_id="ckpt", config=_tinker_config(temperature=1.1)
+    )
+    assert sampled.temperature == 1.1
+
+
+def test_hosted_sampler_config_does_not_require_tinker_sdk_fields() -> None:
+    policy = OpenRouterReAct(
+        config_id="train",
+        config={
+            "inference_target": {
+                "provider": "tinker",
+                "provider_endpoint_id": "https://sampler.example/v1/sample",
+                "auth_bearer": "token-v1",
+                "run_id": "cispo1",
+                "checkpoint_id": "cispo1:checkpoint:1",
+            },
+            "temperature": 1.0,
+            "max_tokens": 64,
+            "policy_version": "cispo1:checkpoint:1",
+        },
+    )
+    assert policy.temperature == 1.0
+    assert policy.sampler_path == ""
+    assert policy._inference_target is not None
+
+
+def test_hosted_sampler_records_training_action_and_usage(monkeypatch) -> None:
+    from synth_containers.training_rollout import SamplerResult
+
+    policy = OpenRouterReAct(
+        config_id="train",
+        config={
+            "inference_target": {
+                "provider": "tinker",
+                "provider_endpoint_id": "https://sampler.example/v1/sample",
+                "auth_bearer": "token-v1",
+                "run_id": "cispo1",
+                "checkpoint_id": "cispo1:checkpoint:1",
+                "rollout_id": "r1",
+            },
+            "temperature": 1.0,
+            "max_tokens": 64,
+            "policy_version": "cispo1:checkpoint:1",
+        },
+    )
+    captured: dict[str, object] = {}
+
+    class FakeClient:
+        def __init__(self, endpoint, **kwargs):
+            captured["allow_loopback_http"] = kwargs.get("allow_loopback_http")
+            captured["url"] = endpoint.url
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def sample(self, payload, *, idempotency_key):
+            captured["payload"] = dict(payload)
+            captured["idempotency_key"] = idempotency_key
+            return SamplerResult(
+                text='{"actions":["left","do"]}',
+                prompt_token_ids=(1, 2, 3),
+                token_ids=(4, 5),
+                log_probs=(-0.1, -0.2),
+                usage={"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5},
+            )
+
+    monkeypatch.setattr(
+        "synth_containers.training_rollout.HostedSamplerClient", FakeClient
+    )
+    body = policy._hosted_sampler_sample()
+    assert captured["payload"]["temperature"] == 1.0
+    assert captured["url"] == "https://sampler.example/v1/sample"
+    assert body["usage"]["prompt_tokens"] == 3
+    assert policy.last_call_usage["completion_tokens"] == 2
+    assert policy.last_training_action["token_ids"] == [4, 5]

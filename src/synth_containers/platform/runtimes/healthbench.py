@@ -216,6 +216,7 @@ def _chat(config: dict[str, Any], messages: list[dict[str, Any]]) -> dict[str, A
             HostedSamplerClient,
             SamplerEndpoint,
         )
+        from ..app import allow_loopback_sampler
 
         endpoint = SamplerEndpoint(
             url=str(inference_target.get("provider_endpoint_id") or ""),
@@ -223,7 +224,9 @@ def _chat(config: dict[str, Any], messages: list[dict[str, Any]]) -> dict[str, A
             connection_mode=str(inference_target.get("connection_mode") or "keep_alive"),
         )
         policy_version = str(config.get("policy_version") or inference_target.get("checkpoint_id"))
-        with HostedSamplerClient(endpoint) as client:
+        with HostedSamplerClient(
+            endpoint, allow_loopback_http=allow_loopback_sampler()
+        ) as client:
             sampled = client.sample(
                 {
                     "schema_version": ROLLOUT_ACTION_SCHEMA_VERSION,
