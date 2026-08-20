@@ -23,6 +23,7 @@ from typing import Any, Callable
 
 from ...event_log import RolloutEventLog
 from ..banking77_world import (
+    label_vocabulary,
     CLASSIFY_SYSTEM,
     load_row,
     normalize_label,
@@ -340,7 +341,7 @@ def _sample_responses(
         {
             "model": model,
             "instructions": CLASSIFY_SYSTEM,
-            "input": user_prompt(str(observation["text"])),
+            "input": user_prompt(str(observation["text"]), labels=label_vocabulary()),
             "max_output_tokens": maximum,
             "temperature": 0,
         },
@@ -486,7 +487,7 @@ def _sample_remote_checkpoint(
     max_tokens = min(max(int(config.get("max_tokens") or 32), 1), 512)
     messages = [
         {"role": "system", "content": CLASSIFY_SYSTEM},
-        {"role": "user", "content": user_prompt(str(observation["text"]))},
+        {"role": "user", "content": user_prompt(str(observation["text"]), labels=label_vocabulary())},
     ]
     timeout = min(max(float(config.get("remote_timeout_seconds") or 60.0), 1.0), 120.0)
     from ...training_rollout import (
@@ -570,7 +571,7 @@ def _sample_remote_checkpoint_legacy(
             "checkpoint_id": checkpoint_id,
             "messages": [
                 {"role": "system", "content": CLASSIFY_SYSTEM},
-                {"role": "user", "content": user_prompt(str(observation["text"]))},
+                {"role": "user", "content": user_prompt(str(observation["text"]), labels=label_vocabulary())},
             ],
             "max_tokens": max_tokens,
         },
@@ -684,7 +685,7 @@ def _sample_tinker(
     tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
     messages = [
         {"role": "system", "content": CLASSIFY_SYSTEM},
-        {"role": "user", "content": user_prompt(str(observation["text"]))},
+        {"role": "user", "content": user_prompt(str(observation["text"]), labels=label_vocabulary())},
     ]
     try:
         prompt = tokenizer.apply_chat_template(
