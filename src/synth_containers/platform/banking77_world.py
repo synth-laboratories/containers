@@ -108,9 +108,19 @@ def extract_answer(text: str) -> str:
     raw = (text or "").strip()
     if not raw:
         return ""
+    # Harmony with its control tokens intact.
     parts = re.split(r"<\|channel\|>final<\|message\|>", raw)
     if len(parts) > 1:
         raw = parts[-1]
+    else:
+        # Harmony after `decode(skip_special_tokens=True)`, which is what the
+        # hosted checkpoint sampler returns. The control tokens are gone but the
+        # channel *names* are ordinary text, so the whole reply collapses to one
+        # blob ending `...assistantfinal<answer>`. Without this the last line is
+        # the entire chain of thought and a correct answer scores zero.
+        collapsed = re.split(r"assistant\s*final", raw)
+        if len(collapsed) > 1:
+            raw = collapsed[-1]
     raw = re.sub(r"<\|[^|]*\|>", " ", raw).strip()
     lines = [line.strip() for line in raw.splitlines() if line.strip()]
     if not lines:
