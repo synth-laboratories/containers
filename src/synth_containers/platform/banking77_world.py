@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import random
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
@@ -86,9 +87,39 @@ def user_prompt(text: str, *, labels: tuple[str, ...] | None = None) -> str:
     )
 
 
+def extract_answer(text: str) -> str:
+    """The model's answer, not the first thing it said.
+
+    Taking line one is only correct for a model that answers immediately. A
+    reasoning model does not. gpt-oss-20b -- the model this task is graded on in
+    the hosted catalog -- emits harmony channels, and its first line is
+    `<|channel|>analysis<|message|>We need to classify into exactly one intent.`
+    while the label it settles on arrives much later. Grading line one scores
+    such a model 0.0 on every rollout however well it reasons, which is
+    indistinguishable from a model that cannot do the task at all. For a
+    group-relative RL lane it is worse than indistinguishable: no group ever has
+    reward variance, so no optimizer step is ever taken and the run reports
+    nothing learned.
+
+    Prefer the harmony `final` channel; otherwise take the last non-empty line,
+    which is where a model that thinks out loud puts its answer.
+    """
+
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+    parts = re.split(r"<\|channel\|>final<\|message\|>", raw)
+    if len(parts) > 1:
+        raw = parts[-1]
+    raw = re.sub(r"<\|[^|]*\|>", " ", raw).strip()
+    lines = [line.strip() for line in raw.splitlines() if line.strip()]
+    if not lines:
+        return ""
+    return lines[-1].strip().strip("`\"'*. ")
+
+
 def normalize_label(text: str) -> str:
-    first = (text or "").strip().splitlines()[0].strip().strip("`\"'")
-    return first.lower().replace("-", "_").replace(" ", "_")
+    return extract_answer(text).lower().replace("-", "_").replace(" ", "_")
 
 
 def split_from_world_ref(world_ref: str | None) -> str:

@@ -23,6 +23,7 @@ from typing import Any, Callable
 
 from ...event_log import RolloutEventLog
 from ..banking77_world import (
+    extract_answer,
     label_vocabulary,
     CLASSIFY_SYSTEM,
     load_row,
@@ -396,7 +397,7 @@ def _sample_responses(
         text = "".join(fragments)
     if not isinstance(text, str):
         raise RuntimeError("responses_response_invalid")
-    predicted = text.strip().splitlines()[0].strip() if text.strip() else None
+    predicted = extract_answer(text) or None
     return predicted, _responses_usage(payload.get("usage"))
 
 
@@ -542,7 +543,7 @@ def _sample_remote_checkpoint(
         "token_ids": list(sampled.token_ids),
         "log_probs": list(sampled.log_probs),
     }
-    predicted = sampled.text.strip().splitlines()[0].strip() if sampled.text.strip() else None
+    predicted = extract_answer(sampled.text) or None
     return predicted, usage
 
 
@@ -611,7 +612,7 @@ def _sample_remote_checkpoint_legacy(
     if not isinstance(payload, dict) or not isinstance(payload.get("text"), str):
         raise RuntimeError("remote_checkpoint_response_invalid")
     text = payload["text"]
-    predicted = text.strip().splitlines()[0].strip() if text.strip() else None
+    predicted = extract_answer(text) or None
     return predicted, _remote_usage(payload.get("usage"))
 
 
@@ -711,5 +712,5 @@ def _sample_tinker(
     ).result()
     seq = result.sequences[0]
     text = tokenizer.decode(list(map(int, seq.tokens)), skip_special_tokens=True)
-    predicted = text.strip().splitlines()[0].strip() if text.strip() else None
+    predicted = extract_answer(text) or None
     return predicted, dict(_EMPTY_USAGE)
