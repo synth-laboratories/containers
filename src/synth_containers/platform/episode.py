@@ -148,6 +148,8 @@ def run_episode(
                 log.append("span.policy.data", payload)
 
         plan = planner.plan(result.observation, on_delta=on_delta)
+        training_action = getattr(planner, "last_training_action", None)
+        call_usage = getattr(planner, "last_call_usage", None)
         if emit_policy_spans:
             trace_data = getattr(planner, "trace_data", None)
             if callable(trace_data):
@@ -172,7 +174,7 @@ def run_episode(
                     "remaining_steps": remaining,
                 },
             )
-        for action in plan[:accepted]:
+        for action_index, action in enumerate(plan[:accepted]):
             if result.done:
                 break
             log.append("span.step.opened", {"action": action, "step": result.env_steps})
@@ -187,15 +189,19 @@ def run_episode(
             )
             actions.append(action)
             _relay_native(world, log)
-            log.append(
-                "action",
-                {
-                    "step": result.env_steps,
-                    "action": action,
-                    "class": taxonomy["class"],
-                    "outcome": taxonomy["outcome"],
-                },
-            )
+            action_payload: dict[str, Any] = {
+                "step": result.env_steps,
+                "action": action,
+                "class": taxonomy["class"],
+                "outcome": taxonomy["outcome"],
+            }
+            # One sample produces many env steps. Attach the token receipt once
+            # so the hosted summary does not duplicate the same training action.
+            if action_index == 0 and isinstance(training_action, dict):
+                action_payload["training_action"] = training_action
+            if action_index == 0 and isinstance(call_usage, dict):
+                action_payload["usage"] = call_usage
+            log.append("action", action_payload)
             value: float | None = result.reward
             if omit_reward and result.env_steps == 2:
                 value = None
