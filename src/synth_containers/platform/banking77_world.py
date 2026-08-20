@@ -121,6 +121,12 @@ def extract_answer(text: str) -> str:
         collapsed = re.split(r"assistant\s*final", raw)
         if len(collapsed) > 1:
             raw = collapsed[-1]
+        elif re.fullmatch(r"final[a-z][a-z0-9_\- ]*", raw, flags=re.IGNORECASE):
+            # Some hosted samplers preserve only the final channel name and
+            # its payload, yielding e.g. ``finalcancel_transfer``. Banking77
+            # has no labels beginning with "final", so remove that channel
+            # marker before grading.
+            raw = raw[5:]
     raw = re.sub(r"<\|[^|]*\|>", " ", raw).strip()
     lines = [line.strip() for line in raw.splitlines() if line.strip()]
     if not lines:
