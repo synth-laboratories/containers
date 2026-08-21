@@ -180,6 +180,11 @@ def create_compat_app(
             max_concurrency=spec.scale_leases,
         )
 
+    def _terminal_reason(exc: BaseException) -> str:
+        """Machine-readable reason for a rollout that failed on its own terms."""
+        text = str(exc).strip() or exc.__class__.__name__
+        return text[:500]
+
     @app.post("/training/rollouts")
     async def hosted_training_rollout(request: Request) -> Any:
         body = await request.json()
@@ -275,16 +280,42 @@ def create_compat_app(
             rollout_request = parse_create_rollout(rollout_payload)
         except (RequestParseError, ValueError) as exc:
             raise _http_from_parse(exc) from exc
-        started = await asyncio.to_thread(platform.start_rollout, rollout_request)
+        rollout_error: str | None = None
+        try:
+            started = await asyncio.to_thread(platform.start_rollout, rollout_request)
+        except Exception as exc:  # noqa: BLE001
+            # `_simulate_or_fail` already marked the pin failed and terminal, then
+            # re-raised. Letting that reach the HTTP boundary turned every rollout
+            # that failed on its own terms -- malformed policy JSON, an illegal
+            # action name, an unreachable world -- into a bare 500 with no body.
+            # The optimizer contract is `status in {failed, error, policy_error}`
+            # plus a detail, and a 500 destroys the detail: the caller cannot tell
+            # a fail-closed rollout from a container that broke, so operators chase
+            # phantom infrastructure faults instead of reading the reason. Report
+            # the terminal summary the caller is entitled to, and keep the reason.
+            rollout_error = _terminal_reason(exc)
+            pin = platform.pins.get(rollout_id)
+            started = {
+                "rollout_id": rollout_id,
+                "status": (pin.status if pin is not None else "failed") or "failed",
+                "stream": platform.stream_descriptor_for(rollout_id),
+                "usage": getattr(pin, "usage", None),
+            }
         if started.get("error"):
             return _platform_response(started)
-        reward = platform.compute_reward(
-            rollout_id=rollout_id,
-            evidence=None,
-            mode="terminal",
-            rescore=False,
-            plan_ref=None,
-        )
+        try:
+            reward = platform.compute_reward(
+                rollout_id=rollout_id,
+                evidence=None,
+                mode="terminal",
+                rescore=False,
+                plan_ref=None,
+            )
+        except Exception as exc:  # noqa: BLE001
+            # A rollout that died mid-episode may have nothing to score. That is
+            # still a terminal outcome with a reason, not a transport fault.
+            rollout_error = rollout_error or _terminal_reason(exc)
+            reward = {"status": "failed", "reward": None, "node_results": [], "execution_id": None}
         capabilities = await hosted_training_capabilities()
         actions = []
         event_log = platform.logs.get(rollout_id)
@@ -317,7 +348,11 @@ def create_compat_app(
             "policy_version": body["policy_version"],
             "container_digest": capabilities["container_digest"],
             "capability_hash": capabilities["capability_hash"],
-            "status": started.get("status") or reward.get("status") or "unknown",
+            "status": (
+                "failed"
+                if rollout_error
+                else (started.get("status") or reward.get("status") or "unknown")
+            ),
             "steps": max(1, int(started.get("steps") or 1)),
             "reward": {
                 "schema_version": ROLLOUT_REWARD_SCHEMA_VERSION,
@@ -334,6 +369,8 @@ def create_compat_app(
                 "evaluation_execution_id": reward.get("execution_id"),
             },
         }
+        if rollout_error:
+            result["error"] = rollout_error
         if spec.runtime_family.value == "healthbench":
             from .runtimes.healthbench import model_roles
 
