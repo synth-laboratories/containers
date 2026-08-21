@@ -144,11 +144,17 @@ def create_compat_app(
             capabilities = payload.get("capabilities")
             if not isinstance(capabilities, dict):
                 capabilities = {}
+            capabilities.setdefault("protocol", "synth.container.live-eval.v1")
             capabilities.setdefault("contract_version", "container_contract.v1")
             capabilities.setdefault("rollout_modes", ["blocking"])
             capabilities.setdefault(
                 "operations",
                 {
+                    "rollouts.prepare": True,
+                    "rollouts.start_prepared": True,
+                    "rollouts.get": True,
+                    "rollouts.poll": True,
+                    "reward.get": True,
                     "prepare": True,
                     "start": True,
                     "get": True,

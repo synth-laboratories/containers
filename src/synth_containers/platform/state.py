@@ -747,6 +747,19 @@ class CompatPlatform:
             "input_schema": schema,
             "capabilities_digest": digest,
             "capabilities": {
+                "protocol": "synth.container.live-eval.v1",
+                "operations": {
+                    "rollouts.prepare": True,
+                    "rollouts.start_prepared": True,
+                    "rollouts.get": True,
+                    "rollouts.poll": True,
+                    "reward.get": True,
+                    "prepare": True,
+                    "start": True,
+                    "get": True,
+                    "poll": True,
+                    "reward": True,
+                },
                 self.spec.target_id: {
                     "runtime_family": self.spec.runtime_family.value,
                     "input_schema": schema,

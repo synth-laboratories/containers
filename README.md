@@ -14,6 +14,16 @@ and a typed rollout contract — it never imports your task package or reads pri
 evaluator state. The same contract works whether the task is a classifier, a coding
 agent, or a live game environment, and in Python, Rust, or TypeScript.
 
+**v0.7 local targets** (Dockerfile + Compose + code, never GHCR):
+[`docs/local_target_standard_v1.md`](docs/local_target_standard_v1.md) and
+[`targets/`](targets/). Banking77, HealthBench, and Craftax:
+
+```bash
+docker compose -f targets/banking77/compose.yaml up --build
+docker compose -f targets/healthbench/compose.yaml up --build
+docker compose -f targets/craftax/compose.yaml up --build
+```
+
 ## Install
 
 ```bash

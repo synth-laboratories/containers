@@ -1,0 +1,17 @@
+# Craftax local target. Serves the Containers façade (craftax_engine),
+# not native GameBench HTTP. Workshop attaches 127.0.0.1:8097.
+name: synth-craftax
+
+services:
+  eval:
+    build:
+      context: ../..
+      dockerfile: targets/craftax/Dockerfile
+    pull_policy: build
+    environment:
+      SYNTH_CONTAINER_TARGET: craftax_engine
+      SYNTH_CONTAINER_BIND: "0.0.0.0"
+      SYNTH_CONTAINER_PORT: "8080"
+    ports:
+      - "127.0.0.1:8097:8080"
+    restart: "no"

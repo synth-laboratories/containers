@@ -1,0 +1,39 @@
+# Local eval/optimizer targets. Never a registry URL.
+# Operator: docker compose -f targets/<id>/compose.yaml up --build
+
+[catalog]
+version = 1
+pull = false
+
+[[target]]
+id = "banking77"
+target_id = "banking77_classify"
+path = "targets/banking77"
+compose = "targets/banking77/compose.yaml"
+dockerfile = "targets/banking77/Dockerfile"
+contract = "synth.container.live-eval.v1"
+gepa = "synth_optimizers.gepa.v2"
+host = "127.0.0.1"
+port = 8765
+
+[[target]]
+id = "healthbench"
+target_id = "healthbench_chat"
+path = "targets/healthbench"
+compose = "targets/healthbench/compose.yaml"
+dockerfile = "targets/healthbench/Dockerfile"
+contract = "synth.container.live-eval.v1"
+gepa = "synth_optimizers.gepa.v2"
+host = "127.0.0.1"
+port = 8114
+required_env = ["OPENAI_API_KEY"]
+
+[[target]]
+id = "craftax"
+target_id = "craftax_engine"
+path = "targets/craftax"
+compose = "targets/craftax/compose.yaml"
+dockerfile = "targets/craftax/Dockerfile"
+contract = "synth.container.live-eval.v1"
+host = "127.0.0.1"
+port = 8097
