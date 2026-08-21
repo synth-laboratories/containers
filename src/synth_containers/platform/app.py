@@ -823,11 +823,8 @@ def create_compat_app(
         return payload
 
     @app.get("/rollouts/{rollout_id}/trace")
-    async def get_trace(rollout_id: str) -> dict[str, Any]:
-        seal = platform.seals.get(rollout_id)
-        if seal is None:
-            raise HTTPException(status_code=404, detail=f"trace_not_sealed:{rollout_id}")
-        return seal
+    async def get_trace(rollout_id: str) -> Any:
+        return _platform_response(platform.trace_for(rollout_id), default_status=404)
 
     @app.get("/rollouts/{rollout_id}/trace/bundle")
     async def get_trace_bundle(rollout_id: str) -> Any:
