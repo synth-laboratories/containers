@@ -6,6 +6,7 @@ missing ≠ 0, gold private, /reward env-authored accuracy.
 
 from __future__ import annotations
 
+import tempfile
 import json
 import urllib.error
 
@@ -34,7 +35,7 @@ TARGET = "banking77_classify"
 
 
 def _client() -> TestClient:
-    return TestClient(create_compat_app(TARGET))
+    return TestClient(create_compat_app(TARGET, storage_root=tempfile.mkdtemp(prefix="test_banking77_platform-")))
 
 
 def _prepare_start(client: TestClient, *, rollout_id: str, body: dict) -> tuple[dict, dict]:

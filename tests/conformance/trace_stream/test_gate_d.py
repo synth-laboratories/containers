@@ -7,8 +7,8 @@ from fastapi.testclient import TestClient
 from synth_containers.platform import create_compat_app
 
 
-def test_ts_d02_d03_closed_high_water_matches_seal() -> None:
-    client = TestClient(create_compat_app("craftax_engine"))
+def test_ts_d02_d03_closed_high_water_matches_seal(tmp_path) -> None:
+    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path / "p0"))
     started = client.post(
         "/rollouts",
         json={
@@ -31,9 +31,9 @@ def test_ts_d02_d03_closed_high_water_matches_seal() -> None:
     assert seal["trace_id"] == rid
 
 
-def test_ts_d07_failed_rollout_is_not_a_trusted_success(monkeypatch) -> None:
+def test_ts_d07_failed_rollout_is_not_a_trusted_success(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("DIGBENCH_API_TOKEN", raising=False)
-    client = TestClient(create_compat_app("digbench_public"))
+    client = TestClient(create_compat_app("digbench_public", storage_root=tmp_path / "p1"))
     started = client.post(
         "/rollouts",
         json={

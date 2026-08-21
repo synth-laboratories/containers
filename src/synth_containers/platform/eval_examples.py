@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -37,8 +39,8 @@ def _prepare_and_start(client: TestClient, *, rollout_id: str, body: dict[str, A
     return started.json()
 
 
-def run_react(*, seeds: int = 10) -> dict[str, Any]:
-    client = TestClient(create_compat_app("craftax_engine"))
+def run_react(*, storage_root: str | Path, seeds: int = 10) -> dict[str, Any]:
+    client = TestClient(create_compat_app("craftax_engine", storage_root=storage_root))
     client.post("/policy-configs", json={"config_id": "luna_med", "config": {"model": "gpt-5.6-luna", "effort": "medium", "max_tokens": 1024, "context_token_budget": 16000, "compact_at": 0.7, "keep_recent_messages": 8, "keep_recent_frames": 2, "observation_mode": "text"}})
     rows = []
     for seed in range(seeds):
@@ -79,8 +81,8 @@ def run_react(*, seeds: int = 10) -> dict[str, Any]:
     }
 
 
-def run_code_policy() -> dict[str, Any]:
-    client = TestClient(create_compat_app("craftax_code_policy"))
+def run_code_policy(*, storage_root: str | Path) -> dict[str, Any]:
+    client = TestClient(create_compat_app("craftax_code_policy", storage_root=storage_root))
     do_put = client.put("/policy", json={"code": DEFAULT_HEURISTIC, "harness": "isolated_policy_process"})
     if do_put.status_code != 200:
         raise RuntimeError(f"PUT /policy failed: {do_put.status_code} {do_put.text}")
@@ -127,11 +129,12 @@ def run_code_policy() -> dict[str, Any]:
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     which = args[0] if args else "both"
-    out: dict[str, Any] = {}
+    storage_root = Path(tempfile.mkdtemp(prefix="craftax-eval-examples-"))
+    out: dict[str, Any] = {"storage_root": str(storage_root)}
     if which in {"react", "both"}:
-        out["react"] = run_react()
+        out["react"] = run_react(storage_root=storage_root / "react")
     if which in {"code-policy", "code_policy", "both"}:
-        out["code_policy"] = run_code_policy()
+        out["code_policy"] = run_code_policy(storage_root=storage_root / "code_policy")
     json.dump(out, sys.stdout, indent=2)
     sys.stdout.write("\n")
     return 0

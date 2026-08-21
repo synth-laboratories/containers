@@ -259,7 +259,7 @@ def test_gold_missing_frame_fails_closed(gold_http, monkeypatch) -> None:
         world.reset(0)
 
 
-def test_engine_is_fixture_not_gold() -> None:
+def test_engine_is_fixture_not_gold(tmp_path) -> None:
     engine = TARGETS["craftax_engine"]
     react = TARGETS["craftax_react"]
     code = TARGETS["craftax_code_policy"]
@@ -269,7 +269,7 @@ def test_engine_is_fixture_not_gold() -> None:
     assert code.max_episode_steps == 8
     assert react.environment_ref == "env:craftax_gold"
     assert react.max_episode_steps == 120
-    info = TestClient(create_compat_app("craftax_engine")).get("/info").json()
+    info = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path / "p0")).get("/info").json()
     assert info["environment_ref"] == "env:craftax_fixture"
     assert info["max_episode_steps"] == 8
 
@@ -458,8 +458,8 @@ def test_engine_fixture_artifacts_are_not_claimed_as_png(tmp_path) -> None:
         assert meta.json().get("format") != "png"
 
 
-def test_code_policy_put_and_restart_keep_engine_generation() -> None:
-    client = TestClient(create_compat_app("craftax_code_policy"))
+def test_code_policy_put_and_restart_keep_engine_generation(tmp_path) -> None:
+    client = TestClient(create_compat_app("craftax_code_policy", storage_root=tmp_path / "p1"))
     put = client.put("/policy", json={"code": "def act(obs):\n    return 0\n"})
     assert put.status_code == 200, put.text
     generation = put.json()["engine_generation"]
@@ -470,8 +470,8 @@ def test_code_policy_put_and_restart_keep_engine_generation() -> None:
     assert body.get("isolation_receipt", {}).get("sandbox") == "process"
 
 
-def test_engine_fixture_frames_are_ascii_not_png() -> None:
-    client = TestClient(create_compat_app("craftax_engine"))
+def test_engine_fixture_frames_are_ascii_not_png(tmp_path) -> None:
+    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path / "p2"))
     started = client.post(
         "/rollouts",
         json={

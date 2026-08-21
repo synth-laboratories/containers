@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import tempfile
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -171,7 +170,7 @@ class CompatPlatform:
         self,
         spec: TargetSpec,
         *,
-        storage_root: str | Path | None = None,
+        storage_root: str | Path,
         runtime_config: dict[str, Any] | None = None,
     ) -> None:
         self.spec = spec
@@ -180,11 +179,13 @@ class CompatPlatform:
         # metadata or the trace envelope.  Runtimes may read this immutable
         # construction input, but callers cannot mutate it through HTTP.
         self.runtime_config = dict(runtime_config or {})
-        self.storage_root = (
-            Path(storage_root)
-            if storage_root is not None
-            else Path(tempfile.mkdtemp(prefix="synth-containers-events-"))
-        )
+        # Durable state is the point of this façade: leases, seals, receipts
+        # and manifests must survive the process. A silent temporary root made
+        # every recovery guarantee conditional on nobody having forgotten the
+        # argument, so the root is required and named by the caller.
+        if storage_root is None or str(storage_root).strip() == "":
+            raise ValueError("storage_root_required")
+        self.storage_root = Path(storage_root)
         self.engine_generation = 1
         self.policy_generation = 1
         self.active_leases = 0

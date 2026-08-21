@@ -93,7 +93,7 @@ def _sampler_scheme_allowed(url: str) -> bool:
 def create_compat_app(
     target: str | TargetSpec = "craftax_engine",
     *,
-    storage_root: str | Path | None = None,
+    storage_root: str | Path,
     runtime_config: dict[str, Any] | None = None,
 ) -> FastAPI:
     spec = TARGETS[target] if isinstance(target, str) else target

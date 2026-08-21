@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import tempfile
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -23,7 +24,7 @@ def _has_gate(node_results: list[dict[str, Any]]) -> bool:
 
 
 def run() -> dict[str, Any]:
-    client = TestClient(create_compat_app("deo_nested"))
+    client = TestClient(create_compat_app("deo_nested", storage_root=tempfile.mkdtemp(prefix="deo-nested-reward-")))
     started = client.post(
         "/rollouts",
         json={

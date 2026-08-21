@@ -1358,7 +1358,8 @@ def main(argv: list[str] | None = None) -> int:
 
         from synth_containers.platform import create_compat_app
 
-        with TestClient(create_compat_app(args.target)) as client:
+        storage_root = tempfile.mkdtemp(prefix="container-compat-conformance-")
+        with TestClient(create_compat_app(args.target, storage_root=storage_root)) as client:
             suite = run_against_client(client, args.target, paid=args.paid)
     receipt = receipt_from_suite(suite)
     if args.receipt:

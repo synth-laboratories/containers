@@ -14,8 +14,8 @@ from synth_containers.platform.react import (
 )
 
 
-def test_react_ten_seeds_through_containers_http() -> None:
-    result = run_react(seeds=10)
+def test_react_ten_seeds_through_containers_http(tmp_path) -> None:
+    result = run_react(storage_root=tmp_path, seeds=10)
     board = result["leaderboard"]
     assert len(board) == 10
     assert len({row["rollout_id"] for row in board}) == 10
@@ -27,8 +27,8 @@ def test_react_ten_seeds_through_containers_http() -> None:
     assert result["absent_n"] == 0
 
 
-def test_code_policy_put_restart_distinct_from_noop() -> None:
-    result = run_code_policy()
+def test_code_policy_put_restart_distinct_from_noop(tmp_path) -> None:
+    result = run_code_policy(storage_root=tmp_path)
     assert result["engine_generation"] == 1
     assert result["isolation_receipt"]["sandbox"] == "process"
     assert result["do_policy"]["reward"] == 0.5

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tempfile
 import json
 from pathlib import Path
 
@@ -23,7 +24,7 @@ _SCHEMA_ROOT = Path(__file__).resolve().parents[3] / "schemas" / "trace-stream"
 
 
 def _engine_events() -> tuple[dict, list[dict]]:
-    client = TestClient(create_compat_app("craftax_engine"))
+    client = TestClient(create_compat_app("craftax_engine", storage_root=tempfile.mkdtemp(prefix="test_gate_a-")))
     prepared = client.post(
         "/rollouts/prepare",
         json={"rollout_id": "roll_ts_a", "telemetry": {"enabled": True, "transport": "sse"}},
@@ -103,8 +104,8 @@ def test_ts_a06_lifecycle_regressions_fail() -> None:
     assert "orphan_close:span.policy.closed" in issues
 
 
-def test_ts_a07_missing_stays_missing() -> None:
-    client = TestClient(create_compat_app("craftax_engine"))
+def test_ts_a07_missing_stays_missing(tmp_path) -> None:
+    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path / "p1"))
     started = client.post(
         "/rollouts",
         json={

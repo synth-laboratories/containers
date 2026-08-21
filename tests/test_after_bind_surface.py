@@ -43,13 +43,13 @@ def _subscribe(client: TestClient, stream: dict) -> list[dict]:
     return events
 
 
-def test_info_classifies_families_and_advertises_policy_refs() -> None:
-    craftax = TestClient(create_compat_app("craftax_engine")).get("/info").json()
-    gold = TestClient(create_compat_app("craftax_react")).get("/info").json()
-    harbor = TestClient(create_compat_app("harbor_public")).get("/info").json()
-    docker = TestClient(create_compat_app("harbor_docker")).get("/info").json()
-    mock = TestClient(create_compat_app("digbench_mock")).get("/info").json()
-    relay = TestClient(create_compat_app("digbench_public")).get("/info").json()
+def test_info_classifies_families_and_advertises_policy_refs(tmp_path) -> None:
+    craftax = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path / "p0")).get("/info").json()
+    gold = TestClient(create_compat_app("craftax_react", storage_root=tmp_path / "p1")).get("/info").json()
+    harbor = TestClient(create_compat_app("harbor_public", storage_root=tmp_path / "p2")).get("/info").json()
+    docker = TestClient(create_compat_app("harbor_docker", storage_root=tmp_path / "p3")).get("/info").json()
+    mock = TestClient(create_compat_app("digbench_mock", storage_root=tmp_path / "p4")).get("/info").json()
+    relay = TestClient(create_compat_app("digbench_public", storage_root=tmp_path / "p5")).get("/info").json()
 
     assert craftax["runtime_family"] == gold["runtime_family"] == "craftax"
     assert craftax["environment_ref"] == "env:craftax_fixture"
@@ -76,15 +76,15 @@ def test_info_classifies_families_and_advertises_policy_refs() -> None:
     }
 
 
-def test_health_names_runtime_family() -> None:
-    harbor = TestClient(create_compat_app("harbor_public")).get("/health").json()
+def test_health_names_runtime_family(tmp_path) -> None:
+    harbor = TestClient(create_compat_app("harbor_public", storage_root=tmp_path / "p6")).get("/health").json()
     assert harbor["runtime_family"] == "harbor"
     assert harbor["environment_ref"] == "env:harbor_sandbox"
     assert harbor["target"] == "harbor_public"
 
 
-def test_prepare_get_returns_prepared_before_start() -> None:
-    client = TestClient(create_compat_app("harbor_public"))
+def test_prepare_get_returns_prepared_before_start(tmp_path) -> None:
+    client = TestClient(create_compat_app("harbor_public", storage_root=tmp_path / "p7"))
     prepared = _prepare(client, "roll_prepared_status")
     stream = prepared["stream"]
     _subscribe(client, stream)
@@ -97,8 +97,8 @@ def test_prepare_get_returns_prepared_before_start() -> None:
     assert body["stream"]["id"] == stream["id"]
 
 
-def test_auto_transport_refused_on_authoritative_prepare() -> None:
-    client = TestClient(create_compat_app("craftax_engine"))
+def test_auto_transport_refused_on_authoritative_prepare(tmp_path) -> None:
+    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path / "p8"))
     refused = client.post(
         "/rollouts/prepare",
         json={"rollout_id": "roll_auto", "telemetry": {"enabled": True, "transport": "auto"}},
@@ -106,8 +106,8 @@ def test_auto_transport_refused_on_authoritative_prepare() -> None:
     assert refused.status_code == 422, refused.text
 
 
-def test_craftax_eleventh_lease_is_typed_429() -> None:
-    client = TestClient(create_compat_app("craftax_engine"))
+def test_craftax_eleventh_lease_is_typed_429(tmp_path) -> None:
+    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path / "p9"))
     leases = TARGETS["craftax_engine"].scale_leases
     assert leases == 10
     held: list[str] = []
@@ -145,8 +145,8 @@ def test_craftax_eleventh_lease_is_typed_429() -> None:
             client.post(f"/rollouts/{rollout_id}/complete")
 
 
-def test_harbor_fixture_subscribe_before_trial_and_no_frames() -> None:
-    client = TestClient(create_compat_app("harbor_public"))
+def test_harbor_fixture_subscribe_before_trial_and_no_frames(tmp_path) -> None:
+    client = TestClient(create_compat_app("harbor_public", storage_root=tmp_path / "p10"))
     prepared = _prepare(client, "roll_harbor_bind")
     _subscribe(client, prepared["stream"])
     started = client.post(
@@ -170,10 +170,10 @@ def test_harbor_fixture_subscribe_before_trial_and_no_frames() -> None:
     assert native == scored.get("reward") == 1.0
 
 
-def test_harbor_docker_info_is_distinct_from_fixture() -> None:
+def test_harbor_docker_info_is_distinct_from_fixture(tmp_path) -> None:
     from synth_containers.platform.targets import PR_TARGETS
 
-    info = TestClient(create_compat_app("harbor_docker")).get("/info").json()
+    info = TestClient(create_compat_app("harbor_docker", storage_root=tmp_path / "p11")).get("/info").json()
     assert info["runtime_family"] == "harbor"
     assert info["environment_ref"] == "env:harbor_docker"
     assert info["live_frames"] == "unsupported"
@@ -181,8 +181,8 @@ def test_harbor_docker_info_is_distinct_from_fixture() -> None:
     assert "harbor_docker" not in PR_TARGETS
 
 
-def test_digbench_mock_both_harnesses_share_one_eval_stream() -> None:
-    client = TestClient(create_compat_app("digbench_mock"))
+def test_digbench_mock_both_harnesses_share_one_eval_stream(tmp_path) -> None:
+    client = TestClient(create_compat_app("digbench_mock", storage_root=tmp_path / "p12"))
     prepared = _prepare(client, "roll_digbench_basic")
     _subscribe(client, prepared["stream"])
     status = client.get("/rollouts/roll_digbench_basic")
@@ -248,10 +248,10 @@ def test_digbench_mock_both_harnesses_share_one_eval_stream() -> None:
 
 
 def test_digbench_public_without_token_allows_subscribe_before_start_session(
-    monkeypatch,
+    monkeypatch, tmp_path,
 ) -> None:
     monkeypatch.delenv("DIGBENCH_API_TOKEN", raising=False)
-    client = TestClient(create_compat_app("digbench_public"))
+    client = TestClient(create_compat_app("digbench_public", storage_root=tmp_path / "p13"))
     prepared = _prepare(client, "roll_digbench_no_token")
     _subscribe(client, prepared["stream"])
     started = client.post(

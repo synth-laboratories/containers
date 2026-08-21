@@ -166,8 +166,8 @@ def test_trace_bundle_served_when_capture_supervisor_archive_exists(tmp_path) ->
     assert reference["inspectable"] is True
 
 
-def test_policy_config_registration_is_idempotent_and_conflict_safe() -> None:
-    platform = CompatPlatform(TARGETS["craftax_engine"])
+def test_policy_config_registration_is_idempotent_and_conflict_safe(tmp_path) -> None:
+    platform = CompatPlatform(TARGETS["craftax_engine"], storage_root=tmp_path / "p0")
     first = platform.register_policy_config(
         "checkpoint-e",
         {"harness": "react", "config": {"model": "checkpoint-e"}},
@@ -186,8 +186,8 @@ def test_policy_config_registration_is_idempotent_and_conflict_safe() -> None:
     assert conflict["error"] == "policy_config_conflict"
 
 
-def test_usage_totals_match_emitted_events() -> None:
-    platform = CompatPlatform(TARGETS["craftax_engine"])
+def test_usage_totals_match_emitted_events(tmp_path) -> None:
+    platform = CompatPlatform(TARGETS["craftax_engine"], storage_root=tmp_path / "p1")
     body = platform.start_rollout(
         parse_create_rollout(
             {

@@ -22,8 +22,8 @@ def test_heartbeat_interval_is_at_least_five_seconds() -> None:
     assert STREAM_TERMINAL_GRACE_S >= 5.0
 
 
-def test_stream_descriptor_advertises_reconnect() -> None:
-    client = TestClient(create_compat_app("craftax_engine"))
+def test_stream_descriptor_advertises_reconnect(tmp_path) -> None:
+    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path / "p0"))
     started = client.post(
         "/rollouts",
         json={
@@ -42,8 +42,8 @@ def test_stream_descriptor_advertises_reconnect() -> None:
     client.post("/rollouts/roll_c4_reconnect/complete")
 
 
-def test_stream_cap_returns_429_with_retry_after() -> None:
-    client = TestClient(create_compat_app("craftax_engine"))
+def test_stream_cap_returns_429_with_retry_after(tmp_path) -> None:
+    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path / "p1"))
     started = client.post(
         "/rollouts",
         json={
@@ -70,7 +70,7 @@ def test_stream_cap_returns_429_with_retry_after() -> None:
     client.post("/rollouts/roll_c4_cap/complete")
 
 
-def test_terminal_unclosed_stream_closes_after_grace(monkeypatch) -> None:
+def test_terminal_unclosed_stream_closes_after_grace(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
         "synth_containers.platform.app.STREAM_HEARTBEAT_INTERVAL_S",
         0.05,
@@ -79,7 +79,7 @@ def test_terminal_unclosed_stream_closes_after_grace(monkeypatch) -> None:
         "synth_containers.platform.app.STREAM_TERMINAL_GRACE_S",
         0.05,
     )
-    client = TestClient(create_compat_app("craftax_engine"))
+    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path / "p2"))
     started = client.post(
         "/rollouts",
         json={

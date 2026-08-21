@@ -16,8 +16,8 @@ _OPENAPI = (
 )
 
 
-def test_craftax_metadata_advertises_input_schema_and_digest() -> None:
-    client = TestClient(create_compat_app("craftax_engine"))
+def test_craftax_metadata_advertises_input_schema_and_digest(tmp_path) -> None:
+    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path / "p0"))
     payload = client.get("/info").json()
     schema = payload["input_schema"]
     assert schema["properties"]["task_instance_id"]["pattern"] == TASK_INSTANCE_ID_PATTERN
@@ -35,15 +35,15 @@ def test_craftax_metadata_advertises_input_schema_and_digest() -> None:
     assert "luna_low" not in str(payload)
 
 
-def test_banking77_schema_has_seed_range_and_intent_vocab() -> None:
-    payload = TestClient(create_compat_app("banking77_classify")).get("/metadata").json()
+def test_banking77_schema_has_seed_range_and_intent_vocab(tmp_path) -> None:
+    payload = TestClient(create_compat_app("banking77_classify", storage_root=tmp_path / "p1")).get("/metadata").json()
     seed = payload["input_schema"]["properties"]["seed"]
     assert seed["minimum"] == 0
     assert seed["maximum"] >= 1
     vocab = payload["input_schema"]["properties"]["action_vocabulary"]["items"]["enum"]
     assert "card_arrival" in vocab
     assert payload["capabilities_digest"] == CompatPlatform(
-        TARGETS["banking77_classify"]
+        TARGETS["banking77_classify"], storage_root=tmp_path / "p2"
     ).capabilities_digest()
 
 
