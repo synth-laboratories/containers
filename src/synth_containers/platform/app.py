@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
-from urllib.parse import urlparse
+from collections import OrderedDict
+from urllib.parse import urlparse, urlunparse
 import json
 import math
 import time
@@ -16,6 +17,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+import httpx
 
 from ..event_log import (
     STREAM_HEARTBEAT_INTERVAL_S,
@@ -33,6 +35,7 @@ from .http_requests import (
     to_policy_config_dict,
     to_put_policy_dict,
 )
+from .pin import RolloutCredentialLease
 from .state import CompatPlatform, PolicyConfig
 from .targets import TARGETS, TargetSpec
 from ..training_rollout import (
@@ -60,11 +63,6 @@ def _platform_response(result: dict[str, Any], *, default_status: int = 400) -> 
     return result
 
 
-def _http_from_parse(exc: BaseException) -> HTTPException:
-    status = exc.status_code if isinstance(exc, RequestParseError) else 422
-    return HTTPException(status_code=status, detail=str(exc))
-
-
 def allow_loopback_sampler() -> bool:
     """Whether a plaintext loopback sampler is admissible on this host.
 
@@ -90,6 +88,43 @@ def _sampler_scheme_allowed(url: str) -> bool:
     return parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost", "::1"}
 
 
+def _http_from_parse(exc: BaseException) -> HTTPException:
+    status = exc.status_code if isinstance(exc, RequestParseError) else 422
+    return HTTPException(status_code=status, detail=str(exc))
+
+
+class SamplerUnreachable(Exception):
+    """Sampler health canary failed within the admission budget."""
+
+
+class _BoundedLRU(OrderedDict):
+    def __init__(self, maxsize: int) -> None:
+        super().__init__()
+        self.maxsize = max(1, int(maxsize))
+
+    def __setitem__(self, key, value):  # type: ignore[no-untyped-def]
+        if key in self:
+            self.move_to_end(key)
+        super().__setitem__(key, value)
+        while len(self) > self.maxsize:
+            self.popitem(last=False)
+
+
+def sampler_health_url(sampler_url: str) -> str:
+    parsed = urlparse(sampler_url)
+    return urlunparse((parsed.scheme, parsed.netloc, "/health", "", "", ""))
+
+
+def probe_sampler_health(sampler_url: str, *, timeout: float = 2.0) -> None:
+    """Admission-time reachability canary. Transport failure is sampler_unreachable."""
+    url = sampler_health_url(sampler_url)
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            client.get(url)
+    except httpx.HTTPError as exc:
+        raise SamplerUnreachable from exc
+
+
 def create_compat_app(
     target: str | TargetSpec = "craftax_engine",
     *,
@@ -108,7 +143,7 @@ def create_compat_app(
     )
     app.state.platform = platform
     app.state.spec = spec
-    app.state.training_rollout_results = {}
+    app.state.training_rollout_results = _BoundedLRU(spec.scale_leases * 4)
 
     def _sse_event(rollout_id: str, envelope: Any) -> dict[str, Any]:
         row = envelope.to_dict()
@@ -234,6 +269,18 @@ def create_compat_app(
                 raise HTTPException(status_code=409, detail="training_rollout_idempotency_conflict")
             return cached["result"]
 
+        try:
+            probe_sampler_health(sampler_url, timeout=2.0)
+        except SamplerUnreachable:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "sampler_unreachable",
+                    "retryable": True,
+                    "status_code": 422,
+                },
+            )
+
         config_id = f"training_{hashlib.sha256(identity_digest.encode()).hexdigest()[:16]}"
         platform.policy_configs[config_id] = PolicyConfig(
             config_id=config_id,
@@ -242,7 +289,6 @@ def create_compat_app(
                 "inference_target": {
                     "provider": "tinker",
                     "provider_endpoint_id": sampler_url,
-                    "auth_bearer": sampler_token,
                     "run_id": body["job_id"],
                     "checkpoint_id": body["policy_version"],
                     "connection_mode": str(sampler.get("connection_mode") or "keep_alive"),
@@ -257,6 +303,11 @@ def create_compat_app(
                 "max_tokens": max_tokens,
                 "temperature": temperature,
             },
+        )
+        platform.credential_leases[rollout_id] = RolloutCredentialLease(
+            rollout_id=rollout_id,
+            endpoint=sampler_url,
+            bearer=sampler_token,
         )
         rollout_payload = {
             "rollout_id": rollout_id,
@@ -274,17 +325,22 @@ def create_compat_app(
         try:
             rollout_request = parse_create_rollout(rollout_payload)
         except (RequestParseError, ValueError) as exc:
+            platform.credential_leases.pop(rollout_id, None)
             raise _http_from_parse(exc) from exc
-        started = await asyncio.to_thread(platform.start_rollout, rollout_request)
-        if started.get("error"):
-            return _platform_response(started)
-        reward = platform.compute_reward(
-            rollout_id=rollout_id,
-            evidence=None,
-            mode="terminal",
-            rescore=False,
-            plan_ref=None,
-        )
+        try:
+            started = await asyncio.to_thread(platform.start_rollout, rollout_request)
+            if started.get("error"):
+                return _platform_response(started)
+            reward = await asyncio.to_thread(
+                platform.compute_reward,
+                rollout_id=rollout_id,
+                evidence=None,
+                mode="terminal",
+                rescore=False,
+                plan_ref=None,
+            )
+        finally:
+            platform.credential_leases.pop(rollout_id, None)
         capabilities = await hosted_training_capabilities()
         actions = []
         event_log = platform.logs.get(rollout_id)
@@ -554,7 +610,8 @@ def create_compat_app(
         result = await asyncio.to_thread(platform.start_rollout, req)
         if "error" in result:
             return _platform_response(result)
-        reward_record = platform.compute_reward(
+        reward_record = await asyncio.to_thread(
+            platform.compute_reward,
             rollout_id=rollout_id,
             evidence=None,
             mode="terminal",
@@ -728,7 +785,8 @@ def create_compat_app(
         except (RequestParseError, ValueError) as exc:
             # Translate once at the HTTP edge: parse failures are 422, not 500.
             raise _http_from_parse(exc) from exc
-        result = platform.compute_reward(
+        result = await asyncio.to_thread(
+            platform.compute_reward,
             rollout_id=req.rollout_id,
             evidence=req.evidence,
             mode=req.mode,
@@ -823,11 +881,8 @@ def create_compat_app(
         return payload
 
     @app.get("/rollouts/{rollout_id}/trace")
-    async def get_trace(rollout_id: str) -> dict[str, Any]:
-        seal = platform.seals.get(rollout_id)
-        if seal is None:
-            raise HTTPException(status_code=404, detail=f"trace_not_sealed:{rollout_id}")
-        return seal
+    async def get_trace(rollout_id: str) -> Any:
+        return _platform_response(platform.trace_for(rollout_id), default_status=404)
 
     @app.get("/rollouts/{rollout_id}/trace/bundle")
     async def get_trace_bundle(rollout_id: str) -> Any:

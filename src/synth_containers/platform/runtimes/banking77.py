@@ -148,7 +148,7 @@ class Banking77Runtime:
             return row.label, dict(_EMPTY_USAGE)
 
         config_id = str(pin.policy_ref.get("config") or "").strip()
-        policy = platform.policy_configs.get(config_id)
+        policy = platform.policy_for(pin)
         config = dict(policy.config) if policy is not None else {}
         forced = config.get("forced_label")
         if isinstance(forced, str) and forced.strip():

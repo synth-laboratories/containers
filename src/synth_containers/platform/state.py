@@ -6,8 +6,9 @@ import hashlib
 import json
 import os
 import threading
+import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -17,15 +18,25 @@ from ..event_log import (
     STREAM_RETRY_AFTER_S,
     RolloutEventLog,
     stream_descriptor,
-    validate_rollout_id,
 )
 from .react import CRAFTAX_REACT_SYSTEM_PROMPT
 from .affordances import bind_recipe
 from .http_requests import CreateRolloutRequest, ISOLATED_POLICY_HARNESS
+from .manifests import CompletedRolloutMixin
+from .pin import (
+    AdmissionReceipt,
+    PinStatus,
+    RolloutCredentialLease,
+    RolloutPin,
+    admission_identity_digest,
+    admission_identity_payload,
+    require_lease_identity,
+    transition,
+)
 from .policy_process import DEFAULT_HEURISTIC, IsolatedPolicyProcess
 from .reward_plan import PlanOutcome, classify_plan_outcome
 from .runtime import runtime_for
-from .seal import seal_rollout_log, validate_rollout_seal
+from .seal import seal_rollout_log
 from .targets import TargetSpec
 
 
@@ -107,65 +118,7 @@ class PolicyRevision:
     isolation_receipt: dict[str, Any]
 
 
-@dataclass
-class RewardNode:
-    node_id: str
-    kind: str  # gate | aggregate | env_reward | script
-    authority: str
-    status: str
-    value: float | None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "node_id": self.node_id,
-            "kind": self.kind,
-            "authority": self.authority,
-            "status": self.status,
-            "value": self.value,
-        }
-
-
-@dataclass
-class RolloutPin:
-    rollout_id: str
-    world_ref: str
-    environment_ref: str
-    policy_ref: dict[str, Any]
-    evaluation_plan_ref: str
-    task_instance_id: str
-    stream_id: str
-    engine_generation: int
-    policy_revision_id: str | None
-    seed: int | None
-    child_rollout_id: str | None = None
-    child_resource_ref: dict[str, Any] | None = None
-    usage: dict[str, Any] | None = None
-    terminal: bool = False
-    status: str = "prepared"
-    started: bool = False
-    reward_signals: list[float | None] = field(default_factory=list)
-    native_script_reward: float | None = None
-    hillclimb_nodes: tuple[RewardNode, ...] | None = None
-    env_generation: int = 1
-    omit_reward: bool = False
-    outcome: str | None = None
-    session_dropped: bool = False
-    reward_kind: str = "env_sum"
-    checkpoint_schedule: dict[str, Any] | None = None
-    resume_from_checkpoint_id: str | None = None
-    scheduled_checkpoints: list[dict[str, Any]] = field(default_factory=list)
-    config_digest: str | None = None
-    capability_digest: str | None = None
-    execution: str | None = None
-    idempotency_key: str | None = None
-    accepted_at: str | None = None
-    completed_at: str | None = None
-    simulating: bool = False
-    owner_id: str | None = None
-    owner_kind: str | None = None
-
-
-class CompatPlatform:
+class CompatPlatform(CompletedRolloutMixin):
     def __init__(
         self,
         spec: TargetSpec,
@@ -212,6 +165,7 @@ class CompatPlatform:
         self._background_threads: dict[str, threading.Thread] = {}
         self.execution_manifests: dict[str, dict[str, Any]] = {}
         self._stream_occupancy: dict[str, int] = {}
+        self.credential_leases: dict[str, RolloutCredentialLease] = {}
         self.instance_id = str(
             (self.runtime_config.get("instance_id") if self.runtime_config else None)
             or uuid.uuid4()
@@ -229,6 +183,9 @@ class CompatPlatform:
 
     def _lease_path(self, rollout_id: str) -> Path:
         return self.storage_root / "leases" / f"{self._durable_key(rollout_id)}.json"
+
+    def _admission_path(self, rollout_id: str) -> Path:
+        return self.storage_root / "admissions" / f"{self._durable_key(rollout_id)}.json"
 
     def _trace_bundle_path(self, rollout_id: str) -> Path:
         configured = self.runtime_config.get("trace_bundle_root")
@@ -302,158 +259,6 @@ class CompatPlatform:
         finally:
             os.close(directory_fd)
 
-    def _persist_completed_rollout(self, pin: RolloutPin) -> None:
-        manifest = {
-            "schema": "synth.containers.completed-rollout.v1",
-            "target_id": self.spec.target_id,
-            "rollout_id": pin.rollout_id,
-            "stream_id": pin.stream_id,
-            "stream_binding": list(self.stream_bindings[pin.rollout_id]),
-            "pin": {
-                "world_ref": pin.world_ref,
-                "environment_ref": pin.environment_ref,
-                "policy_ref": {key: value for key, value in pin.policy_ref.items() if key != "code"},
-                "evaluation_plan_ref": pin.evaluation_plan_ref,
-                "task_instance_id": pin.task_instance_id,
-                "engine_generation": pin.engine_generation,
-                "policy_revision_id": pin.policy_revision_id,
-                "seed": pin.seed,
-                "child_rollout_id": pin.child_rollout_id,
-                "child_resource_ref": pin.child_resource_ref,
-                "usage": pin.usage,
-                "status": pin.status,
-                "reward_signals": pin.reward_signals,
-                "native_script_reward": pin.native_script_reward,
-                "hillclimb_nodes": [node.to_dict() for node in (pin.hillclimb_nodes or ())],
-                "env_generation": pin.env_generation,
-                "omit_reward": pin.omit_reward,
-                "outcome": pin.outcome,
-                "session_dropped": pin.session_dropped,
-                "reward_kind": pin.reward_kind,
-                "checkpoint_schedule": pin.checkpoint_schedule,
-                "resume_from_checkpoint_id": pin.resume_from_checkpoint_id,
-                "scheduled_checkpoints": pin.scheduled_checkpoints,
-                "config_digest": pin.config_digest,
-                "capability_digest": pin.capability_digest,
-                "execution": pin.execution,
-                "idempotency_key": pin.idempotency_key,
-                "accepted_at": pin.accepted_at,
-                "completed_at": pin.completed_at,
-                "owner_id": pin.owner_id,
-                "owner_kind": pin.owner_kind,
-            },
-        }
-        self._atomic_json(self._manifest_path(pin.rollout_id), manifest)
-
-    def _recover_completed_rollouts(self) -> None:
-        root = self.storage_root / "run_manifests"
-        if not root.is_dir():
-            return
-        for path in sorted(root.glob("*.json")):
-            manifest = json.loads(path.read_text(encoding="utf-8"))
-            if manifest.get("schema") != "synth.containers.completed-rollout.v1":
-                raise ValueError(f"completed_rollout_manifest_schema:{path.name}")
-            if manifest.get("target_id") != self.spec.target_id:
-                continue
-            rollout_id = str(manifest.get("rollout_id") or "")
-            validate_rollout_id(rollout_id)
-            expected_name = f"{self._durable_key(rollout_id)}.json"
-            if path.name != expected_name:
-                raise ValueError(f"completed_rollout_manifest_identity:{path.name}")
-            stream_id = str(manifest.get("stream_id") or "")
-            if stream_id != f"stream:{rollout_id}":
-                raise ValueError(f"completed_rollout_stream_identity:{rollout_id}")
-            journal = self.storage_root / "event_logs" / expected_name.replace(".json", ".jsonl")
-            log = RolloutEventLog.recover(
-                rollout_id=rollout_id,
-                stream_id=stream_id,
-                journal_path=journal,
-            )
-            seal_path = self.storage_root / "seals" / f"{rollout_id}.trace-v5.json"
-            seal = json.loads(seal_path.read_text(encoding="utf-8"))
-            validate_rollout_seal(seal)
-            if seal.get("rollout_id") != rollout_id or seal.get("high_water") != log.high_water:
-                raise ValueError(f"completed_rollout_seal_identity:{rollout_id}")
-            expected_seal = seal_rollout_log(
-                log,
-                pin=seal.get("pin") if isinstance(seal.get("pin"), dict) else None,
-            )
-            if expected_seal["content_digest"] != seal["content_digest"]:
-                raise ValueError(f"completed_rollout_seal_log_mismatch:{rollout_id}")
-            binding = manifest.get("stream_binding")
-            if not isinstance(binding, list) or len(binding) != 2:
-                raise ValueError(f"completed_rollout_stream_binding:{rollout_id}")
-            raw_pin = manifest.get("pin")
-            if not isinstance(raw_pin, dict):
-                raise ValueError(f"completed_rollout_pin:{rollout_id}")
-            nodes = tuple(
-                RewardNode(
-                    node_id=str(row["node_id"]),
-                    kind=str(row["kind"]),
-                    authority=str(row["authority"]),
-                    status=str(row["status"]),
-                    value=row.get("value"),
-                )
-                for row in (raw_pin.get("hillclimb_nodes") or [])
-            )
-            pin = RolloutPin(
-                rollout_id=rollout_id,
-                world_ref=str(raw_pin["world_ref"]),
-                environment_ref=str(raw_pin["environment_ref"]),
-                policy_ref=dict(raw_pin["policy_ref"]),
-                evaluation_plan_ref=str(raw_pin["evaluation_plan_ref"]),
-                task_instance_id=str(raw_pin["task_instance_id"]),
-                stream_id=stream_id,
-                engine_generation=int(raw_pin["engine_generation"]),
-                policy_revision_id=raw_pin.get("policy_revision_id"),
-                seed=raw_pin.get("seed"),
-                child_rollout_id=raw_pin.get("child_rollout_id"),
-                child_resource_ref=raw_pin.get("child_resource_ref"),
-                usage=raw_pin.get("usage"),
-                terminal=True,
-                status=str(raw_pin["status"]),
-                started=True,
-                reward_signals=list(raw_pin.get("reward_signals") or []),
-                native_script_reward=raw_pin.get("native_script_reward"),
-                hillclimb_nodes=nodes or None,
-                env_generation=int(raw_pin.get("env_generation") or 1),
-                omit_reward=bool(raw_pin.get("omit_reward")),
-                outcome=raw_pin.get("outcome"),
-                session_dropped=bool(raw_pin.get("session_dropped")),
-                reward_kind=str(raw_pin.get("reward_kind") or self.spec.reward_kind),
-                checkpoint_schedule=raw_pin.get("checkpoint_schedule"),
-                resume_from_checkpoint_id=raw_pin.get("resume_from_checkpoint_id"),
-                scheduled_checkpoints=list(raw_pin.get("scheduled_checkpoints") or []),
-                config_digest=raw_pin.get("config_digest"),
-                capability_digest=raw_pin.get("capability_digest"),
-                execution=raw_pin.get("execution"),
-                idempotency_key=raw_pin.get("idempotency_key"),
-                accepted_at=raw_pin.get("accepted_at"),
-                completed_at=raw_pin.get("completed_at"),
-                owner_id=raw_pin.get("owner_id"),
-                owner_kind=raw_pin.get("owner_kind"),
-            )
-            self.logs[rollout_id] = log
-            self.stream_bindings[rollout_id] = (str(binding[0]), str(binding[1]))
-            self.pins[rollout_id] = pin
-            self.seals[rollout_id] = seal
-            reward_path = self._reward_path(rollout_id)
-            if reward_path.is_file():
-                wrapper = json.loads(reward_path.read_text(encoding="utf-8"))
-                reward = wrapper.get("receipt") if isinstance(wrapper, dict) else None
-                if (
-                    wrapper.get("schema") != "synth.containers.reward-receipt.v1"
-                    or not isinstance(reward, dict)
-                    or wrapper.get("content_digest") != self._receipt_digest(reward)
-                ):
-                    raise ValueError(f"reward_receipt_digest:{rollout_id}")
-                if reward.get("rollout_id") != rollout_id:
-                    raise ValueError(f"reward_receipt_identity:{rollout_id}")
-                self.reward_executions[rollout_id] = reward
-                execution_id = reward.get("execution_id")
-                if execution_id:
-                    self.reward_by_execution_id[str(execution_id)] = reward
-
     def _persist_lease(self, pin: RolloutPin) -> None:
         self._atomic_json(
             self._lease_path(pin.rollout_id),
@@ -464,9 +269,33 @@ class CompatPlatform:
                 "rollout_id": pin.rollout_id,
                 "owner_id": pin.owner_id,
                 "owner_kind": pin.owner_kind,
-                "status": pin.status,
+                "status": str(pin.status),
                 "accepted_at": pin.accepted_at,
+                "policy_ref": {
+                    key: value for key, value in pin.policy_ref.items() if key != "code"
+                },
+                "task_instance_id": pin.task_instance_id,
+                "seed": pin.seed,
+                "config_digest": pin.config_digest,
+                "capability_digest": pin.capability_digest,
+                "identity_digest": pin.identity_digest,
+                "stream_id": pin.stream_id,
             },
+        )
+
+    def _write_admission_receipt(self, pin: RolloutPin) -> None:
+        receipt = pin.admission
+        if receipt is None:
+            raise ValueError(f"admission_receipt_missing:{pin.rollout_id}")
+        path = self._admission_path(pin.rollout_id)
+        if path.is_file():
+            existing = json.loads(path.read_text(encoding="utf-8"))
+            if existing.get("identity_digest") != receipt.identity_digest:
+                raise ValueError(f"admission_receipt_conflict:{pin.rollout_id}")
+            return
+        self._atomic_json(
+            path,
+            {"schema": "synth.containers.admission.v1", **receipt.to_dict()},
         )
 
     def _drop_lease(self, rollout_id: str) -> None:
@@ -493,25 +322,43 @@ class CompatPlatform:
                 continue
             if existing is not None and not existing.terminal:
                 continue
+            require_lease_identity(record, source=path.name)
             pin = RolloutPin(
                 rollout_id=rollout_id,
-                world_ref=self.spec.world_ref,
+                world_ref=str(record.get("world_ref") or self.spec.world_ref),
                 environment_ref=self.spec.environment_ref,
-                policy_ref={},
-                evaluation_plan_ref=self.spec.evaluation_plan_ref,
-                task_instance_id="seed:0",
-                stream_id=f"stream:{rollout_id}",
+                policy_ref=dict(record["policy_ref"]),
+                evaluation_plan_ref=str(
+                    record.get("evaluation_plan_ref") or self.spec.evaluation_plan_ref
+                ),
+                task_instance_id=str(record["task_instance_id"]),
+                stream_id=str(record.get("stream_id") or f"stream:{rollout_id}"),
                 engine_generation=self.engine_generation,
                 policy_revision_id=None,
-                seed=0,
-                terminal=True,
-                status="crashed",
+                seed=record["seed"],
+                status=PinStatus.RUNNING,
                 started=True,
                 owner_id=record.get("owner_id"),
                 owner_kind=record.get("owner_kind"),
                 accepted_at=record.get("accepted_at"),
-                completed_at=_utc_now(),
+                config_digest=str(record["config_digest"]),
+                capability_digest=str(record["capability_digest"]),
+                identity_digest=record.get("identity_digest"),
             )
+            transition(
+                pin,
+                PinStatus.CRASHED,
+                {"reason": "orphaned_lease", "lease_instance_id": record.get("instance_id")},
+            )
+            journal = self.storage_root / "event_logs" / f"{self._durable_key(rollout_id)}.jsonl"
+            if journal.is_file():
+                log = RolloutEventLog.recover(
+                    rollout_id=rollout_id,
+                    stream_id=pin.stream_id,
+                    journal_path=journal,
+                )
+                self.logs[rollout_id] = log
+                self.stream_bindings[rollout_id] = ("sse", self.spec.retention)
             self.pins[rollout_id] = pin
             path.unlink()
 
@@ -567,6 +414,31 @@ class CompatPlatform:
                 harness=seed.harness,
                 config=dict(seed.config),
             )
+
+    def policy_for(self, pin: RolloutPin) -> PolicyConfig | None:
+        """Policy used for this pin, with a per-rollout credential overlay.
+
+        The sampler bearer lives on ``credential_leases``, never in
+        ``policy_configs``. Runtimes that need it receive a copy here.
+        """
+        config_id = str((pin.policy_ref or {}).get("config") or "").strip()
+        registered = self.policy_configs.get(config_id) if config_id else None
+        if registered is None:
+            return None
+        lease = self.credential_leases.get(pin.rollout_id)
+        if lease is None:
+            return registered
+        overlay = dict(registered.config)
+        target = dict(overlay.get("inference_target") or {})
+        target["auth_bearer"] = lease.bearer
+        overlay["inference_target"] = target
+        return PolicyConfig(
+            config_id=registered.config_id,
+            harness=registered.harness,
+            config=overlay,
+            code=registered.code,
+            revision=registered.revision,
+        )
 
     def _advertised_policy_refs(self) -> list[dict[str, Any]]:
         """Pins Desktop can bind before start. Harbor = two configs; dig.bench = two harnesses."""
@@ -788,10 +660,10 @@ class CompatPlatform:
             {
                 "rollout_id": pin.rollout_id,
                 "owner_id": pin.owner_id,
-                "status": pin.status,
+                "status": str(pin.status),
             }
             for pin in self.pins.values()
-            if pin.status == "crashed"
+            if pin.status == PinStatus.CRASHED
         ]
         return {
             "status": "ok",
@@ -908,7 +780,7 @@ class CompatPlatform:
                     request.submission_mode != "async"
                     and pin is not None
                     and log is not None
-                    and pin.status == "running"
+                    and pin.status == PinStatus.RUNNING
                     and not bool(result.get("replayed"))
                 )
         if spawn_id:
@@ -968,28 +840,26 @@ class CompatPlatform:
                 if telemetry.retention is not None
                 else self.spec.retention
             )
-            bound_transport, bound_retention = self.stream_bindings.get(
-                rollout_id,
-                (transport, requested_retention),
+            requested_identity = admission_identity_payload(
+                harness=requested_harness,
+                config=requested_config,
+                code=request.policy_ref.code,
+                task_instance_id=requested_task,
+                world_ref=str(request.world_ref or self.spec.world_ref),
+                evaluation_plan_ref=str(
+                    request.evaluation_plan_ref or self.spec.evaluation_plan_ref
+                ),
+                omit_reward=request.omit_reward,
+                transport=transport,
+                retention=requested_retention,
+                resume_from_checkpoint_id=request.resume_from_checkpoint_id,
+                execution=(
+                    request.execution
+                    if request.submission_mode == "async"
+                    else existing_pin.execution
+                ),
             )
-            same_identity = (
-                existing_pin.policy_ref.get("harness") == requested_harness
-                and existing_pin.policy_ref.get("config") == requested_config
-                and existing_pin.policy_ref.get("code") == request.policy_ref.code
-                and existing_pin.task_instance_id == requested_task
-                and existing_pin.world_ref == str(request.world_ref or self.spec.world_ref)
-                and existing_pin.evaluation_plan_ref
-                == str(request.evaluation_plan_ref or self.spec.evaluation_plan_ref)
-                and existing_pin.omit_reward == request.omit_reward
-                and bound_transport == transport
-                and bound_retention == requested_retention
-                and existing_pin.resume_from_checkpoint_id
-                == request.resume_from_checkpoint_id
-                and existing_pin.execution == (
-                    request.execution if request.submission_mode == "async" else existing_pin.execution
-                )
-            )
-            if not same_identity:
+            if existing_pin.identity_digest != admission_identity_digest(requested_identity):
                 return {
                     "error": "rollout_identity_conflict",
                     "status_code": 409,
@@ -1089,6 +959,39 @@ class CompatPlatform:
         capability_digest = self.capabilities_digest()
         idempotency_key = request.idempotency_key or rollout_id
         owner_id, owner_kind = _owner_from_metadata(request.metadata)
+        identity_payload = admission_identity_payload(
+            harness=harness,
+            config=config_id,
+            code=policy_ref.code,
+            task_instance_id=task_instance_id,
+            world_ref=str(request.world_ref or self.spec.world_ref),
+            evaluation_plan_ref=str(request.evaluation_plan_ref or self.spec.evaluation_plan_ref),
+            omit_reward=request.omit_reward,
+            transport=transport,
+            retention=retention,
+            resume_from_checkpoint_id=request.resume_from_checkpoint_id,
+            execution=execution,
+        )
+        identity_digest = admission_identity_digest(identity_payload)
+        accepted_at = _utc_now()
+        admission = AdmissionReceipt(
+            identity_digest=identity_digest,
+            rollout_id=rollout_id,
+            task_instance_id=task_instance_id,
+            seed=seed_i,
+            world_ref=str(request.world_ref or self.spec.world_ref),
+            evaluation_plan_ref=str(request.evaluation_plan_ref or self.spec.evaluation_plan_ref),
+            omit_reward=request.omit_reward,
+            transport=transport,
+            retention=retention,
+            resume_from_checkpoint_id=request.resume_from_checkpoint_id,
+            execution=execution,
+            config_digest=config_digest,
+            capability_digest=capability_digest,
+            policy_harness=harness,
+            policy_config=config_id,
+            accepted_at=accepted_at,
+        )
         pin = RolloutPin(
             rollout_id=rollout_id,
             world_ref=str(request.world_ref or self.spec.world_ref),
@@ -1110,12 +1013,15 @@ class CompatPlatform:
             capability_digest=capability_digest,
             execution=execution,
             idempotency_key=idempotency_key,
-            accepted_at=_utc_now(),
+            accepted_at=accepted_at,
             owner_id=owner_id,
             owner_kind=owner_kind,
+            identity_digest=identity_digest,
+            admission=admission,
         )
         self.pins[rollout_id] = pin
         self.active_leases += 1
+        self._write_admission_receipt(pin)
         self._persist_lease(pin)
         log = self.logs[rollout_id]
         if not any(item.kind == "trace.opened" for item in log.after(0)):
@@ -1142,7 +1048,7 @@ class CompatPlatform:
                 },
             )
         pin.started = True
-        pin.status = "running"
+        transition(pin, PinStatus.RUNNING, {"reason": "admitted"})
         if async_mode:
             accepted = self._acceptance_payload(pin, descriptor)
             if execution == "background":
@@ -1167,7 +1073,7 @@ class CompatPlatform:
         payload = {
             "accepted": True,
             "rollout_id": pin.rollout_id,
-            "status": pin.status,
+            "status": str(pin.status),
             # Admission freezes these identities. Async callers must not need
             # a second GET to learn which exact policy and runtime generation
             # accepted their work, especially while configs continue to be
@@ -1207,7 +1113,7 @@ class CompatPlatform:
                 wait_for = self._background_done.setdefault(rollout_id, threading.Event())
             else:
                 try:
-                    self._simulate(pin, log)
+                    self._simulate_or_fail(pin, log)
                 finally:
                     self.active_leases = max(0, self.active_leases - 1)
                 return self._rollout_response(pin, self.stream_descriptor_for(rollout_id))
@@ -1322,7 +1228,7 @@ class CompatPlatform:
     def _rollout_response(self, pin: RolloutPin, descriptor: dict[str, Any]) -> dict[str, Any]:
         return {
             "rollout_id": pin.rollout_id,
-            "status": pin.status,
+            "status": str(pin.status),
             "world_ref": pin.world_ref,
             "environment_ref": pin.environment_ref,
             "policy_ref": pin.policy_ref,
@@ -1335,7 +1241,7 @@ class CompatPlatform:
             "engine_generation": pin.engine_generation,
             "policy_revision_id": pin.policy_revision_id,
             "terminated": pin.terminal,
-            "truncated": pin.status == "truncated",
+            "truncated": pin.status == PinStatus.TRUNCATED,
             "resume_from_checkpoint_id": pin.resume_from_checkpoint_id,
             "scheduled_checkpoints": pin.scheduled_checkpoints,
             "trace": self._sealed_trace_reference(pin.rollout_id),
@@ -1381,18 +1287,66 @@ class CompatPlatform:
         outcome — a malformed policy config, say — left its pin pinned forever,
         so every later bind returned 409 and the container had to be restarted
         to accept work again. The error still propagates; it just no longer
-        takes the container down with it.
+        takes the container down with it. Terminalization is the same path
+        runtime ``_fail`` uses: status + closed events, seal, completed
+        manifest, drop lease.
         """
         try:
             self._simulate(pin, log)
-        except BaseException:
-            pin.status = "failed"
-            pin.terminal = True
+        except BaseException as exc:
+            self._fail(
+                pin,
+                log,
+                reason="runtime_exception",
+                error_type=type(exc).__name__,
+            )
             raise
 
-    def _simulate(self, pin: RolloutPin, log: RolloutEventLog) -> None:
-        pin.env_generation += 1
-        runtime_for(self.spec).simulate(self, pin, log)
+    def _fail(
+        self,
+        pin: RolloutPin,
+        log: RolloutEventLog,
+        *,
+        reason: str,
+        error_type: str | None = None,
+    ) -> None:
+        """One terminalization path: status events, seal, completed manifest, drop lease."""
+        if not pin.terminal:
+            evidence: dict[str, Any] = {"reason": reason}
+            if error_type:
+                evidence["error_type"] = error_type
+            transition(pin, PinStatus.FAILED, evidence)
+        if log is not None and not log.closed:
+            payload: dict[str, Any] = {"status": str(pin.status), "reason": reason}
+            if error_type:
+                payload["error_type"] = error_type
+            log.append("env.episode.closed", payload)
+            log.append("status", payload)
+            high_water = log.high_water
+            log.append("capture.high_water", {"high_water": high_water})
+            log.append("capture.closed", {"high_water": high_water})
+            log.mark_closed()
+        self._seal_and_persist(pin, log)
+
+    def _hold_if_requested(self, pin: RolloutPin) -> None:
+        raw = (self.runtime_config or {}).get("simulate_hold_path")
+        if not raw:
+            return
+        marker = Path(str(raw))
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(pin.rollout_id, encoding="utf-8")
+        while marker.exists():
+            time.sleep(0.05)
+
+    def _seal_and_persist(self, pin: RolloutPin, log: RolloutEventLog) -> None:
+        if pin.rollout_id in self.seals:
+            self._write_execution_manifest(pin, log)
+            self._persist_completed_rollout(pin)
+            self._drop_lease(pin.rollout_id)
+            return
+        if log is None:
+            self._drop_lease(pin.rollout_id)
+            return
         pin.completed_at = pin.completed_at or _utc_now()
         self.seals[pin.rollout_id] = seal_rollout_log(
             log,
@@ -1431,6 +1385,14 @@ class CompatPlatform:
         self._persist_completed_rollout(pin)
         self._drop_lease(pin.rollout_id)
 
+    def _simulate(self, pin: RolloutPin, log: RolloutEventLog) -> None:
+        pin.env_generation += 1
+        self._hold_if_requested(pin)
+        runtime_for(self.spec).simulate(self, pin, log)
+        if not pin.terminal:
+            transition(pin, PinStatus.COMPLETED, {"reason": "runtime_returned"})
+        self._seal_and_persist(pin, log)
+
     def _execution_manifest_path(self, rollout_id: str) -> Path:
         return self.storage_root / "seals" / f"{rollout_id}.manifest.json"
 
@@ -1453,7 +1415,7 @@ class CompatPlatform:
         body = {
             "schema": "synth.containers.execution-manifest.v1",
             "rollout_id": pin.rollout_id,
-            "status": pin.status,
+            "status": str(pin.status),
             "taxonomy": {"event_kind_counts": self._taxonomy_counters(log)},
             "usage": pin.usage,
             "reward": {
@@ -1623,6 +1585,21 @@ class CompatPlatform:
         pin.session_dropped = True
         return {"dropped": True, "rollout_id": rollout_id}
 
+    def trace_for(self, rollout_id: str) -> dict[str, Any]:
+        """Return the lite seal, or refuse an unsealed crashed log."""
+        seal = self.seals.get(rollout_id)
+        if seal is not None:
+            return seal
+        pin = self.pins.get(rollout_id)
+        if pin is not None and pin.status == PinStatus.CRASHED:
+            return {
+                "error": "unsealed_log",
+                "status_code": 409,
+                "rollout_id": rollout_id,
+                "task_instance_id": pin.task_instance_id,
+            }
+        return {"error": "trace_not_sealed", "status_code": 404, "rollout_id": rollout_id}
+
     def get_trace_bundle(self, rollout_id: str) -> dict[str, Any]:
         """Serve a capture-supervisor Trace V5 bundle archive when one exists.
 
@@ -1659,9 +1636,11 @@ class CompatPlatform:
         if pin.terminal:
             return self._rollout_response(pin, self.stream_descriptor_for(rollout_id) if log else {"id": pin.stream_id})
         held = not pin.terminal
-        pin.status = "cancelled"
-        pin.terminal = True
-        pin.completed_at = pin.completed_at or _utc_now()
+        transition(
+            pin,
+            PinStatus.CANCELLED,
+            {"reason": "cancel_requested", "owner_id": owner_id},
+        )
         if log is not None and not log.closed:
             log.append(
                 "status",

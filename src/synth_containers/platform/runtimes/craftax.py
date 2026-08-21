@@ -41,7 +41,7 @@ class CraftaxRuntime:
                 raise ValueError(
                     "Craftax simulate requires policy_ref.config; start must not default luna_med"
                 )
-            policy = platform.policy_configs.get(config_id)
+            policy = platform.policy_for(pin)
             config = dict(policy.config) if policy is not None else {}
             hosted_sampler = bool(
                 config.get("training_sampler_endpoint") or config.get("inference_target")

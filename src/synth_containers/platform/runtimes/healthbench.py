@@ -111,7 +111,7 @@ class HealthBenchRuntime:
         log.append("observation", observation)
         try:
             config_id = str(pin.policy_ref.get("config") or "groq_llama31_8b")
-            policy = platform.policy_configs.get(config_id)
+            policy = platform.policy_for(pin)
             config = dict(policy.config) if policy is not None else {}
             provider = str(config.get("provider") or "groq")
             model = str(config.get("model") or POLICY_MODEL)

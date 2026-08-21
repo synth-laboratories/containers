@@ -206,7 +206,7 @@ class Gsm8kRuntime:
             return row.answer_text, dict(_EMPTY_USAGE), None
 
         config_id = str(pin.policy_ref.get("config") or "").strip()
-        policy = platform.policy_configs.get(config_id)
+        policy = platform.policy_for(pin)
         config = dict(policy.config) if policy is not None else {}
         forced = config.get("forced_completion")
         if isinstance(forced, str) and forced.strip():

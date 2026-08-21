@@ -6,7 +6,8 @@ from copy import deepcopy
 from typing import Any
 
 from ...event_log import RolloutEventLog
-from ..state import CompatPlatform, RewardNode, RolloutPin
+from ..pin import RewardNode
+from ..state import CompatPlatform, RolloutPin
 from ..targets import TARGETS, ScriptNode
 from .harbor_docker import DOCKER_ENVIRONMENT, run_docker_trial
 
