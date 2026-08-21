@@ -291,3 +291,13 @@ class RolloutPin:
     transitions: list[dict[str, Any]] = field(default_factory=list)
     identity_digest: str | None = None
     admission: AdmissionReceipt | None = None
+
+
+@dataclass(frozen=True)
+class RolloutCredentialLease:
+    """Per-rollout sampler credential. Never stored in ``policy_configs``."""
+
+    rollout_id: str
+    endpoint: str
+    bearer: str = field(repr=False)
+

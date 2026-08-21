@@ -26,6 +26,7 @@ from .manifests import CompletedRolloutMixin
 from .pin import (
     AdmissionReceipt,
     PinStatus,
+    RolloutCredentialLease,
     RolloutPin,
     admission_identity_digest,
     admission_identity_payload,
@@ -164,6 +165,7 @@ class CompatPlatform(CompletedRolloutMixin):
         self._background_threads: dict[str, threading.Thread] = {}
         self.execution_manifests: dict[str, dict[str, Any]] = {}
         self._stream_occupancy: dict[str, int] = {}
+        self.credential_leases: dict[str, RolloutCredentialLease] = {}
         self.instance_id = str(
             (self.runtime_config.get("instance_id") if self.runtime_config else None)
             or uuid.uuid4()
@@ -412,6 +414,31 @@ class CompatPlatform(CompletedRolloutMixin):
                 harness=seed.harness,
                 config=dict(seed.config),
             )
+
+    def policy_for(self, pin: RolloutPin) -> PolicyConfig | None:
+        """Policy used for this pin, with a per-rollout credential overlay.
+
+        The sampler bearer lives on ``credential_leases``, never in
+        ``policy_configs``. Runtimes that need it receive a copy here.
+        """
+        config_id = str((pin.policy_ref or {}).get("config") or "").strip()
+        registered = self.policy_configs.get(config_id) if config_id else None
+        if registered is None:
+            return None
+        lease = self.credential_leases.get(pin.rollout_id)
+        if lease is None:
+            return registered
+        overlay = dict(registered.config)
+        target = dict(overlay.get("inference_target") or {})
+        target["auth_bearer"] = lease.bearer
+        overlay["inference_target"] = target
+        return PolicyConfig(
+            config_id=registered.config_id,
+            harness=registered.harness,
+            config=overlay,
+            code=registered.code,
+            revision=registered.revision,
+        )
 
     def _advertised_policy_refs(self) -> list[dict[str, Any]]:
         """Pins Desktop can bind before start. Harbor = two configs; dig.bench = two harnesses."""

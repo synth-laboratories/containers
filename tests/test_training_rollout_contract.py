@@ -124,6 +124,10 @@ def test_training_rollout_is_policy_stamped_and_idempotent(monkeypatch: pytest.M
         )
 
     monkeypatch.setattr(HostedSamplerClient, "sample", sample)
+    monkeypatch.setattr(
+        "synth_containers.platform.app.probe_sampler_health",
+        lambda *_args, **_kwargs: None,
+    )
     client = TestClient(create_compat_app("banking77_classify", storage_root=tmp_path / "p2"))
     request = {
         "schema_version": ROLLOUT_REQUEST_SCHEMA_VERSION,
