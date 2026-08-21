@@ -1,5 +1,10 @@
 # synth-containers changelog
 
+## 2026-08-21
+
+* Prepared `0.4.1` as the official Containers package for Workshop v0.7.
+* Included the promoted Banking77 and GSM8K contracts, hosted sampler fixes, and immutable Trace V5 receipts from `main`.
+
 ## 2026-08-14
 
 * Prepared `0.4.1.dev20260814` as the Workshop v0.3 development-channel Containers substrate.
