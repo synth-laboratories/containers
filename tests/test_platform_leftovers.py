@@ -39,10 +39,10 @@ def test_seed_from_task_instance_id_rules() -> None:
         _seed_from_task_instance_id("seed:12abc")
 
 
-def test_metadata_names_runtime_family() -> None:
-    harbor = TestClient(create_compat_app("harbor_public")).get("/info").json()
-    craftax = TestClient(create_compat_app("craftax_engine")).get("/info").json()
-    banking77 = TestClient(create_compat_app("banking77_classify")).get("/info").json()
+def test_metadata_names_runtime_family(tmp_path) -> None:
+    harbor = TestClient(create_compat_app("harbor_public", storage_root=tmp_path / "p0")).get("/info").json()
+    craftax = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path / "p1")).get("/info").json()
+    banking77 = TestClient(create_compat_app("banking77_classify", storage_root=tmp_path / "p2")).get("/info").json()
     assert harbor["runtime_family"] == "harbor"
     assert harbor["live_frames"] == "unsupported"
     assert harbor["adapter_chain"] == ["harbor"]
@@ -51,7 +51,7 @@ def test_metadata_names_runtime_family() -> None:
     assert craftax["environment_ref"] == "env:craftax_fixture"
     assert craftax["max_episode_steps"] == 8
     assert "harbor" not in craftax.get("adapter_chain", [])
-    react = TestClient(create_compat_app("craftax_react")).get("/info").json()
+    react = TestClient(create_compat_app("craftax_react", storage_root=tmp_path / "p3")).get("/info").json()
     assert react["environment_ref"] == "env:craftax_gold"
     assert react["max_episode_steps"] == 120
     assert banking77["runtime_family"] == "banking77"
@@ -63,8 +63,8 @@ def test_metadata_names_runtime_family() -> None:
     assert gepa["rollout_route"] == "/rollouts"
 
 
-def test_start_rollout_reads_create_rollout_request() -> None:
-    platform = CompatPlatform(TARGETS["craftax_engine"])
+def test_start_rollout_reads_create_rollout_request(tmp_path) -> None:
+    platform = CompatPlatform(TARGETS["craftax_engine"], storage_root=tmp_path / "p4")
     req = parse_create_rollout(
         {
             "telemetry": {"enabled": True, "transport": "sse"},
@@ -89,8 +89,8 @@ def test_start_rollout_reads_create_rollout_request() -> None:
     assert body["status"] == "completed"
 
 
-def test_start_rollout_refuses_silent_policy_pin() -> None:
-    client = TestClient(create_compat_app("craftax_engine"))
+def test_start_rollout_refuses_silent_policy_pin(tmp_path) -> None:
+    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path / "p5"))
     missing = client.post("/rollouts", json={"telemetry": {"enabled": True, "transport": "sse"}})
     assert missing.status_code == 422
     assert "policy_ref.harness" in missing.json()["detail"]
@@ -143,8 +143,8 @@ def test_craftax_policy_failure_closes_and_seals_the_stream(monkeypatch, tmp_pat
     assert body["rollout_id"] in platform.seals
 
 
-def test_prepare_and_start_retries_replay_one_rollout_identity() -> None:
-    client = TestClient(create_compat_app("craftax_engine"))
+def test_prepare_and_start_retries_replay_one_rollout_identity(tmp_path) -> None:
+    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path / "p6"))
     prepared_body = {
         "rollout_id": "roll_retry_safe",
         "telemetry": {"enabled": True, "transport": "sse"},
@@ -172,8 +172,8 @@ def test_prepare_and_start_retries_replay_one_rollout_identity() -> None:
     assert status.json()["terminated"] is True
 
 
-def test_start_retry_refuses_changed_identity() -> None:
-    client = TestClient(create_compat_app("craftax_engine"))
+def test_start_retry_refuses_changed_identity(tmp_path) -> None:
+    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path / "p7"))
     original = {
         "rollout_id": "roll_identity_locked",
         "task_instance_id": "seed:1",
@@ -199,8 +199,8 @@ def test_start_retry_refuses_changed_identity() -> None:
     assert client.post("/rollouts", json=changed_transport).status_code == 409
 
 
-def test_harbor_atif_is_projection_of_the_log() -> None:
-    client = TestClient(create_compat_app("harbor_public"))
+def test_harbor_atif_is_projection_of_the_log(tmp_path) -> None:
+    client = TestClient(create_compat_app("harbor_public", storage_root=tmp_path / "p8"))
     started = client.post(
         "/rollouts",
         json={
@@ -254,8 +254,8 @@ def test_headless_visual_consumer_craftax_vs_harbor() -> None:
     assert not assert_honest_projection(digbench["projection"])
 
 
-def test_optimizer_child_eval_refs_and_occupancy() -> None:
-    client = TestClient(create_compat_app("harbor_public"))
+def test_optimizer_child_eval_refs_and_occupancy(tmp_path) -> None:
+    client = TestClient(create_compat_app("harbor_public", storage_root=tmp_path / "p9"))
     refs = []
     for index in range(2):
         started = client.post(
@@ -294,8 +294,8 @@ def test_optimizer_child_eval_refs_and_occupancy() -> None:
     assert refs[0]["stream_id"] != refs[1]["stream_id"]
 
 
-def test_c7_w06_trace_survives_world_stop() -> None:
-    client = TestClient(create_compat_app("craftax_engine"))
+def test_c7_w06_trace_survives_world_stop(tmp_path) -> None:
+    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path / "p10"))
     started = client.post(
         "/rollouts",
         json={
@@ -320,8 +320,8 @@ def test_c7_w06_trace_survives_world_stop() -> None:
     assert live.status_code in {200, 404}
 
 
-def test_policy_restart_is_independent_and_unproven_environment_restart_fails_closed() -> None:
-    client = TestClient(create_compat_app("craftax_engine"))
+def test_policy_restart_is_independent_and_unproven_environment_restart_fails_closed(tmp_path) -> None:
+    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path / "p11"))
     policy = client.post("/policy/restart")
     assert policy.status_code == 200, policy.text
     assert policy.json()["policy_generation"] == 2

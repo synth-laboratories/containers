@@ -42,7 +42,11 @@ class HarborRuntime:
         # Code-policy child so PUT /policy and POST /policy/restart are native
         # (`update_policy_code=native`). Parent /reward stays held-out gate +
         # baseline delta, not a copy of the child env-sum.
-        child_platform = CompatPlatform(TARGETS["craftax_code_policy"])
+        # rollout_id is caller-controlled; never use it as a path component.
+        child_platform = CompatPlatform(
+            TARGETS["craftax_code_policy"],
+            storage_root=platform.storage_root / "children" / platform._durable_key(child_id),
+        )
         from ..http_requests import parse_create_rollout
 
         child = child_platform.start_rollout(

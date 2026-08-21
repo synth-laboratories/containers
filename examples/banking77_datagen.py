@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -41,7 +42,7 @@ def _to_messages(text: str, label: str) -> dict[str, Any]:
 
 
 def collect(*, seeds: int, world_ref: str = WORLD_REF) -> list[dict[str, Any]]:
-    client = TestClient(create_compat_app("banking77_classify"))
+    client = TestClient(create_compat_app("banking77_classify", storage_root=tempfile.mkdtemp(prefix="banking77-datagen-")))
     available = split_size("train" if "@train" in world_ref else "heldout")
     if seeds > available:
         raise SystemExit(f"asked for {seeds} seeds; split only has {available} fixture rows")

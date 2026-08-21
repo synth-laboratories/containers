@@ -25,8 +25,8 @@ def _parse_sse(body: str) -> list[dict]:
     return events
 
 
-def test_ts_c01_poll_and_sse_same_ids() -> None:
-    client = TestClient(create_compat_app("craftax_engine"))
+def test_ts_c01_poll_and_sse_same_ids(tmp_path) -> None:
+    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path / "p0"))
     started = client.post(
         "/rollouts",
         json={
@@ -46,8 +46,8 @@ def test_ts_c01_poll_and_sse_same_ids() -> None:
     assert poll_ids == sse_ids
 
 
-def test_ts_c04_subscribed_is_control_and_does_not_advance_sequence() -> None:
-    client = TestClient(create_compat_app("craftax_engine"))
+def test_ts_c04_subscribed_is_control_and_does_not_advance_sequence(tmp_path) -> None:
+    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path / "p1"))
     prepared = client.post(
         "/rollouts/prepare",
         json={"rollout_id": "roll_ts_c04", "telemetry": {"enabled": True, "transport": "sse"}},
@@ -58,8 +58,8 @@ def test_ts_c04_subscribed_is_control_and_does_not_advance_sequence() -> None:
     assert all(item.get("sequence") is None for item in before if item.get("control"))
 
 
-def test_ts_c08_absent_transports_are_null_when_unbound() -> None:
-    client = TestClient(create_compat_app("craftax_engine"))
+def test_ts_c08_absent_transports_are_null_when_unbound(tmp_path) -> None:
+    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path / "p2"))
     prepared = client.post(
         "/rollouts/prepare",
         json={"rollout_id": "roll_ts_c08", "telemetry": {"enabled": True, "transport": "poll"}},

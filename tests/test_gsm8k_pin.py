@@ -9,6 +9,7 @@ answer (``exact``) or on the last-number fallback (``trailing_number``).
 
 from __future__ import annotations
 
+import tempfile
 import importlib.util
 import json
 import os
@@ -116,8 +117,8 @@ def test_the_pin_never_comes_from_the_environment(monkeypatch) -> None:
     assert not any(name.startswith("SYNTH_GSM8K") and "REVISION" in name for name in os.environ)
 
 
-def test_metadata_exposes_the_manifest_and_hashes_it_into_the_capability_digest() -> None:
-    client = TestClient(create_compat_app(TARGET))
+def test_metadata_exposes_the_manifest_and_hashes_it_into_the_capability_digest(tmp_path) -> None:
+    client = TestClient(create_compat_app(TARGET, storage_root=tmp_path / "p0"))
     meta = client.get("/metadata").json()
     dataset = meta["dataset"]
     assert dataset["schema_version"] == world.MANIFEST_SCHEMA
@@ -271,7 +272,7 @@ def test_parse_mode_separates_marked_answers_from_the_fallback(completion, mode,
 
 
 def _client() -> TestClient:
-    return TestClient(create_compat_app(TARGET))
+    return TestClient(create_compat_app(TARGET, storage_root=tempfile.mkdtemp(prefix="test_gsm8k_pin-")))
 
 
 def _run_forced(client: TestClient, rollout_id: str, completion: str) -> tuple[dict, dict]:

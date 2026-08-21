@@ -51,8 +51,8 @@ def test_terminal_manifest_is_self_digested_and_write_once(tmp_path) -> None:
     assert again["content_digest"] == manifest["content_digest"]
 
 
-def test_seal_pin_carries_config_and_capability_digests() -> None:
-    platform = CompatPlatform(TARGETS["craftax_engine"])
+def test_seal_pin_carries_config_and_capability_digests(tmp_path) -> None:
+    platform = CompatPlatform(TARGETS["craftax_engine"], storage_root=tmp_path / "p0")
     body = platform.start_rollout(parse_create_rollout(_START))
     seal = platform.seals[body["rollout_id"]]
     assert seal["pin"]["config_digest"] == body["config_digest"]
