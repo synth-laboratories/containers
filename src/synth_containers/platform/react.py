@@ -23,6 +23,11 @@ from .local_provider import (
     RESPONSES,
     local_endpoint,
 )
+from ..proxying import (
+    CredentialMode,
+    WORKSHOP_API_KEY_SENTINEL,
+    resolve_proxied_inference_url,
+)
 from .local_provider import PROVIDER_ID as LOCAL_PROVIDER_ID
 
 DeltaCallback = Callable[[dict[str, Any]], None]
@@ -333,15 +338,29 @@ class OpenRouterReAct:
         # and every rollout died on turn 0 with `policy_error` after zero steps.
         # A missing endpoint must say so, not pick one.
         self.provider = _required_choice(
-            config, "provider", config_id, ("openrouter", LOCAL_PROVIDER_ID, "tinker")
+            config,
+            "provider",
+            config_id,
+            ("openrouter", LOCAL_PROVIDER_ID, "tinker", "openai"),
         )
-        self.api_key_env = _required_str(config, "api_key_env", config_id)
+        cred_mode = CredentialMode.parse(config.get("credential_mode"))
+        self.credential_mode = cred_mode
+        if cred_mode.is_proxied():
+            self.api_key_env = str(config.get("api_key_env") or "OPENAI_API_KEY")
+            self.base_url = resolve_proxied_inference_url(config)
+            self.chat_endpoint = f"{self.base_url}/chat/completions"
+        else:
+            self.api_key_env = _required_str(config, "api_key_env", config_id)
         self.parse_retries = _required_bounded_int(config, "parse_retries", config_id, 0, 2)
         # OpenRouter and Tinker speak chat-completions only. `synth_mlx_rl` may
         # name either family and overrides this below.
         self.api_family = CHAT_COMPLETIONS
         self.policy_snapshot_id = str(config.get("policy_snapshot_id") or "").strip()
-        if self.provider in {"openrouter", LOCAL_PROVIDER_ID}:
+        if cred_mode.is_proxied():
+            self.sampler_path = ""
+            self.tokenizer_id = ""
+            self.sampler_ready_timeout_s = 0
+        elif self.provider in {"openrouter", LOCAL_PROVIDER_ID}:
             self.base_url = _required_str(config, "base_url", config_id).rstrip("/")
             self.chat_endpoint = f"{self.base_url}/chat/completions"
             self.sampler_path = ""
@@ -490,7 +509,9 @@ class OpenRouterReAct:
         on_delta: DeltaCallback | None = None,
     ) -> list[str]:
         api_key = os.environ.get(self.api_key_env, "").strip()
-        if self._inference_target is None and not api_key:
+        if getattr(self, "credential_mode", None) is not None and self.credential_mode.is_proxied():
+            api_key = os.environ.get("OPENAI_API_KEY", "").strip() or WORKSHOP_API_KEY_SENTINEL
+        elif self._inference_target is None and not api_key:
             raise RuntimeError(f"paid Craftax policy requires {self.api_key_env}")
         valid = [str(action) for action in observation.get("valid_actions") or []]
         if not valid:
@@ -1052,7 +1073,15 @@ class OpenRouterReAct:
                 raw = response.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")[:1000]
-            raise RuntimeError(f"OpenRouter policy HTTP {exc.code}: {detail}") from exc
+            if exc.code in {401, 403}:
+                code = "provider_auth_rejected"
+            elif exc.code == 429:
+                code = "provider_rate_limited"
+            elif exc.code >= 500:
+                code = "provider_unavailable"
+            else:
+                code = f"policy_http_{exc.code}"
+            raise RuntimeError(f"{code}: {detail}") from exc
         stripped = raw.lstrip()
         if stripped.startswith("data:"):
             return self._consume_sse_text(raw, on_delta)

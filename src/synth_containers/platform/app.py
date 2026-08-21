@@ -35,6 +35,7 @@ from .http_requests import (
 )
 from .state import CompatPlatform, PolicyConfig
 from .targets import TARGETS, TargetSpec
+from ..proxying import workload_proxy_base
 from ..training_rollout import (
     ROLLOUT_REQUEST_SCHEMA_VERSION,
     ROLLOUT_REWARD_SCHEMA_VERSION,
@@ -515,7 +516,15 @@ def create_compat_app(
             "api_key_env": policy.get("api_key_env") or default_policy_api_key_env,
             "max_tokens": policy.get("max_tokens") or 1536,
             "system_prompt": candidate.get("system_prompt"),
+            "credential_mode": policy.get("credential_mode")
+            or os.environ.get("WORKSHOP_CREDENTIAL_MODE"),
+            "inference_url": policy.get("inference_url")
+            or os.environ.get("WORKSHOP_OPENAI_BASE_URL")
+            or os.environ.get("WORKSHOP_INFERENCE_URL"),
         }
+        if proxied := workload_proxy_base(policy_config):
+            policy_config["base_url"] = proxied
+            policy_config["credential_mode"] = "workshop_proxy"
         config_digest = hashlib.sha256(
             json.dumps(policy_config, sort_keys=True).encode("utf-8")
         ).hexdigest()[:12]

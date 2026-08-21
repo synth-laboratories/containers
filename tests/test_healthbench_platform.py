@@ -359,6 +359,54 @@ def test_optimizer_adapter_derives_openai_policy_connection_defaults(monkeypatch
     assert configs[0]["api_key_env"] == "OPENAI_API_KEY"
 
 
+def test_optimizer_adapter_honors_workshop_proxy_inference_url(monkeypatch) -> None:
+    row = _row()
+    row["rubrics"] = [row["rubrics"][0]]
+    monkeypatch.setattr(healthbench, "load_row", lambda seed: row)
+    monkeypatch.setenv("WORKSHOP_CREDENTIAL_MODE", "workshop_proxy")
+    monkeypatch.setenv(
+        "WORKSHOP_OPENAI_BASE_URL",
+        "http://host.docker.internal:9/cap/wcap_x/v1/providers/openai",
+    )
+    configs = []
+
+    def chat(config, messages):
+        configs.append(config)
+        if len(configs) == 1:
+            return {
+                "text": "Rest and seek care for red flags.",
+                "usage": healthbench._usage(
+                    "openai", "gpt-4.1-mini-2025-04-14", {"prompt_tokens": 10, "completion_tokens": 5}
+                ),
+            }
+        return {
+            "text": '{"explanation":"Appropriate.","criteria_met":true}',
+            "usage": healthbench._usage(
+                "openai", healthbench.GRADER_MODEL, {"prompt_tokens": 20, "completion_tokens": 5}
+            ),
+        }
+
+    monkeypatch.setattr(healthbench, "_chat", chat)
+    response = TestClient(create_compat_app("healthbench_chat")).post(
+        "/rollout",
+        json={
+            "rollout_id": "hb-gepa-workshop-proxy",
+            "task": {"seed": 0},
+            "candidate": {"system_prompt": "Be safe."},
+            "policy": {
+                "provider": "openai",
+                "model": "gpt-4.1-mini-2025-04-14",
+                "credential_mode": "workshop_proxy",
+                "inference_url": "http://host.docker.internal:9/cap/wcap_x/v1/providers/openai",
+            },
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "completed"
+    assert "host.docker.internal" in configs[0]["base_url"]
+    assert "api.openai.com" not in configs[0]["base_url"]
+
+
 def test_optimizer_retry_with_same_rollout_id_is_idempotent(monkeypatch) -> None:
     row = _row()
     row["rubrics"] = [row["rubrics"][0]]

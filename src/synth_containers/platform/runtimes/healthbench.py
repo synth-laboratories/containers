@@ -26,6 +26,7 @@ from ..local_provider import (
     normalize_api_family,
 )
 from ..state import CompatPlatform, RolloutPin
+from ...proxying import WORKSHOP_API_KEY_SENTINEL, workload_proxy_base
 
 
 POLICY_MODEL = "llama-3.1-8b-instant"
@@ -61,7 +62,10 @@ def model_roles() -> dict[str, dict[str, Any]]:
             "model": grader_model,
             "api_key_env": grader_key_env,
             "credential_present": bool(os.environ.get(grader_key_env, "").strip()),
-            "base_url": os.environ.get("HEALTHBENCH_GRADER_BASE_URL", "https://api.openai.com/v1"),
+            "base_url": os.environ.get("HEALTHBENCH_GRADER_BASE_URL")
+            or os.environ.get("WORKSHOP_OPENAI_BASE_URL")
+            or os.environ.get("WORKSHOP_INFERENCE_URL")
+            or "https://api.openai.com/v1",
             "evaluation_plan_ref": (
                 "healthbench_eval.v1"
                 if grader_model == GRADER_MODEL
@@ -259,14 +263,18 @@ def _chat(config: dict[str, Any], messages: list[dict[str, Any]]) -> dict[str, A
     provider = str(config.get("provider") or "groq").lower()
     model = str(config.get("model") or POLICY_MODEL)
     api_family = normalize_api_family(config.get("api_family"))
+    proxied_base = workload_proxy_base(config)
     base = str(
-        config.get("base_url")
+        proxied_base
+        or config.get("base_url")
         or ("https://api.groq.com/openai/v1" if provider == "groq" else "https://api.openai.com/v1")
     ).rstrip("/")
     key_env = str(
         config.get("api_key_env") or ("GROQ_API_KEY" if provider == "groq" else "OPENAI_API_KEY")
     )
-    api_key = os.environ.get(key_env, "")
+    api_key = os.environ.get(key_env, "") or (
+        WORKSHOP_API_KEY_SENTINEL if proxied_base is not None else ""
+    )
     if is_local_provider(provider):
         # A loopback proxy issues no bearer of its own; the URL check is the
         # admission, so a missing key is not a refusal here.

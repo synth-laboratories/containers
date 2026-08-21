@@ -421,6 +421,59 @@ def test_openai_chat_policy_scores_and_reports_usage(monkeypatch) -> None:
     assert captured["body"]["model"] == "gpt-4.1-nano"
 
 
+def test_workshop_proxy_uses_inference_url_not_openai(monkeypatch) -> None:
+    client = _client()
+    gold = load_row("train", 0)
+    captured = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self, _limit: int) -> bytes:
+            return json.dumps({
+                "choices": [{"message": {"content": gold.label}}],
+                "usage": {"prompt_tokens": 20, "completion_tokens": 3, "total_tokens": 23},
+            }).encode()
+
+    def fake_urlopen(request, *, timeout):
+        captured["url"] = request.full_url
+        captured["authorization"] = request.get_header("Authorization")
+        return Response()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "workshop-proxy")
+    monkeypatch.setenv("WORKSHOP_CREDENTIAL_MODE", "workshop_proxy")
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    registered = client.post("/policy-configs", json={
+        "config_id": "banking77_workshop_proxy",
+        "harness": "classify",
+        "config": {
+            "provider": "openai",
+            "model": "gpt-4.1-nano",
+            "credential_mode": "workshop_proxy",
+            "inference_url": "http://host.docker.internal:9/cap/wcap_x/v1/providers/openai",
+            "api_key_env": "OPENAI_API_KEY",
+            "temperature": 0,
+            "max_tokens": 32,
+        },
+    })
+    assert registered.status_code == 200
+    _, started = _prepare_start(client, rollout_id="b77_proxy", body={
+        "world_ref": "world:banking77@train",
+        "task_instance_id": "seed:0",
+        "policy_ref": {"harness": "classify", "config": "banking77_workshop_proxy"},
+    })
+    assert started["status"] == "completed"
+    assert captured["url"] == (
+        "http://host.docker.internal:9/cap/wcap_x/v1/providers/openai/chat/completions"
+    )
+    assert "api.openai.com" not in captured["url"]
+    assert captured["authorization"] == "Bearer workshop-proxy"
+
+
 def test_tinker_error_code_is_typed_without_provider_prose() -> None:
     from synth_containers.platform.runtimes.banking77 import _error_code
 

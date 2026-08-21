@@ -82,6 +82,9 @@ class RolloutPolicySpecModel(StrictModel):
                 f"policy.config must not carry raw credential field {raw_key!r}; "
                 "set credential_mode and resolve credentials inside the container or proxy"
             )
+        mode = CredentialMode.parse(self.credential_mode)
+        if mode.is_proxied() and not str(self.inference_url or "").strip():
+            raise ValueError("inference_url is required when credential_mode=workshop_proxy")
         return self
 
     def to_inference_target(self) -> InferenceTarget:

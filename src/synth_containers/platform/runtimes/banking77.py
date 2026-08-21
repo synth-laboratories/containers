@@ -41,6 +41,7 @@ from ..local_provider import (
     validate_local_endpoint,
 )
 from ..state import CompatPlatform, RolloutPin
+from ...proxying import WORKSHOP_API_KEY_SENTINEL, workload_proxy_base
 
 
 _EMPTY_USAGE = {
@@ -232,6 +233,12 @@ def _sample_chat_completion(
         api_key = os.environ.get(key_env, "").strip() if key_env else ""
         if not model:
             raise RuntimeError("banking77_model_missing")
+    elif (proxied_base := workload_proxy_base(config)) is not None:
+        if not model:
+            raise RuntimeError("banking77_model_missing")
+        key_env = str(config.get("api_key_env") or "OPENAI_API_KEY").strip()
+        api_key = os.environ.get(key_env, "").strip() or WORKSHOP_API_KEY_SENTINEL
+        endpoint = f"{proxied_base}/chat/completions"
     else:
         base_url = str(config.get("base_url") or "https://api.openai.com/v1").rstrip("/")
         key_env = str(config.get("api_key_env") or "OPENAI_API_KEY").strip()

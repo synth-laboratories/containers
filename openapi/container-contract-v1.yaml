@@ -653,11 +653,12 @@ components:
       type: string
       description: >-
         How the container obtains the provider credential. Raw keys are never
-        sent on the wire: `byok` means the container reads its own env secret;
-        `proxy` means inference is routed through the Synth proxy which injects
-        credentials.
-      enum: [byok, proxy]
-      default: byok
+        sent on the wire. `workshop_proxy` (alias `proxy`) means inference is
+        routed through the Workshop provider proxy using `inference_url` and
+        the public sentinel `workshop-proxy`. `byok` is standalone only and is
+        rejected for Workshop-managed recipes.
+      enum: [byok, workshop_proxy, proxy]
+      default: workshop_proxy
     PolicyDisableReasoning:
       type: string
       enum: [auto, "on", "off"]

@@ -58,6 +58,7 @@ from ..local_provider import (
     token_capture_ref,
 )
 from ..state import CompatPlatform, RolloutPin
+from ...proxying import WORKSHOP_API_KEY_SENTINEL, workload_proxy_base
 from .banking77 import _error_code
 
 
@@ -369,6 +370,11 @@ def _endpoint(config: dict[str, Any], *, api_family: str) -> tuple[str, str]:
         endpoint = local_endpoint(config.get("base_url"), api_family=api_family)
         key_env = str(config.get("api_key_env") or "").strip()
         return endpoint, (os.environ.get(key_env, "").strip() if key_env else "")
+    if (proxied_base := workload_proxy_base(config)) is not None:
+        key_env = str(config.get("api_key_env") or "OPENAI_API_KEY").strip()
+        api_key = os.environ.get(key_env, "").strip() or WORKSHOP_API_KEY_SENTINEL
+        suffix = "/responses" if api_family == RESPONSES else "/chat/completions"
+        return f"{proxied_base}{suffix}", api_key
     if provider not in _HOSTED_BASES:
         raise RuntimeError("gsm8k_provider_unsupported")
     base_url = str(config.get("base_url") or _HOSTED_BASES[provider]).rstrip("/")
