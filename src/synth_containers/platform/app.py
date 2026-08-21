@@ -11,8 +11,7 @@ import json
 import math
 import time
 import uuid
-from pathlib import Path
-from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
