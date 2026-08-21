@@ -137,7 +137,7 @@ def test_training_rollout_is_policy_stamped_and_idempotent(monkeypatch: pytest.M
             "bearer_token": "job-token",
             "connection_mode": "close",
         },
-        "task": {"task_instance_id": "seed:0", "max_tokens": 32},
+        "task": {"task_instance_id": "seed:0", "max_tokens": 32, "temperature": 0.7},
     }
     first = client.post("/training/rollouts", json=request)
     second = client.post("/training/rollouts", json=request)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 import json
 import math
 import time
@@ -81,13 +81,29 @@ def allow_loopback_sampler() -> bool:
     ).strip().lower() in {"1", "true", "yes", "on"}
 
 
+_LOOPBACK_SAMPLER_HOSTS = {"127.0.0.1", "localhost", "::1", "host.docker.internal"}
+
+
+def _rewrite_sampler_url(url: str) -> str:
+    """Compose containers reach the host sampler via host.docker.internal."""
+
+    rewrite = os.environ.get("SYNTH_SAMPLER_HOST_REWRITE", "").strip()
+    if not rewrite:
+        return url
+    parsed = urlparse(url)
+    if parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+        return url
+    netloc = rewrite if parsed.port is None else f"{rewrite}:{parsed.port}"
+    return urlunparse(parsed._replace(netloc=netloc))
+
+
 def _sampler_scheme_allowed(url: str) -> bool:
     if url.startswith("https://"):
         return True
     if not allow_loopback_sampler():
         return False
     parsed = urlparse(url)
-    return parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost", "::1"}
+    return parsed.scheme == "http" and parsed.hostname in _LOOPBACK_SAMPLER_HOSTS
 
 
 def create_compat_app(
@@ -206,21 +222,21 @@ def create_compat_app(
             raise HTTPException(
                 status_code=422, detail="training_rollout_task_and_sampler_required"
             )
-        sampler_url = str(sampler.get("url") or "").strip()
+        sampler_url = _rewrite_sampler_url(str(sampler.get("url") or "").strip())
         sampler_token = str(sampler.get("bearer_token") or "").strip()
         if not sampler_token or not _sampler_scheme_allowed(sampler_url):
             raise HTTPException(status_code=422, detail="training_rollout_https_sampler_required")
         try:
             max_tokens = int(task.get("max_tokens") or 1536)
-            temperature = float(task.get("temperature") or 0.0)
-        except (TypeError, ValueError) as exc:
+            temperature = float(task["temperature"])
+        except (KeyError, TypeError, ValueError) as exc:
             raise HTTPException(
                 status_code=422, detail="training_rollout_sampling_config_invalid"
             ) from exc
         if (
             not 1 <= max_tokens <= 16_384
             or not math.isfinite(temperature)
-            or not 0 <= temperature <= 2
+            or not 0 < temperature <= 2
         ):
             raise HTTPException(status_code=422, detail="training_rollout_sampling_config_invalid")
         rollout_id = body["rollout_id"].strip()

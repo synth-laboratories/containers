@@ -418,7 +418,7 @@ def _validate_responses_endpoint(endpoint: str) -> None:
     ):
         raise RuntimeError("responses_endpoint_refused")
     host = parsed.hostname.lower()
-    if host in {"127.0.0.1", "localhost", "::1"} and parsed.scheme == "http":
+    if host in {"127.0.0.1", "localhost", "::1", "host.docker.internal"} and parsed.scheme == "http":
         return
     normalized = f"{parsed.scheme}://{host}"
     if port is not None:
@@ -466,6 +466,16 @@ def _remote_checkpoint_target(config: dict[str, Any]) -> dict[str, Any] | None:
     if endpoint.startswith("http://") or endpoint.startswith("https://"):
         return dict(target)
     return None
+
+
+def _required_positive_temperature(config: dict[str, Any]) -> float:
+    try:
+        temperature = float(config["temperature"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError("banking77_temperature_required") from exc
+    if temperature <= 0.0:
+        raise RuntimeError("banking77_greedy_sampling_refused")
+    return temperature
 
 
 def _sample_remote_checkpoint(
@@ -521,15 +531,10 @@ def _sample_remote_checkpoint(
                 "policy_version": config.get("policy_version") or checkpoint_id,
                 "messages": messages,
                 "max_tokens": max_tokens,
-                # The training boundary validates and passes a temperature, and
-                # it has to be honoured. Hardcoding 0.0 makes every sample in a
-                # group identical, so the group has no reward variance, so
-                # group-relative advantages are undefined and the step is
-                # filtered -- which is exactly what a bounded CISPO canary saw
-                # when eight rollouts across four groups produced no optimizer
-                # step at all. Greedy stays the default for callers that do not
-                # ask for anything else.
-                "temperature": float(config.get("temperature") or 0.0),
+                # The training boundary validates and passes a temperature.
+                # Hardcoding 0.0, or falling back to it, makes every sample in a
+                # group identical, so the group has no reward variance.
+                "temperature": _required_positive_temperature(config),
             },
             idempotency_key=(
                 f"{config.get('rollout_id') or run_id}:{checkpoint_id}:{message_digest}"
@@ -633,7 +638,7 @@ def _validate_remote_checkpoint_endpoint(endpoint: str) -> None:
     ):
         raise RuntimeError("remote_checkpoint_endpoint_refused")
     host = parsed.hostname.lower()
-    if host in {"127.0.0.1", "localhost", "::1"} and parsed.scheme == "http":
+    if host in {"127.0.0.1", "localhost", "::1", "host.docker.internal"} and parsed.scheme == "http":
         return
     normalized = f"{parsed.scheme}://{host}"
     if port is not None:

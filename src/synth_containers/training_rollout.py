@@ -79,7 +79,7 @@ class SamplerEndpoint:
 
     def validate(self, *, allow_loopback_http: bool = False) -> None:
         parsed = urlparse(self.url)
-        loopback = parsed.hostname in {"127.0.0.1", "localhost", "::1"}
+        loopback = parsed.hostname in {"127.0.0.1", "localhost", "::1", "host.docker.internal"}
         if parsed.scheme != "https" and not (allow_loopback_http and loopback):
             raise TrainingRolloutError("sampler_endpoint_requires_https")
         if (

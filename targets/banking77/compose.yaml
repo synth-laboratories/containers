@@ -11,6 +11,12 @@ services:
       SYNTH_CONTAINER_TARGET: banking77_classify
       SYNTH_CONTAINER_BIND: "0.0.0.0"
       SYNTH_CONTAINER_PORT: "8080"
+      SYNTH_CONTAINERS_ALLOW_LOOPBACK_SAMPLER: "1"
+      SYNTH_SAMPLER_HOST_REWRITE: host.docker.internal
+      SYNTH_BANKING77_SOURCE: hf
+      HF_HOME: /hf-cache
+    volumes:
+      - /Users/joshuapurtell/.cache/huggingface:/hf-cache
     ports:
       - "127.0.0.1:8765:8080"
     restart: "no"

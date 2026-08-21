@@ -8,6 +8,7 @@ See: workshop/docs/aug_12_update.md §2.2 (Environment / Policy / TaskWorld).
 
 from __future__ import annotations
 
+import json
 import os
 import random
 import re
@@ -195,9 +196,53 @@ def _rows_for(split: str) -> tuple[Banking77Row, ...]:
     name = source_name()
     if name in {"hf", "huggingface", "polyai"}:
         return _hf_rows(split)
+    if name in {"jsonl", "sft", "mix"}:
+        return _jsonl_rows(split)
     if split == TRAIN_SPLIT:
         return _TRAIN_FIXTURE
     return _HELDOUT_FIXTURE
+
+
+@lru_cache(maxsize=4)
+def _jsonl_rows(split: str) -> tuple[Banking77Row, ...]:
+    env_name = (
+        "SYNTH_BANKING77_TRAIN_PATH" if split == TRAIN_SPLIT else "SYNTH_BANKING77_HELDOUT_PATH"
+    )
+    path = os.environ.get(env_name, "").strip()
+    if not path:
+        raise RuntimeError("banking77_jsonl_path_missing")
+    rows: list[Banking77Row] = []
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            raw = line.strip()
+            if not raw:
+                continue
+            rows.append(_row_from_jsonl(json.loads(raw)))
+    if not rows:
+        raise RuntimeError("banking77_jsonl_empty")
+    return _deterministic_order(rows, split)
+
+
+def _row_from_jsonl(obj: dict[str, Any]) -> Banking77Row:
+    if obj.get("text") and obj.get("label"):
+        return Banking77Row(text=str(obj["text"]), label=str(obj["label"]).strip())
+    messages = obj.get("messages") or []
+    user = ""
+    label = ""
+    for message in messages:
+        role = str(message.get("role") or "")
+        content = str(message.get("content") or "")
+        if role == "user":
+            user = content
+        elif role == "assistant":
+            label = content.strip()
+    marker = "Customer query:\n"
+    if marker not in user or not label:
+        raise RuntimeError("banking77_jsonl_row_invalid")
+    text = user.split(marker, 1)[1].split("\n\nReturn EXACTLY", 1)[0].strip()
+    if not text:
+        raise RuntimeError("banking77_jsonl_row_invalid")
+    return Banking77Row(text=text, label=label)
 
 
 @lru_cache(maxsize=4)
@@ -209,7 +254,7 @@ def _hf_rows(split: str) -> tuple[Banking77Row, ...]:
             "SYNTH_BANKING77_SOURCE=hf requires the datasets package"
         ) from exc
     hf_split = "train" if split == TRAIN_SPLIT else "test"
-    dataset = load_dataset("PolyAI/banking77", split=hf_split, trust_remote_code=True)
+    dataset = load_dataset("PolyAI/banking77", split=hf_split)
     names = list(dataset.features["label"].names)
     rows = []
     for item in dataset:
