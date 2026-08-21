@@ -359,7 +359,7 @@ def test_optimizer_adapter_derives_openai_policy_connection_defaults(monkeypatch
     assert configs[0]["api_key_env"] == "OPENAI_API_KEY"
 
 
-def test_optimizer_adapter_honors_workshop_proxy_inference_url(monkeypatch) -> None:
+def test_optimizer_adapter_honors_workshop_proxy_inference_url(monkeypatch, tmp_path) -> None:
     row = _row()
     row["rubrics"] = [row["rubrics"][0]]
     monkeypatch.setattr(healthbench, "load_row", lambda seed: row)
@@ -387,7 +387,9 @@ def test_optimizer_adapter_honors_workshop_proxy_inference_url(monkeypatch) -> N
         }
 
     monkeypatch.setattr(healthbench, "_chat", chat)
-    response = TestClient(create_compat_app("healthbench_chat")).post(
+    response = TestClient(
+        create_compat_app("healthbench_chat", storage_root=tmp_path / "proxy")
+    ).post(
         "/rollout",
         json={
             "rollout_id": "hb-gepa-workshop-proxy",
