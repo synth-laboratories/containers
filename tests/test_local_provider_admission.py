@@ -8,6 +8,7 @@ Docker host alias — must be named in SYNTH_MLX_RL_ALLOWED_ENDPOINTS.
 
 from __future__ import annotations
 
+import tempfile
 import json
 
 import httpx
@@ -222,7 +223,7 @@ def test_a_base_url_that_already_names_the_route_is_not_doubled() -> None:
 
 
 def _banking77_client() -> TestClient:
-    return TestClient(create_compat_app("banking77_classify"))
+    return TestClient(create_compat_app("banking77_classify", storage_root=tempfile.mkdtemp(prefix="test_local_provider_admission-")))
 
 
 def _run_banking77(client: TestClient, rollout_id: str, config_id: str) -> dict:

@@ -31,12 +31,12 @@ def test_harbor_docker_is_not_a_pr_target() -> None:
     assert "harbor_docker" not in PR_TARGETS
 
 
-def test_harbor_docker_fails_closed_without_inventing_reward(monkeypatch) -> None:
+def test_harbor_docker_fails_closed_without_inventing_reward(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
         "synth_containers.platform.runtimes.harbor_docker.docker_runtime_available",
         lambda: False,
     )
-    client = TestClient(create_compat_app("harbor_docker"))
+    client = TestClient(create_compat_app("harbor_docker", storage_root=tmp_path / "p0"))
     started = client.post(
         "/rollouts",
         json={
@@ -59,7 +59,7 @@ def test_harbor_docker_fails_closed_without_inventing_reward(monkeypatch) -> Non
     assert scored.json().get("reward") is None
 
 
-def test_harbor_docker_distinct_executions_read_verifier_reward_txt(monkeypatch) -> None:
+def test_harbor_docker_distinct_executions_read_verifier_reward_txt(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
         "synth_containers.platform.runtimes.harbor_docker.docker_runtime_available",
         lambda: True,
@@ -98,7 +98,7 @@ def test_harbor_docker_distinct_executions_read_verifier_reward_txt(monkeypatch)
         "synth_containers.platform.runtimes.harbor_docker.execute_docker_role",
         fake_execute,
     )
-    client = TestClient(create_compat_app("harbor_docker"))
+    client = TestClient(create_compat_app("harbor_docker", storage_root=tmp_path / "p1"))
     started = client.post(
         "/rollouts",
         json={
@@ -133,7 +133,7 @@ def test_harbor_docker_distinct_executions_read_verifier_reward_txt(monkeypatch)
     assert "DOCKER_HOST" not in blob
 
 
-def test_harbor_docker_run_failure_does_not_invent_reward(monkeypatch) -> None:
+def test_harbor_docker_run_failure_does_not_invent_reward(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
         "synth_containers.platform.runtimes.harbor_docker.docker_runtime_available",
         lambda: True,
@@ -146,7 +146,7 @@ def test_harbor_docker_run_failure_does_not_invent_reward(monkeypatch) -> None:
         "synth_containers.platform.runtimes.harbor_docker.execute_docker_role",
         boom,
     )
-    client = TestClient(create_compat_app("harbor_docker"))
+    client = TestClient(create_compat_app("harbor_docker", storage_root=tmp_path / "p2"))
     started = client.post(
         "/rollouts",
         json={
@@ -169,7 +169,7 @@ def test_harbor_docker_run_failure_does_not_invent_reward(monkeypatch) -> None:
     assert scored.json().get("reward") is None
 
 
-def test_harbor_docker_missing_reward_txt_stays_null(monkeypatch) -> None:
+def test_harbor_docker_missing_reward_txt_stays_null(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
         "synth_containers.platform.runtimes.harbor_docker.docker_runtime_available",
         lambda: True,
@@ -193,7 +193,7 @@ def test_harbor_docker_missing_reward_txt_stays_null(monkeypatch) -> None:
         "synth_containers.platform.runtimes.harbor_docker.execute_docker_role",
         fake_execute,
     )
-    client = TestClient(create_compat_app("harbor_docker"))
+    client = TestClient(create_compat_app("harbor_docker", storage_root=tmp_path / "p3"))
     started = client.post(
         "/rollouts",
         json={
@@ -216,8 +216,8 @@ def test_harbor_docker_missing_reward_txt_stays_null(monkeypatch) -> None:
 
 
 @pytest.mark.skipif(not docker_runtime_available(), reason="docker daemon not present")
-def test_harbor_docker_live_agent_and_verifier_are_distinct() -> None:
-    client = TestClient(create_compat_app("harbor_docker"))
+def test_harbor_docker_live_agent_and_verifier_are_distinct(tmp_path) -> None:
+    client = TestClient(create_compat_app("harbor_docker", storage_root=tmp_path / "p4"))
     started = client.post(
         "/rollouts",
         json={
@@ -251,8 +251,8 @@ def test_harbor_docker_live_agent_and_verifier_are_distinct() -> None:
     assert "DOCKER_HOST" not in blob
 
 
-def test_harbor_fixture_keeps_verifier_on_parent_with_distinct_spans() -> None:
-    client = TestClient(create_compat_app("harbor_public"))
+def test_harbor_fixture_keeps_verifier_on_parent_with_distinct_spans(tmp_path) -> None:
+    client = TestClient(create_compat_app("harbor_public", storage_root=tmp_path / "p5"))
     started = client.post(
         "/rollouts",
         json={
@@ -275,8 +275,8 @@ def test_harbor_fixture_keeps_verifier_on_parent_with_distinct_spans() -> None:
     assert project_harbor_atif(events)["reward.txt"] == 1.0
 
 
-def test_deo_nested_child_is_code_policy() -> None:
-    client = TestClient(create_compat_app("deo_nested"))
+def test_deo_nested_child_is_code_policy(tmp_path) -> None:
+    client = TestClient(create_compat_app("deo_nested", storage_root=tmp_path / "p6"))
     started = client.post(
         "/rollouts",
         json={

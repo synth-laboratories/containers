@@ -20,8 +20,8 @@ def test_healthbench_declares_thirty_parallel_leases() -> None:
     assert HEALTHBENCH_CHAT.scale_leases == 30
 
 
-def test_healthbench_info_merges_operations_and_advertises_gepa_v2() -> None:
-    info = TestClient(create_compat_app("healthbench_chat")).get("/info").json()
+def test_healthbench_info_merges_operations_and_advertises_gepa_v2(tmp_path) -> None:
+    info = TestClient(create_compat_app("healthbench_chat", storage_root=tmp_path / "p0")).get("/info").json()
     operations = info["capabilities"]["operations"]
     assert operations["prepare"] is True
     assert operations["start"] is True
@@ -36,9 +36,9 @@ def test_healthbench_info_merges_operations_and_advertises_gepa_v2() -> None:
     assert "groq_llama31_8b" in configs
 
 
-def test_healthbench_declares_independent_policy_and_scorer_roles(monkeypatch) -> None:
+def test_healthbench_declares_independent_policy_and_scorer_roles(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("HEALTHBENCH_GRADER_API_KEY_ENV", "CUSTOM_GRADER_KEY")
-    metadata = TestClient(create_compat_app("healthbench_chat")).get("/metadata").json()
+    metadata = TestClient(create_compat_app("healthbench_chat", storage_root=tmp_path / "p1")).get("/metadata").json()
     roles = metadata["metadata"]["model_roles"]
     assert roles["policy"]["configuration_authority"] == "policy_ref"
     assert roles["policy"]["usage_lane"] == "policy"
@@ -48,34 +48,34 @@ def test_healthbench_declares_independent_policy_and_scorer_roles(monkeypatch) -
     assert roles["scorer"]["canonical"] is True
 
 
-def test_healthbench_info_reports_missing_policy_credential(monkeypatch) -> None:
+def test_healthbench_info_reports_missing_policy_credential(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("HEALTHBENCH_POLICY_API_KEY_ENV", "MISSING_POLICY_KEY")
     monkeypatch.setenv("HEALTHBENCH_GRADER_API_KEY_ENV", "PRESENT_GRADER_KEY")
     monkeypatch.setenv("PRESENT_GRADER_KEY", "present")
-    info = TestClient(create_compat_app("healthbench_chat")).get("/info").json()
+    info = TestClient(create_compat_app("healthbench_chat", storage_root=tmp_path / "p2")).get("/info").json()
     assert info["metadata"]["model_roles"]["policy"]["credential_present"] is False
     assert info["metadata"]["model_roles"]["scorer"]["credential_present"] is True
     assert info["capabilities"]["metadata"]["policy_ready"] is False
     assert info["capabilities"]["metadata"]["grader_ready"] is True
 
 
-def test_healthbench_info_reports_missing_grader_credential(monkeypatch) -> None:
+def test_healthbench_info_reports_missing_grader_credential(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("HEALTHBENCH_POLICY_API_KEY_ENV", "PRESENT_POLICY_KEY")
     monkeypatch.setenv("HEALTHBENCH_GRADER_API_KEY_ENV", "MISSING_GRADER_KEY")
     monkeypatch.setenv("PRESENT_POLICY_KEY", "present")
-    info = TestClient(create_compat_app("healthbench_chat")).get("/info").json()
+    info = TestClient(create_compat_app("healthbench_chat", storage_root=tmp_path / "p3")).get("/info").json()
     assert info["metadata"]["model_roles"]["policy"]["credential_present"] is True
     assert info["metadata"]["model_roles"]["scorer"]["credential_present"] is False
     assert info["capabilities"]["metadata"]["policy_ready"] is True
     assert info["capabilities"]["metadata"]["grader_ready"] is False
 
 
-def test_healthbench_info_reports_both_credentials_present(monkeypatch) -> None:
+def test_healthbench_info_reports_both_credentials_present(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("HEALTHBENCH_POLICY_API_KEY_ENV", "PRESENT_POLICY_KEY")
     monkeypatch.setenv("HEALTHBENCH_GRADER_API_KEY_ENV", "PRESENT_GRADER_KEY")
     monkeypatch.setenv("PRESENT_POLICY_KEY", "present")
     monkeypatch.setenv("PRESENT_GRADER_KEY", "present")
-    info = TestClient(create_compat_app("healthbench_chat")).get("/info").json()
+    info = TestClient(create_compat_app("healthbench_chat", storage_root=tmp_path / "p4")).get("/info").json()
     assert info["metadata"]["model_roles"]["policy"]["credential_present"] is True
     assert info["metadata"]["model_roles"]["scorer"]["credential_present"] is True
     assert info["capabilities"]["metadata"]["policy_ready"] is True
@@ -143,7 +143,7 @@ def test_unknown_cost_is_null_but_real_zero_is_preserved() -> None:
     assert mini["cost_kind"] == "estimated_from_tokens"
 
 
-def test_normalized_lifecycle_streams_rubrics_and_reward(monkeypatch) -> None:
+def test_normalized_lifecycle_streams_rubrics_and_reward(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(healthbench, "load_row", lambda seed: _row() if seed == 7 else None)
     calls = iter(
         [
@@ -168,7 +168,7 @@ def test_normalized_lifecycle_streams_rubrics_and_reward(monkeypatch) -> None:
         ]
     )
     monkeypatch.setattr(healthbench, "_chat", lambda config, messages: next(calls))
-    client = TestClient(create_compat_app("healthbench_chat"))
+    client = TestClient(create_compat_app("healthbench_chat", storage_root=tmp_path / "p5"))
     prepared = client.post(
         "/rollouts/prepare", json={"rollout_id": "hb-7", "telemetry": TELEMETRY}
     ).json()
@@ -199,7 +199,7 @@ def test_normalized_lifecycle_streams_rubrics_and_reward(monkeypatch) -> None:
     assert usage["cost_kind"] == "estimated_from_tokens"
 
 
-def test_synchronous_healthbench_rollouts_use_advertised_parallel_leases(monkeypatch) -> None:
+def test_synchronous_healthbench_rollouts_use_advertised_parallel_leases(monkeypatch, tmp_path) -> None:
     row = _row()
     row["rubrics"] = [row["rubrics"][0]]
     monkeypatch.setattr(healthbench, "load_row", lambda seed: row)
@@ -227,7 +227,7 @@ def test_synchronous_healthbench_rollouts_use_advertised_parallel_leases(monkeyp
         }
 
     monkeypatch.setattr(healthbench, "_chat", chat)
-    client = TestClient(create_compat_app("healthbench_chat"))
+    client = TestClient(create_compat_app("healthbench_chat", storage_root=tmp_path / "p6"))
     for seed in (0, 1):
         prepared = client.post(
             "/rollouts/prepare",
@@ -253,14 +253,14 @@ def test_synchronous_healthbench_rollouts_use_advertised_parallel_leases(monkeyp
     assert max_active >= 2, "synchronous rollout execution was serialized by the platform lock"
 
 
-def test_failed_grader_does_not_fabricate_zero_reward(monkeypatch) -> None:
+def test_failed_grader_does_not_fabricate_zero_reward(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(healthbench, "load_row", lambda seed: _row())
     monkeypatch.setattr(
         healthbench,
         "_chat",
         lambda config, messages: (_ for _ in ()).throw(RuntimeError("provider_timeout")),
     )
-    client = TestClient(create_compat_app("healthbench_chat"))
+    client = TestClient(create_compat_app("healthbench_chat", storage_root=tmp_path / "p7"))
     client.post("/rollouts/prepare", json={"rollout_id": "hb-fail", "telemetry": TELEMETRY})
     started = client.post(
         "/rollouts",
@@ -278,7 +278,7 @@ def test_failed_grader_does_not_fabricate_zero_reward(monkeypatch) -> None:
 
 
 def test_optimizer_adapter_computes_terminal_reward_and_preserves_runtime_status(
-    monkeypatch,
+    monkeypatch, tmp_path,
 ) -> None:
     row = _row()
     row["rubrics"] = [row["rubrics"][0]]
@@ -302,7 +302,7 @@ def test_optimizer_adapter_computes_terminal_reward_and_preserves_runtime_status
         ]
     )
     monkeypatch.setattr(healthbench, "_chat", lambda config, messages: next(calls))
-    response = TestClient(create_compat_app("healthbench_chat")).post(
+    response = TestClient(create_compat_app("healthbench_chat", storage_root=tmp_path / "p8")).post(
         "/rollout",
         json={
             "rollout_id": "hb-gepa-success",
@@ -321,7 +321,7 @@ def test_optimizer_adapter_computes_terminal_reward_and_preserves_runtime_status
     assert body["usage"]["cost_source"] == "mixed_public_price_tables"
 
 
-def test_optimizer_adapter_derives_openai_policy_connection_defaults(monkeypatch) -> None:
+def test_optimizer_adapter_derives_openai_policy_connection_defaults(monkeypatch, tmp_path) -> None:
     row = _row()
     row["rubrics"] = [row["rubrics"][0]]
     monkeypatch.setattr(healthbench, "load_row", lambda seed: row)
@@ -344,7 +344,7 @@ def test_optimizer_adapter_derives_openai_policy_connection_defaults(monkeypatch
         }
 
     monkeypatch.setattr(healthbench, "_chat", chat)
-    response = TestClient(create_compat_app("healthbench_chat")).post(
+    response = TestClient(create_compat_app("healthbench_chat", storage_root=tmp_path / "p9")).post(
         "/rollout",
         json={
             "rollout_id": "hb-gepa-openai-policy",
@@ -407,7 +407,7 @@ def test_optimizer_adapter_honors_workshop_proxy_inference_url(monkeypatch) -> N
     assert "api.openai.com" not in configs[0]["base_url"]
 
 
-def test_optimizer_retry_with_same_rollout_id_is_idempotent(monkeypatch) -> None:
+def test_optimizer_retry_with_same_rollout_id_is_idempotent(monkeypatch, tmp_path) -> None:
     row = _row()
     row["rubrics"] = [row["rubrics"][0]]
     monkeypatch.setattr(healthbench, "load_row", lambda seed: row)
@@ -436,7 +436,7 @@ def test_optimizer_retry_with_same_rollout_id_is_idempotent(monkeypatch) -> None
         raise AssertionError("idempotent retry reran paid provider calls")
 
     monkeypatch.setattr(healthbench, "_chat", chat)
-    client = TestClient(create_compat_app("healthbench_chat"))
+    client = TestClient(create_compat_app("healthbench_chat", storage_root=tmp_path / "p10"))
     request = {
         "rollout_id": "hb-gepa-idempotent",
         "task": {"seed": 0},

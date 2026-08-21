@@ -8,6 +8,7 @@ a normalized answer.
 
 from __future__ import annotations
 
+import tempfile
 import json
 
 import pytest
@@ -32,7 +33,7 @@ TARGET = "gsm8k_solve"
 
 
 def _client() -> TestClient:
-    return TestClient(create_compat_app(TARGET))
+    return TestClient(create_compat_app(TARGET, storage_root=tempfile.mkdtemp(prefix="test_gsm8k_platform-")))
 
 
 def _prepare_start(client: TestClient, *, rollout_id: str, body: dict) -> dict:

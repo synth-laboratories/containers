@@ -19,9 +19,9 @@ from synth_containers.training_rollout import (
 )
 
 
-def test_banking77_advertises_hashed_training_capabilities() -> None:
+def test_banking77_advertises_hashed_training_capabilities(tmp_path) -> None:
     payload = (
-        TestClient(create_compat_app("banking77_classify")).get("/training/capabilities").json()
+        TestClient(create_compat_app("banking77_classify", storage_root=tmp_path / "p0")).get("/training/capabilities").json()
     )
     capability_hash = payload.pop("capability_hash")
     assert payload["schema_version"] == ROLLOUT_CAPABILITIES_SCHEMA_VERSION
@@ -34,8 +34,8 @@ def test_banking77_advertises_hashed_training_capabilities() -> None:
     assert capability_hash == canonical_sha256(payload)
 
 
-def test_metadata_and_dedicated_capability_route_agree() -> None:
-    client = TestClient(create_compat_app("healthbench_chat"))
+def test_metadata_and_dedicated_capability_route_agree(tmp_path) -> None:
+    client = TestClient(create_compat_app("healthbench_chat", storage_root=tmp_path / "p1"))
     assert client.get("/metadata").json()["training"] == client.get("/training/capabilities").json()
 
 
@@ -103,7 +103,7 @@ def test_sampler_endpoint_repr_redacts_token() -> None:
     assert "top-secret" not in json.dumps({"endpoint": repr(endpoint)})
 
 
-def test_training_rollout_is_policy_stamped_and_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_training_rollout_is_policy_stamped_and_idempotent(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     calls: list[str] = []
 
     def sample(
@@ -124,7 +124,7 @@ def test_training_rollout_is_policy_stamped_and_idempotent(monkeypatch: pytest.M
         )
 
     monkeypatch.setattr(HostedSamplerClient, "sample", sample)
-    client = TestClient(create_compat_app("banking77_classify"))
+    client = TestClient(create_compat_app("banking77_classify", storage_root=tmp_path / "p2"))
     request = {
         "schema_version": ROLLOUT_REQUEST_SCHEMA_VERSION,
         "job_id": "job-1",

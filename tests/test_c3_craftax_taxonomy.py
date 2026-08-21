@@ -107,8 +107,8 @@ def test_classify_completion_kinds() -> None:
     ) == "infra_complete"
 
 
-def test_fixture_episode_emits_taxonomy_truncation_and_reconciled_usage() -> None:
-    client = TestClient(create_compat_app("craftax_engine"))
+def test_fixture_episode_emits_taxonomy_truncation_and_reconciled_usage(tmp_path) -> None:
+    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path / "p0"))
     started = client.post(
         "/rollouts",
         json={

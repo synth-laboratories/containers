@@ -55,8 +55,8 @@ def test_parse_async_defaults_to_background() -> None:
         )
 
 
-def test_async_start_returns_202_acceptance_receipt() -> None:
-    client = TestClient(create_compat_app("craftax_engine"))
+def test_async_start_returns_202_acceptance_receipt(tmp_path) -> None:
+    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path / "p0"))
     started = client.post(
         "/rollouts",
         json={
@@ -81,8 +81,8 @@ def test_async_start_returns_202_acceptance_receipt() -> None:
     _wait_terminal(client, "roll_c1_receipt")
 
 
-def test_background_reaches_terminal_without_complete() -> None:
-    client = TestClient(create_compat_app("craftax_engine"))
+def test_background_reaches_terminal_without_complete(tmp_path) -> None:
+    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path / "p1"))
     started = client.post(
         "/rollouts",
         json={
@@ -100,8 +100,8 @@ def test_background_reaches_terminal_without_complete() -> None:
     assert client.post("/rollouts/roll_c1_bg/complete").status_code == 200
 
 
-def test_on_complete_holds_until_complete() -> None:
-    client = TestClient(create_compat_app("craftax_engine"))
+def test_on_complete_holds_until_complete(tmp_path) -> None:
+    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path / "p2"))
     started = client.post(
         "/rollouts",
         json={
@@ -124,8 +124,8 @@ def test_on_complete_holds_until_complete() -> None:
     assert completed.json()["terminated"] is True
 
 
-def test_same_id_retry_returns_same_record_and_spawns_nothing() -> None:
-    client = TestClient(create_compat_app("craftax_engine"))
+def test_same_id_retry_returns_same_record_and_spawns_nothing(tmp_path) -> None:
+    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path / "p3"))
     payload = {
         "rollout_id": "roll_c1_idem",
         "telemetry": _TELEMETRY,

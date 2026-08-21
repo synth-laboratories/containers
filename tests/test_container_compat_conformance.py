@@ -12,8 +12,8 @@ from tests.conformance.container_compat.run import receipt_from_suite, run_again
 
 
 @pytest.mark.parametrize("target", PR_TARGETS)
-def test_container_compat_pr_target(target: str) -> None:
-    with TestClient(create_compat_app(target)) as client:
+def test_container_compat_pr_target(target: str, tmp_path) -> None:
+    with TestClient(create_compat_app(target, storage_root=tmp_path / "p0")) as client:
         suite = run_against_client(client, target, paid=False)
     receipt = receipt_from_suite(suite)
     failed = receipt["failed"]

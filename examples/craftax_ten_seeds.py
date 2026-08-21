@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import tempfile
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -20,7 +21,7 @@ def _kinds(events: list[dict[str, Any]]) -> list[str]:
 
 
 def run(*, seeds: int = 10) -> dict[str, Any]:
-    client = TestClient(create_compat_app("craftax_engine"))
+    client = TestClient(create_compat_app("craftax_engine", storage_root=tempfile.mkdtemp(prefix="craftax-ten-seeds-")))
     client.post("/policy-configs", json={"config_id": "luna_med", "config": {"model": "gpt-5.6-luna", "effort": "medium", "max_tokens": 1024, "context_token_budget": 16000, "compact_at": 0.7, "keep_recent_messages": 8, "keep_recent_frames": 2, "observation_mode": "text"}})
     rows: list[dict[str, Any]] = []
     for seed in range(seeds):

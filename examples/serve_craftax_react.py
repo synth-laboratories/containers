@@ -19,10 +19,15 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8097)
     parser.add_argument("--target", default="craftax_react")
+    parser.add_argument(
+        "--storage-root",
+        required=True,
+        help="durable root for leases, seals, receipts and manifests",
+    )
     args = parser.parse_args()
     if args.host not in {"127.0.0.1", "localhost", "::1"}:
         raise SystemExit("serve_craftax_react binds loopback only")
-    app = create_compat_app(args.target)
+    app = create_compat_app(args.target, storage_root=args.storage_root)
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
 
 
