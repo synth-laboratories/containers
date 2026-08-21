@@ -8,8 +8,7 @@ import json
 import math
 import time
 import uuid
-from pathlib import Path
-from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -175,7 +174,12 @@ def create_compat_app(
             )
         sampler_url = str(sampler.get("url") or "").strip()
         sampler_token = str(sampler.get("bearer_token") or "").strip()
-        if not sampler_url.startswith("https://") or not sampler_token:
+        sampler_host = urlparse(sampler_url).hostname
+        sampler_scheme_ok = sampler_url.startswith("https://") or (
+            sampler_url.startswith("http://")
+            and sampler_host in {"127.0.0.1", "localhost", "::1"}
+        )
+        if not sampler_scheme_ok or not sampler_token:
             raise HTTPException(status_code=422, detail="training_rollout_https_sampler_required")
         try:
             max_tokens = int(task.get("max_tokens") or 1536)

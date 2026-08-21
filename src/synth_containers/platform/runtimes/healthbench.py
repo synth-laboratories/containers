@@ -17,7 +17,7 @@ from typing import Any
 import httpx
 
 from ...event_log import RolloutEventLog
-from ..healthbench_world import load_row, public_observation
+from ..healthbench_world import load_row, prompt_messages, public_observation, rubric_items
 from ..local_provider import (
     RESPONSES,
     endpoint_suffix,
@@ -116,7 +116,7 @@ class HealthBenchRuntime:
             provider = str(config.get("provider") or "groq")
             model = str(config.get("model") or POLICY_MODEL)
             log.append("span.policy.opened", {"provider": provider, "model": model})
-            messages = list(row.get("prompt") or [])
+            messages = list(prompt_messages(row))
             system_prompt = config.get("system_prompt")
             if isinstance(system_prompt, str) and system_prompt.strip():
                 messages = [{"role": "system", "content": system_prompt.strip()}, *messages]
@@ -223,7 +223,12 @@ def _chat(config: dict[str, Any], messages: list[dict[str, Any]]) -> dict[str, A
             connection_mode=str(inference_target.get("connection_mode") or "keep_alive"),
         )
         policy_version = str(config.get("policy_version") or inference_target.get("checkpoint_id"))
-        with HostedSamplerClient(endpoint) as client:
+        # app.py already admits loopback HTTP for the typed training sampler
+        # boundary; the client defaults to HTTPS-only unless opted in here.
+        with HostedSamplerClient(
+            endpoint,
+            allow_loopback_http=config.get("training_sampler_endpoint") is True,
+        ) as client:
             sampled = client.sample(
                 {
                     "schema_version": ROLLOUT_ACTION_SCHEMA_VERSION,
@@ -332,7 +337,7 @@ def _grade(
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     roles = model_roles()
     scorer = roles["scorer"]
-    conversation_messages = list(messages or row.get("prompt") or []) + [
+    conversation_messages = list(messages or prompt_messages(row)) + [
         {"role": "assistant", "content": completion}
     ]
     conversation = "\n\n".join(
@@ -340,7 +345,7 @@ def _grade(
     )
     usages = []
     grades = []
-    for index, rubric in enumerate(row.get("rubrics") or []):
+    for index, rubric in enumerate(rubric_items(row)):
         prompt = (
             "Judge only the final assistant turn against this rubric item. Return exactly JSON "
             "with string explanation and boolean criteria_met. A negative-point item's "
