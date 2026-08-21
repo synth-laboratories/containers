@@ -43,9 +43,12 @@ class CraftaxRuntime:
                 )
             policy = platform.policy_configs.get(config_id)
             config = dict(policy.config) if policy is not None else {}
+            hosted_sampler = bool(
+                config.get("training_sampler_endpoint") or config.get("inference_target")
+            )
             planner = (
                 OpenRouterReAct(config_id=config_id, config=config)
-                if platform.spec.environment_ref == GOLD_ENVIRONMENT
+                if platform.spec.environment_ref == GOLD_ENVIRONMENT or hosted_sampler
                 else ScriptedReAct(config_id=config_id)
             )
         resume_checkpoint = None

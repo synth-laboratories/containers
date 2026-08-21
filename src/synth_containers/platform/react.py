@@ -7,6 +7,7 @@ not a Luna eval. `craftax_react --paid` may call a chat model when a key exists.
 from __future__ import annotations
 
 import json
+import math
 import os
 import time
 import urllib.error
@@ -52,6 +53,63 @@ def _required_str(
             f"it defines the policy under test and is never defaulted"
         )
     return value.strip()
+
+
+def _optional_temperature(config: dict[str, Any], default: float = 0.0) -> float:
+    raw = config.get("temperature", default)
+    try:
+        temperature = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise PolicyConfigError(
+            f"policy config temperature {raw!r} is not a number"
+        ) from exc
+    if not math.isfinite(temperature) or not 0.0 <= temperature <= 2.0:
+        raise PolicyConfigError(
+            f"policy config temperature={temperature} is outside [0, 2]"
+        )
+    return temperature
+
+
+def _hosted_react_config(config: dict[str, Any]) -> dict[str, Any]:
+    """Fill ReAct recipe fields the training boundary does not send.
+
+    Hosted CISPO injects a sampler endpoint, temperature, and max_tokens.
+    The rest of this class is a Craftax episode loop that still needs a
+    model id, compaction window, and system prompt. Those are harness
+    constants on this path, not a silent fallback for a paid eval recipe.
+    """
+    resolved = dict(config)
+    resolved.setdefault("model", str(resolved.get("policy_version") or "hosted-sampler"))
+    resolved.setdefault("effort", "none")
+    if not isinstance(resolved.get("max_tokens"), int) or isinstance(
+        resolved.get("max_tokens"), bool
+    ):
+        resolved["max_tokens"] = 256
+    if not isinstance(resolved.get("context_token_budget"), int) or isinstance(
+        resolved.get("context_token_budget"), bool
+    ):
+        resolved["context_token_budget"] = 16_000
+    if not isinstance(resolved.get("compact_at"), (int, float)) or isinstance(
+        resolved.get("compact_at"), bool
+    ):
+        resolved["compact_at"] = 0.7
+    if not isinstance(resolved.get("keep_recent_messages"), int) or isinstance(
+        resolved.get("keep_recent_messages"), bool
+    ):
+        resolved["keep_recent_messages"] = 8
+    if not isinstance(resolved.get("keep_recent_frames"), int) or isinstance(
+        resolved.get("keep_recent_frames"), bool
+    ):
+        resolved["keep_recent_frames"] = 2
+    resolved.setdefault("observation_mode", "text")
+    resolved.setdefault("provider", "tinker")
+    resolved.setdefault("api_key_env", "TINKER_API_KEY")
+    if not isinstance(resolved.get("parse_retries"), int) or isinstance(
+        resolved.get("parse_retries"), bool
+    ):
+        resolved["parse_retries"] = 0
+    resolved.setdefault("system_prompt", CRAFTAX_REACT_SYSTEM_PROMPT)
+    return resolved
 
 
 def _required_bounded_int(
@@ -233,6 +291,16 @@ class OpenRouterReAct:
 
     def __init__(self, *, config_id: str, config: dict[str, Any]) -> None:
         self.config_id = config_id
+        self._inference_target = (
+            dict(config["inference_target"])
+            if isinstance(config.get("inference_target"), dict)
+            else None
+        )
+        self.temperature = _optional_temperature(config)
+        self._last_training_action: dict[str, Any] | None = None
+        self.last_call_usage: dict[str, Any] | None = None
+        if self._inference_target is not None:
+            config = _hosted_react_config(config)
         # Policy identity is never defaulted. A silent fallback here attributes
         # a result to a model, effort or memory window the caller never asked
         # for, and the mistake is invisible in the output — the run simply
@@ -296,17 +364,25 @@ class OpenRouterReAct:
                         f"{LOCAL_PROVIDER_ID} provider refuses: {exc}"
                     ) from exc
         else:
-            # Tinker samples through its SDK, not an HTTP base_url. The sampler
-            # path names the trained weights; the tokenizer must be the base
-            # model's, or the chat template renders a prompt the student never
-            # saw in training.
+            # Hosted CISPO names a SamplerEndpoint, not a Tinker SDK path.
+            # Going through the SDK here cannot be pointed at the run's live
+            # hosted sampler and bypasses the token receipt the summary needs.
             self.base_url = ""
             self.chat_endpoint = ""
-            self.sampler_path = _required_str(config, "sampler_path", config_id)
-            self.tokenizer_id = _required_str(config, "tokenizer_id", config_id)
-            self.sampler_ready_timeout_s = _required_bounded_int(
-                config, "sampler_ready_timeout_s", config_id, 0, 900
-            )
+            if self._inference_target is not None:
+                self.sampler_path = ""
+                self.tokenizer_id = ""
+                self.sampler_ready_timeout_s = 0
+            else:
+                # Tinker samples through its SDK, not an HTTP base_url. The
+                # sampler path names the trained weights; the tokenizer must
+                # be the base model's, or the chat template renders a prompt
+                # the student never saw in training.
+                self.sampler_path = _required_str(config, "sampler_path", config_id)
+                self.tokenizer_id = _required_str(config, "tokenizer_id", config_id)
+                self.sampler_ready_timeout_s = _required_bounded_int(
+                    config, "sampler_ready_timeout_s", config_id, 0, 900
+                )
             if self.observation_mode != "text":
                 raise PolicyConfigError(
                     f"policy config {config_id!r} sets observation_mode="
@@ -371,6 +447,10 @@ class OpenRouterReAct:
     def trace_data(self) -> dict[str, Any]:
         return dict(self._last_trace)
 
+    @property
+    def last_training_action(self) -> dict[str, Any] | None:
+        return self._last_training_action
+
     def checkpoint_state(self) -> dict[str, Any]:
         """Secret-free policy-session state paired with an environment snapshot."""
         return {
@@ -410,7 +490,7 @@ class OpenRouterReAct:
         on_delta: DeltaCallback | None = None,
     ) -> list[str]:
         api_key = os.environ.get(self.api_key_env, "").strip()
-        if not api_key:
+        if self._inference_target is None and not api_key:
             raise RuntimeError(f"paid Craftax policy requires {self.api_key_env}")
         valid = [str(action) for action in observation.get("valid_actions") or []]
         if not valid:
@@ -459,6 +539,12 @@ class OpenRouterReAct:
             usage = body.get("usage") if isinstance(body.get("usage"), dict) else {}
             emitted = bool(usage)
             self._accumulate_usage(usage)
+            if usage:
+                self.last_call_usage = {
+                    key: usage.get(key)
+                    for key in ("prompt_tokens", "completion_tokens", "total_tokens")
+                    if isinstance(usage.get(key), int)
+                } or self.last_call_usage
             policy_output = tool_arguments or assistant
             try:
                 actions = self._parse_actions(policy_output, valid)
@@ -669,7 +755,7 @@ class OpenRouterReAct:
                     ),
                 },
             ],
-            "temperature": 0,
+            "temperature": self.temperature,
             "max_tokens": 700,
         }
         if self.provider == "tinker":
@@ -694,7 +780,7 @@ class OpenRouterReAct:
                     }
                     for message in payload["messages"]
                 ],
-                "temperature": 0,
+                "temperature": self.temperature,
                 "max_output_tokens": 700,
             }
         request = urllib.request.Request(
@@ -722,14 +808,21 @@ class OpenRouterReAct:
         return text.strip() or f"[summary empty; {len(transcript)} messages dropped]"
 
     def _tinker_sample(self, api_key: str) -> dict[str, Any]:
-        """Sample the trained checkpoint through the Tinker SDK.
+        """Sample the trained checkpoint.
 
         Returns an OpenAI-shaped body so the caller's parse, retry, usage and
         compaction paths are the same ones the OpenRouter provider exercises.
         Tinker has no tool-calling API, so the sample arrives as assistant text
         — which is exactly the `{"actions":[...]}` shape the SFT targets were
         written in, and `_parse_actions` already reads it.
+
+        A hosted training run names a SamplerEndpoint. Sampling through the
+        Tinker SDK instead cannot be pointed at that endpoint, pins
+        temperature at whatever this function used to hardcode, and drops the
+        per-call token receipt the rollout summary accounts spend from.
         """
+        if self._inference_target is not None:
+            return self._hosted_sampler_sample()
         if self._sampling_client is None:
             import tinker  # noqa: PLC0415 — optional dependency of the tinker provider
             from transformers import AutoTokenizer  # noqa: PLC0415
@@ -787,7 +880,7 @@ class OpenRouterReAct:
                         prompt=model_input,
                         num_samples=1,
                         sampling_params=tinker.SamplingParams(
-                            max_tokens=self.max_tokens, temperature=0.0
+                            max_tokens=self.max_tokens, temperature=self.temperature
                         ),
                     )
                     .result()
@@ -803,15 +896,85 @@ class OpenRouterReAct:
                 time.sleep(min(2.0 * attempt, 10.0))
         completion_ids = [int(value) for value in sequence.tokens]
         text = tokenizer.decode(completion_ids, skip_special_tokens=True)
+        usage = {
+            "prompt_tokens": len(prompt_ids),
+            "completion_tokens": len(completion_ids),
+            "total_tokens": len(prompt_ids) + len(completion_ids),
+        }
+        self.last_call_usage = dict(usage)
         # Token counts are exact here rather than provider-reported, which is
         # what compaction triggers on.
         return {
             "choices": [{"message": {"content": text, "tool_calls": None}}],
-            "usage": {
-                "prompt_tokens": len(prompt_ids),
-                "completion_tokens": len(completion_ids),
-                "total_tokens": len(prompt_ids) + len(completion_ids),
-            },
+            "usage": usage,
+        }
+
+    def _hosted_sampler_sample(self) -> dict[str, Any]:
+        """Sample the live hosted checkpoint through SamplerEndpoint."""
+        from ..training_rollout import (
+            ROLLOUT_ACTION_SCHEMA_VERSION,
+            HostedSamplerClient,
+            SamplerEndpoint,
+            canonical_sha256,
+        )
+        from .app import allow_loopback_sampler
+
+        target = self._inference_target or {}
+        endpoint = str(target.get("provider_endpoint_id") or "").strip()
+        auth_bearer = str(target.get("auth_bearer") or "").strip()
+        run_id = str(target.get("run_id") or "").strip()
+        checkpoint_id = str(
+            target.get("checkpoint_id") or self.model or "hosted-sampler"
+        ).strip()
+        messages = list(self._messages)
+        message_digest = canonical_sha256({"messages": messages})
+        with HostedSamplerClient(
+            SamplerEndpoint(
+                endpoint,
+                auth_bearer,
+                str(target.get("connection_mode") or "keep_alive"),
+            ),
+            timeout_seconds=90.0,
+            allow_loopback_http=allow_loopback_sampler(),
+        ) as client:
+            sampled = client.sample(
+                {
+                    "schema_version": ROLLOUT_ACTION_SCHEMA_VERSION,
+                    "job_id": target.get("run_id") or run_id,
+                    "attempt_id": target.get("attempt_id"),
+                    "rollout_id": target.get("rollout_id"),
+                    "run_id": run_id,
+                    "checkpoint_id": checkpoint_id,
+                    "policy_version": checkpoint_id,
+                    "messages": messages,
+                    "max_tokens": self.max_tokens,
+                    "temperature": self.temperature,
+                },
+                idempotency_key=f"{target.get('rollout_id') or run_id}:{checkpoint_id}:{message_digest}",
+            )
+        usage = dict(sampled.usage)
+        prompt_tokens = usage.get("prompt_tokens")
+        completion_tokens = usage.get("completion_tokens")
+        if not isinstance(prompt_tokens, int):
+            prompt_tokens = len(sampled.prompt_token_ids)
+        if not isinstance(completion_tokens, int):
+            completion_tokens = len(sampled.token_ids)
+        accounted = {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        }
+        self.last_call_usage = dict(accounted)
+        self._last_training_action = {
+            "schema_version": ROLLOUT_ACTION_SCHEMA_VERSION,
+            "policy_version": checkpoint_id,
+            "prompt_token_ids": list(sampled.prompt_token_ids),
+            "token_ids": list(sampled.token_ids),
+            "log_probs": list(sampled.log_probs),
+        }
+        return {
+            "choices": [{"message": {"content": sampled.text, "tool_calls": None}}],
+            "usage": accounted,
         }
 
     def _complete(
@@ -828,7 +991,7 @@ class OpenRouterReAct:
         payload = {
             "model": self.model,
             "messages": list(self._messages),
-            "temperature": 0,
+            "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "stream": True,
             "stream_options": {"include_usage": True},
@@ -940,7 +1103,7 @@ class OpenRouterReAct:
         payload = {
             "model": self.model,
             "input": self._responses_input(),
-            "temperature": 0,
+            "temperature": self.temperature,
             "max_output_tokens": self.max_tokens,
             "stream": True,
             "tools": [

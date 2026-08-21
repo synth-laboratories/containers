@@ -1,0 +1,11 @@
+{
+  "aligned": true,
+  "container_policy_snapshot_id": "snap_f6d46912f0ff48caa3faa5ae99668805",
+  "provider_sampled_published_snapshot": true,
+  "proxy_request_id": "prid_fb7f31184ebd4da8937149464a72dd26",
+  "published_snapshot_id": "snap_f6d46912f0ff48caa3faa5ae99668805",
+  "service_completion_tokens": 215,
+  "service_policy_snapshot_id": "snap_f6d46912f0ff48caa3faa5ae99668805",
+  "service_rollout_logprobs": 215,
+  "snapshot_ids_agree": true
+}

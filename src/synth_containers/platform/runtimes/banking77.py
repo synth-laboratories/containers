@@ -23,6 +23,8 @@ from typing import Any, Callable
 
 from ...event_log import RolloutEventLog
 from ..banking77_world import (
+    extract_answer,
+    label_vocabulary,
     CLASSIFY_SYSTEM,
     load_row,
     normalize_label,
@@ -340,7 +342,7 @@ def _sample_responses(
         {
             "model": model,
             "instructions": CLASSIFY_SYSTEM,
-            "input": user_prompt(str(observation["text"])),
+            "input": user_prompt(str(observation["text"]), labels=label_vocabulary()),
             "max_output_tokens": maximum,
             "temperature": 0,
         },
@@ -395,7 +397,7 @@ def _sample_responses(
         text = "".join(fragments)
     if not isinstance(text, str):
         raise RuntimeError("responses_response_invalid")
-    predicted = text.strip().splitlines()[0].strip() if text.strip() else None
+    predicted = extract_answer(text) or None
     return predicted, _responses_usage(payload.get("usage"))
 
 
@@ -486,7 +488,7 @@ def _sample_remote_checkpoint(
     max_tokens = min(max(int(config.get("max_tokens") or 32), 1), 512)
     messages = [
         {"role": "system", "content": CLASSIFY_SYSTEM},
-        {"role": "user", "content": user_prompt(str(observation["text"]))},
+        {"role": "user", "content": user_prompt(str(observation["text"]), labels=label_vocabulary())},
     ]
     timeout = min(max(float(config.get("remote_timeout_seconds") or 60.0), 1.0), 120.0)
     from ...training_rollout import (
@@ -497,6 +499,8 @@ def _sample_remote_checkpoint(
     )
 
     message_digest = canonical_sha256({"messages": messages})
+    from ..app import allow_loopback_sampler
+
     with HostedSamplerClient(
         SamplerEndpoint(
             endpoint,
@@ -504,6 +508,7 @@ def _sample_remote_checkpoint(
             str(target.get("connection_mode") or "keep_alive"),
         ),
         timeout_seconds=timeout,
+        allow_loopback_http=allow_loopback_sampler(),
     ) as client:
         sampled = client.sample(
             {
@@ -516,7 +521,15 @@ def _sample_remote_checkpoint(
                 "policy_version": config.get("policy_version") or checkpoint_id,
                 "messages": messages,
                 "max_tokens": max_tokens,
-                "temperature": 0.0,
+                # The training boundary validates and passes a temperature, and
+                # it has to be honoured. Hardcoding 0.0 makes every sample in a
+                # group identical, so the group has no reward variance, so
+                # group-relative advantages are undefined and the step is
+                # filtered -- which is exactly what a bounded CISPO canary saw
+                # when eight rollouts across four groups produced no optimizer
+                # step at all. Greedy stays the default for callers that do not
+                # ask for anything else.
+                "temperature": float(config.get("temperature") or 0.0),
             },
             idempotency_key=(
                 f"{config.get('rollout_id') or run_id}:{checkpoint_id}:{message_digest}"
@@ -530,7 +543,7 @@ def _sample_remote_checkpoint(
         "token_ids": list(sampled.token_ids),
         "log_probs": list(sampled.log_probs),
     }
-    predicted = sampled.text.strip().splitlines()[0].strip() if sampled.text.strip() else None
+    predicted = extract_answer(sampled.text) or None
     return predicted, usage
 
 
@@ -559,7 +572,7 @@ def _sample_remote_checkpoint_legacy(
             "checkpoint_id": checkpoint_id,
             "messages": [
                 {"role": "system", "content": CLASSIFY_SYSTEM},
-                {"role": "user", "content": user_prompt(str(observation["text"]))},
+                {"role": "user", "content": user_prompt(str(observation["text"]), labels=label_vocabulary())},
             ],
             "max_tokens": max_tokens,
         },
@@ -599,7 +612,7 @@ def _sample_remote_checkpoint_legacy(
     if not isinstance(payload, dict) or not isinstance(payload.get("text"), str):
         raise RuntimeError("remote_checkpoint_response_invalid")
     text = payload["text"]
-    predicted = text.strip().splitlines()[0].strip() if text.strip() else None
+    predicted = extract_answer(text) or None
     return predicted, _remote_usage(payload.get("usage"))
 
 
@@ -673,7 +686,7 @@ def _sample_tinker(
     tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
     messages = [
         {"role": "system", "content": CLASSIFY_SYSTEM},
-        {"role": "user", "content": user_prompt(str(observation["text"]))},
+        {"role": "user", "content": user_prompt(str(observation["text"]), labels=label_vocabulary())},
     ]
     try:
         prompt = tokenizer.apply_chat_template(
@@ -699,5 +712,5 @@ def _sample_tinker(
     ).result()
     seq = result.sequences[0]
     text = tokenizer.decode(list(map(int, seq.tokens)), skip_special_tokens=True)
-    predicted = text.strip().splitlines()[0].strip() if text.strip() else None
+    predicted = extract_answer(text) or None
     return predicted, dict(_EMPTY_USAGE)

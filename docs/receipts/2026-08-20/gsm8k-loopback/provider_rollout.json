@@ -1,0 +1,97 @@
+{
+  "reward": {
+    "child_rollout_id": null,
+    "env_generation": 2,
+    "env_mutated": false,
+    "evaluation_plan_ref": "gsm8k_eval.v1",
+    "evidence_digest": "95743e4c4644fd6b",
+    "execution_id": "eval_gsm8k_provider_seed0_15d1232ea18b4b30",
+    "node_results": [
+      {
+        "authority": "environment",
+        "kind": "env_reward",
+        "node_id": "env_sum",
+        "status": "scored",
+        "value": 1.0
+      }
+    ],
+    "reasons": [],
+    "reward": 1.0,
+    "rollout_id": "gsm8k_provider_seed0",
+    "start_session_delta": 0,
+    "status": "scored",
+    "step_calls_delta": 0
+  },
+  "started": {
+    "capability_digest": "sha256:396719e96d02af3e693c837f96c3096c8963ce95d8c3d9b227f35d9b9cb96b66",
+    "child_resource_ref": null,
+    "child_rollout_id": null,
+    "config_digest": "sha256:e8c6aa1c8fa8c3d00915bae264943c68e5f0f1b77bce04177ab18654a3ef609d",
+    "engine_generation": 1,
+    "environment_ref": "env:gsm8k_dataset",
+    "evaluation_plan_ref": "gsm8k_eval.v1",
+    "owner_id": null,
+    "owner_kind": null,
+    "policy_ref": {
+      "code": null,
+      "config": "mlx_loopback_chat",
+      "harness": "solve"
+    },
+    "policy_revision_id": null,
+    "resume_from_checkpoint_id": null,
+    "rollout_id": "gsm8k_provider_seed0",
+    "scheduled_checkpoints": [],
+    "status": "completed",
+    "stream": {
+      "auth": {
+        "mode": "none"
+      },
+      "cursor": {
+        "kind": "sequence",
+        "producer_kind": null
+      },
+      "id": "stream:gsm8k_provider_seed0",
+      "reconnect": {
+        "jitter": 0.2,
+        "max_backoff_s": 30.0,
+        "min_backoff_s": 1.0
+      },
+      "retention": "run",
+      "reward": {
+        "url": "/rollouts/gsm8k_provider_seed0/reward"
+      },
+      "schema": "synth.rollout.stream.v1",
+      "transports": {
+        "poll": {
+          "url": "/rollouts/gsm8k_provider_seed0/events"
+        },
+        "sse": {
+          "url": "/rollouts/gsm8k_provider_seed0/stream"
+        },
+        "websocket": null
+      }
+    },
+    "task_instance_id": "seed:0",
+    "terminated": true,
+    "trace": {
+      "bundle_url": "/rollouts/gsm8k_provider_seed0/trace/bundle",
+      "closed": true,
+      "content_digest": "sha256:1ea0b3444ae6648d91f5fed57db9470098fdee2759c9684c17bcb617a5b9acec",
+      "event_count": 12,
+      "high_water": 12,
+      "inspectable": false,
+      "kind": "lite_seal",
+      "schema_version": "synth.trace.v5",
+      "trace_id": "gsm8k_provider_seed0",
+      "url": "/rollouts/gsm8k_provider_seed0/trace"
+    },
+    "truncated": false,
+    "usage": {
+      "completion_tokens": 215,
+      "prompt_tokens": 139,
+      "total_tokens": 354
+    },
+    "world_ref": "world:gsm8k@heldout"
+  },
+  "wall_seconds": 4.68
+}

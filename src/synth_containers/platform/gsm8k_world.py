@@ -1,10 +1,19 @@
 """GSM8K one-turn world. Gold stays private; public observation is the question.
 
-Fixture rows are the PR CI source. HuggingFace ``openai/gsm8k`` is opt-in via
-``SYNTH_GSM8K_SOURCE=hf`` so tests never download — the same switch Banking77
-uses (``SYNTH_BANKING77_SOURCE=hf``).
+Fixture rows are the PR CI source. The real dataset is ``openai/gsm8k`` pinned
+to one HuggingFace revision (:data:`HF_REVISION`) with a recorded digest per
+split (:data:`SPLIT_PINS`); a load whose rows do not reproduce those digests is
+refused rather than scored. Which rows back the world is a *declared profile*
+(:func:`declare_profile`): ``fixture`` (32 in-module rows), ``hf`` (the pinned
+revision through ``datasets``) or ``snapshot`` (the pinned rows baked into a
+directory, as the eval target image does). ``SYNTH_GSM8K_SOURCE=hf`` is kept
+only as a test-time opt-in; the pin itself never comes from the environment,
+and :func:`dataset_manifest` reports which profile produced a number.
 
-Two things this module refuses to blur:
+Three things this module refuses to blur:
+
+- a pinned profile and an unpinned one: the manifest says ``pinned`` only for
+  rows whose digest matched the recorded one;
 
 - the reference answer never reaches :func:`public_observation`;
 - a completion that cannot be parsed is *unparsed*, not wrong. :func:`parse_answer`
@@ -16,12 +25,17 @@ See: workshop/docs/aug_12_update.md §2.2 (Environment / Policy / TaskWorld).
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
+import random
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from decimal import Decimal, localcontext
 from fractions import Fraction
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 
@@ -34,6 +48,62 @@ SOLVE_SYSTEM = (
 WORLD_REF_PREFIX = "world:gsm8k"
 TRAIN_SPLIT = "train"
 HELDOUT_SPLIT = "heldout"
+
+# --- the dataset pin -----------------------------------------------------------
+#
+# One HuggingFace revision, one digest per split. These live in code, not in an
+# environment variable, so the pin is part of the container's capability digest
+# and a score can always say which bytes it was measured on. Change them only
+# with a new receipt: the digests are over the canonical JSON lines of
+# ``{"answer", "question"}`` in the dataset's own row order (see
+# :func:`rows_digest`), so they are independent of the shuffle below.
+HF_DATASET = "openai/gsm8k"
+HF_CONFIG = "main"
+HF_REVISION = "740312add88f781978c0658806c59bc2815b9866"
+#: Seeds index a deterministic permutation of each pinned split rather than its
+#: head, so ``seed:0..9`` samples the dataset instead of its first ten rows.
+#: Recorded in the manifest; the same seed always names the same row.
+SHUFFLE_SEED = 20260820
+MANIFEST_SCHEMA = "gsm8k.dataset-manifest.v1"
+
+
+@dataclass(frozen=True)
+class SplitPin:
+    split: str
+    hf_split: str
+    rows: int
+    digest: str
+
+    def to_json(self) -> dict[str, Any]:
+        return {"hf_split": self.hf_split, "rows": self.rows, "digest": self.digest}
+
+
+SPLIT_PINS: dict[str, SplitPin] = {
+    TRAIN_SPLIT: SplitPin(
+        TRAIN_SPLIT,
+        "train",
+        7473,
+        "sha256:dca449882e67a1e7716b5da453650a7b16588a1f2d1a0d82394a43d75ea7e9ca",
+    ),
+    HELDOUT_SPLIT: SplitPin(
+        HELDOUT_SPLIT,
+        "test",
+        1319,
+        "sha256:32c548f08195e19e33408b844dd7be6aa4bcae457d957bc05909ff4bd4a00595",
+    ),
+}
+
+PROFILE_FIXTURE = "fixture"
+PROFILE_HF = "hf"
+PROFILE_SNAPSHOT = "snapshot"
+PROFILES: tuple[str, ...] = (PROFILE_FIXTURE, PROFILE_HF, PROFILE_SNAPSHOT)
+#: Test-time opt-in only. It can choose ``hf`` over the fixture; it cannot name
+#: a revision, a split, or a digest, and a declared profile always wins.
+LEGACY_SOURCE_ENV = "SYNTH_GSM8K_SOURCE"
+_LEGACY_HF_VALUES = frozenset({"hf", "huggingface", "openai"})
+
+SPLIT_DIGEST_MISMATCH = "gsm8k_split_digest_mismatch"
+SNAPSHOT_INVALID = "gsm8k_snapshot_invalid"
 
 #: Deterministic split indices into :data:`_FIXTURE_POOL`, persisted here rather
 #: than in a data file: ``pyproject.toml`` declares no ``package-data``, so a
@@ -73,6 +143,28 @@ class ParsedAnswer:
     @property
     def parsed(self) -> bool:
         return self.value is not None
+
+    @property
+    def parse_mode(self) -> str:
+        """``exact`` / ``trailing_number`` / ``unparsed`` — reported per trial.
+
+        ``exact`` means the completion used a marked answer (``#### N`` or
+        ``\\boxed{}``), which is what the prompt asks for. ``trailing_number`` is
+        the fallback: the last bare number in the text. The fallback keeps a
+        rambling-but-correct answer scorable, but it also means a 0% parse
+        failure rate says nothing about format compliance — only the share of
+        ``exact`` trials does, and that is why the mode travels with every
+        action rather than being folded into ``parsed``.
+        """
+        if self.source in _EXACT_SOURCES:
+            return PARSE_MODE_EXACT
+        if self.source == PARSE_SOURCE_TRAILING:
+            return PARSE_MODE_TRAILING
+        return PARSE_MODE_UNPARSED
+
+    @property
+    def format_compliant(self) -> bool:
+        return self.parse_mode == PARSE_MODE_EXACT
 
 
 _FIXTURE_POOL: tuple[Gsm8kRow, ...] = (
@@ -282,6 +374,12 @@ PARSE_SOURCE_HASH = "hash_marker"
 PARSE_SOURCE_TRAILING = "trailing_number"
 PARSE_SOURCE_NONE = "unparsed"
 
+PARSE_MODE_EXACT = "exact"
+PARSE_MODE_TRAILING = "trailing_number"
+PARSE_MODE_UNPARSED = "unparsed"
+PARSE_MODES: tuple[str, ...] = (PARSE_MODE_EXACT, PARSE_MODE_TRAILING, PARSE_MODE_UNPARSED)
+_EXACT_SOURCES = frozenset({PARSE_SOURCE_BOXED, PARSE_SOURCE_HASH})
+
 
 def normalize_number(token: str) -> str | None:
     """Canonical decimal string for one numeric token, or ``None``.
@@ -381,8 +479,164 @@ def public_observation(row: Gsm8kRow, *, seed: int, split: str) -> dict[str, Any
     }
 
 
+# --- profiles ------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DatasetProfile:
+    """Which rows back the world, and who said so.
+
+    ``source`` is ``declared`` (set in code via :func:`declare_profile`),
+    ``env`` (the legacy test-time opt-in) or ``default``. Anything reportable
+    reads the profile from here, never from the environment directly.
+    """
+
+    name: str
+    source: str
+    snapshot_dir: Path | None = None
+
+    @property
+    def pinned(self) -> bool:
+        return self.name in {PROFILE_HF, PROFILE_SNAPSHOT}
+
+
+_declared_profile: DatasetProfile | None = None
+
+
+def declare_profile(name: str, *, snapshot_dir: str | Path | None = None) -> DatasetProfile:
+    """Declare, in code, which profile backs the world. Wins over the env var."""
+    global _declared_profile
+    if name not in PROFILES:
+        raise ValueError(f"unknown gsm8k profile {name!r}; expected one of {PROFILES}")
+    directory: Path | None = None
+    if name == PROFILE_SNAPSHOT:
+        if snapshot_dir is None:
+            raise ValueError("the snapshot profile needs snapshot_dir")
+        directory = Path(snapshot_dir).expanduser().resolve()
+        for pin in SPLIT_PINS.values():
+            if not (directory / f"{pin.hf_split}.jsonl").is_file():
+                raise RuntimeError(f"{SNAPSHOT_INVALID}:{pin.hf_split}.jsonl missing in {directory}")
+    elif snapshot_dir is not None:
+        raise ValueError("snapshot_dir is only meaningful for the snapshot profile")
+    _declared_profile = DatasetProfile(name, "declared", directory)
+    _clear_row_caches()
+    return _declared_profile
+
+
+def clear_profile() -> None:
+    """Forget a declaration (tests). The env opt-in / fixture default apply again."""
+    global _declared_profile
+    _declared_profile = None
+    _clear_row_caches()
+
+
+def active_profile() -> DatasetProfile:
+    if _declared_profile is not None:
+        return _declared_profile
+    raw = os.environ.get(LEGACY_SOURCE_ENV, "").strip().lower()
+    if raw in _LEGACY_HF_VALUES:
+        return DatasetProfile(PROFILE_HF, "env")
+    if raw == PROFILE_FIXTURE:
+        return DatasetProfile(PROFILE_FIXTURE, "env")
+    return DatasetProfile(PROFILE_FIXTURE, "default")
+
+
 def source_name() -> str:
-    return os.environ.get("SYNTH_GSM8K_SOURCE", "fixture").strip().lower() or "fixture"
+    """Name of the active profile (compatibility alias for :func:`active_profile`)."""
+    return active_profile().name
+
+
+def _clear_row_caches() -> None:
+    _hf_rows.cache_clear()
+    _snapshot_rows.cache_clear()
+
+
+# --- digests and order ---------------------------------------------------------
+
+
+def _canonical_line(row: Gsm8kRow) -> bytes:
+    return json.dumps(
+        {"question": row.question, "answer": row.answer_text},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+def rows_digest(rows: Iterable[Gsm8kRow]) -> tuple[int, str]:
+    """``(row_count, sha256:…)`` over canonical JSON lines in the given order."""
+    hasher = hashlib.sha256()
+    count = 0
+    for row in rows:
+        hasher.update(_canonical_line(row))
+        hasher.update(b"\n")
+        count += 1
+    return count, "sha256:" + hasher.hexdigest()
+
+
+def verify_split(split: str, rows: tuple[Gsm8kRow, ...]) -> SplitPin:
+    """Refuse rows that are not the pinned split. Returns the matching pin."""
+    pin = SPLIT_PINS[split]
+    count, digest = rows_digest(rows)
+    if count != pin.rows or digest != pin.digest:
+        raise RuntimeError(
+            f"{SPLIT_DIGEST_MISMATCH}:{split}:expected {pin.rows} rows {pin.digest}, "
+            f"got {count} rows {digest}"
+        )
+    return pin
+
+
+def shuffled_order(count: int, *, seed: int = SHUFFLE_SEED) -> tuple[int, ...]:
+    """The deterministic permutation seeds index into. Same seed, same order."""
+    order = list(range(count))
+    random.Random(seed).shuffle(order)
+    return tuple(order)
+
+
+def _pinned_rows(split: str, source_rows: tuple[Gsm8kRow, ...]) -> tuple[Gsm8kRow, ...]:
+    verify_split(split, source_rows)
+    return tuple(source_rows[index] for index in shuffled_order(len(source_rows)))
+
+
+def dataset_manifest() -> dict[str, Any]:
+    """What backs the world right now: pin, profile, order, parse modes.
+
+    Exposed on the target's metadata so a rollout record can be read back
+    against the exact rows and the exact parser behaviour it was scored with.
+    """
+    profile = active_profile()
+    manifest: dict[str, Any] = {
+        "schema_version": MANIFEST_SCHEMA,
+        "dataset": HF_DATASET,
+        "config": HF_CONFIG,
+        "revision": HF_REVISION,
+        "profile": profile.name,
+        "profile_source": profile.source,
+        "pinned": profile.pinned,
+        "splits": {split: pin.to_json() for split, pin in SPLIT_PINS.items()},
+        "shuffle_seed": SHUFFLE_SEED if profile.pinned else None,
+        "order": (
+            "random.Random(shuffle_seed).shuffle(list(range(rows)))"
+            if profile.pinned
+            else "persisted_indices"
+        ),
+        "snapshot_dir": str(profile.snapshot_dir) if profile.snapshot_dir else None,
+        "parse_modes": list(PARSE_MODES),
+    }
+    if profile.name == PROFILE_FIXTURE:
+        manifest["fixture"] = {
+            TRAIN_SPLIT: _fixture_split_json(_TRAIN_FIXTURE, TRAIN_INDICES),
+            HELDOUT_SPLIT: _fixture_split_json(_HELDOUT_FIXTURE, HELDOUT_INDICES),
+        }
+    return manifest
+
+
+def _fixture_split_json(rows: tuple[Gsm8kRow, ...], indices: tuple[int, ...]) -> dict[str, Any]:
+    count, digest = rows_digest(rows)
+    return {"rows": count, "digest": digest, "indices": list(indices)}
+
+
+# --- rows ----------------------------------------------------------------------
 
 
 def load_row(split: str, seed: int) -> Gsm8kRow | None:
@@ -397,9 +651,11 @@ def split_size(split: str) -> int:
 
 
 def _rows_for(split: str) -> tuple[Gsm8kRow, ...]:
-    name = source_name()
-    if name in {"hf", "huggingface", "openai"}:
+    profile = active_profile()
+    if profile.name == PROFILE_HF:
         return _hf_rows(split)
+    if profile.name == PROFILE_SNAPSHOT:
+        return _snapshot_rows(split, str(profile.snapshot_dir))
     if split == TRAIN_SPLIT:
         return _TRAIN_FIXTURE
     return _HELDOUT_FIXTURE
@@ -410,10 +666,60 @@ def _hf_rows(split: str) -> tuple[Gsm8kRow, ...]:
     try:
         from datasets import load_dataset
     except ImportError as exc:
-        raise RuntimeError("SYNTH_GSM8K_SOURCE=hf requires the datasets package") from exc
-    hf_split = "train" if split == TRAIN_SPLIT else "test"
-    dataset = load_dataset("openai/gsm8k", "main", split=hf_split)
-    return tuple(
+        raise RuntimeError("the hf profile requires the datasets package") from exc
+    pin = SPLIT_PINS[split]
+    dataset = load_dataset(HF_DATASET, HF_CONFIG, split=pin.hf_split, revision=HF_REVISION)
+    source_rows = tuple(
         Gsm8kRow(question=str(item["question"]), answer_text=str(item["answer"]))
         for item in dataset
     )
+    return _pinned_rows(split, source_rows)
+
+
+@lru_cache(maxsize=4)
+def _snapshot_rows(split: str, snapshot_dir: str) -> tuple[Gsm8kRow, ...]:
+    pin = SPLIT_PINS[split]
+    path = Path(snapshot_dir) / f"{pin.hf_split}.jsonl"
+    source_rows: list[Gsm8kRow] = []
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                item = json.loads(line)
+                source_rows.append(
+                    Gsm8kRow(question=str(item["question"]), answer_text=str(item["answer"]))
+                )
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise RuntimeError(f"{SNAPSHOT_INVALID}:{path}") from exc
+    return _pinned_rows(split, tuple(source_rows))
+
+
+def write_snapshot(directory: str | Path, rows_by_split: dict[str, Iterable[Gsm8kRow]]) -> Path:
+    """Bake pinned rows into ``<dir>/<hf_split>.jsonl`` + ``manifest.json``.
+
+    The rows are verified against the pin *before* anything is written, so a
+    snapshot directory either reproduces the recorded digests or does not exist.
+    """
+    target = Path(directory).expanduser().resolve()
+    verified: dict[str, tuple[Gsm8kRow, ...]] = {}
+    for split, rows in rows_by_split.items():
+        materialized = tuple(rows)
+        verify_split(split, materialized)
+        verified[split] = materialized
+    target.mkdir(parents=True, exist_ok=True)
+    for split, materialized in verified.items():
+        with (target / f"{SPLIT_PINS[split].hf_split}.jsonl").open("w", encoding="utf-8") as handle:
+            for row in materialized:
+                handle.write(_canonical_line(row).decode("utf-8") + "\n")
+    manifest = {
+        "schema_version": MANIFEST_SCHEMA,
+        "dataset": HF_DATASET,
+        "config": HF_CONFIG,
+        "revision": HF_REVISION,
+        "splits": {split: SPLIT_PINS[split].to_json() for split in verified},
+        "shuffle_seed": SHUFFLE_SEED,
+        "order": "random.Random(shuffle_seed).shuffle(list(range(rows)))",
+    }
+    (target / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    return target

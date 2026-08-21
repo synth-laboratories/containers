@@ -591,7 +591,7 @@ class CompatPlatform:
 
     def capability_metadata(self) -> dict[str, Any]:
         """Stable capability advertisement hashed into contract.capability_digest."""
-        return {
+        payload = {
             "target_id": self.spec.target_id,
             "runtime_family": self.spec.runtime_family.value,
             "environment_ref": self.spec.environment_ref,
@@ -601,6 +601,20 @@ class CompatPlatform:
             "affordances": self.spec.affordances.advertised(),
             "input_schema": self._input_schema(),
         }
+        dataset = self._dataset_manifest()
+        if dataset is not None:
+            # The rows a score was measured on are part of what the container
+            # is, so the pin (revision, split digests, order) is hashed into
+            # the capability digest rather than reported beside it.
+            payload["dataset"] = dataset
+        return payload
+
+    def _dataset_manifest(self) -> dict[str, Any] | None:
+        if self.spec.runtime_family.value == "gsm8k":
+            from .gsm8k_world import dataset_manifest
+
+            return dataset_manifest()
+        return None
 
     def capabilities_digest(self) -> str:
         return _canonical_sha256(self.capability_metadata())
@@ -738,6 +752,7 @@ class CompatPlatform:
                     "input_schema": schema,
                 }
             },
+            "dataset": self._dataset_manifest(),
             "identity": {
                 "target_id": self.spec.target_id,
                 "instance_id": self.instance_id,
