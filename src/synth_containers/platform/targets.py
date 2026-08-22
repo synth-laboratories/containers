@@ -12,6 +12,10 @@ from .affordances import AffordanceMap
 class TargetRuntimeKind(StrEnum):
     """Child of TargetRuntime. Not contracts.RuntimeFamily (codex/mcp/http)."""
 
+    # Catalog images may supply a self-contained runtime instead of being a
+    # public `TARGETS` entry.  Keep that boundary explicit: EXTERNAL is a
+    # target descriptor kind, not a request to resolve a built-in runtime.
+    EXTERNAL = "external"
     CRAFTAX = "craftax"
     HARBOR = "harbor"
     DIGBENCH = "digbench"
@@ -63,6 +67,12 @@ class TargetSpec:
     script_node: ScriptNode = ScriptNode.REWARD_TXT
     max_episode_steps: int | None = None
     gold_base_url: str | None = None
+    # Image catalog entries are allowed to provide a concrete runtime without
+    # becoming a built-in public TARGETS entry.
+    runtime: Any | None = None
+    # A supplied runtime may expose a dependency-aware health probe (for
+    # example a façade that must report unhealthy when its gold engine exits).
+    health_probe: Any | None = None
 
 
 def _env(items: dict[str, str]) -> AffordanceMap:
