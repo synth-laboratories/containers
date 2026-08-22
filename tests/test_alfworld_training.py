@@ -91,3 +91,20 @@ def test_empty_sample_is_recorded_as_failed_generation(monkeypatch, tmp_path) ->
     assert result["reward_info"]["invalid_completion"] is True
     assert result["reward_info"]["exploration_coverage"] == 0.0
     assert game.updates == []
+
+
+def test_dataset_digest_binds_relative_paths_and_bytes(monkeypatch, tmp_path) -> None:
+    first = tmp_path / "a" / "game.tw-pddl"
+    second = tmp_path / "b" / "game.tw-pddl"
+    first.parent.mkdir()
+    second.parent.mkdir()
+    first.write_text("one")
+    second.write_text("two")
+    monkeypatch.setattr(alfworld, "DATA_ROOT", tmp_path)
+
+    initial = alfworld._dataset_digest()
+    assert initial.startswith("sha256:")
+    assert initial == alfworld._dataset_digest()
+
+    second.write_text("changed")
+    assert alfworld._dataset_digest() != initial

@@ -40,6 +40,19 @@ def _files() -> list[Path]:
     return sorted(DATA_ROOT.rglob("game.tw-pddl"))
 
 
+def _dataset_digest() -> str:
+    """Bind the advertised workload to exact artifact paths and bytes."""
+    digest = hashlib.sha256()
+    for source in _files():
+        relative = source.relative_to(DATA_ROOT).as_posix().encode()
+        digest.update(len(relative).to_bytes(8, "big"))
+        digest.update(relative)
+        content = source.read_bytes()
+        digest.update(len(content).to_bytes(8, "big"))
+        digest.update(content)
+    return f"sha256:{digest.hexdigest()}"
+
+
 def _split(path: Path) -> str:
     # Stable, artifact-identity split; no train/test leakage by path ordering.
     return "test" if int(hashlib.sha256(path.read_bytes()).hexdigest()[:8], 16) % 10 == 0 else "train"
@@ -144,6 +157,7 @@ async def training_capabilities() -> dict[str, Any]:
     """Advertise the same rollout protocol consumed by local MLX CISPO."""
     contract = {
         "task_id": "alfworld.text.v1",
+        "dataset_digest": _dataset_digest(),
         "protocol_versions": [TRAINING_REQUEST_VERSION, TRAINING_ACTION_VERSION, TRAINING_SUMMARY_VERSION],
         "operations": ["rollout", "reward", "heartbeat"],
         "max_concurrency": 1,
