@@ -18,6 +18,7 @@ from synth_containers.platform.banking77_world import (
     public_observation,
     CLASSIFY_SYSTEM,
     extract_answer,
+    label_vocabulary,
     load_row,
     split_size,
     user_prompt,
@@ -525,7 +526,10 @@ def test_remote_checkpoint_sampler_is_loopback_only_and_secret_free(monkeypatch)
         "checkpoint_id": "checkpoint_20",
         "messages": [
             {"role": "system", "content": CLASSIFY_SYSTEM},
-            {"role": "user", "content": user_prompt(gold.text)},
+                {
+                    "role": "user",
+                    "content": user_prompt(gold.text, labels=label_vocabulary()),
+                },
         ],
         "max_tokens": 24,
     }

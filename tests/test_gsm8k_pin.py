@@ -337,6 +337,10 @@ def test_training_rollout_samples_gsm8k_and_stamps_the_action(monkeypatch) -> No
         )
 
     monkeypatch.setattr(HostedSamplerClient, "sample", sample)
+    # The reachability canary is a separate network boundary from sampling.
+    # This unit test owns the sampler response, so it must own a healthy canary
+    # too instead of depending on the nonexistent sampler.example host.
+    monkeypatch.setattr("synth_containers.platform.app.probe_sampler_health", lambda *_args, **_kwargs: None)
     client = _client()
     request = {
         "schema_version": ROLLOUT_REQUEST_SCHEMA_VERSION,
