@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -44,14 +45,18 @@ def training_capabilities(
     target_id: str,
     runtime_family: str,
     container_digest: str,
+    dataset_digest: str,
     max_concurrency: int,
 ) -> dict[str, Any]:
     if not target_id.strip() or not container_digest.strip() or max_concurrency < 1:
         raise TrainingRolloutError("invalid_training_capability_identity")
+    if re.fullmatch(r"sha256:[0-9a-f]{64}", dataset_digest) is None:
+        raise TrainingRolloutError("invalid_training_dataset_digest")
     payload: dict[str, Any] = {
         "schema_version": ROLLOUT_CAPABILITIES_SCHEMA_VERSION,
         "container_id": target_id,
         "container_digest": container_digest,
+        "dataset_digest": dataset_digest,
         "task_id": runtime_family,
         "protocol_versions": [
             ROLLOUT_REQUEST_SCHEMA_VERSION,

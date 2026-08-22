@@ -34,6 +34,7 @@ from .http_requests import (
     to_policy_config_dict,
     to_put_policy_dict,
 )
+from .dataset_provenance import digest_for_spec
 from .pin import RolloutCredentialLease
 from .state import CompatPlatform, PolicyConfig
 from .targets import TARGETS, TargetSpec
@@ -73,9 +74,12 @@ def allow_loopback_sampler() -> bool:
     endpoint.
     """
 
-    return str(
-        os.environ.get("SYNTH_CONTAINERS_ALLOW_LOOPBACK_SAMPLER") or ""
-    ).strip().lower() in {"1", "true", "yes", "on"}
+    return str(os.environ.get("SYNTH_CONTAINERS_ALLOW_LOOPBACK_SAMPLER") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def _sampler_scheme_allowed(url: str) -> bool:
@@ -169,6 +173,7 @@ def create_compat_app(
             target_id=spec.target_id,
             runtime_family=spec.runtime_family.value,
             container_digest=container_digest,
+            dataset_digest=digest_for_spec(spec),
             max_concurrency=spec.scale_leases,
         )
         if spec.runtime_family.value == "healthbench":
@@ -218,6 +223,7 @@ def create_compat_app(
             target_id=spec.target_id,
             runtime_family=spec.runtime_family.value,
             container_digest=platform.capabilities_digest(),
+            dataset_digest=digest_for_spec(spec),
             max_concurrency=spec.scale_leases,
         )
 

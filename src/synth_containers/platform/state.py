@@ -38,6 +38,7 @@ from .reward_plan import PlanOutcome, classify_plan_outcome
 from .runtime import runtime_for
 from .seal import seal_rollout_log
 from .targets import TargetSpec
+from .dataset_provenance import manifest_for_spec
 
 
 def _digest(payload: Any) -> str:
@@ -474,20 +475,10 @@ class CompatPlatform(CompletedRolloutMixin):
             "affordances": self.spec.affordances.advertised(),
             "input_schema": self._input_schema(),
         }
-        dataset = self._dataset_manifest()
+        dataset = manifest_for_spec(self.spec)
         if dataset is not None:
-            # The rows a score was measured on are part of what the container
-            # is, so the pin (revision, split digests, order) is hashed into
-            # the capability digest rather than reported beside it.
             payload["dataset"] = dataset
         return payload
-
-    def _dataset_manifest(self) -> dict[str, Any] | None:
-        if self.spec.runtime_family.value == "gsm8k":
-            from .gsm8k_world import dataset_manifest
-
-            return dataset_manifest()
-        return None
 
     def capabilities_digest(self) -> str:
         return _canonical_sha256(self.capability_metadata())
@@ -625,7 +616,7 @@ class CompatPlatform(CompletedRolloutMixin):
                     "input_schema": schema,
                 }
             },
-            "dataset": self._dataset_manifest(),
+            "dataset": manifest_for_spec(self.spec),
             "identity": {
                 "target_id": self.spec.target_id,
                 "instance_id": self.instance_id,
@@ -637,7 +628,9 @@ class CompatPlatform(CompletedRolloutMixin):
         return payload
 
     def _capacity_snapshot(self) -> dict[str, Any]:
-        active = sum(1 for pin in self.pins.values() if pin.started and not pin.terminal and pin.simulating)
+        active = sum(
+            1 for pin in self.pins.values() if pin.started and not pin.terminal and pin.simulating
+        )
         reserved = int(self.active_leases)
         by_owner: dict[str, dict[str, int]] = {}
         for pin in self.pins.values():
@@ -677,6 +670,7 @@ class CompatPlatform(CompletedRolloutMixin):
             "capacity": self._capacity_snapshot(),
             "crash_signals": crashed,
         }
+
     def _gepa_v2_contract(self) -> dict[str, Any] | None:
         family = self.spec.runtime_family.value
         if family == "healthbench":
@@ -802,9 +796,7 @@ class CompatPlatform(CompletedRolloutMixin):
         finally:
             with self._state_lock:
                 self.active_leases = max(0, self.active_leases - 1)
-                result = self._rollout_response(
-                    pin, self.stream_descriptor_for(rollout_id)
-                )
+                result = self._rollout_response(pin, self.stream_descriptor_for(rollout_id))
         return result
 
     def _start_rollout_locked(
@@ -836,9 +828,7 @@ class CompatPlatform(CompletedRolloutMixin):
             requested_seed = _seed_from_task_instance_id(request.task_instance_id)
             requested_task = request.task_instance_id or f"seed:{requested_seed}"
             requested_retention = (
-                telemetry.retention
-                if telemetry.retention is not None
-                else self.spec.retention
+                telemetry.retention if telemetry.retention is not None else self.spec.retention
             )
             requested_identity = admission_identity_payload(
                 harness=requested_harness,
@@ -865,9 +855,7 @@ class CompatPlatform(CompletedRolloutMixin):
                     "status_code": 409,
                     "rollout_id": rollout_id,
                 }
-            replay = self._rollout_response(
-                existing_pin, self.stream_descriptor_for(rollout_id)
-            )
+            replay = self._rollout_response(existing_pin, self.stream_descriptor_for(rollout_id))
             replay["replayed"] = True
             if request.submission_mode == "async":
                 return self._acceptance_payload(
@@ -888,9 +876,7 @@ class CompatPlatform(CompletedRolloutMixin):
                 rollout_id,
                 (transport, retention),
             )
-            if telemetry.enabled and (
-                transport != bound_transport or retention != bound_retention
-            ):
+            if telemetry.enabled and (transport != bound_transport or retention != bound_retention):
                 return {
                     "error": "stream_binding_mismatch",
                     "status_code": 409,
@@ -925,13 +911,18 @@ class CompatPlatform(CompletedRolloutMixin):
                 "status_code": 422,
                 "detail": "POST /rollouts requires policy_ref.config; the platform does not default luna_med",
             }
-        if config_id and config_id not in self.policy_configs and harness != ISOLATED_POLICY_HARNESS:
+        if (
+            config_id
+            and config_id not in self.policy_configs
+            and harness != ISOLATED_POLICY_HARNESS
+        ):
             return {"error": "unknown_policy_config", "status_code": 404, "config_id": config_id}
 
         if request.resume_from_checkpoint_id:
-            if self.spec.affordances.level("restore") != "native" or self.spec.affordances.level(
-                "fork"
-            ) != "native":
+            if (
+                self.spec.affordances.level("restore") != "native"
+                or self.spec.affordances.level("fork") != "native"
+            ):
                 return {
                     "error": "checkpoint_resume_unsupported",
                     "status_code": 409,
@@ -1542,7 +1533,11 @@ class CompatPlatform(CompletedRolloutMixin):
                 "replayed": True,
             }
         self.policy_configs[config_id] = cfg
-        return {"config_id": config_id, "harness": cfg.harness, "engine_generation": self.engine_generation}
+        return {
+            "config_id": config_id,
+            "harness": cfg.harness,
+            "engine_generation": self.engine_generation,
+        }
 
     def world_stop(self) -> dict[str, Any]:
         self.stopped_worlds.add(self.spec.world_ref)
@@ -1634,7 +1629,9 @@ class CompatPlatform(CompletedRolloutMixin):
                 "owner_id": pin.owner_id,
             }
         if pin.terminal:
-            return self._rollout_response(pin, self.stream_descriptor_for(rollout_id) if log else {"id": pin.stream_id})
+            return self._rollout_response(
+                pin, self.stream_descriptor_for(rollout_id) if log else {"id": pin.stream_id}
+            )
         held = not pin.terminal
         transition(
             pin,
@@ -1676,7 +1673,9 @@ class CompatPlatform(CompletedRolloutMixin):
         return {
             "owner_id": owner_id,
             "cancelled": cancelled,
-            "skipped": [rid for rid in skipped if self.pins.get(rid) and self.pins[rid].owner_id != owner_id],
+            "skipped": [
+                rid for rid in skipped if self.pins.get(rid) and self.pins[rid].owner_id != owner_id
+            ],
             "instance_id": self.instance_id,
         }
 
@@ -1863,12 +1862,18 @@ class CompatPlatform(CompletedRolloutMixin):
         for item in log.after(0):
             if item.control or item.kind != "reward_signal":
                 continue
-            if after_sequence is not None and item.sequence is not None and item.sequence > after_sequence:
+            if (
+                after_sequence is not None
+                and item.sequence is not None
+                and item.sequence > after_sequence
+            ):
                 break
             values.append(item.payload.get("value"))
         return values
 
-    def _reward_nodes(self, pin: RolloutPin) -> tuple[float | None, list[dict[str, Any]], str, str | None]:
+    def _reward_nodes(
+        self, pin: RolloutPin
+    ) -> tuple[float | None, list[dict[str, Any]], str, str | None]:
         if pin.hillclimb_nodes:
             nodes = [node.to_dict() for node in pin.hillclimb_nodes]
             gates = [node for node in pin.hillclimb_nodes if node.kind == "gate"]
@@ -1879,50 +1884,68 @@ class CompatPlatform(CompletedRolloutMixin):
         kind = pin.reward_kind
         if kind == "env_sum":
             if any(item is None for item in pin.reward_signals):
-                return None, [
+                return (
+                    None,
+                    [
+                        {
+                            "node_id": "env_sum",
+                            "kind": "env_reward",
+                            "authority": "environment",
+                            "status": "skipped",
+                            "value": None,
+                        }
+                    ],
+                    "absent",
+                    "missing_reward_signal",
+                )
+            total = float(sum(float(item) for item in pin.reward_signals if item is not None))
+            return (
+                total,
+                [
                     {
                         "node_id": "env_sum",
                         "kind": "env_reward",
                         "authority": "environment",
-                        "status": "skipped",
-                        "value": None,
+                        "status": "scored",
+                        "value": total,
                     }
-                ], "absent", "missing_reward_signal"
-            total = float(
-                sum(float(item) for item in pin.reward_signals if item is not None)
+                ],
+                "scored",
+                None,
             )
-            return total, [
-                {
-                    "node_id": "env_sum",
-                    "kind": "env_reward",
-                    "authority": "environment",
-                    "status": "scored",
-                    "value": total,
-                }
-            ], "scored", None
         if kind == "script":
             node_id = str(self.spec.script_node)
             value = pin.native_script_reward
-            return value, [
-                {
-                    "node_id": node_id,
-                    "kind": "script" if node_id == "reward.txt" else "gate",
-                    "authority": "trusted_scorer",
-                    "status": "scored" if value is not None else "skipped",
-                    "value": value,
-                }
-            ], "scored" if value is not None else "absent", None
+            return (
+                value,
+                [
+                    {
+                        "node_id": node_id,
+                        "kind": "script" if node_id == "reward.txt" else "gate",
+                        "authority": "trusted_scorer",
+                        "status": "scored" if value is not None else "skipped",
+                        "value": value,
+                    }
+                ],
+                "scored" if value is not None else "absent",
+                None,
+            )
         if kind == "env_status":
             value = pin.native_script_reward
-            return value, [
-                {
-                    "node_id": "env_status",
-                    "kind": "env_reward",
-                    "authority": "environment",
-                    "status": "scored" if value is not None else "skipped",
-                    "value": value,
-                }
-            ], "scored" if value is not None else "absent", None
+            return (
+                value,
+                [
+                    {
+                        "node_id": "env_status",
+                        "kind": "env_reward",
+                        "authority": "environment",
+                        "status": "scored" if value is not None else "skipped",
+                        "value": value,
+                    }
+                ],
+                "scored" if value is not None else "absent",
+                None,
+            )
         return None, [], "absent", "unknown_plan"
 
     def get_reward(self, rollout_id: str) -> dict[str, Any]:
@@ -1931,7 +1954,9 @@ class CompatPlatform(CompletedRolloutMixin):
             return {"status": "absent", "reward": None, "rollout_id": rollout_id}
         return existing
 
-    def product_combiner(self, bases: dict[str, float | None], required: list[str]) -> dict[str, Any]:
+    def product_combiner(
+        self, bases: dict[str, float | None], required: list[str]
+    ) -> dict[str, Any]:
         values = []
         for name in required:
             item = bases.get(name)
