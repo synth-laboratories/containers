@@ -74,12 +74,19 @@ def create_compat_app(
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
-        return {
+        payload = {
             "status": "ok",
             "target": spec.target_id,
             "runtime_family": spec.runtime_family.value,
             "environment_ref": spec.environment_ref,
         }
+        if spec.health_probe is not None:
+            extra = spec.health_probe()
+            if isinstance(extra, dict):
+                payload.update(extra)
+            if str(payload.get("status") or "ok") != "ok":
+                return JSONResponse(status_code=503, content=payload)
+        return payload
 
     @app.get("/metadata")
     @app.get("/info")

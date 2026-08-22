@@ -25,6 +25,8 @@ _BY_FAMILY = {
 
 
 def runtime_for(spec: TargetSpec):
+    if spec.runtime is not None:
+        return spec.runtime
     family = spec.runtime_family
     if family not in _BY_FAMILY:
         raise KeyError(f"unknown_runtime_family:{family}")
