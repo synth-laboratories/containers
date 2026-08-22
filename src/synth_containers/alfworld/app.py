@@ -31,6 +31,7 @@ SYSTEM_PROMPT = """You are playing a text-only ALFWorld episode. Reply with exac
 TRAINING_REQUEST_VERSION = "training.rollout.request.v1"
 TRAINING_ACTION_VERSION = "training.rollout.action.v1"
 TRAINING_SUMMARY_VERSION = "training.rollout.summary.v1"
+INVALID_EMPTY_ACTION = "<invalid:empty-model-output>"
 
 
 def _files() -> list[Path]:
@@ -107,7 +108,12 @@ def _load(rollout_id: str) -> dict[str, Any]:
 
 
 def _parse_action(text: str, allowed: list[str]) -> str:
-    line = re.sub(r"^\s*action\s*:\s*", "", text.strip().splitlines()[0], flags=re.I).strip().lower()
+    lines = text.strip().splitlines()
+    if not lines:
+        return INVALID_EMPTY_ACTION
+    line = re.sub(r"^\s*action\s*:\s*", "", lines[0], flags=re.I).strip().lower()
+    if not line:
+        return INVALID_EMPTY_ACTION
     return next((action for action in allowed if action.lower() == line), line)
 
 
@@ -181,6 +187,7 @@ async def training_rollout(request: Request) -> dict[str, Any]:
     initial_progress = game.runtime.goal_progress()
     history: list[str] = []
     actions: list[dict[str, Any]] = []
+    invalid_completion = False
     headers = {"content-type": "application/json"}
     if sampler.get("bearer_token"):
         headers["authorization"] = f"Bearer {sampler['bearer_token']}"
@@ -210,7 +217,6 @@ async def training_rollout(request: Request) -> dict[str, Any]:
                 raise HTTPException(502, f"sampler failed: {sample_response.status_code} {sample_response.text[:300]}")
             sampled = sample_response.json()
             action = _parse_action(str(sampled.get("text") or ""), allowed)
-            state = game.update(action)
             history.append(action)
             actions.append({
                 "schema_version": TRAINING_ACTION_VERSION,
@@ -218,13 +224,25 @@ async def training_rollout(request: Request) -> dict[str, Any]:
                 "token_ids": sampled.get("token_ids") or [],
                 "log_probs": sampled.get("log_probs") or [],
             })
+            if action == INVALID_EMPTY_ACTION:
+                # Empty model output is an explicit failed generation.  Do not
+                # invent a valid environment action or award exploration shaping.
+                invalid_completion = True
+                break
+            state = game.update(action)
             if state.terminal:
                 break
     rollout_id = str(payload.get("rollout_id") or f"alfworld_{uuid.uuid4().hex}")
     final_progress = game.runtime.goal_progress()
     progress_delta = max(0.0, final_progress - initial_progress)
-    exploration_coverage = len(set(history)) / max(1, max_turns)
-    shaped_reward = 1.0 if state.won else 0.25 * progress_delta + 0.01 * exploration_coverage
+    exploration_coverage = (
+        0.0 if invalid_completion else len(set(history)) / max(1, max_turns)
+    )
+    shaped_reward = (
+        0.0
+        if invalid_completion
+        else 1.0 if state.won else 0.25 * progress_delta + 0.01 * exploration_coverage
+    )
     result = {
         "schema_version": TRAINING_SUMMARY_VERSION,
         "rollout_id": rollout_id,
@@ -239,6 +257,7 @@ async def training_rollout(request: Request) -> dict[str, Any]:
             "shaping_weight": 0.25,
             "exploration_coverage": exploration_coverage,
             "exploration_weight": 0.01,
+            "invalid_completion": invalid_completion,
         },
         "container_digest": (await training_capabilities())["container_digest"],
         "capability_hash": (await training_capabilities())["capability_hash"],
@@ -357,4 +376,3 @@ async def get_rollout(rollout_id: str) -> dict[str, Any]: return _load(rollout_i
 @app.get("/reward")
 async def reward(rollout_id: str) -> dict[str, Any]:
     result = _load(rollout_id); return {"rollout_id": rollout_id, "reward": result["reward"], "reward_info": result["reward_info"]}
-
