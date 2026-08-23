@@ -54,9 +54,9 @@ uv sync --group dev
 | `/health` | GET | liveness |
 
 The Python SDK also provides `Container`, `Container.serve()`,
-`ContainerHandle`, and `ContainerConnection` for URL-only optimizer handoff.
-Use generic route hints and capability metadata here; optimizer-specific GEPA
-settings belong in `synth-optimizers`.
+`ContainerHandle`, `ContainerConnection`, and `ContainerRunner` (url, command,
+in-process app, or local `image_id`). CLI: `synth-containers serve` and
+`synth-containers up`.
 
 ## Example
 

@@ -230,7 +230,14 @@ def _typed_native_records(
         payload.get("threshold"),
     )
     if threshold is None:
-        threshold = 0.5
+        explicit_passed = _first_bool(
+            verifier_payload.get("passed") if verifier_payload else None,
+            payload.get("passed"),
+            payload.get("accepted"),
+        )
+        # A declared pass with no bar is "finite score counts", not a hidden
+        # 0.5 quality gate. Keep 0.5 only when the native payload is silent.
+        threshold = 0.0 if explicit_passed is True else 0.5
 
     criteria: list[CriterionDefinitionV1] = []
     criterion_results: list[JudgmentV1] = []

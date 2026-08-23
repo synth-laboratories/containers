@@ -472,26 +472,8 @@ class CompatPlatform:
         return payload
 
     def _gepa_v2_contract(self) -> dict[str, Any] | None:
-        family = self.spec.runtime_family.value
-        if family == "healthbench":
-            return {
-                "version": "synth_optimizers.gepa.v2",
-                "program_route": "/program",
-                "taskset_route": "/taskset",
-                "taskset_tasks_route": "/taskset/tasks",
-                "rollout_route": "/rollout",
-                "trace_route": "/rollouts/{rollout_id}/events",
-            }
-        if family == "banking77":
-            return {
-                "version": "synth_optimizers.gepa.v2",
-                "program_route": "/program",
-                "taskset_route": "/taskset",
-                "rollout_route": "/rollouts",
-                "prepare_route": "/rollouts/prepare",
-                "trace_route": "/rollouts/{rollout_id}/events",
-            }
-        return None
+        contract = self.spec.optimizer_contracts
+        return dict(contract) if isinstance(contract, dict) else None
 
     def bind(self, recipe: dict[str, Any] | None) -> dict[str, Any] | None:
         return bind_recipe(self.spec.affordances, recipe)

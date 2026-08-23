@@ -12,16 +12,14 @@ from fastapi.testclient import TestClient
 
 from synth_containers.event_log import RolloutEventLog
 from synth_containers.platform import create_compat_app
-from synth_containers.platform.craftax_world import StepResult
-from synth_containers.platform.episode import _emit_obs
 from synth_containers.tracing.capture.redaction import RedactionError
 
-_CRAFTAX_PIN = {"harness": "react", "config": "luna_med"}
+_OPENENV_PIN = {"harness": "gym_loop", "config": "echo"}
 _HARBOR_PIN = {"harness": "harbor_fused", "config": "luna_med"}
 
 
 def test_compat_journal_persists_before_poll_and_recovers(tmp_path: Path) -> None:
-    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path))
+    client = TestClient(create_compat_app("openenv_echo", storage_root=tmp_path))
     rollout_id = "persist-before-publish"
     prepared = client.post(
         "/rollouts/prepare",
@@ -42,7 +40,7 @@ def test_compat_journal_persists_before_poll_and_recovers(tmp_path: Path) -> Non
             "rollout_id": rollout_id,
             "slot": "stream",
             "task_instance_id": "seed:0",
-            "policy_ref": _CRAFTAX_PIN,
+            "policy_ref": _OPENENV_PIN,
             "telemetry": {"enabled": True, "transport": "sse", "retention": "run"},
         },
     )
@@ -74,7 +72,7 @@ def test_compat_journal_persists_before_poll_and_recovers(tmp_path: Path) -> Non
 def test_poll_small_pages_reconstruct_exact_evidence_without_advancing_on_control(
     tmp_path: Path,
 ) -> None:
-    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path))
+    client = TestClient(create_compat_app("openenv_echo", storage_root=tmp_path))
     rollout_id = "small-page-replay"
     prepared = client.post(
         "/rollouts/prepare",
@@ -89,7 +87,7 @@ def test_poll_small_pages_reconstruct_exact_evidence_without_advancing_on_contro
             "rollout_id": rollout_id,
             "slot": "stream",
             "task_instance_id": "seed:11",
-            "policy_ref": _CRAFTAX_PIN,
+            "policy_ref": _OPENENV_PIN,
             "telemetry": {"enabled": True, "transport": "sse", "retention": "run"},
         },
     )
@@ -180,27 +178,19 @@ def test_png_frame_is_fsynced_before_available_event_and_served_after_restart(
         journal_path=journal,
     )
     png = b"\x89PNG\r\n\x1a\n" + b"durable-test-frame"
-    _emit_obs(
-        log,
-        StepResult(
-            observation={"env_steps": 3},
-            reward=0.0,
-            done=False,
-            valid_actions=["noop"],
-            ascii_map="P",
-            frame_digest="frame-digest",
-            env_steps=3,
-            frame_url="http://transient.invalid/current.png",
-            frame_bytes=png,
-        ),
-        seed=7,
+    durable_url = log.persist_frame(3, png)
+    assert durable_url == f"/rollouts/{rollout_id}/frames/3.png"
+    log.append("frame", {"step": 3, "digest": "frame-digest", "url": durable_url, "format": "png"})
+    log.append(
+        "artifact.available",
+        {"kind": "frame", "digest": "frame-digest", "url": durable_url},
     )
 
     available = [row for row in log.after(0) if row.kind == "artifact.available"]
     assert available[0].payload["url"] == f"/rollouts/{rollout_id}/frames/3.png"
     frame_path = RolloutEventLog.frame_asset_path(tmp_path, rollout_id, 3)
     assert frame_path.read_bytes() == png
-    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path))
+    client = TestClient(create_compat_app("openenv_echo", storage_root=tmp_path))
     response = client.get(available[0].payload["url"])
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"
@@ -213,21 +203,9 @@ def test_missing_or_invalid_png_stays_ascii_and_never_claims_available(tmp_path:
         stream_id="stream:no-fake-frame",
         journal_path=tmp_path / "event_logs" / "events.jsonl",
     )
-    _emit_obs(
-        log,
-        StepResult(
-            observation={},
-            reward=None,
-            done=False,
-            valid_actions=[],
-            ascii_map="P",
-            frame_digest="ascii-only",
-            env_steps=0,
-            frame_url="http://transient.invalid/current.png",
-            frame_bytes=b"not a png",
-        ),
-        seed=0,
-    )
+    durable_url = log.persist_frame(0, b"not a png")
+    assert durable_url is None
+    log.append("frame", {"step": 0, "digest": "ascii-only", "format": "ascii"})
     frames = [row for row in log.after(0) if row.kind == "frame"]
     assert frames[0].payload["format"] == "ascii"
     assert "url" not in frames[0].payload
@@ -267,13 +245,13 @@ def test_concurrent_appends_are_gap_free_and_recoverable(tmp_path: Path) -> None
 
 
 def test_concurrent_identical_start_executes_once(tmp_path: Path) -> None:
-    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path))
+    client = TestClient(create_compat_app("openenv_echo", storage_root=tmp_path))
     payload = {
         "rollout_id": "same-start",
         "slot": "stream",
         "submission_mode": "async",
         "task_instance_id": "seed:0",
-        "policy_ref": _CRAFTAX_PIN,
+        "policy_ref": _OPENENV_PIN,
         "telemetry": {"enabled": True, "transport": "sse", "retention": "run"},
     }
     with ThreadPoolExecutor(max_workers=2) as executor:
@@ -293,7 +271,7 @@ def test_concurrent_identical_start_executes_once(tmp_path: Path) -> None:
 def test_concurrent_distinct_starts_enforce_lease_limit_and_isolate_logs(
     tmp_path: Path,
 ) -> None:
-    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path))
+    client = TestClient(create_compat_app("openenv_echo", storage_root=tmp_path))
 
     def start(index: int):
         return client.post(
@@ -303,20 +281,20 @@ def test_concurrent_distinct_starts_enforce_lease_limit_and_isolate_logs(
                 "slot": "stream",
                 "submission_mode": "async",
                 "task_instance_id": f"seed:{index}",
-                "policy_ref": _CRAFTAX_PIN,
+                "policy_ref": _OPENENV_PIN,
                 "telemetry": {"enabled": True, "transport": "sse", "retention": "run"},
             },
         )
 
-    with ThreadPoolExecutor(max_workers=11) as executor:
-        responses = list(executor.map(start, range(11)))
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        responses = list(executor.map(start, range(5)))
 
-    assert sum(response.status_code == 200 for response in responses) == 10
+    assert sum(response.status_code == 200 for response in responses) == 4
     assert sum(response.status_code == 429 for response in responses) == 1
     successful_ids = {
         response.json()["rollout_id"] for response in responses if response.status_code == 200
     }
-    assert len(successful_ids) == 10
+    assert len(successful_ids) == 4
     for rollout_id in successful_ids:
         journal_name = hashlib.sha256(rollout_id.encode()).hexdigest()
         recovered = RolloutEventLog.recover(
@@ -332,9 +310,9 @@ def test_prepare_restart_recovers_open_and_refuses_sealed_or_corrupt(tmp_path: P
         "rollout_id": "restart-open",
         "telemetry": {"enabled": True, "transport": "sse", "retention": "run"},
     }
-    first = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path))
+    first = TestClient(create_compat_app("openenv_echo", storage_root=tmp_path))
     assert first.post("/rollouts/prepare", json=payload).status_code == 200
-    restarted = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path))
+    restarted = TestClient(create_compat_app("openenv_echo", storage_root=tmp_path))
     recovered = restarted.post("/rollouts/prepare", json=payload)
     assert recovered.status_code == 200, recovered.text
 
@@ -343,11 +321,11 @@ def test_prepare_restart_recovers_open_and_refuses_sealed_or_corrupt(tmp_path: P
         json={
             **payload,
             "slot": "stream",
-            "policy_ref": _CRAFTAX_PIN,
+            "policy_ref": _OPENENV_PIN,
         },
     )
     assert started.status_code == 200, started.text
-    sealed_restart = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path))
+    sealed_restart = TestClient(create_compat_app("openenv_echo", storage_root=tmp_path))
     sealed = sealed_restart.post("/rollouts/prepare", json=payload)
     assert sealed.status_code == 409
     assert "event_log_sealed" in sealed.text
@@ -357,14 +335,14 @@ def test_prepare_restart_recovers_open_and_refuses_sealed_or_corrupt(tmp_path: P
     corrupt_name = hashlib.sha256(b"restart-corrupt").hexdigest()
     corrupt_journal = tmp_path / "event_logs" / f"{corrupt_name}.jsonl"
     corrupt_journal.write_text(corrupt_journal.read_text() + "{not-json}\n")
-    corrupt_restart = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path))
+    corrupt_restart = TestClient(create_compat_app("openenv_echo", storage_root=tmp_path))
     corrupt = corrupt_restart.post("/rollouts/prepare", json=corrupt_payload)
     assert corrupt.status_code == 409
     assert "event_log_unrecoverable:event_log_malformed_json_line" in corrupt.text
 
 
 def test_prepare_requires_enabled_telemetry(tmp_path: Path) -> None:
-    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path))
+    client = TestClient(create_compat_app("openenv_echo", storage_root=tmp_path))
     refused = client.post(
         "/rollouts/prepare",
         json={"rollout_id": "disabled", "telemetry": {"enabled": False, "transport": "poll"}},
@@ -374,7 +352,7 @@ def test_prepare_requires_enabled_telemetry(tmp_path: Path) -> None:
 
 
 def test_rollout_id_cannot_escape_event_store_or_break_declared_urls(tmp_path: Path) -> None:
-    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path))
+    client = TestClient(create_compat_app("openenv_echo", storage_root=tmp_path))
     refused = client.post(
         "/rollouts/prepare",
         json={
@@ -387,7 +365,7 @@ def test_rollout_id_cannot_escape_event_store_or_break_declared_urls(tmp_path: P
 
 
 def test_prepare_binding_is_stable_and_unadvertised_transports_refuse(tmp_path: Path) -> None:
-    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path))
+    client = TestClient(create_compat_app("openenv_echo", storage_root=tmp_path))
     prepared = client.post(
         "/rollouts/prepare",
         json={
@@ -405,7 +383,7 @@ def test_prepare_binding_is_stable_and_unadvertised_transports_refuse(tmp_path: 
         json={
             "rollout_id": "poll-only",
             "slot": "stream",
-            "policy_ref": _CRAFTAX_PIN,
+            "policy_ref": _OPENENV_PIN,
             "telemetry": {"enabled": True, "transport": "sse", "retention": "run"},
         },
     )
@@ -417,7 +395,7 @@ def test_prepare_binding_is_stable_and_unadvertised_transports_refuse(tmp_path: 
         json={
             "rollout_id": "poll-only",
             "slot": "stream",
-            "policy_ref": _CRAFTAX_PIN,
+            "policy_ref": _OPENENV_PIN,
             "telemetry": {"enabled": True, "transport": "poll", "retention": "run"},
         },
     )
@@ -428,7 +406,7 @@ def test_prepare_binding_is_stable_and_unadvertised_transports_refuse(tmp_path: 
         json={
             "rollout_id": "poll-only",
             "slot": "stream",
-            "policy_ref": _CRAFTAX_PIN,
+            "policy_ref": _OPENENV_PIN,
             "telemetry": {"enabled": True, "transport": "poll", "retention": "run"},
         },
     )

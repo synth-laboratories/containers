@@ -18,7 +18,7 @@ One umbrella: `TargetRuntime`. Callers say “run this target.” Children live 
 
 | Kind | Module | What it owns |
 | ---- | ------ | ------------ |
-| `craftax` | `runtimes/craftax.py` | Fixture world (`env:craftax_fixture`) or gold HTTP (`env:craftax_gold`). Planner follows environment_ref, not `target_id`. |
+| `external` | `TargetSpec.runtime` | Image-owned world (not in this package). |
 | `harbor` | `runtimes/harbor.py` | Trial/verifier fold. Fixture keeps verifier on the parent log. `env:harbor_docker` runs agent vs verifier as distinct `docker run`s; native `reward.txt` ≡ `/reward`. |
 | `digbench` | `runtimes/digbench.py` | Mock dungeon (`env:digbench_mock`) or live Agent API (`env:digbench_relay`). No frames. |
 | `openenv` | `runtimes/openenv.py` | Echo-shaped gym wrap (`env:echo` via `echo_world.py`). Observation / action / env reward. Not a fold. Not an unmodified image. |
@@ -52,8 +52,7 @@ Trace Streaming Profile kit: `docs/specs/trace-streaming-profile-v1.md` + `tests
 - `project_harbor_atif` — Harbor-only overlay of the log
 - `examples/serve_banking77.py` — loopback `banking77_classify` (default `:8099`, optional `--storage-root`)
 - `examples/serve_healthbench.py` — loopback `healthbench_chat` (default `:8114`)
-- `examples/serve_craftax_react.py` — loopback gold Craftax ReAct (default `:8097`)
-- `examples/craftax_ten_seeds.py`, `examples/deo_nested_reward.py`, `examples/banking77_datagen.py` — headless C3-01 / C4-06 / Banking77 data gen (no Desktop, no `--paid`)
+- `examples/deo_nested_reward.py`, `examples/banking77_datagen.py` — headless C4-06 / Banking77 data gen (no Desktop, no `--paid`)
 
 ## Live-stream order
 

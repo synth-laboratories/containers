@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import uuid
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+
+from ..nested import NestedError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
@@ -25,7 +26,7 @@ from .http_requests import (
     to_policy_config_dict,
     to_put_policy_dict,
 )
-from .state import CompatPlatform, PolicyConfig
+from .state import CompatPlatform
 from .targets import TARGETS, TargetSpec
 
 
@@ -49,7 +50,7 @@ def _http_from_parse(exc: BaseException) -> HTTPException:
 
 
 def create_compat_app(
-    target: str | TargetSpec = "craftax_engine",
+    target: str | TargetSpec = "openenv_echo",
     *,
     storage_root: str | Path | None = None,
     runtime_config: dict[str, Any] | None = None,
@@ -74,152 +75,29 @@ def create_compat_app(
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
-        return {
+        payload = {
             "status": "ok",
             "target": spec.target_id,
             "runtime_family": spec.runtime_family.value,
             "environment_ref": spec.environment_ref,
         }
+        if spec.health_probe is not None:
+            extra = spec.health_probe()
+            if isinstance(extra, dict):
+                payload.update(extra)
+            if str(payload.get("status") or "ok") != "ok":
+                return JSONResponse(status_code=503, content=payload)
+        return payload
 
     @app.get("/metadata")
     @app.get("/info")
     async def metadata() -> dict[str, Any]:
         payload = platform.metadata_payload()
-        if spec.runtime_family.value == "healthbench":
-            from .runtimes.healthbench import model_roles
-
-            gepa = (payload.get("optimizer_contracts") or {}).get("gepa") or {
-                "version": "synth_optimizers.gepa.v2",
-                "program_route": "/program",
-                "taskset_route": "/taskset",
-                "taskset_tasks_route": "/taskset/tasks",
-                "rollout_route": "/rollout",
-                "trace_route": "/rollouts/{rollout_id}/events",
-            }
-            capabilities = payload.get("capabilities")
-            if not isinstance(capabilities, dict):
-                capabilities = {}
-            capabilities.setdefault("contract_version", "container_contract.v1")
-            capabilities.setdefault("rollout_modes", ["blocking"])
-            capabilities.setdefault(
-                "operations",
-                {
-                    "prepare": True,
-                    "start": True,
-                    "get": True,
-                    "poll": True,
-                    "reward": True,
-                },
-            )
-            roles = model_roles()
-            metadata_blob = capabilities.setdefault("metadata", {})
-            if isinstance(metadata_blob, dict):
-                metadata_blob["policy_ready"] = bool(
-                    roles["policy"]["credential_present"]
-                )
-                metadata_blob["grader_ready"] = bool(
-                    roles["scorer"]["credential_present"]
-                )
-            capabilities["optimizer_contracts"] = {"gepa": gepa}
-            payload["capabilities"] = capabilities
-            metadata = payload.get("metadata")
-            if not isinstance(metadata, dict):
-                metadata = {}
-            metadata["model_roles"] = roles
-            metadata["optimizer_contracts"] = {"gepa": gepa}
-            payload["metadata"] = metadata
+        if spec.metadata_extra is not None:
+            extra = spec.metadata_extra(payload)
+            if isinstance(extra, dict):
+                payload = extra
         return payload
-
-    @app.get("/task_info")
-    async def task_info() -> Any:
-        if spec.runtime_family.value != "healthbench":
-            raise HTTPException(status_code=404, detail="task_info_not_supported")
-        return {
-            "task_id": "healthbench.response",
-            "name": "HealthBench physician-rubric response",
-            "objective": "maximize physician-rubric score",
-            "output_kind": "open_text",
-            "literal_training_targets": "forbidden",
-            "proposer_hints": {
-                "do_not_memorize": True,
-                "focus": "safe, accurate, relevant, and appropriately escalated health responses",
-            },
-        }
-
-    @app.get("/program")
-    async def program() -> Any:
-        if spec.runtime_family.value != "healthbench":
-            raise HTTPException(status_code=404, detail="program_not_supported")
-        seed_prompt = (
-            "You are a careful health assistant. Give accurate, relevant, and safe guidance. "
-            "State uncertainty, ask useful follow-up questions, and recommend appropriate "
-            "professional or emergency care when warranted."
-        )
-        return {
-            "version": "prompt_program.v1",
-            "program_id": "healthbench.response.v1",
-            "modules": [
-                {
-                    "module_id": "system_prompt",
-                    "role": "system",
-                    "mutable": True,
-                    "candidate_field": "system_prompt",
-                    "content": seed_prompt,
-                }
-            ],
-            "target_modules": [
-                {
-                    "module_id": "system_prompt",
-                    "candidate_field": "system_prompt",
-                    "objective": "healthbench_physician_rubric_score",
-                }
-            ],
-            "seed_candidate": {"system_prompt": seed_prompt},
-            "rollout_task_id": "healthbench.response",
-            "rollout_overlay_schema": {"system_prompt": "policy.system_message"},
-        }
-
-    @app.get("/taskset")
-    async def taskset() -> Any:
-        if spec.runtime_family.value != "healthbench":
-            raise HTTPException(status_code=404, detail="taskset_not_supported")
-        from .healthbench_world import rows
-
-        count = len(rows())
-        return {
-            "taskset_id": "openai.healthbench.2025-05-07",
-            "splits": {"train": count, "heldout": count},
-            "source": "openai/healthbench",
-            "metadata": {"gold_visibility": "environment_only", "rubric_authority": "physician"},
-        }
-
-    @app.post("/taskset/tasks")
-    async def taskset_tasks(request: Request) -> Any:
-        if spec.runtime_family.value != "healthbench":
-            raise HTTPException(status_code=404, detail="taskset_tasks_not_supported")
-        from .healthbench_world import load_row, public_observation
-
-        body = await request.json()
-        tasks = []
-        for task_id in body.get("task_ids") or []:
-            try:
-                seed = int(str(task_id).rsplit(":", 1)[-1])
-            except ValueError as exc:
-                raise HTTPException(status_code=422, detail="invalid_healthbench_task_id") from exc
-            row = load_row(seed)
-            if row is None:
-                raise HTTPException(status_code=404, detail=f"unknown_healthbench_task:{task_id}")
-            tasks.append(
-                {
-                    "task_id": str(task_id),
-                    "task_instance_id": f"seed:{seed}",
-                    "seed": seed,
-                    "split": str(body.get("split") or "train"),
-                    "input": public_observation(row, seed),
-                    "objective": "healthbench physician-rubric score",
-                }
-            )
-        return {"tasks": tasks, "metadata": {"requested": len(tasks)}}
 
     @app.post("/rollouts/prepare")
     async def prepare(request: Request) -> dict[str, Any]:
@@ -273,99 +151,20 @@ def create_compat_app(
         except (RequestParseError, ValueError) as exc:
             # Translate once at the HTTP edge: parse failures are 422, not 500.
             raise _http_from_parse(exc) from exc
-        result = await asyncio.to_thread(platform.start_rollout, req)
+        try:
+            result = await asyncio.to_thread(platform.start_rollout, req)
+        except NestedError as exc:
+            # A rollout that named a trial the platform does not carry is a bad
+            # request, not a platform fault. A 500 tells the caller nothing; the
+            # known ids are in the message, so hand them back.
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _platform_response(result)
 
     @app.post("/rollout", include_in_schema=False)
     async def optimizer_rollout(request: Request) -> Any:
-        if spec.runtime_family.value != "healthbench":
-            return await start(request)
-        body = await request.json()
-        task = body.get("task") if isinstance(body.get("task"), dict) else {}
-        seed = int(task.get("seed") or 0)
-        candidate = body.get("candidate") if isinstance(body.get("candidate"), dict) else {}
-        policy = body.get("policy") if isinstance(body.get("policy"), dict) else {}
-        policy_provider = str(policy.get("provider") or "groq").lower()
-        default_policy_base_url = (
-            "https://api.groq.com/openai/v1"
-            if policy_provider == "groq"
-            else "https://api.openai.com/v1"
-        )
-        default_policy_api_key_env = (
-            "GROQ_API_KEY" if policy_provider == "groq" else "OPENAI_API_KEY"
-        )
-        policy_config = {
-            "provider": policy_provider,
-            "model": policy.get("model") or "llama-3.1-8b-instant",
-            "base_url": policy.get("base_url")
-            or policy.get("api_base")
-            or default_policy_base_url,
-            "api_key_env": policy.get("api_key_env") or default_policy_api_key_env,
-            "max_tokens": policy.get("max_tokens") or 1536,
-            "system_prompt": candidate.get("system_prompt"),
-        }
-        config_digest = hashlib.sha256(
-            json.dumps(policy_config, sort_keys=True).encode("utf-8")
-        ).hexdigest()[:12]
-        config_id = f"gepa_healthbench_{config_digest}"
-        # The optimizer adapter may dispatch several immutable candidates at
-        # once. Registering an additional future pin is not a mid-trial mutation
-        # of any active pin; each rollout retains its own config id.
-        platform.policy_configs.setdefault(
-            config_id,
-            PolicyConfig(
-                config_id=config_id,
-                harness="chat_completion",
-                config=policy_config,
-            ),
-        )
-        rollout_id = str(
-            body.get("rollout_id")
-            or body.get("trace_correlation_id")
-            or f"roll_{uuid.uuid4().hex[:12]}"
-        )
-        telemetry = {"enabled": True, "transport": "poll", "retention": "run"}
-        if rollout_id not in platform.logs:
-            platform.prepare(rollout_id, "poll", "run")
-        req = parse_create_rollout(
-            {
-                "rollout_id": rollout_id,
-                "submission_mode": "sync",
-                "slot": "stream",
-                "telemetry": telemetry,
-                "task_instance_id": f"seed:{seed}",
-                "world_ref": "world:healthbench@eval",
-                "evaluation_plan_ref": "healthbench_eval.v1",
-                "policy_ref": {"harness": "chat_completion", "config": config_id},
-            }
-        )
-        result = await asyncio.to_thread(platform.start_rollout, req)
-        if "error" in result:
-            return _platform_response(result)
-        reward_record = platform.compute_reward(
-            rollout_id=rollout_id,
-            evidence=None,
-            mode="terminal",
-            rescore=False,
-            plan_ref="healthbench_eval.v1",
-            after_sequence=None,
-        )
-        reward = reward_record.get("reward")
-        events = platform.events_payload(rollout_id, 0, 10_000).get("events", [])
-        return {
-            **result,
-            "status": result.get("status"),
-            "success_status": "success" if reward is not None else "failed",
-            "reward_info": {"outcome_reward": reward, "metrics": {"healthbench_score": reward}},
-            "trace": {"events": events, "prompt_assertions": body.get("prompt_assertions")},
-            "events": events,
-            "summary": {
-                "seed": seed,
-                "rubric_authority": "physician",
-                "reward_status": reward_record.get("status"),
-                "reward_reasons": reward_record.get("reasons", []),
-            },
-        }
+        if spec.compat_rollout is not None:
+            return await spec.compat_rollout(request, platform, spec)
+        return await start(request)
 
     @app.post("/rollouts/{rollout_id}/complete")
     async def complete(rollout_id: str) -> Any:
@@ -581,5 +380,8 @@ def create_compat_app(
     async def drop_session(rollout_id: str) -> Any:
         result = platform.drop_session(rollout_id)
         return _platform_response(result)
+
+    if spec.mount_routes is not None:
+        spec.mount_routes(app, platform, spec)
 
     return app

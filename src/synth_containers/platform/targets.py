@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
@@ -12,7 +12,7 @@ from .affordances import AffordanceMap
 class TargetRuntimeKind(StrEnum):
     """Child of TargetRuntime. Not contracts.RuntimeFamily (codex/mcp/http)."""
 
-    CRAFTAX = "craftax"
+    EXTERNAL = "external"
     HARBOR = "harbor"
     DIGBENCH = "digbench"
     OPENENV = "openenv"
@@ -61,193 +61,17 @@ class TargetSpec:
     policy_seeds: tuple[PolicySeed, ...] = ()
     script_node: ScriptNode = ScriptNode.REWARD_TXT
     max_episode_steps: int | None = None
+    runtime: Any | None = None
+    health_probe: Any | None = None
+    optimizer_contracts: dict[str, Any] | None = None
+    metadata_extra: Any | None = None
+    mount_routes: Any | None = None
+    compat_rollout: Any | None = None
 
 
 def _env(items: dict[str, str]) -> AffordanceMap:
     return AffordanceMap(by_role={"environment": dict(items), "policy": {}, "evaluator": {}})
 
-
-CRAFTAX_ENGINE = TargetSpec(
-    target_id="craftax_engine",
-    runtime_family=TargetRuntimeKind.CRAFTAX,
-    adapter_chain=(),
-    world_ref="world:craftax_default@symbolic_survival",
-    environment_ref="env:craftax_fixture",
-    evaluation_plan_ref="eval:craftax.env_sum",
-    default_policy_harness="react",
-    scale_leases=10,
-    retention="run",
-    reward_kind=RewardKind.ENV_SUM,
-    live_reward=True,
-    live_frames="native",
-    true_checkpoint="unsupported",
-    blocking_trial="unsupported",
-    mcp_bind="unused",
-    reconnect="derived",
-    event_kinds=(
-        "trace.opened",
-        "env.episode.opened",
-        "observation",
-        "action",
-        "reward_signal",
-        "frame",
-        "span.policy.opened",
-        "span.step.opened",
-        "capture.closed",
-        "status",
-    ),
-    affordances=_env(
-        {
-            "step": "native",
-            "live_frames": "native",
-            "partial_trace": "native",
-            "poll": "native",
-            "sse": "derived",
-            "websocket": "derived",
-            "true_checkpoint": "unsupported",
-            "restore": "unsupported",
-            "fork": "unsupported",
-            "live_reward": "native",
-            "scale_leases": "native",
-            "bind_policy_config": "native",
-            "restart_policy": "native",
-        }
-    ),
-    max_episode_steps=8,
-)
-
-CRAFTAX_REACT = TargetSpec(
-    target_id="craftax_react",
-    runtime_family=TargetRuntimeKind.CRAFTAX,
-    adapter_chain=(),
-    world_ref="world:craftax_default@symbolic_survival",
-    environment_ref="env:craftax_gold",
-    evaluation_plan_ref="eval:craftax.env_sum",
-    default_policy_harness="react",
-    scale_leases=10,
-    retention="run",
-    reward_kind=RewardKind.ENV_SUM,
-    live_reward=True,
-    live_frames="native",
-    true_checkpoint="unsupported",
-    blocking_trial="unsupported",
-    mcp_bind="unused",
-    reconnect="derived",
-    event_kinds=(
-        "trace.opened",
-        "env.episode.opened",
-        "observation",
-        "action",
-        "reward_signal",
-        "frame",
-        "task_resolved",
-        "action_applied",
-        "state_transition",
-        "entity_transition",
-        "resource_delta",
-        "achievement_unlocked",
-        "reward_delta",
-        "checkpoint_cadence",
-        "episode_truncated",
-        "terminal",
-        "span.policy.opened",
-        "span.step.opened",
-        "capture.closed",
-        "status",
-    ),
-    affordances=_env(
-        {
-            "step": "native",
-            "live_frames": "native",
-            "partial_trace": "native",
-            "poll": "native",
-            "sse": "derived",
-            "websocket": "derived",
-            "true_checkpoint": "unsupported",
-            "restore": "unsupported",
-            "fork": "unsupported",
-            "live_reward": "native",
-            "scale_leases": "native",
-            "bind_policy_config": "native",
-            "restart_policy": "native",
-            "token_trace": "derived",
-        }
-    ),
-    policy_seeds=(
-        PolicySeed(
-            "muse_spark_medium",
-            "react",
-            {
-                "provider": "openrouter",
-                "model": "meta/muse-spark-1.1",
-                "effort": "medium",
-                "api_key_env": "OPENROUTER_API_KEY",
-                # Muse Spark medium needs room for hidden reasoning before its
-                # short structured action batch. 384 consistently ended at
-                # the reasoning budget with no model-authored content.
-                "max_tokens": 2048,
-                "parse_retries": 2,
-                "compact_every": 16,
-            },
-        ),
-    ),
-    max_episode_steps=120,
-)
-
-# Dedicated GoEx target: same gold Rust environment and paid ReAct harness, but
-# only this surface advertises the paired environment+policy checkpoint contract
-# implemented by the Containers adapter. The ordinary Craftax viewer remains
-# conservatively unsupported.
-CRAFTAX_GOEX = replace(
-    CRAFTAX_REACT,
-    target_id="craftax_goex",
-    true_checkpoint="native",
-    event_kinds=CRAFTAX_REACT.event_kinds
-    + ("rollout.checkpoint", "rollout.restored"),
-    affordances=_env(
-        {
-            **CRAFTAX_REACT.affordances.by_role["environment"],
-            "true_checkpoint": "native",
-            "restore": "native",
-            "fork": "native",
-        }
-    ),
-)
-
-CRAFTAX_CODE_POLICY = TargetSpec(
-    target_id="craftax_code_policy",
-    runtime_family=TargetRuntimeKind.CRAFTAX,
-    adapter_chain=(),
-    world_ref="world:craftax_default@symbolic_survival",
-    environment_ref="env:craftax_fixture",
-    evaluation_plan_ref="eval:craftax.env_sum",
-    default_policy_harness="isolated_policy_process",
-    scale_leases=4,
-    retention="run",
-    reward_kind=RewardKind.ENV_SUM,
-    live_reward=True,
-    live_frames="native",
-    true_checkpoint="unsupported",
-    blocking_trial="unsupported",
-    mcp_bind="unused",
-    reconnect="derived",
-    event_kinds=("trace.opened", "observation", "action", "reward_signal", "frame", "status"),
-    affordances=_env(
-        {
-            "step": "native",
-            "live_frames": "native",
-            "update_policy_code": "native",
-            "restart_policy": "native",
-            "bind_policy_config": "unsupported",
-            "true_checkpoint": "unsupported",
-            "poll": "native",
-            "sse": "derived",
-            "websocket": "derived",
-            "live_reward": "native",
-        }
-    ),
-    max_episode_steps=8,
-)
 
 HARBOR_PUBLIC = TargetSpec(
     target_id="harbor_public",
@@ -403,6 +227,7 @@ OPENENV_ECHO = TargetSpec(
             "live_reward": "unsupported",
         }
     ),
+    policy_seeds=(PolicySeed("echo", "gym_loop", {}),),
 )
 
 DIGBENCH_PUBLIC = TargetSpec(
@@ -509,163 +334,25 @@ DIGBENCH_MOCK = TargetSpec(
     ),
 )
 
-BANKING77_CLASSIFY = TargetSpec(
-    target_id="banking77_classify",
-    runtime_family=TargetRuntimeKind.BANKING77,
-    adapter_chain=(),
-    world_ref="world:banking77@heldout",
-    environment_ref="env:banking77_dataset",
-    evaluation_plan_ref="banking77_eval.v1",
-    default_policy_harness="classify",
-    scale_leases=8,
-    retention="run",
-    reward_kind=RewardKind.ENV_SUM,
-    live_reward=True,
-    live_frames="unsupported",
-    true_checkpoint="unsupported",
-    blocking_trial="unsupported",
-    mcp_bind="unused",
-    reconnect="derived",
-    event_kinds=(
-        "trace.opened",
-        "env.episode.opened",
-        "observation",
-        "action",
-        "reward_signal",
-        "span.policy.opened",
-        "span.policy.closed",
-        "env.episode.closed",
-        "capture.closed",
-        "status",
-    ),
-    affordances=_env(
-        {
-            "step": "native",
-            "poll": "native",
-            "sse": "derived",
-            "websocket": "derived",
-            "live_frames": "unsupported",
-            "true_checkpoint": "unsupported",
-            "restore": "unsupported",
-            "fork": "unsupported",
-            "live_reward": "native",
-            "scale_leases": "native",
-            "bind_policy_config": "native",
-            "restart_policy": "native",
-        }
-    ),
-    policy_seeds=(
-        PolicySeed("dataset_gold", "dataset_gold", {"source": "environment"}),
-        PolicySeed("classify", "classify", {"source": "policy"}),
-    ),
-)
-
-HEALTHBENCH_CHAT = TargetSpec(
-    target_id="healthbench_chat",
-    runtime_family=TargetRuntimeKind.HEALTHBENCH,
-    adapter_chain=(),
-    world_ref="world:healthbench@eval",
-    environment_ref="env:healthbench_physician_rubrics",
-    evaluation_plan_ref="healthbench_eval.v1",
-    default_policy_harness="chat_completion",
-    scale_leases=30,
-    retention="run",
-    reward_kind=RewardKind.ENV_SUM,
-    live_reward=True,
-    live_frames="unsupported",
-    true_checkpoint="unsupported",
-    blocking_trial="unsupported",
-    mcp_bind="unused",
-    reconnect="derived",
-    event_kinds=(
-        "trace.opened",
-        "env.episode.opened",
-        "observation",
-        "span.policy.opened",
-        "span.policy.closed",
-        "action",
-        "span.evaluator.opened",
-        "rubric.grade",
-        "span.evaluator.closed",
-        "reward_signal",
-        "env.episode.closed",
-        "capture.closed",
-        "status",
-    ),
-    affordances=_env(
-        {
-            "step": "native",
-            "poll": "native",
-            "sse": "derived",
-            "websocket": "derived",
-            "live_frames": "unsupported",
-            "true_checkpoint": "unsupported",
-            "restore": "unsupported",
-            "fork": "unsupported",
-            "live_reward": "native",
-            "scale_leases": "native",
-            "bind_policy_config": "native",
-            "restart_policy": "native",
-            "physician_rubric_grading": "native",
-        }
-    ),
-    policy_seeds=(
-        PolicySeed(
-            "groq_llama31_8b",
-            "chat_completion",
-            {
-                "provider": "groq",
-                "model": "llama-3.1-8b-instant",
-                "api_key_env": "GROQ_API_KEY",
-                "base_url": "https://api.groq.com/openai/v1",
-                "max_tokens": 1536,
-            },
-        ),
-        PolicySeed(
-            "openai_gpt41_mini",
-            "chat_completion",
-            {
-                "provider": "openai",
-                "model": "gpt-4.1-mini-2025-04-14",
-                "api_key_env": "OPENAI_API_KEY",
-                "base_url": "https://api.openai.com/v1",
-                "max_tokens": 1536,
-            },
-        ),
-    ),
-)
-
 TARGETS: dict[str, TargetSpec] = {
     spec.target_id: spec
     for spec in (
-        CRAFTAX_ENGINE,
-        CRAFTAX_REACT,
-        CRAFTAX_GOEX,
-        CRAFTAX_CODE_POLICY,
         HARBOR_PUBLIC,
         HARBOR_DOCKER,
         DEO_NESTED,
         OPENENV_ECHO,
         DIGBENCH_MOCK,
         DIGBENCH_PUBLIC,
-        BANKING77_CLASSIFY,
-        HEALTHBENCH_CHAT,
     )
 }
 
 PR_TARGETS = (
-    "craftax_engine",
-    "craftax_code_policy",
     "harbor_public",
     "deo_nested",
     "openenv_echo",
     "digbench_mock",
-    "banking77_classify",
 )
 
 PAID_TARGETS = (
-    "craftax_react",
-    "craftax_goex",
     "digbench_public",
-    "healthbench_chat",
 )

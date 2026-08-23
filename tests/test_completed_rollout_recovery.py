@@ -14,13 +14,13 @@ from synth_containers.platform import create_compat_app
 BODY = {
     "rollout_id": "destructive_reopen_1",
     "task_instance_id": "seed:4",
-    "policy_ref": {"harness": "react", "config": "luna_med"},
+    "policy_ref": {"harness": "gym_loop", "config": "echo"},
     "telemetry": {"enabled": True, "transport": "sse", "retention": "run"},
 }
 
 
 def test_completed_rollout_reopens_from_durable_storage_without_reexecution(tmp_path) -> None:
-    first_app = create_compat_app("craftax_engine", storage_root=tmp_path)
+    first_app = create_compat_app("openenv_echo", storage_root=tmp_path)
     first = TestClient(first_app)
     prepared = first.post(
         "/rollouts/prepare",
@@ -43,7 +43,7 @@ def test_completed_rollout_reopens_from_durable_storage_without_reexecution(tmp_
 
     # Constructing a new process façade is the destructive boundary: no live
     # in-memory pins, logs, reward cache, or seal cache survive it.
-    reopened_app = create_compat_app("craftax_engine", storage_root=tmp_path)
+    reopened_app = create_compat_app("openenv_echo", storage_root=tmp_path)
     reopened = TestClient(reopened_app)
     reopened_platform = reopened_app.state.platform
     assert reopened_platform.step_calls == 0
@@ -78,18 +78,18 @@ def test_completed_rollout_reopens_from_durable_storage_without_reexecution(tmp_
 
 
 def test_reopen_fails_closed_when_seal_is_tampered(tmp_path) -> None:
-    first = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path))
+    first = TestClient(create_compat_app("openenv_echo", storage_root=tmp_path))
     assert first.post("/rollouts", json=BODY).status_code == 200
     seal_path = tmp_path / "seals" / f"{BODY['rollout_id']}.trace-v5.json"
     seal = json.loads(seal_path.read_text(encoding="utf-8"))
     seal["high_water"] += 1
     seal_path.write_text(json.dumps(seal), encoding="utf-8")
     with pytest.raises(ValueError, match="trace_seal_digest_mismatch"):
-        create_compat_app("craftax_engine", storage_root=tmp_path)
+        create_compat_app("openenv_echo", storage_root=tmp_path)
 
 
 def test_reopen_fails_closed_when_reward_receipt_is_tampered(tmp_path) -> None:
-    first = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path))
+    first = TestClient(create_compat_app("openenv_echo", storage_root=tmp_path))
     assert first.post("/rollouts", json=BODY).status_code == 200
     assert first.post(
         "/reward", json={"rollout_id": BODY["rollout_id"], "mode": "terminal"}
@@ -100,4 +100,4 @@ def test_reopen_fails_closed_when_reward_receipt_is_tampered(tmp_path) -> None:
     wrapper["receipt"]["reward"] = 999
     reward_path.write_text(json.dumps(wrapper), encoding="utf-8")
     with pytest.raises(ValueError, match="reward_receipt_digest"):
-        create_compat_app("craftax_engine", storage_root=tmp_path)
+        create_compat_app("openenv_echo", storage_root=tmp_path)

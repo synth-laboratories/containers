@@ -33,6 +33,7 @@ dev = [
 ]
 
 [project.scripts]
+synth-containers = "synth_containers.cli:main"
 synth-trace = "synth_containers.tracing.cli:main"
 
 [project.urls]

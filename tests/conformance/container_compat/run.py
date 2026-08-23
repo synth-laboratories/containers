@@ -1349,7 +1349,10 @@ def main(argv: list[str] | None = None) -> int:
 
         from synth_containers.platform import create_compat_app
 
-        with TestClient(create_compat_app(args.target)) as client:
+        from .child_fixture import runtime_config_for
+
+        app = create_compat_app(args.target, runtime_config=runtime_config_for(args.target))
+        with TestClient(app) as client:
             suite = run_against_client(client, args.target, paid=args.paid)
     receipt = receipt_from_suite(suite)
     if args.receipt:

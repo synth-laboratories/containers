@@ -14,7 +14,7 @@ from synth_containers.platform.reducer import assert_honest_projection
 
 SLOT = "stream"
 POLICY_PINS = {
-    "craftax_engine": {"harness": "react", "config": "luna_med"},
+    "openenv_echo": {"harness": "gym_loop", "config": "echo"},
     "harbor_public": {"harness": "harbor_fused", "config": "luna_med"},
     "digbench_mock": {"harness": "react_legal_actions", "config": "react_legal_actions"},
 }
@@ -76,13 +76,13 @@ def consume(target: str, tmp: Path) -> dict:
 def main() -> int:
     with tempfile.TemporaryDirectory() as raw:
         tmp = Path(raw)
-        craftax = consume("craftax_engine", tmp)
+        echo = consume("openenv_echo", tmp)
         harbor = consume("harbor_public", tmp)
         digbench = consume("digbench_mock", tmp)
-        assert craftax["ready"] and harbor["ready"] and digbench["ready"]
-        assert craftax["slot"] == harbor["slot"] == digbench["slot"] == SLOT
-        assert craftax["projection"]["has_live_frames"] is True
-        assert craftax["projection"]["has_reward_txt"] is False
+        assert echo["ready"] and harbor["ready"] and digbench["ready"]
+        assert echo["slot"] == harbor["slot"] == digbench["slot"] == SLOT
+        assert echo["projection"]["has_live_frames"] is False
+        assert echo["projection"]["has_reward_txt"] is False
         assert harbor["projection"]["has_live_frames"] is False
         assert harbor["projection"]["has_reward_txt"] is True
         assert digbench["projection"]["has_live_frames"] is False
@@ -90,7 +90,7 @@ def main() -> int:
         print(
             json.dumps(
                 {
-                    "craftax": {k: craftax[k] for k in ("stream_id", "reward", "slot")},
+                    "echo": {k: echo[k] for k in ("stream_id", "reward", "slot")},
                     "harbor": {k: harbor[k] for k in ("stream_id", "reward", "slot")},
                     "digbench": {k: digbench[k] for k in ("stream_id", "reward", "slot")},
                 },

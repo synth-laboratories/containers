@@ -54,6 +54,17 @@ These are separate concerns. Do not conflate them in docs, TOML, or skills.
   ```
 
   Dockerizing the task server is optional and independent of GEPA proposer config.
+  Preferred eval packaging is a **local** catalog image (no GHCR):
+
+  ```python
+  from synth_containers import ContainerRunner
+
+  handle = ContainerRunner(image_id="banking77", catalog="evals/containers/images").serve()
+  ```
+
+  CLI: `synth-containers serve --target banking77_classify` (duck) or
+  `synth-containers up banking77 --catalog evals/containers/images` (local image).
+  `url` / `command` still work. Harbor trial images are not this path.
 
 - **Proposer substrate** (optimizers repo): where the Codex app-server runs during
   reflective prompt optimization — `runtime_substrate = "local"` (default) or

@@ -8,12 +8,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from synth_containers.platform import PR_TARGETS, create_compat_app
+from tests.conformance.container_compat.child_fixture import runtime_config_for
 from tests.conformance.container_compat.run import receipt_from_suite, run_against_client
 
 
 @pytest.mark.parametrize("target", PR_TARGETS)
 def test_container_compat_pr_target(target: str) -> None:
-    with TestClient(create_compat_app(target)) as client:
+    app = create_compat_app(target, runtime_config=runtime_config_for(target))
+    with TestClient(app) as client:
         suite = run_against_client(client, target, paid=False)
     receipt = receipt_from_suite(suite)
     failed = receipt["failed"]

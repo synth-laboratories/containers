@@ -23,7 +23,7 @@ _SCHEMA_ROOT = Path(__file__).resolve().parents[3] / "schemas" / "trace-stream"
 
 
 def _engine_events() -> tuple[dict, list[dict]]:
-    client = TestClient(create_compat_app("craftax_engine"))
+    client = TestClient(create_compat_app("openenv_echo"))
     prepared = client.post(
         "/rollouts/prepare",
         json={"rollout_id": "roll_ts_a", "telemetry": {"enabled": True, "transport": "sse"}},
@@ -35,7 +35,7 @@ def _engine_events() -> tuple[dict, list[dict]]:
         json={
             "rollout_id": "roll_ts_a",
             "telemetry": {"enabled": True, "transport": "sse"},
-            "policy_ref": {"harness": "react", "config": "luna_med"},
+            "policy_ref": {"harness": "gym_loop", "config": "echo"},
         },
     )
     assert started.status_code == 200, started.text
@@ -72,13 +72,12 @@ def test_ts_a04_discriminated_payloads() -> None:
     envelope_schema = json.loads((_SCHEMA_ROOT / "envelope.schema.json").read_text())
     required = envelope_schema["required"]
     kinds = {item["kind"]: item for item in events if not item.get("control")}
-    for kind in ("reward_signal", "frame", "action", "observation", "status"):
+    for kind in ("reward_signal", "action", "observation", "status"):
         row = kinds[kind]
         for key in required:
             assert key in row
         assert isinstance(row["payload"], dict)
     assert isinstance(kinds["reward_signal"]["payload"].get("value"), (int, float))
-    assert kinds["frame"]["payload"].get("digest")
 
 
 def test_ts_a05_unknown_namespaced_kinds_survive() -> None:
@@ -104,13 +103,13 @@ def test_ts_a06_lifecycle_regressions_fail() -> None:
 
 
 def test_ts_a07_missing_stays_missing() -> None:
-    client = TestClient(create_compat_app("craftax_engine"))
+    client = TestClient(create_compat_app("openenv_echo"))
     started = client.post(
         "/rollouts",
         json={
             "telemetry": {"enabled": True, "transport": "sse"},
             "omit_reward": True,
-            "policy_ref": {"harness": "react", "config": "luna_med"},
+            "policy_ref": {"harness": "gym_loop", "config": "echo"},
         },
     )
     assert started.status_code == 200, started.text

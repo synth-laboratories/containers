@@ -16,13 +16,13 @@ from synth_containers.platform import create_compat_app
 BODY = {
     "rollout_id": "seal_reference_1",
     "task_instance_id": "seed:7",
-    "policy_ref": {"harness": "react", "config": "luna_med"},
+    "policy_ref": {"harness": "gym_loop", "config": "echo"},
     "telemetry": {"enabled": True, "transport": "sse", "retention": "run"},
 }
 
 
 def test_terminal_record_names_the_sealed_trace(tmp_path) -> None:
-    app = create_compat_app("craftax_engine", storage_root=tmp_path)
+    app = create_compat_app("openenv_echo", storage_root=tmp_path)
     client = TestClient(app)
     prepared = client.post(
         "/rollouts/prepare",
@@ -47,7 +47,7 @@ def test_terminal_record_names_the_sealed_trace(tmp_path) -> None:
 
 
 def test_prepared_but_unstarted_rollout_announces_no_trace(tmp_path) -> None:
-    app = create_compat_app("craftax_engine", storage_root=tmp_path)
+    app = create_compat_app("openenv_echo", storage_root=tmp_path)
     client = TestClient(app)
     prepared = client.post(
         "/rollouts/prepare",

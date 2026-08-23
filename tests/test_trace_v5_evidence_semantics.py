@@ -545,6 +545,40 @@ def test_native_evaluation_infers_bounds_that_include_unbounded_native_score(
     assert _codes(trace, inspected.evidence) == set()
 
 
+def test_native_evaluation_declared_pass_does_not_invent_half_bar(
+    tmp_path: Path,
+) -> None:
+    trace = _trace("healthbench-correlation")
+    _write_trace_bundle(tmp_path, trace)
+
+    attached = attach_native_evaluation(
+        tmp_path,
+        payload={
+            "schema_version": "evals.evaluation-pipeline.v1",
+            "authority": "evals.evaluation-pipeline",
+            "trace_correlation_id": "healthbench-correlation",
+            "status": "completed",
+            "passed": True,
+            "pass_threshold": 0.0,
+            "reward": {
+                "id": "final_evaluation_score",
+                "value": 0.423728813559322,
+                "source_kind": "composite",
+            },
+        },
+        source_name="aggregate.native-evaluation.json",
+    )
+    inspected = load_bundle(tmp_path)[0]
+    assert inspected.evidence is not None
+    verdict = inspected.evidence.benchmark_verdicts[-1]
+
+    assert attached["validation_valid"] is True
+    assert attached["aggregate_score"] == pytest.approx(0.423728813559322)
+    assert verdict.decision == "pass"
+    assert verdict.threshold == pytest.approx(0.0)
+    assert _codes(trace, inspected.evidence) == set()
+
+
 def test_failed_native_evaluation_does_not_publish_placeholder_score_or_verdict(
     tmp_path: Path,
 ) -> None:
