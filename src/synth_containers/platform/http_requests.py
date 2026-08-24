@@ -23,6 +23,7 @@ _TRANSPORTS = frozenset({"poll", "sse", "websocket", "auto"})
 _REWARD_MODES = frozenset({"terminal", "provisional"})
 _SUBMISSION_MODES = frozenset({"sync", "async"})
 ISOLATED_POLICY_HARNESS = "isolated_policy_process"
+NANOHORIZON_HARNESS = "nanohorizon"
 
 
 class RequestParseError(ValueError):

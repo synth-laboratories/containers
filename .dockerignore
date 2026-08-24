@@ -1,0 +1,18 @@
+# Bake context hygiene: source + packaging only.
+.git
+.github
+.venv
+.pytest_cache
+.ruff_cache
+build
+dist
+temp
+tasks
+docs
+examples
+tests
+openapi
+schemas
+skills
+**/__pycache__
+**/*.pyc

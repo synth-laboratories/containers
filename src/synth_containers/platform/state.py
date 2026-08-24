@@ -19,7 +19,7 @@ from ..event_log import (
     validate_rollout_id,
 )
 from .affordances import bind_recipe
-from .http_requests import CreateRolloutRequest, ISOLATED_POLICY_HARNESS
+from .http_requests import CreateRolloutRequest, ISOLATED_POLICY_HARNESS, NANOHORIZON_HARNESS
 from .policy_process import DEFAULT_HEURISTIC, IsolatedPolicyProcess
 from .reward_plan import PlanOutcome, classify_plan_outcome
 from .runtime import runtime_for
@@ -381,7 +381,7 @@ class CompatPlatform:
                     self.reward_by_execution_id[str(execution_id)] = reward
 
     def _seed_default_policies(self) -> None:
-        if self.spec.default_policy_harness == "isolated_policy_process":
+        if self.spec.default_policy_harness in {ISOLATED_POLICY_HARNESS, NANOHORIZON_HARNESS}:
             return
         self.policy_configs["luna_med"] = PolicyConfig(
             config_id="luna_med",
@@ -409,6 +409,8 @@ class CompatPlatform:
             ]
         if self.spec.default_policy_harness == ISOLATED_POLICY_HARNESS:
             return [{"harness": ISOLATED_POLICY_HARNESS, "config": None, "code": None}]
+        if self.spec.default_policy_harness == NANOHORIZON_HARNESS:
+            return [{"harness": NANOHORIZON_HARNESS, "config": None, "code": None}]
         return [
             {
                 "harness": self.spec.default_policy_harness,
@@ -684,6 +686,14 @@ class CompatPlatform:
             }
         if config_id and config_id not in self.policy_configs and harness != ISOLATED_POLICY_HARNESS:
             return {"error": "unknown_policy_config", "status_code": 404, "config_id": config_id}
+        if harness == NANOHORIZON_HARNESS:
+            revision = self.policy_revisions.get(str(self.current_policy_revision_id or ""))
+            if revision is None or not revision.code:
+                return {
+                    "error": "policy_revision_required",
+                    "status_code": 422,
+                    "detail": "harness nanohorizon requires PUT /policy before POST /rollouts",
+                }
 
         if request.resume_from_checkpoint_id:
             if self.spec.affordances.level("restore") != "native" or self.spec.affordances.level(
@@ -945,7 +955,7 @@ class CompatPlatform:
             harness=harness,
             config_id=None,
             code=bytes(raw),
-            isolation_receipt={"sandbox": "isolated_policy_process", "digest": digest},
+            isolation_receipt={"sandbox": harness, "digest": digest},
         )
         self.policy_revisions[revision_id] = revision
         self.current_policy_revision_id = revision_id
@@ -953,12 +963,19 @@ class CompatPlatform:
         self.policy_code = bytes(raw)
         self._close_policy_process()
         receipt = dict(revision.isolation_receipt)
-        try:
-            process = self._ensure_policy_process()
-            receipt.update(process.isolation_receipt)
-            revision.isolation_receipt = receipt
-        except Exception as exc:
-            receipt["spawn_error"] = str(exc)
+        spawn = harness == ISOLATED_POLICY_HARNESS or (
+            self.spec.default_policy_harness == ISOLATED_POLICY_HARNESS
+            and harness != NANOHORIZON_HARNESS
+        )
+        if spawn:
+            try:
+                process = self._ensure_policy_process()
+                receipt.update(process.isolation_receipt)
+                revision.isolation_receipt = receipt
+            except Exception as exc:
+                receipt["spawn_error"] = str(exc)
+        else:
+            receipt["spawned"] = False
         return {
             "policy_revision_id": revision_id,
             "digest": digest,

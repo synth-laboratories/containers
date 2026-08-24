@@ -57,6 +57,19 @@ from .formats import (
     task_info_to_http_payload,
 )
 from .http_adapter import ManagedRuntime, create_reference_app
+from .harbor_environment import (
+    HARBOR_ENVIRONMENT_RELEASE_SCHEMA,
+    HARBOR_PACKAGE_DRAFT_SCHEMA,
+    HarborEnvironmentDraft,
+    HarborEnvironmentError,
+    HarborEnvironmentRelease,
+    HarborFreshnessReceipt,
+    HarborProviderCompatibility,
+    HarborResourceRequest,
+    HarborValidation,
+    inspect_harbor_package,
+    register_harbor_environment,
+)
 from .launch import (
     ImageSpec,
     LaunchError,
