@@ -259,3 +259,120 @@ def test_openrouter_react_streams_token_deltas_and_skips_empty_reasoning(
     assert trace["token_trace"] == "derived"
     assert trace["deltas_emitted"] == 1
     assert trace["usage"]["total_tokens"] == 13
+
+
+def _tool_body_with_usage(actions: list[str], prompt_tokens: int) -> dict:
+    body = _tool_body(actions)
+    body["usage"] = {"prompt_tokens": prompt_tokens, "completion_tokens": 8}
+    return body
+
+
+def test_openrouter_react_compacts_when_the_prompt_passes_the_token_budget(monkeypatch) -> None:
+    """A turn count only predicts context length if every turn is the same size.
+
+    A model that keeps its own reasoning in history grows the prompt by whatever
+    it wrote, so the thing that runs out is tokens, not turns.
+    """
+
+    captured: list[dict] = []
+
+    def fake_urlopen(request, timeout=None):
+        body = json.loads(request.data.decode())
+        captured.append(body)
+        # A stand-in for a real provider: the prompt costs what the history
+        # holds, so a compaction actually brings the number back down.
+        return _json_response(_tool_body_with_usage(["do"], 1000 * len(body["messages"])))
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-only")
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    policy = OpenRouterReAct(
+        config_id="luna_med", config={"compact_every": 64, "compact_at_tokens": 8000}
+    )
+    observation = {"valid_actions": ["do"], "observation_text": "obs"}
+    for index in range(8):
+        policy.plan({**observation, "observation_text": f"obs-{index}"})
+
+    # The turn rule cannot fire in 8 turns; the token budget does, and the
+    # history it rebuilds is genuinely shorter than the one it replaced.
+    assert policy.trace_data()["compact_count"] >= 1
+    lengths = [len(body["messages"]) for body in captured]
+    assert any(
+        later < earlier for earlier, later in zip(lengths, lengths[1:])
+    ), f"compaction never shrank the history: {lengths}"
+
+    notice = captured[-1]["messages"][1]["content"]
+    assert notice.startswith("[compacted ")
+    assert "trigger=tokens" in notice
+    assert "compact_at_tokens=8000" in notice
+
+    # Control: the same eight turns with only the turn rule never compact, and
+    # the prompt sails past the budget.
+    turns_only = OpenRouterReAct(
+        config_id="luna_med", config={"compact_every": 64, "compact_at_tokens": 0}
+    )
+    for index in range(8):
+        turns_only.plan({**observation, "observation_text": f"obs-{index}"})
+    assert turns_only.trace_data()["compact_count"] == 0
+    assert turns_only.trace_data()["prompt_tokens"] > 8000
+
+
+def test_openrouter_react_compacts_a_tool_cycle_history(monkeypatch) -> None:
+    """Pairing on `user` alone matched nothing when observations are tool results.
+
+    `observation_role="tool"` is what lets a training proxy keep the sampled
+    tokens as a prefix, and it silently disabled compaction entirely.
+    """
+
+    captured: list[dict] = []
+
+    def fake_urlopen(request, timeout=None):
+        body = json.loads(request.data.decode())
+        captured.append(body)
+        return _json_response(_tool_body_with_usage(["do"], 1000 * len(body["messages"])))
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-only")
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    policy = OpenRouterReAct(
+        config_id="luna_med",
+        config={"compact_every": 64, "compact_at_tokens": 8000, "observation_role": "tool"},
+    )
+    observation = {"valid_actions": ["do"], "observation_text": "obs"}
+    for index in range(6):
+        policy.plan({**observation, "observation_text": f"obs-{index}"})
+
+    assert policy.trace_data()["compact_count"] >= 1
+    messages = captured[-1]["messages"]
+    # Every surviving tool result must answer a call that is still in history.
+    live_calls = {
+        str(call.get("id") or "")
+        for message in messages
+        if message.get("role") == "assistant"
+        for call in (message.get("tool_calls") or ())
+    }
+    orphans = [
+        message
+        for message in messages
+        if message.get("role") == "tool" and str(message.get("tool_call_id") or "") not in live_calls
+    ]
+    assert orphans == []
+
+
+def test_openrouter_react_token_budget_survives_a_checkpoint(monkeypatch) -> None:
+    def fake_urlopen(request, timeout=None):
+        return _json_response(_tool_body_with_usage(["do"], 7777))
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-only")
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    policy = OpenRouterReAct(config_id="luna_med", config={"compact_at_tokens": 8000})
+    policy.plan({"valid_actions": ["do"], "observation_text": "obs"})
+    state = policy.checkpoint_state()
+    assert state["last_prompt_tokens"] == 7777
+
+    resumed = OpenRouterReAct(config_id="luna_med", config={"compact_at_tokens": 8000})
+    resumed.restore_checkpoint_state(state)
+    assert resumed._last_prompt_tokens == 7777
+    # A checkpoint written before token-triggered compaction still restores.
+    legacy = dict(state)
+    legacy.pop("last_prompt_tokens")
+    resumed.restore_checkpoint_state(legacy)
+    assert resumed._last_prompt_tokens == 0

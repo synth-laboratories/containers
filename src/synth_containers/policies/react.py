@@ -250,6 +250,13 @@ class OpenRouterReAct:
         self.max_tokens = min(max(int(config.get("max_tokens") or 768), 64), 2048)
         self.parse_retries = min(max(int(config.get("parse_retries") or 0), 0), 2)
         self.compact_every = min(max(int(config.get("compact_every") or 16), 1), 64)
+        # A turn count only predicts context length when every turn is the same
+        # size. It is not: a model that keeps its own reasoning in history grows
+        # the prompt by whatever it wrote. Compact on the thing that actually
+        # runs out — tokens — using the prompt size the provider reports. 0
+        # leaves the turn-count rule alone.
+        self.compact_at_tokens = max(int(config.get("compact_at_tokens") or 0), 0)
+        self._last_prompt_tokens = 0
         # How the NEXT observation is carried back to the model.
         #
         #   "user" (default)  a plain user turn, as this harness has always done
@@ -300,6 +307,7 @@ class OpenRouterReAct:
             "plan_min": self.plan_min,
             "plan_max": self.plan_max,
             "compact_every": self.compact_every,
+            "compact_at_tokens": self.compact_at_tokens,
             "observation_role": self.observation_role,
             "token_trace": "derived",
             "graded": True,
@@ -319,6 +327,7 @@ class OpenRouterReAct:
             "pending_tool_call_id": self._pending_tool_call_id,
             "calls": self.calls,
             "compact_count": self._compact_count,
+            "last_prompt_tokens": self._last_prompt_tokens,
             "deltas_emitted": self._deltas_emitted,
             "usage": dict(self._usage),
         }
@@ -340,6 +349,9 @@ class OpenRouterReAct:
         self.calls = int(state.get("calls") or 0)
         self._pending_tool_call_id = state.get("pending_tool_call_id") or None
         self._compact_count = int(state.get("compact_count") or 0)
+        # Absent in checkpoints written before token-triggered compaction; a
+        # zero just means the next turn re-measures.
+        self._last_prompt_tokens = int(state.get("last_prompt_tokens") or 0)
         self._deltas_emitted = int(state.get("deltas_emitted") or 0)
         usage = state.get("usage")
         if not isinstance(usage, dict):
@@ -454,7 +466,9 @@ class OpenRouterReAct:
             "fallback": fallback,
             "parse_error": parse_error,
             "compact_every": self.compact_every,
+            "compact_at_tokens": self.compact_at_tokens,
             "compact_count": self._compact_count,
+            "prompt_tokens": self._last_prompt_tokens,
             "history_turns": self.calls,
             "deltas_emitted": call_deltas,
             "token_trace": "derived" if call_deltas else None,
@@ -481,15 +495,31 @@ class OpenRouterReAct:
             'Return JSON only: {"actions":["do","right"]}'
         )
 
+    def _compaction_reason(self) -> str | None:
+        """Why this turn should compact, or None."""
+
+        if self.calls == 0:
+            return None
+        if self.compact_at_tokens and self._last_prompt_tokens >= self.compact_at_tokens:
+            return "tokens"
+        if self.calls % self.compact_every == 0:
+            return "turns"
+        return None
+
     def _maybe_compact(self, on_delta: DeltaCallback | None) -> None:
-        if self.calls == 0 or self.calls % self.compact_every != 0:
+        reason = self._compaction_reason()
+        if reason is None:
             return
         pairs: list[tuple[dict[str, Any], dict[str, Any] | None]] = []
         rest = self._messages[1:]
         index = 0
         while index < len(rest):
             message = rest[index]
-            if message.get("role") != "user":
+            # An observation is whatever carries the environment back to the
+            # model. With `observation_role="tool"` that is a tool result, and
+            # pairing on "user" alone matched nothing at all — compaction was
+            # silently dead for the entire tool-cycle shape.
+            if message.get("role") not in ("user", "tool"):
                 index += 1
                 continue
             assistant = None
@@ -501,7 +531,11 @@ class OpenRouterReAct:
             if str(message.get("content") or "").startswith("[compacted "):
                 continue
             pairs.append((message, assistant))
-        if len(pairs) < self.compact_every:
+        # A token-triggered compaction has to happen even when few turns have
+        # accumulated: one enormous turn is exactly the case a turn count misses.
+        if reason == "turns" and len(pairs) < self.compact_every:
+            return
+        if len(pairs) <= self.compact_keep_turns:
             return
         keep = pairs[-self.compact_keep_turns :]
         dropped = pairs[: -self.compact_keep_turns]
@@ -513,25 +547,45 @@ class OpenRouterReAct:
         compact = {
             "role": "user",
             "content": (
-                f"[compacted {len(dropped)} earlier ReAct turns; "
-                f"compact_every={self.compact_every}. Mechanical history compact, "
-                "not a model-authored summary. Dropped assistant payloads "
+                f"[compacted {len(dropped)} earlier ReAct turns; trigger={reason}, "
+                f"compact_every={self.compact_every}, "
+                f"compact_at_tokens={self.compact_at_tokens}, "
+                f"prompt_tokens={self._last_prompt_tokens}. Mechanical history "
+                "compact, not a model-authored summary. Dropped assistant payloads "
                 f"(truncated): {json.dumps(dropped_payloads[-8:])}]"
             ),
         }
         rebuilt: list[dict[str, Any]] = [self._messages[0], compact]
-        for user, assistant in keep:
-            rebuilt.append(user)
+        for observation, assistant in keep:
+            if observation.get("role") == "tool":
+                # The assistant turn that made this call was dropped or now sits
+                # behind the compaction notice, so a tool result would answer a
+                # call that is no longer in the history. Carry the content as a
+                # plain observation instead of sending an orphaned tool message.
+                observation = {"role": "user", "content": observation.get("content") or ""}
+            rebuilt.append(observation)
             if assistant is not None:
                 rebuilt.append(assistant)
         self._messages = rebuilt
         self._compact_count += 1
+        # The pending call is only answerable if the assistant turn that made it
+        # survived the rebuild.
+        if self._pending_tool_call_id and not any(
+            str(call.get("id") or "") == self._pending_tool_call_id
+            for message in rebuilt
+            if message.get("role") == "assistant"
+            for call in (message.get("tool_calls") or ())
+        ):
+            self._pending_tool_call_id = None
+        self._last_prompt_tokens = 0
         if on_delta is not None:
             on_delta(
                 {
                     "delta": False,
                     "channel": "compact",
                     "compact_every": self.compact_every,
+                    "compact_at_tokens": self.compact_at_tokens,
+                    "compact_trigger": reason,
                     "compact_count": self._compact_count,
                     "dropped_turns": len(dropped),
                     "kept_turns": len(keep),
@@ -709,6 +763,13 @@ class OpenRouterReAct:
         )
 
     def _accumulate_usage(self, usage: dict[str, Any]) -> None:
+        # The provider's own count of what this history costs, which is the
+        # number `compact_at_tokens` compares against. Kept separate from the
+        # running totals: those accumulate across the episode, this is the size
+        # of the CURRENT prompt.
+        prompt_tokens = usage.get("prompt_tokens")
+        if isinstance(prompt_tokens, int) and not isinstance(prompt_tokens, bool):
+            self._last_prompt_tokens = prompt_tokens
         for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
             value = usage.get(key)
             if isinstance(value, int):
