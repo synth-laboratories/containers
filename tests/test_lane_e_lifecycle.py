@@ -51,6 +51,25 @@ def test_health_reports_identity_and_truthful_capacity(tmp_path) -> None:
     client.post("/rollouts/roll_e_cap_a/complete")
 
 
+def test_registered_policy_config_is_advertised_for_authoritative_preflight(tmp_path) -> None:
+    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path))
+    registered = client.post(
+        "/policy-configs",
+        json={
+            "config_id": "luna_low",
+            "config": {"model": "gpt-5.6-luna", "effort": "low", "max_tokens": 256},
+        },
+    )
+    assert registered.status_code == 200, registered.text
+    refs = client.get("/info").json()["policy_refs"]
+    assert any(
+        ref["config"] == "luna_low"
+        and ref["model"] == "gpt-5.6-luna"
+        and ref["reasoning_effort"] == "low"
+        for ref in refs
+    )
+
+
 def test_concurrent_owners_and_owner_scoped_cleanup(tmp_path) -> None:
     client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path))
     first = client.post("/rollouts", json=_async_hold("owner-a", 0, "roll_e_a"))

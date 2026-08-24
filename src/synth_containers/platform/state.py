@@ -484,17 +484,14 @@ class CompatPlatform(CompletedRolloutMixin):
             ]
         if self.spec.default_policy_harness == ISOLATED_POLICY_HARNESS:
             return [{"harness": ISOLATED_POLICY_HARNESS, "config": None, "code": None}]
+        # Policy configs are a live, versioned endpoint contract. A caller that
+        # registers a local-MLX or standard-API config must be able to discover
+        # and bind it; accepting the config while advertising only baked-in
+        # defaults makes the authoritative Workshop preflight refuse it.
         return [
-            {
-                "harness": self.spec.default_policy_harness,
-                "config": "luna_med",
-                "code": None,
-            },
-            {
-                "harness": self.spec.default_policy_harness,
-                "config": "sol_med",
-                "code": None,
-            },
+            {"harness": config.harness, "config": config.config_id, "code": None}
+            for config in sorted(self.policy_configs.values(), key=lambda item: item.config_id)
+            if config.harness == self.spec.default_policy_harness
         ]
 
     def capability_metadata(self) -> dict[str, Any]:
