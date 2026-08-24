@@ -116,7 +116,7 @@ def test_crash_recovery_does_not_touch_unrelated_owners(tmp_path) -> None:
     assert not any(row["rollout_id"] == "roll_e_done" for row in health["crash_signals"])
 
 
-def test_trace_bundle_absent_is_honest_lite_seal_fallback(tmp_path) -> None:
+def test_trace_bundle_missing_after_capture_is_honest_lite_seal_fallback(tmp_path) -> None:
     client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path))
     started = client.post(
         "/rollouts",
@@ -128,7 +128,10 @@ def test_trace_bundle_absent_is_honest_lite_seal_fallback(tmp_path) -> None:
         },
     )
     assert started.status_code == 200, started.text
-    reference = started.json()["trace"]
+    archive = tmp_path / "seals" / "roll_e_trace.trace-bundle.zip"
+    assert archive.is_file()
+    archive.unlink()
+    reference = client.get("/rollouts/roll_e_trace").json()["trace"]
     assert reference["url"] == "/rollouts/roll_e_trace/trace"
     assert reference["bundle_url"] == "/rollouts/roll_e_trace/trace/bundle"
     assert reference["kind"] == "lite_seal"
@@ -164,6 +167,26 @@ def test_trace_bundle_served_when_capture_supervisor_archive_exists(tmp_path) ->
     reference = client.get("/rollouts/roll_e_bundle").json()["trace"]
     assert reference["kind"] == "trace_v5_bundle"
     assert reference["inspectable"] is True
+
+
+def test_completed_rollout_materializes_self_contained_trace_bundle(tmp_path) -> None:
+    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path))
+    started = client.post(
+        "/rollouts",
+        json={
+            "rollout_id": "roll_e_native_bundle",
+            "telemetry": _TELEMETRY,
+            "policy_ref": _POLICY,
+            "task_instance_id": "seed:4",
+        },
+    )
+    assert started.status_code == 200, started.text
+    reference = started.json()["trace"]
+    assert reference["kind"] == "trace_v5_bundle"
+    assert reference["inspectable"] is True
+    fetched = client.get(reference["bundle_url"])
+    assert fetched.status_code == 200, fetched.text
+    assert fetched.content.startswith(b"PK")
 
 
 def test_policy_config_registration_is_idempotent_and_conflict_safe(tmp_path) -> None:

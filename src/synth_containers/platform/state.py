@@ -8,6 +8,7 @@ import os
 import threading
 import time
 import uuid
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,40 @@ from .reward_plan import PlanOutcome, classify_plan_outcome
 from .runtime import runtime_for
 from .seal import seal_rollout_log
 from .targets import TargetSpec
+
+
+def _materialize_trace_bundle(seal_path: Path, archive_path: Path, rollout_id: str) -> None:
+    """Promote the platform event seal into a portable self-contained Trace V5 bundle.
+
+    The HTTP platform is the capture authority for its own rollout.  Leaving the
+    canonical bundle to an optional sidecar meant the advertised bundle endpoint
+    returned 404 for every ordinary local run.  Native import supplies the
+    missing canonical actor/session identity without changing the retained lite
+    seal, then emits the deterministic archive served by the endpoint.
+    """
+    from ..tracing.adapters.native import import_native_to_bundle
+    from ..tracing.store.bundle import LocalTraceBundle
+
+    scratch = archive_path.parent / f".{rollout_id}.trace-bundle.{os.getpid()}.{threading.get_ident()}"
+    source = scratch / "source.json"
+    bundle_root = scratch / "bundle"
+    try:
+        scratch.mkdir(parents=True, exist_ok=False)
+        payload = json.loads(seal_path.read_text(encoding="utf-8"))
+        payload["run_id"] = rollout_id
+        payload["trace_correlation_id"] = rollout_id
+        source.write_text(json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+        bundle = LocalTraceBundle(bundle_root, bundle_id=f"bundle-{rollout_id}")
+        import_native_to_bundle(source, source_format="craftax_react", bundle=bundle)
+        body = bundle.archive_bytes()
+        temporary = archive_path.with_name(f".{archive_path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+        with temporary.open("wb") as handle:
+            handle.write(body)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, archive_path)
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
 
 
 def _digest(payload: Any) -> str:
@@ -1406,6 +1441,9 @@ class CompatPlatform(CompletedRolloutMixin):
             os.fsync(directory_fd)
         finally:
             os.close(directory_fd)
+        archive_path = self._trace_bundle_path(pin.rollout_id)
+        if not archive_path.is_file():
+            _materialize_trace_bundle(seal_path, archive_path, pin.rollout_id)
         self._write_execution_manifest(pin, log)
         self._persist_completed_rollout(pin)
         self._drop_lease(pin.rollout_id)
