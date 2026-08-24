@@ -586,6 +586,18 @@ class CompatPlatform(CompletedRolloutMixin):
         }
         schema = self._input_schema()
         digest = self.capabilities_digest()
+        policy_refs = []
+        for policy_ref in self._advertised_policy_refs():
+            row = dict(policy_ref)
+            registered = self.policy_configs.get(str(row.get("config") or ""))
+            if registered is not None:
+                config = registered.config
+                if config.get("model") is not None:
+                    row["model"] = config["model"]
+                effort = config.get("effort") or config.get("reasoning_effort")
+                if effort is not None:
+                    row["reasoning_effort"] = effort
+            policy_refs.append(row)
         payload = {
             "world_ref": self.spec.world_ref,
             "environment_ref": self.spec.environment_ref,
@@ -594,7 +606,7 @@ class CompatPlatform(CompletedRolloutMixin):
                 "config": None,
                 "code": None,
             },
-            "policy_refs": self._advertised_policy_refs(),
+            "policy_refs": policy_refs,
             "evaluation_plan_ref": self.spec.evaluation_plan_ref,
             "task_instance_id": None,
             "adapter_chain": list(self.spec.adapter_chain),
@@ -620,10 +632,23 @@ class CompatPlatform(CompletedRolloutMixin):
             "input_schema": schema,
             "capabilities_digest": digest,
             "capabilities": {
+                "protocol": "synth.container.live-eval.v1",
+                "operations": {
+                    "rollouts.prepare": True,
+                    "rollouts.start_prepared": True,
+                    "rollouts.get": True,
+                    "rollouts.poll": True,
+                    "reward.get": True,
+                    # Every accepted start opens the durable rollout event log;
+                    # terminalization validates and atomically persists its
+                    # Trace V5 seal before the terminal manifest is exposed.
+                    "trace_v5.capture": True,
+                },
+                "policy_refs": policy_refs,
                 self.spec.target_id: {
                     "runtime_family": self.spec.runtime_family.value,
                     "input_schema": schema,
-                }
+                },
             },
             "dataset": self._dataset_manifest(),
             "identity": {
