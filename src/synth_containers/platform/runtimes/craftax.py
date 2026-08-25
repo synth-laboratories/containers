@@ -189,6 +189,9 @@ class CraftaxRuntime:
                 if attempted_url is not None:
                     status_payload["attempted_url"] = attempted_url
                     status_payload["config_key"] = config_key
+                    status_code = getattr(exc, "status_code", None)
+                    if isinstance(status_code, int):
+                        status_payload["status_code"] = status_code
                 log.append("status", status_payload)
                 evidence_high_water = log.high_water
                 log.append("capture.high_water", {"high_water": evidence_high_water})

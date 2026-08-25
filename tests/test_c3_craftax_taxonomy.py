@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import io
+import urllib.error
+
 from fastapi.testclient import TestClient
 
 from synth_containers.platform import create_compat_app
@@ -11,7 +14,11 @@ from synth_containers.platform.craftax_taxonomy import (
     classify_completion,
     usage_from_call_identity,
 )
-from synth_containers.platform.gold_craftax_world import GoldConnectionError, GoldCraftaxWorld
+from synth_containers.platform.gold_craftax_world import (
+    GoldConnectionError,
+    GoldCraftaxWorld,
+    GoldHTTPError,
+)
 from synth_containers.platform.react import OpenRouterReAct, ScriptedReAct
 
 
@@ -200,3 +207,30 @@ def test_gold_connection_error_names_url_and_config_key() -> None:
         assert "http://127.0.0.1:1/rollouts" in str(exc)
     else:
         raise AssertionError("expected GoldConnectionError")
+
+
+def test_gold_http_status_is_an_environment_contract_error(monkeypatch) -> None:
+    def reject(request, timeout):  # type: ignore[no-untyped-def]
+        raise urllib.error.HTTPError(
+            request.full_url,
+            422,
+            "wrong service contract",
+            {},
+            io.BytesIO(b'{"detail":"do not persist provider-shaped bodies"}'),
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", reject)
+    world = GoldCraftaxWorld(
+        max_steps=1,
+        base_url="http://127.0.0.1:8800",
+        require_frames=False,
+    )
+    try:
+        world.reset(0)
+    except GoldHTTPError as exc:
+        assert isinstance(exc, GoldConnectionError)
+        assert exc.status_code == 422
+        assert exc.attempted_url == "http://127.0.0.1:8800/rollouts"
+        assert "do not persist" not in str(exc)
+    else:
+        raise AssertionError("expected GoldHTTPError")

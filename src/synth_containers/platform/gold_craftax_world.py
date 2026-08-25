@@ -56,6 +56,25 @@ class GoldConnectionError(RuntimeError):
         )
 
 
+class GoldHTTPError(GoldConnectionError):
+    """The pinned gold origin answered, but rejected the gold-world contract."""
+
+    def __init__(
+        self,
+        *,
+        attempted_url: str,
+        config_key: str,
+        status_code: int,
+        cause: BaseException,
+    ) -> None:
+        super().__init__(
+            attempted_url=attempted_url,
+            config_key=config_key,
+            cause=cause,
+        )
+        self.status_code = int(status_code)
+
+
 class GoldCraftaxWorld:
     """EnvironmentService: reset/step/frames/NEV drain against rust gold HTTP."""
 
@@ -288,8 +307,19 @@ class GoldCraftaxWorld:
                 if not isinstance(payload, dict):
                     raise RuntimeError("Craftax gold returned non-object JSON")
                 return payload
-            except urllib.error.HTTPError:
-                raise
+            except urllib.error.HTTPError as exc:
+                # A healthy process at the pinned address is not necessarily a
+                # Craftax gold world. Keep provider traffic out of the diagnosis:
+                # reset happens before the first policy call, so an HTTP status
+                # here is an environment-contract failure, never a model failure.
+                # Do not persist the response body; upstream services may echo
+                # request material in error details.
+                raise GoldHTTPError(
+                    attempted_url=attempted,
+                    config_key=self.config_key,
+                    status_code=exc.code,
+                    cause=exc,
+                ) from exc
             except urllib.error.URLError as exc:
                 last_error = exc
                 continue
