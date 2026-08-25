@@ -460,13 +460,18 @@ class CompatPlatform(CompletedRolloutMixin):
         registered = self.policy_configs.get(config_id) if config_id else None
         if registered is None:
             return None
-        lease = self.credential_leases.get(pin.rollout_id)
-        if lease is None:
-            return registered
         overlay = dict(registered.config)
-        target = dict(overlay.get("inference_target") or {})
-        target["auth_bearer"] = lease.bearer
-        overlay["inference_target"] = target
+        candidate_instruction = (pin.policy_ref or {}).get("code")
+        if isinstance(candidate_instruction, str) and candidate_instruction.strip():
+            base_prompt = str(overlay.get("system_prompt") or "").strip()
+            overlay["system_prompt"] = (
+                f"{base_prompt}\n\nCandidate instruction: {candidate_instruction.strip()}"
+            )
+        lease = self.credential_leases.get(pin.rollout_id)
+        if lease is not None:
+            target = dict(overlay.get("inference_target") or {})
+            target["auth_bearer"] = lease.bearer
+            overlay["inference_target"] = target
         return PolicyConfig(
             config_id=registered.config_id,
             harness=registered.harness,
