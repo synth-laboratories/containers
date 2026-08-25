@@ -100,6 +100,7 @@ def admission_identity_payload(
     retention: str,
     resume_from_checkpoint_id: str | None,
     execution: str | None,
+    max_steps: int | None,
 ) -> dict[str, Any]:
     """Canonical replay identity. Equality is digest equality, not a 10-clause boolean."""
     return {
@@ -114,6 +115,7 @@ def admission_identity_payload(
         "retention": retention,
         "resume_from_checkpoint_id": resume_from_checkpoint_id,
         "execution": execution,
+        "max_steps": max_steps,
     }
 
 
@@ -165,6 +167,7 @@ def admission_from_raw(raw: Any) -> AdmissionReceipt | None:
         retention=str(raw.get("retention") or ""),
         resume_from_checkpoint_id=raw.get("resume_from_checkpoint_id"),
         execution=raw.get("execution"),
+        max_steps=raw.get("max_steps"),
         config_digest=str(raw.get("config_digest") or ""),
         capability_digest=str(raw.get("capability_digest") or ""),
         policy_harness=str(raw.get("policy_harness") or ""),
@@ -205,6 +208,7 @@ class AdmissionReceipt:
     retention: str
     resume_from_checkpoint_id: str | None
     execution: str | None
+    max_steps: int | None
     config_digest: str
     capability_digest: str
     policy_harness: str
@@ -224,6 +228,7 @@ class AdmissionReceipt:
             "retention": self.retention,
             "resume_from_checkpoint_id": self.resume_from_checkpoint_id,
             "execution": self.execution,
+            "max_steps": self.max_steps,
             "config_digest": self.config_digest,
             "capability_digest": self.capability_digest,
             "policy_harness": self.policy_harness,
@@ -262,6 +267,7 @@ class RolloutPin:
     engine_generation: int
     policy_revision_id: str | None
     seed: int | None
+    max_steps: int | None = None
     child_rollout_id: str | None = None
     child_resource_ref: dict[str, Any] | None = None
     usage: dict[str, Any] | None = None
@@ -300,4 +306,3 @@ class RolloutCredentialLease:
     rollout_id: str
     endpoint: str
     bearer: str = field(repr=False)
-

@@ -920,6 +920,7 @@ class CompatPlatform(CompletedRolloutMixin):
                     if request.submission_mode == "async"
                     else existing_pin.execution
                 ),
+                max_steps=request.max_steps,
             )
             if existing_pin.identity_digest != admission_identity_digest(requested_identity):
                 return {
@@ -1033,6 +1034,7 @@ class CompatPlatform(CompletedRolloutMixin):
             retention=retention,
             resume_from_checkpoint_id=request.resume_from_checkpoint_id,
             execution=execution,
+            max_steps=request.max_steps,
         )
         identity_digest = admission_identity_digest(identity_payload)
         accepted_at = _utc_now()
@@ -1048,6 +1050,7 @@ class CompatPlatform(CompletedRolloutMixin):
             retention=retention,
             resume_from_checkpoint_id=request.resume_from_checkpoint_id,
             execution=execution,
+            max_steps=request.max_steps,
             config_digest=config_digest,
             capability_digest=capability_digest,
             policy_harness=harness,
@@ -1065,6 +1068,7 @@ class CompatPlatform(CompletedRolloutMixin):
             engine_generation=self.engine_generation,
             policy_revision_id=self.current_policy_revision_id,
             seed=seed_i,
+            max_steps=request.max_steps,
             usage=None,
             omit_reward=request.omit_reward,
             outcome=request.outcome,

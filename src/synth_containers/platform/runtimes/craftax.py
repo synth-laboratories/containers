@@ -25,7 +25,7 @@ GOLD_ENVIRONMENT = "env:craftax_gold"
 
 class CraftaxRuntime:
     def simulate(self, platform: CompatPlatform, pin: RolloutPin, log: RolloutEventLog) -> None:
-        max_steps = _max_steps(platform)
+        max_steps = _max_steps(platform, pin)
         world = _world_for(platform, max_steps=max_steps)
         harness = str(pin.policy_ref.get("harness") or "").strip()
         if not harness:
@@ -307,7 +307,11 @@ def _frames_from_log(
     return records
 
 
-def _max_steps(platform: CompatPlatform) -> int:
+def _max_steps(platform: CompatPlatform, pin: RolloutPin) -> int:
+    if pin.max_steps is not None:
+        if pin.max_steps <= 0:
+            raise ValueError("rollout max_steps must be a positive immutable pin")
+        return int(pin.max_steps)
     override = os.environ.get("SYNTH_CRAFTAX_MAX_STEPS")
     if override:
         return int(override)

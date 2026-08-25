@@ -62,6 +62,7 @@ class CreateRolloutRequest:
     outcome: Optional[str]
     slot: str
     metadata: dict[str, Any]
+    max_steps: Optional[int] = None
     checkpoint_schedule: Optional[dict[str, Any]] = None
     resume_from_checkpoint_id: Optional[str] = None
     execution: Optional[str] = None
@@ -165,6 +166,9 @@ def parse_create_rollout(
             rollout_id = validate_rollout_id(rollout_id)
         except ValueError as exc:
             raise RequestParseError(f"{operation}: {exc}") from exc
+    max_steps = _optional_int(raw, "max_steps", operation=operation)
+    if max_steps is not None and max_steps <= 0:
+        raise RequestParseError(f"{operation}: max_steps must be a positive integer")
     return CreateRolloutRequest(
         rollout_id=rollout_id,
         telemetry=telemetry,
@@ -178,6 +182,7 @@ def parse_create_rollout(
         outcome=_optional_str(raw, "outcome", operation=operation) or None,
         slot=slot,
         metadata=metadata,
+        max_steps=max_steps,
         checkpoint_schedule=_optional_object(raw, "checkpoint_schedule", operation=operation),
         resume_from_checkpoint_id=_optional_str(
             raw, "resume_from_checkpoint_id", operation=operation
@@ -219,6 +224,7 @@ def to_platform_dict(req: CreateRolloutRequest) -> dict[str, Any]:
         "slot": req.slot,
         "stream_slot": req.slot,
         "metadata": req.metadata,
+        "max_steps": req.max_steps,
         "checkpoint_schedule": req.checkpoint_schedule,
         "resume_from_checkpoint_id": req.resume_from_checkpoint_id,
         "execution": req.execution,

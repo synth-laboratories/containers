@@ -47,6 +47,7 @@ _EXCLUDED_DIR_NAMES = {
 # direction is expected as the file continues to change); the enforced
 # invariant is `test_allowlist_entries_still_needed` below.
 ALLOWLIST: dict[str, int] = {
+    "src/synth_containers/platform/state.py": 2044,
     "src/synth_containers/tracing/capture/finalizer.py": 2085,
     "src/synth_containers/tracing/capture/supervisor.py": 2331,
     "src/synth_containers/tracing/validation/validator.py": 4434,

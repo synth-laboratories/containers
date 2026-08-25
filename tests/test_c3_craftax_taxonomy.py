@@ -166,6 +166,33 @@ def test_fixture_episode_emits_taxonomy_truncation_and_reconciled_usage(tmp_path
     assert reconciled["payload"]["prompt_tokens"] is None
 
 
+def test_rollout_max_steps_is_an_enforced_identity_pin(tmp_path) -> None:
+    client = TestClient(create_compat_app("craftax_engine", storage_root=tmp_path / "cap"))
+    body = {
+        "rollout_id": "roll_bounded",
+        "max_steps": 3,
+        "telemetry": {"enabled": True, "transport": "sse"},
+        "policy_ref": {"harness": "react", "config": "luna_med"},
+        "task_instance_id": "seed:0",
+    }
+    completed = client.post("/rollouts", json=body)
+    assert completed.status_code == 200, completed.text
+    events = client.get("/rollouts/roll_bounded/events", params={"after": 0}).json()[
+        "events"
+    ]
+    closed = next(item for item in events if item["kind"] == "env.episode.closed")
+    assert closed["payload"]["steps"] == 3
+    assert closed["payload"]["truncated"] is True
+
+    conflict = client.post("/rollouts", json={**body, "max_steps": 4})
+    assert conflict.status_code == 409
+    assert conflict.json()["error"] == "rollout_identity_conflict"
+
+    rejected = client.post("/rollouts", json={**body, "rollout_id": "roll_invalid", "max_steps": 0})
+    assert rejected.status_code == 422
+    assert "max_steps must be a positive integer" in rejected.text
+
+
 def test_openrouter_omitted_usage_is_null_not_zero() -> None:
     planner = OpenRouterReAct(
         config_id="luna_med",
