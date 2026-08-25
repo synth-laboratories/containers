@@ -23,11 +23,12 @@ def test_healthbench_declares_thirty_parallel_leases() -> None:
 def test_healthbench_info_merges_operations_and_advertises_gepa_v2(tmp_path) -> None:
     info = TestClient(create_compat_app("healthbench_chat", storage_root=tmp_path / "p0")).get("/info").json()
     operations = info["capabilities"]["operations"]
-    assert operations["prepare"] is True
-    assert operations["start"] is True
-    assert operations["get"] is True
-    assert operations["poll"] is True
-    assert operations["reward"] is True
+    assert operations["rollouts.prepare"] is True
+    assert operations["rollouts.start_prepared"] is True
+    assert operations["rollouts.get"] is True
+    assert operations["rollouts.poll"] is True
+    assert operations["reward.get"] is True
+    assert operations["trace_v5.capture"] is True
     gepa = info["capabilities"]["optimizer_contracts"]["gepa"]
     assert gepa["version"] == "synth_optimizers.gepa.v2"
     assert info["optimizer_contracts"]["gepa"]["version"] == "synth_optimizers.gepa.v2"
