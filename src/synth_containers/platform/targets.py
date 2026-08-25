@@ -7,6 +7,7 @@ from enum import StrEnum
 from typing import Any
 
 from .affordances import AffordanceMap
+from .react import CRAFTAX_REACT_SYSTEM_PROMPT
 
 
 class TargetRuntimeKind(StrEnum):
@@ -181,9 +182,11 @@ CRAFTAX_REACT = TargetSpec(
             "react",
             {
                 "provider": "openrouter",
+                "base_url": "https://openrouter.ai/api/v1",
                 "model": "meta/muse-spark-1.1",
                 "effort": "medium",
                 "api_key_env": "OPENROUTER_API_KEY",
+                "system_prompt": CRAFTAX_REACT_SYSTEM_PROMPT,
                 # Muse Spark medium needs room for hidden reasoning before its
                 # short structured action batch. 384 consistently ended at
                 # the reasoning budget with no model-authored content.

@@ -12,6 +12,14 @@ from synth_containers.platform.react import (
     PolicyConfigError,
     CRAFTAX_REACT_SYSTEM_PROMPT,
 )
+from synth_containers.platform.targets import CRAFTAX_REACT
+
+
+def test_advertised_muse_seed_is_a_complete_paid_policy_config() -> None:
+    seed = next(row for row in CRAFTAX_REACT.policy_seeds if row.config_id == "muse_spark_medium")
+    policy = OpenRouterReAct(config_id=seed.config_id, config=dict(seed.config))
+    assert policy.base_url == "https://openrouter.ai/api/v1"
+    assert policy._messages[0]["content"] == CRAFTAX_REACT_SYSTEM_PROMPT
 
 
 def test_react_ten_seeds_through_containers_http(tmp_path) -> None:
