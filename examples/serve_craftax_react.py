@@ -8,6 +8,7 @@ OpenRouter key for the live planner. Engine/scripted CI uses craftax_engine.
 from __future__ import annotations
 
 import argparse
+import os
 
 import uvicorn
 
@@ -27,7 +28,13 @@ def main() -> None:
     args = parser.parse_args()
     if args.host not in {"127.0.0.1", "localhost", "::1"}:
         raise SystemExit("serve_craftax_react binds loopback only")
-    app = create_compat_app(args.target, storage_root=args.storage_root)
+    gold_url = os.environ.get("SYNTH_CRAFTAX_URL", "").strip()
+    runtime_config = {"gold_base_url": gold_url} if gold_url else None
+    app = create_compat_app(
+        args.target,
+        storage_root=args.storage_root,
+        runtime_config=runtime_config,
+    )
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
 
 
