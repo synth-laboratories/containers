@@ -9,6 +9,7 @@ import tempfile
 import threading
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +25,12 @@ from .policy_process import DEFAULT_HEURISTIC, IsolatedPolicyProcess
 from .reward_plan import PlanOutcome, classify_plan_outcome
 from .runtime import runtime_for
 from .seal import seal_rollout_log, validate_rollout_seal
-from .targets import TargetSpec
+from .targets import PolicyInstallStatus, TargetRuntimeKind, TargetSpec, TaskInstanceStatus
+from .trace_bundle import (
+    HarborTraceBundleRef,
+    inspect_harbor_trace_bundle,
+    materialize_harbor_trace_bundle,
+)
 
 
 def _digest(payload: Any) -> str:
@@ -75,6 +81,12 @@ class PolicyRevision:
     config_id: str | None
     code: bytes | None
     isolation_receipt: dict[str, Any]
+    namespace: str
+    name: str
+    configuration_digest: str
+    model_digest: str
+    source_revision: str | None
+    installed_at: str
 
 
 @dataclass
@@ -151,6 +163,9 @@ class CompatPlatform:
         self.logs: dict[str, RolloutEventLog] = {}
         self.stream_bindings: dict[str, tuple[str, str]] = {}
         self.pins: dict[str, RolloutPin] = {}
+        self.materialized_task_instances: dict[str, dict[str, Any]] = (
+            self._load_materialized_task_instances()
+        )
         self.policy_configs: dict[str, PolicyConfig] = {}
         self.policy_revisions: dict[str, PolicyRevision] = {}
         self.current_policy_revision_id: str | None = None
@@ -160,6 +175,8 @@ class CompatPlatform:
         self.evaluation_logs: dict[str, list[dict[str, Any]]] = {}
         self.artifacts: dict[str, dict[str, Any]] = {}
         self.seals: dict[str, dict[str, Any]] = {}
+        self.trace_bundles: dict[str, HarborTraceBundleRef] = {}
+        self.trace_bundle_errors: dict[str, str] = {}
         self.checkpoints: dict[str, dict[str, Any]] = {}
         self.stopped_worlds: set[str] = set()
         self.step_calls = 0
@@ -170,6 +187,33 @@ class CompatPlatform:
         self._seed_default_policies()
         self._recover_checkpoints()
         self._recover_completed_rollouts()
+
+    def _task_instances_path(self) -> Path:
+        return self.storage_root / "task_instances.json"
+
+    def _load_materialized_task_instances(self) -> dict[str, dict[str, Any]]:
+        path = self._task_instances_path()
+        if not path.is_file():
+            return {}
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, list):
+            raise RuntimeError("task_instances_unrecoverable: expected an array")
+        rows: dict[str, dict[str, Any]] = {}
+        for row in payload:
+            if not isinstance(row, dict) or not isinstance(row.get("id"), str):
+                raise RuntimeError("task_instances_unrecoverable: invalid instance")
+            rows[row["id"]] = row
+        return rows
+
+    def _persist_materialized_task_instances_locked(self) -> None:
+        path = self._task_instances_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(
+            json.dumps(list(self.materialized_task_instances.values()), sort_keys=True),
+            encoding="utf-8",
+        )
+        os.replace(temporary, path)
 
     def _durable_key(self, rollout_id: str) -> str:
         return hashlib.sha256(rollout_id.encode("utf-8")).hexdigest()
@@ -363,6 +407,7 @@ class CompatPlatform:
             self.stream_bindings[rollout_id] = (str(binding[0]), str(binding[1]))
             self.pins[rollout_id] = pin
             self.seals[rollout_id] = seal
+            self._ensure_harbor_trace_bundle(pin=pin, log=log, seal=seal)
             reward_path = self._reward_path(rollout_id)
             if reward_path.is_file():
                 wrapper = json.loads(reward_path.read_text(encoding="utf-8"))
@@ -381,32 +426,46 @@ class CompatPlatform:
                     self.reward_by_execution_id[str(execution_id)] = reward
 
     def _seed_default_policies(self) -> None:
-        if self.spec.default_policy_harness in {ISOLATED_POLICY_HARNESS, NANOHORIZON_HARNESS}:
-            return
-        self.policy_configs["luna_med"] = PolicyConfig(
-            config_id="luna_med",
-            harness=self.spec.default_policy_harness,
-            config={"model": "gpt-5.6-luna", "effort": "medium", "compact_every": 16},
-        )
-        self.policy_configs["sol_med"] = PolicyConfig(
-            config_id="sol_med",
-            harness=self.spec.default_policy_harness,
-            config={"model": "gpt-5.6-sol", "effort": "medium"},
-        )
         for seed in self.spec.policy_seeds:
             self.policy_configs[seed.config_id] = PolicyConfig(
                 config_id=seed.config_id,
                 harness=seed.harness,
                 config=dict(seed.config),
             )
+        if self.spec.default_policy_harness in {ISOLATED_POLICY_HARNESS, NANOHORIZON_HARNESS}:
+            return
+        self.policy_configs.setdefault(
+            "luna_med",
+            PolicyConfig(
+                config_id="luna_med",
+                harness=self.spec.default_policy_harness,
+                config={"model": "gpt-5.6-luna", "effort": "medium", "compact_every": 16},
+            ),
+        )
+        self.policy_configs.setdefault(
+            "sol_med",
+            PolicyConfig(
+                config_id="sol_med",
+                harness=self.spec.default_policy_harness,
+                config={"model": "gpt-5.6-sol", "effort": "medium"},
+            ),
+        )
 
     def _advertised_policy_refs(self) -> list[dict[str, Any]]:
         """Pins Desktop can bind before start. Harbor = two configs; dig.bench = two harnesses."""
         if self.spec.policy_seeds:
-            return [
-                {"harness": seed.harness, "config": seed.config_id, "code": None}
-                for seed in self.spec.policy_seeds
-            ]
+            refs = []
+            for seed in self.spec.policy_seeds:
+                ref = {"harness": seed.harness, "config": seed.config_id, "code": None}
+                # Policy identity is useful to admission and the UI, but the
+                # sampler configuration may also contain credential selectors
+                # and transport details. Project only the public identity.
+                for key in ("model", "provider", "api"):
+                    value = seed.config.get(key)
+                    if isinstance(value, str) and value.strip():
+                        ref[key] = value.strip()
+                refs.append(ref)
+            return refs
         if self.spec.default_policy_harness == ISOLATED_POLICY_HARNESS:
             return [{"harness": ISOLATED_POLICY_HARNESS, "config": None, "code": None}]
         if self.spec.default_policy_harness == NANOHORIZON_HARNESS:
@@ -424,6 +483,122 @@ class CompatPlatform:
             },
         ]
 
+    def _task_identity(self) -> tuple[str, str]:
+        if self.spec.task_id and self.spec.task_family:
+            return self.spec.task_id, self.spec.task_family
+        identity_haystack = " ".join(
+            (
+                self.spec.target_id,
+                self.spec.world_ref,
+                self.spec.environment_ref,
+                self.spec.evaluation_plan_ref,
+            )
+        ).lower()
+        inferred_family = "craftax" if "craftax" in identity_haystack else self.spec.target_id
+        return self.spec.task_id or inferred_family, self.spec.task_family or inferred_family
+
+    def _task_definition_locked(self) -> dict[str, Any]:
+        task_id, family = self._task_identity()
+        return {
+            "id": task_id,
+            "family": family,
+            "world_ref": self.spec.world_ref,
+            "environment_ref": self.spec.environment_ref,
+            "evaluation_plan_ref": self.spec.evaluation_plan_ref,
+            "max_episode_steps": self.spec.max_episode_steps,
+        }
+
+    def _catalog_policy_ref_locked(self, pin: RolloutPin) -> dict[str, Any]:
+        """Project policy identity without executable code or secret-bearing config."""
+        harness = pin.policy_ref.get("harness")
+        config_id = pin.policy_ref.get("config")
+        result: dict[str, Any] = {"harness": harness, "config": config_id}
+        config = self.policy_configs.get(str(config_id or ""))
+        if config is not None:
+            for key in ("model", "provider"):
+                value = config.config.get(key)
+                if isinstance(value, str) and value.strip():
+                    result[key] = value.strip()
+        return result
+
+    @staticmethod
+    def _catalog_status(pin: RolloutPin) -> TaskInstanceStatus:
+        if not pin.started:
+            return TaskInstanceStatus.PREPARED
+        if not pin.terminal:
+            return TaskInstanceStatus.RUNNING
+        try:
+            return TaskInstanceStatus(pin.status)
+        except ValueError:
+            return TaskInstanceStatus.TERMINAL
+
+    def _task_instance_locked(self, pin: RolloutPin, task_id: str) -> dict[str, Any]:
+        reward = self.reward_executions.get(pin.rollout_id)
+        return {
+            "id": pin.rollout_id,
+            "task_id": task_id,
+            "task_instance_id": pin.task_instance_id,
+            "rollout_id": pin.rollout_id,
+            "seed": pin.seed,
+            "status": self._catalog_status(pin),
+            "terminal": pin.terminal,
+            "started": pin.started,
+            "reward": reward.get("reward") if reward is not None else None,
+            "policy_ref": self._catalog_policy_ref_locked(pin),
+            "policy_revision_id": pin.policy_revision_id,
+        }
+
+    def materialize_task_instances(self, task_id: str, seeds: list[int]) -> list[dict[str, Any]]:
+        """Idempotently declare deterministic, non-spending task instances."""
+        with self._state_lock:
+            declared_task = str(self._task_definition_locked()["id"])
+            if task_id != declared_task:
+                raise ValueError(f"unknown_task:{task_id}")
+            rows: list[dict[str, Any]] = []
+            for seed in seeds:
+                instance_id = f"{task_id}:seed:{seed}"
+                row = self.materialized_task_instances.setdefault(
+                    instance_id,
+                    {
+                        "id": instance_id,
+                        "task_id": task_id,
+                        "task_instance_id": instance_id,
+                        "seed": seed,
+                        "status": "planned",
+                        "terminal": False,
+                        "started": False,
+                        "rollout_id": None,
+                        "reward": None,
+                        "policy_ref": None,
+                        "policy_revision_id": None,
+                    },
+                )
+                rows.append(dict(row))
+            self._persist_materialized_task_instances_locked()
+            return rows
+
+    def task_catalog_payload(self) -> dict[str, Any]:
+        """Snapshot definitions and RolloutPin-backed instances atomically."""
+        with self._state_lock:
+            task = self._task_definition_locked()
+            by_instance = {
+                key: dict(value) for key, value in self.materialized_task_instances.items()
+            }
+            for pin in self.pins.values():
+                row = self._task_instance_locked(pin, str(task["id"]))
+                row["id"] = pin.task_instance_id
+                by_instance[pin.task_instance_id] = row
+            instances = list(by_instance.values())
+            return {
+                "schema_version": "synth.container.task-catalog.v1",
+                "tasks": [task],
+                "instances": instances,
+            }
+
+    def task_info_payload(self) -> dict[str, Any]:
+        with self._state_lock:
+            return self._task_definition_locked()
+
     def metadata_payload(self) -> dict[str, Any]:
         services = {
             "world": self.spec.world_ref,
@@ -437,15 +612,12 @@ class CompatPlatform:
             role: {name: level != "unsupported" for name, level in items.items()}
             for role, items in advertised.items()
         }
+        policy_refs = self._advertised_policy_refs()
         payload = {
             "world_ref": self.spec.world_ref,
             "environment_ref": self.spec.environment_ref,
-            "policy_ref": {
-                "harness": self.spec.default_policy_harness,
-                "config": None,
-                "code": None,
-            },
-            "policy_refs": self._advertised_policy_refs(),
+            "policy_ref": policy_refs[0],
+            "policy_refs": policy_refs,
             "evaluation_plan_ref": self.spec.evaluation_plan_ref,
             "task_instance_id": None,
             "adapter_chain": list(self.spec.adapter_chain),
@@ -468,6 +640,23 @@ class CompatPlatform:
             "target_id": self.spec.target_id,
             "runtime_family": self.spec.runtime_family.value,
             "max_episode_steps": self.spec.max_episode_steps,
+            # This facade owns the complete prepare → start → reconcile →
+            # reward workflow and seals its durable event log on terminal
+            # rollout.  Advertise that contract explicitly so Workshop can
+            # register it as a first-class live environment rather than
+            # inferring compatibility from a healthy HTTP endpoint or SSE.
+            "capabilities": {
+                "protocol": "synth.container.live-eval.v1",
+                "operations": {
+                    "rollouts.prepare": True,
+                    "rollouts.start_prepared": True,
+                    "rollouts.get": True,
+                    "rollouts.poll": True,
+                    "reward.get": True,
+                    "trace_v5.capture": True,
+                },
+                "policy_refs": policy_refs,
+            },
         }
         if contract := self._gepa_v2_contract():
             payload["optimizer_contracts"] = {"gepa": contract}
@@ -501,11 +690,24 @@ class CompatPlatform:
             }
         return None
 
-    def prepare(self, rollout_id: str, transport: str, retention: str) -> dict[str, Any]:
+    def prepare(
+        self,
+        rollout_id: str,
+        transport: str,
+        retention: str,
+        request: CreateRolloutRequest | None = None,
+    ) -> dict[str, Any]:
         with self._state_lock:
-            return self._prepare_locked(rollout_id, transport, retention)
+            return self._prepare_locked(rollout_id, transport, retention, request=request)
 
-    def _prepare_locked(self, rollout_id: str, transport: str, retention: str) -> dict[str, Any]:
+    def _prepare_locked(
+        self,
+        rollout_id: str,
+        transport: str,
+        retention: str,
+        *,
+        request: CreateRolloutRequest | None = None,
+    ) -> dict[str, Any]:
         stream_id = f"stream:{rollout_id}"
         # rollout_id is caller-controlled; never use it as a path component.
         journal_name = hashlib.sha256(rollout_id.encode("utf-8")).hexdigest()
@@ -523,6 +725,31 @@ class CompatPlatform:
         log.append_control(CONTROL_SUBSCRIBED, log.subscribed_payload())
         self.logs[rollout_id] = log
         self.stream_bindings[rollout_id] = (transport, retention or self.spec.retention)
+        if rollout_id not in self.pins:
+            task_instance_id = request.task_instance_id if request is not None else None
+            seed = _seed_from_task_instance_id(task_instance_id)
+            policy_ref = request.policy_ref if request is not None else None
+            self.pins[rollout_id] = RolloutPin(
+                rollout_id=rollout_id,
+                world_ref=str(
+                    (request.world_ref if request is not None else None) or self.spec.world_ref
+                ),
+                environment_ref=self.spec.environment_ref,
+                policy_ref={
+                    "harness": policy_ref.harness if policy_ref is not None else None,
+                    "config": policy_ref.config if policy_ref is not None else None,
+                    "code": policy_ref.code if policy_ref is not None else None,
+                },
+                evaluation_plan_ref=str(
+                    (request.evaluation_plan_ref if request is not None else None)
+                    or self.spec.evaluation_plan_ref
+                ),
+                task_instance_id=task_instance_id or f"seed:{seed}",
+                stream_id=stream_id,
+                engine_generation=self.engine_generation,
+                policy_revision_id=self.current_policy_revision_id,
+                seed=seed,
+            )
         return stream_descriptor(
             rollout_id=rollout_id,
             stream_id=stream_id,
@@ -687,13 +914,63 @@ class CompatPlatform:
         if config_id and config_id not in self.policy_configs and harness != ISOLATED_POLICY_HARNESS:
             return {"error": "unknown_policy_config", "status_code": 404, "config_id": config_id}
         if harness == NANOHORIZON_HARNESS:
-            revision = self.policy_revisions.get(str(self.current_policy_revision_id or ""))
-            if revision is None or not revision.code:
+            installed_revision = self.policy_revisions.get(
+                str(self.current_policy_revision_id or "")
+            )
+            if installed_revision is None:
+                return {
+                    "error": "policy_not_installed",
+                    "status_code": 409,
+                    "detail": "harness nanohorizon requires PUT /policy before POST /rollouts",
+                }
+            requested_revision = request.policy_revision_id
+            if not requested_revision:
                 return {
                     "error": "policy_revision_required",
                     "status_code": 422,
-                    "detail": "harness nanohorizon requires PUT /policy before POST /rollouts",
+                    "detail": "POST /rollouts requires policy_revision_id for harness nanohorizon",
                 }
+            revision = self.policy_revisions.get(requested_revision)
+            if revision is None or not revision.code:
+                return {
+                    "error": "policy_revision_unknown",
+                    "status_code": 404,
+                    "policy_revision_id": requested_revision,
+                    "detail": "the requested immutable policy revision is not installed",
+                }
+            if requested_revision != self.current_policy_revision_id:
+                return {
+                    "error": "policy_revision_mismatch",
+                    "status_code": 409,
+                    "requested_policy_revision_id": requested_revision,
+                    "installed_policy_revision_id": self.current_policy_revision_id,
+                }
+            # Only the harness is an identity claim about the revision. The
+            # revision deliberately does not own a config id -- PUT stores
+            # config_id=None -- because a policy is installed once while sampler
+            # configs are bound per episode: nanohorizon's binder uses
+            # nh-<session_id> so the sampler base_url can carry the session. The
+            # hot_swap flow happens to pass the same string for both, which is
+            # what made comparing revision.name to config_id look correct; it is
+            # a category error, and it 409s every rollout for any caller that
+            # binds config per episode. config_id is already validated above
+            # against self.policy_configs (404 unknown_policy_config).
+            if revision.harness != harness:
+                return {
+                    "error": "policy_configuration_mismatch",
+                    "status_code": 409,
+                    "policy_revision_id": requested_revision,
+                    "requested_policy_ref": {"namespace": harness, "name": config_id},
+                    "installed_policy_ref": {
+                        "namespace": revision.namespace,
+                        "name": revision.name,
+                    },
+                }
+
+        if self.spec.admission is not None:
+            refusal = self.spec.admission(self, request)
+            if isinstance(refusal, dict) and refusal:
+                return refusal
 
         if request.resume_from_checkpoint_id:
             if self.spec.affordances.level("restore") != "native" or self.spec.affordances.level(
@@ -730,7 +1007,7 @@ class CompatPlatform:
             task_instance_id=task_instance_id,
             stream_id=descriptor["id"],
             engine_generation=self.engine_generation,
-            policy_revision_id=self.current_policy_revision_id,
+            policy_revision_id=request.policy_revision_id,
             seed=seed_i,
             usage=None,
             omit_reward=request.omit_reward,
@@ -772,7 +1049,24 @@ class CompatPlatform:
 
     def complete_rollout(self, rollout_id: str) -> dict[str, Any]:
         with self._state_lock:
-            return self._complete_rollout_locked(rollout_id)
+            pin = self.pins.get(rollout_id)
+            log = self.logs.get(rollout_id)
+            if pin is None or log is None:
+                return {"error": "unknown_rollout", "status_code": 404}
+            if pin.terminal:
+                return self._rollout_response(pin, self.stream_descriptor_for(rollout_id))
+        try:
+            # Async submissions are admitted and pinned by POST /rollouts, then
+            # executed here. Model waits must not hold the platform-wide state
+            # lock or distinct leases silently serialize behind one another.
+            self._simulate_or_fail(pin, log)
+        finally:
+            with self._state_lock:
+                self.active_leases = max(0, self.active_leases - 1)
+                result = self._rollout_response(
+                    pin, self.stream_descriptor_for(rollout_id)
+                )
+        return result
 
     def _complete_rollout_locked(self, rollout_id: str) -> dict[str, Any]:
         pin = self.pins.get(rollout_id)
@@ -831,6 +1125,7 @@ class CompatPlatform:
         return False
 
     def _rollout_response(self, pin: RolloutPin, descriptor: dict[str, Any]) -> dict[str, Any]:
+        reward = self.reward_executions.get(pin.rollout_id)
         return {
             "rollout_id": pin.rollout_id,
             "status": pin.status,
@@ -841,6 +1136,12 @@ class CompatPlatform:
             "task_instance_id": pin.task_instance_id,
             "stream": descriptor,
             "usage": pin.usage,
+            # A zero is a scored outcome, not an absent reward. Harbor
+            # finalizes its verifier result as part of its terminal runtime,
+            # so expose the materialized receipt on the authoritative rollout
+            # record as well as on the dedicated reward route.
+            "reward": reward.get("reward") if reward is not None else None,
+            "reward_status": reward.get("status") if reward is not None else None,
             "child_rollout_id": pin.child_rollout_id,
             "child_resource_ref": pin.child_resource_ref,
             "engine_generation": pin.engine_generation,
@@ -865,7 +1166,7 @@ class CompatPlatform:
         seal = self.seals.get(rollout_id)
         if seal is None:
             return None
-        return {
+        reference = {
             "schema_version": seal.get("schema_version"),
             "trace_id": seal.get("trace_id"),
             "content_digest": seal.get("content_digest"),
@@ -874,6 +1175,74 @@ class CompatPlatform:
             "closed": seal.get("closed"),
             "url": f"/rollouts/{rollout_id}/trace",
         }
+        bundle = self.trace_bundles.get(rollout_id)
+        if bundle is not None:
+            reference.update(
+                {
+                    "bundle_url": f"/rollouts/{rollout_id}/trace/bundle",
+                    "bundle_digest": bundle.bundle_digest,
+                    "bundle_archive_digest": bundle.archive_digest,
+                    "bundle_trace_id": bundle.trace_id,
+                    "bundle_trace_digest": bundle.trace_digest,
+                    "bundle_byte_size": bundle.byte_size,
+                }
+            )
+        return reference
+
+    def trace_bundle_archive(self, rollout_id: str) -> Path | None:
+        """Return only a verified self-contained Harbor archive for HTTP serving."""
+        bundle = self.trace_bundles.get(rollout_id)
+        if bundle is None or not bundle.archive_path.is_file():
+            return None
+        return bundle.archive_path
+
+    def _trace_bundle_path(self, rollout_id: str) -> Path:
+        return self.storage_root / "trace_bundles" / f"{self._durable_key(rollout_id)}.zip"
+
+    def _ensure_harbor_trace_bundle(
+        self,
+        *,
+        pin: RolloutPin,
+        log: RolloutEventLog,
+        seal: dict[str, Any],
+    ) -> None:
+        """Derive an inspectable archive without making raw evidence disposable.
+
+        The durable compatibility-layer journal exists for every runtime
+        family.  In particular, NanoHorizon targets use the external runtime,
+        so restricting promotion to Harbor silently left their sealed traces
+        without a downloadable Trace V5 bundle.
+        """
+        archive_path = self._trace_bundle_path(pin.rollout_id)
+        try:
+            if archive_path.is_file():
+                try:
+                    self.trace_bundles[pin.rollout_id] = inspect_harbor_trace_bundle(archive_path)
+                    self.trace_bundle_errors.pop(pin.rollout_id, None)
+                    return
+                except Exception:
+                    # The journal and lite seal are the durable authorities.
+                    # A derived archive may be regenerated without discarding
+                    # either of them, including after a partial host write.
+                    pass
+            self.trace_bundles[pin.rollout_id] = materialize_harbor_trace_bundle(
+                output_path=archive_path,
+                spec=self.spec,
+                log=log,
+                seal=seal,
+                pin={
+                    "world_ref": pin.world_ref,
+                    "environment_ref": pin.environment_ref,
+                    "policy_ref": pin.policy_ref,
+                    "evaluation_plan_ref": pin.evaluation_plan_ref,
+                    "task_instance_id": pin.task_instance_id,
+                },
+                status=pin.status,
+            )
+            self.trace_bundle_errors.pop(pin.rollout_id, None)
+        except Exception as exc:  # Raw journal + lite seal remain the fallback evidence.
+            self.trace_bundles.pop(pin.rollout_id, None)
+            self.trace_bundle_errors[pin.rollout_id] = str(exc)
 
     def _simulate_or_fail(self, pin: RolloutPin, log: RolloutEventLog) -> None:
         """Run the rollout, terminalizing the pin even when it raises.
@@ -895,6 +1264,19 @@ class CompatPlatform:
     def _simulate(self, pin: RolloutPin, log: RolloutEventLog) -> None:
         pin.env_generation += 1
         runtime_for(self.spec).simulate(self, pin, log)
+        # Harbor's native verifier is the terminal scoring authority. Persist
+        # that result as soon as the sibling verifier has completed, instead
+        # of requiring a separate, caller-authored POST /reward after the run
+        # has already closed. This preserves null for unscored verifier
+        # outcomes while making an authoritative 0.0 discoverable.
+        if pin.terminal and self.spec.runtime_family == TargetRuntimeKind.HARBOR:
+            self.compute_reward(
+                rollout_id=pin.rollout_id,
+                evidence=None,
+                mode="terminal",
+                rescore=False,
+                plan_ref=pin.evaluation_plan_ref,
+            )
         self.seals[pin.rollout_id] = seal_rollout_log(
             log,
             pin={
@@ -926,6 +1308,11 @@ class CompatPlatform:
             os.fsync(directory_fd)
         finally:
             os.close(directory_fd)
+        self._ensure_harbor_trace_bundle(
+            pin=pin,
+            log=log,
+            seal=self.seals[pin.rollout_id],
+        )
         self._persist_completed_rollout(pin)
 
     def _ensure_policy_process(self) -> IsolatedPolicyProcess:
@@ -946,9 +1333,72 @@ class CompatPlatform:
             return {"error": "bind_refused", "status_code": 403, "affordance": "update_policy_code"}
         code = body.get("code")
         harness = str(body.get("harness") or self.spec.default_policy_harness)
+        namespace = str(body.get("namespace") or harness).strip()
+        name = str(body.get("name") or "").strip()
+        configuration = body.get("configuration") or {}
+        model = body.get("model") or {}
+        source_revision = body.get("source_revision")
+        if not namespace or not name:
+            return {
+                "error": "policy_identity_required",
+                "status_code": 422,
+                "detail": "PUT /policy requires namespace and name",
+            }
+        secret_suffixes = ("apikey", "secret", "token", "password")
+
+        def secret_key(key: Any) -> bool:
+            normalized = str(key).replace("_", "").replace("-", "").lower()
+            return normalized == "credential" or normalized.endswith(secret_suffixes)
+
+        def contains_secret(value: Any) -> bool:
+            if isinstance(value, dict):
+                return any(
+                    secret_key(key) or contains_secret(child)
+                    for key, child in value.items()
+                )
+            if isinstance(value, list):
+                return any(contains_secret(child) for child in value)
+            return False
+
+        if contains_secret(configuration) or contains_secret(model):
+            return {
+                "error": "policy_credential_forbidden",
+                "status_code": 422,
+                "detail": "PUT /policy accepts identity and configuration, never credentials",
+            }
         raw = code if isinstance(code, (bytes, bytearray)) else str(code or "").encode("utf-8")
-        digest = hashlib.sha256(raw).hexdigest()[:16]
-        revision_id = f"polrev_{digest}"
+        if harness == NANOHORIZON_HARNESS and not raw:
+            return {
+                "error": "policy_source_required",
+                "status_code": 422,
+                "detail": "PUT /policy requires non-empty source for harness nanohorizon",
+            }
+        canonical = json.dumps(
+            {
+                "code_sha256": hashlib.sha256(raw).hexdigest(),
+                "harness": harness,
+                "namespace": namespace,
+                "name": name,
+                "configuration": configuration,
+                "model": model,
+                "source_revision": source_revision,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        digest = hashlib.sha256(canonical).hexdigest()
+        revision_id = f"polrev_{digest[:16]}"
+        existing = self.policy_revisions.get(revision_id)
+        if existing is not None:
+            self.current_policy_revision_id = revision_id
+            return {**self.policy_state_payload(), "idempotent": True}
+        configuration_digest = "sha256:" + hashlib.sha256(
+            json.dumps(configuration, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        model_digest = "sha256:" + hashlib.sha256(
+            json.dumps(model, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        installed_at = datetime.now(timezone.utc).isoformat()
         revision = PolicyRevision(
             revision_id=revision_id,
             digest=digest,
@@ -956,6 +1406,12 @@ class CompatPlatform:
             config_id=None,
             code=bytes(raw),
             isolation_receipt={"sandbox": harness, "digest": digest},
+            namespace=namespace,
+            name=name,
+            configuration_digest=configuration_digest,
+            model_digest=model_digest,
+            source_revision=str(source_revision) if source_revision is not None else None,
+            installed_at=installed_at,
         )
         self.policy_revisions[revision_id] = revision
         self.current_policy_revision_id = revision_id
@@ -976,12 +1432,37 @@ class CompatPlatform:
                 receipt["spawn_error"] = str(exc)
         else:
             receipt["spawned"] = False
-        return {
-            "policy_revision_id": revision_id,
-            "digest": digest,
-            "engine_generation": self.engine_generation,
-            "isolation_receipt": receipt,
-        }
+        return {**self.policy_state_payload(), "idempotent": False, "isolation_receipt": receipt}
+
+    def policy_state_payload(self) -> dict[str, Any]:
+        """Return the installed policy identity without source or credentials."""
+        with self._state_lock:
+            revision = self.policy_revisions.get(str(self.current_policy_revision_id or ""))
+            if revision is None:
+                return {
+                    "schema_version": "synth.container-policy.v1",
+                    "status": PolicyInstallStatus.NOT_INSTALLED,
+                    "policy_ref": None,
+                    "policy_revision_id": None,
+                    "source_revision": None,
+                    "configuration_digest": None,
+                    "model_digest": None,
+                    "installed_at": None,
+                    "compatible_operations": ["rollout"],
+                    "credential_state": "not_exposed",
+                }
+            return {
+                "schema_version": "synth.container-policy.v1",
+                "status": PolicyInstallStatus.INSTALLED,
+                "policy_ref": {"namespace": revision.namespace, "name": revision.name},
+                "policy_revision_id": revision.revision_id,
+                "source_revision": revision.source_revision,
+                "configuration_digest": revision.configuration_digest,
+                "model_digest": revision.model_digest,
+                "installed_at": revision.installed_at,
+                "compatible_operations": ["rollout"],
+                "credential_state": "not_exposed",
+            }
 
     def restart_policy(self) -> dict[str, Any]:
         self._close_policy_process()
