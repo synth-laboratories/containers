@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
+import struct
 import threading
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -18,6 +20,7 @@ from .tracing.capture.redaction import assert_no_secrets
 CONTROL_SUBSCRIBED = "stream.subscribed"
 SCHEMA_STREAM_EVENT = "synth.trace-stream-event.v1"
 SCHEMA_EVENT_CHAIN = "synth.rollout.event-chain.v1"
+SCHEMA_ENVELOPE_DIGEST = "synth.envelope-digest.v2"
 _ROLLOUT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
 DEFAULT_STREAM_RECONNECT = {
@@ -45,6 +48,7 @@ class LogEnvelope:
     control: bool
     ts: str
     digest: str
+    digest_schema: str | None = SCHEMA_ENVELOPE_DIGEST
 
     def to_dict(self) -> dict[str, Any]:
         row: dict[str, Any] = {
@@ -55,6 +59,8 @@ class LogEnvelope:
             "payload": deepcopy(self.payload),
             "digest": self.digest,
         }
+        if self.digest_schema is not None:
+            row["digest_schema"] = self.digest_schema
         if self.sequence is not None:
             row["sequence"] = self.sequence
             row["event_id"] = str(self.sequence)
@@ -84,7 +90,15 @@ class LogEnvelope:
         if row.get("event_id") != expected_event_id:
             raise ValueError("event_log_event_id_mismatch")
         digest = row.get("digest")
-        expected = _digest(kind, sequence, payload)
+        digest_schema = row.get("digest_schema")
+        if digest_schema is None:
+            # Journals persisted before the v2 contract remain recoverable. They
+            # are never upgraded in place: their chain commits to their v1 digest.
+            expected = _legacy_digest(kind, sequence, payload)
+        elif digest_schema == SCHEMA_ENVELOPE_DIGEST:
+            expected = _digest(kind, sequence, payload)
+        else:
+            raise ValueError("event_log_digest_schema_unsupported")
         if digest != expected:
             raise ValueError("event_log_digest_mismatch")
         ts = row.get("ts")
@@ -97,12 +111,14 @@ class LogEnvelope:
             control=control,
             ts=ts,
             digest=expected,
+            digest_schema=digest_schema,
         )
 
 
-def _digest(kind: str, sequence: int | None, payload: dict[str, Any]) -> str:
+def _legacy_digest(kind: str, sequence: int | None, payload: dict[str, Any]) -> str:
+    """The unversioned v1 digest, retained only for persisted-journal recovery."""
+
     import hashlib
-    import json
 
     blob = json.dumps(
         {"kind": kind, "sequence": sequence, "payload": payload},
@@ -113,8 +129,78 @@ def _digest(kind: str, sequence: int | None, payload: dict[str, Any]) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
 
+def _canonical_v2(value: Any, out: bytearray) -> None:
+    """Append the byte-exact ``synth.envelope-digest.v2`` encoding of ``value``.
+
+    The tagged, length-delimited encoding deliberately does not depend on a JSON
+    library's string escaping or floating-point rendering. Strings are raw UTF-8;
+    finite floats are their IEEE-754 binary64 bits; object keys sort by UTF-8 bytes.
+    """
+
+    if value is None:
+        out.extend(b"n")
+    elif value is False:
+        out.extend(b"f")
+    elif value is True:
+        out.extend(b"t")
+    elif isinstance(value, int):
+        if value < -(1 << 63) or value > (1 << 64) - 1:
+            raise ValueError("event_log_integer_out_of_range")
+        out.extend(b"i")
+        out.extend(str(value).encode("ascii"))
+        out.extend(b";")
+    elif isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("event_log_float_must_be_finite")
+        out.extend(b"d")
+        out.extend(struct.pack("!d", value).hex().encode("ascii"))
+        out.extend(b";")
+    elif isinstance(value, str):
+        encoded = value.encode("utf-8")
+        out.extend(b"s")
+        out.extend(str(len(encoded)).encode("ascii"))
+        out.extend(b":")
+        out.extend(encoded)
+    elif isinstance(value, list):
+        out.extend(b"a")
+        out.extend(str(len(value)).encode("ascii"))
+        out.extend(b"[")
+        for item in value:
+            _canonical_v2(item, out)
+        out.extend(b"]")
+    elif isinstance(value, dict):
+        if not all(isinstance(key, str) for key in value):
+            raise ValueError("event_log_object_keys_must_be_strings")
+        keys = sorted(value, key=lambda key: key.encode("utf-8"))
+        out.extend(b"o")
+        out.extend(str(len(keys)).encode("ascii"))
+        out.extend(b"{")
+        for key in keys:
+            _canonical_v2(key, out)
+            _canonical_v2(value[key], out)
+        out.extend(b"}")
+    else:  # pragma: no cover - payload normalization makes values JSON-native
+        raise TypeError(f"event_log_value_not_json:{type(value).__name__}")
+
+
+def canonical_envelope_bytes(
+    kind: str, sequence: int | None, payload: dict[str, Any]
+) -> bytes:
+    """Return the versioned canonical digest preimage for one envelope."""
+
+    out = bytearray(b"synth.envelope-digest.v2\0")
+    _canonical_v2({"kind": kind, "sequence": sequence, "payload": payload}, out)
+    return bytes(out)
+
+
+def _digest(kind: str, sequence: int | None, payload: dict[str, Any]) -> str:
+    import hashlib
+
+    return hashlib.sha256(canonical_envelope_bytes(kind, sequence, payload)).hexdigest()[:16]
+
+
 def envelope_digest(kind: str, sequence: int | None, payload: dict[str, Any]) -> str:
-    """Public name for the canonical envelope digest (see :func:`_digest`)."""
+    """Digest under ``synth.envelope-digest.v2`` (see :func:`_digest`)."""
 
     return _digest(kind, sequence, payload)
 
@@ -128,8 +214,8 @@ def chain_genesis(rollout_id: str) -> str:
     - ``head(i) = sha256(ascii(head(i-1) + digest(i))).hexdigest()`` where
       ``digest(i)`` is the ``digest`` field of the i-th SEQUENCED
     (``control: false``) envelope in sequence order — 16 lowercase hex chars,
-      itself the truncated sha256 of the canonical
-      ``{"kind","sequence","payload"}`` object (see :func:`_digest`).
+      itself the truncated sha256 of the versioned canonical envelope bytes
+      (``synth.envelope-digest.v2``; see :func:`canonical_envelope_bytes`).
 
     Control records never enter the chain.  A consumer that drains every
     sequenced event can recompute the head from the envelope digests alone and
@@ -161,7 +247,13 @@ def chain_head_for(rollout_id: str, digests: "list[str] | tuple[str, ...]") -> s
 
 def _normalized_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Freeze a JSON-safe copy so persisted and published bytes cannot drift."""
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+        allow_nan=False,
+    )
     decoded = json.loads(encoded)
     if not isinstance(decoded, dict):  # pragma: no cover - dict input guarantees this
         raise ValueError("event_log_payload_must_be_object")

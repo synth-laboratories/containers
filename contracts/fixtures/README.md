@@ -21,6 +21,14 @@ SYNTH_UPDATE_METADATA_FIXTURES=1 pytest tests/test_metadata_contract.py
 Consumer repositories may vendor the SDK payload. Re-copy it after regeneration
 so downstream corpora certify the current producer shape.
 
+## `journal/`
+
+`envelope-digest-v2.json` is the cross-language golden corpus for
+`synth.envelope-digest.v2`. Workshop vendors the identical file at
+`apps/synth_desktop/src-tauri/src/optimizers/fixtures/envelope_digest_v2.json`.
+Both producer and consumer tests must pass before changing the encoding or any
+vector; update the two copies together.
+
 ## `gepa/`
 
 `gepa-contract-owned.json` is the committed copy of the GEPA sub-contract values

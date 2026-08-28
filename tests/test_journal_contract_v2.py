@@ -16,7 +16,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from synth_containers.event_log import (
+    SCHEMA_ENVELOPE_DIGEST,
     RolloutEventLog,
+    canonical_envelope_bytes,
     chain_head_for,
     envelope_digest,
 )
@@ -28,6 +30,42 @@ from synth_containers.platform.seal import (
 )
 
 ROLLOUT_ID = "roll_journal_v2"
+_DIGEST_VECTORS = json.loads(
+    (
+        Path(__file__).parents[1]
+        / "contracts"
+        / "fixtures"
+        / "journal"
+        / "envelope-digest-v2.json"
+    ).read_text(encoding="utf-8")
+)
+
+
+@pytest.mark.parametrize(
+    "vector",
+    _DIGEST_VECTORS["vectors"],
+    ids=lambda vector: vector["name"],
+)
+def test_envelope_digest_v2_cross_language_golden_vectors(vector: dict) -> None:
+    assert _DIGEST_VECTORS["digest_schema"] == SCHEMA_ENVELOPE_DIGEST
+    assert (
+        envelope_digest(vector["kind"], vector["sequence"], vector["payload"])
+        == vector["digest"]
+    )
+    assert canonical_envelope_bytes(
+        vector["kind"], vector["sequence"], vector["payload"]
+    ).startswith(
+        b"synth.envelope-digest.v2\0"
+    )
+
+
+def test_new_envelopes_declare_their_digest_contract() -> None:
+    envelope = RolloutEventLog(rollout_id=ROLLOUT_ID, stream_id="s").append(
+        "span.policy.data", {"text": "Unicode survives — 漢字", "cost": 1e-05}
+    )
+    row = envelope.to_dict()
+    assert row["digest_schema"] == SCHEMA_ENVELOPE_DIGEST
+    assert row["digest"] == envelope_digest(row["kind"], row["sequence"], row["payload"])
 
 
 def _make_app(tmp_path: Path, **runtime_config):

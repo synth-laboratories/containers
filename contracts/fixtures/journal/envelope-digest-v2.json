@@ -1,0 +1,49 @@
+{
+  "schema": "synth.envelope-digest-vectors.v1",
+  "digest_schema": "synth.envelope-digest.v2",
+  "vectors": [
+    {
+      "name": "unicode",
+      "kind": "span.policy.data",
+      "sequence": 10,
+      "payload": {
+        "em_dash": "immediately — do",
+        "cjk": "漢字"
+      },
+      "digest": "cac19283107b4763"
+    },
+    {
+      "name": "float-rendering",
+      "kind": "usage",
+      "sequence": 11,
+      "payload": {
+        "tiny": 1e-05,
+        "five": 5e-5,
+        "large": 1e+16,
+        "negative_zero": -0.0
+      },
+      "digest": "a83af6b45b391289"
+    },
+    {
+      "name": "nested-key-order",
+      "kind": "mixed",
+      "sequence": 12,
+      "payload": {
+        "z": [],
+        "a": {
+          "β": true,
+          "alpha": null
+        },
+        "empty": {}
+      },
+      "digest": "b64325246a2b4a9c"
+    },
+    {
+      "name": "empty-object",
+      "kind": "empty",
+      "sequence": 13,
+      "payload": {},
+      "digest": "e16223ac9af17483"
+    }
+  ]
+}

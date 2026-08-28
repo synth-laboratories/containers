@@ -754,7 +754,12 @@ components:
         digest:
           type: string
           pattern: '^[0-9a-f]{16}$'
-          description: Truncated sha256 over the canonical {kind, sequence, payload}.
+          description: Truncated sha256 under digest_schema over {kind, sequence, payload}.
+        digest_schema:
+          type: string
+          enum: [synth.envelope-digest.v2]
+          description: >-
+            Byte contract used for digest. Omitted only by legacy persisted envelopes.
         rollout_id:
           type: string
       additionalProperties: true
