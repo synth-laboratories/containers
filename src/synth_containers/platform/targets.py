@@ -26,6 +26,24 @@ class RewardKind(StrEnum):
     ENV_STATUS = "env_status"
 
 
+class TaskInstanceStatus(StrEnum):
+    PREPARED = "prepared"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    TRUNCATED = "truncated"
+    GAME_OVER = "game_over"
+    CANCELLED = "cancelled"
+    TERMINAL = "terminal"
+
+
+class PolicyInstallStatus(StrEnum):
+    NOT_INSTALLED = "not_installed"
+    INSTALLING = "installing"
+    INSTALLED = "installed"
+    FAILED = "failed"
+
+
 class ScriptNode(StrEnum):
     REWARD_TXT = "reward.txt"
     HELDOUT_GATE = "heldout_gate"
@@ -67,6 +85,15 @@ class TargetSpec:
     metadata_extra: Any | None = None
     mount_routes: Any | None = None
     compat_rollout: Any | None = None
+    # Optional task-specific admission. It runs after a caller has bound an
+    # advertised policy but before any runtime/child-container work begins.
+    # Return a normal platform error payload to refuse without synthesizing an
+    # attempt from an environment that cannot honestly start.
+    admission: Any | None = None
+    # Stable catalog identity. Older image packages may omit these fields; the
+    # platform then derives a conservative identity from the target refs.
+    task_id: str | None = None
+    task_family: str | None = None
 
 
 def _env(items: dict[str, str]) -> AffordanceMap:
