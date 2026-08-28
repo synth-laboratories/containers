@@ -31,8 +31,10 @@ with a ``COMPAT:`` comment at the emit site and removed after one release):
 from __future__ import annotations
 
 import copy
+import os
+import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Mapping
 
 from .ontology import CONTRACT_VERSION
 
@@ -56,6 +58,56 @@ LIVE_FRAMES_LEVELS = ("native", "sampled", "post_hoc", "unsupported")
 # the migration window reviewable instead of turning the aliases permanent.
 EMIT_COMPAT_OPTIMIZER_CONTRACT_DUPLICATES = True
 COMPAT_OPTIMIZER_CONTRACT_DUPLICATES_THROUGH = "2026-08"
+
+IMAGE_DIGEST_ENV = "SYNTH_CONTAINER_IMAGE_DIGEST"
+PRODUCER_SOURCE_REVISION_ENV = "SYNTH_CONTAINER_PRODUCER_SOURCE_REVISION"
+_IMAGE_DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
+_PRODUCER_SOURCE_REVISION = re.compile(r"[0-9a-f]{40}")
+
+
+@dataclass(frozen=True)
+class RuntimeProvenance:
+    """Immutable producer identity injected by the trusted image launcher."""
+
+    image_digest: str | None = None
+    producer_source_revision: str | None = None
+
+
+def runtime_provenance_from_environment(
+    environ: Mapping[str, str] | None = None,
+) -> RuntimeProvenance:
+    source = os.environ if environ is None else environ
+    image_digest = str(source.get(IMAGE_DIGEST_ENV) or "").strip().lower() or None
+    producer_revision = (
+        str(source.get(PRODUCER_SOURCE_REVISION_ENV) or "").strip().lower() or None
+    )
+    if image_digest is not None and _IMAGE_DIGEST.fullmatch(image_digest) is None:
+        raise ValueError("container_image_digest_invalid")
+    if (
+        producer_revision is not None
+        and _PRODUCER_SOURCE_REVISION.fullmatch(producer_revision) is None
+    ):
+        raise ValueError("container_producer_source_revision_invalid")
+    return RuntimeProvenance(
+        image_digest=image_digest,
+        producer_source_revision=producer_revision,
+    )
+
+
+def attach_runtime_provenance(
+    payload: dict[str, Any],
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Stamp trusted launch provenance at stable top-level `/info` paths."""
+
+    result = copy.deepcopy(payload)
+    provenance = runtime_provenance_from_environment(environ)
+    if provenance.image_digest is not None:
+        result["imageDigest"] = provenance.image_digest
+    if provenance.producer_source_revision is not None:
+        result["producerSourceRevision"] = provenance.producer_source_revision
+    return result
 
 
 @dataclass(frozen=True)
@@ -162,4 +214,4 @@ def compose_metadata_payload(
             # copy above.
             capabilities.setdefault("optimizer_contracts", copy.deepcopy(contracts))
 
-    return payload
+    return attach_runtime_provenance(payload)

@@ -165,10 +165,20 @@ def test_rollout_environment_is_never_upped(tmp_path: Path) -> None:
 def test_up_writes_run_record_and_down_clears_it(tmp_path: Path, healthy: None) -> None:
     _write_catalog(tmp_path)
     backend = FakeDocker()
-    record = up_image("banking77", catalog=tmp_path, backend=backend, port=8123)
+    spoofed = "sha256:" + ("cd" * 32)
+    record = up_image(
+        "banking77",
+        catalog=tmp_path,
+        backend=backend,
+        port=8123,
+        env={"SYNTH_CONTAINER_IMAGE_DIGEST": spoofed},
+    )
     assert record.container_name == "synth-banking77-8123"
     assert record.url == "http://127.0.0.1:8123"
     assert read_run_record("banking77", 8123) is not None
+    _, run_args = backend.ran[-1]
+    assert f"SYNTH_CONTAINER_IMAGE_DIGEST={DIGEST}" in run_args
+    assert f"SYNTH_CONTAINER_IMAGE_DIGEST={spoofed}" not in run_args
     assert down_image("banking77", port=8123, catalog=tmp_path, backend=backend) is True
     assert read_run_record("banking77", 8123) is None
     assert backend.containers == {}

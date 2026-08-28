@@ -999,6 +999,14 @@ components:
           additionalProperties: true
         capabilities:
           $ref: '#/components/schemas/InfoCapabilities'
+        imageDigest:
+          type: string
+          pattern: '^sha256:[0-9a-f]{64}$'
+          description: Immutable digest of the image resolved by the trusted launcher.
+        producerSourceRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$'
+          description: Git revision of the Containers producer source used by the launcher.
         capabilities_digest:
           type: string
           description: sha256 of canonical capability metadata, including per-capability input_schema.

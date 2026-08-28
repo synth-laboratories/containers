@@ -84,6 +84,8 @@ def materialize_harbor_trace_bundle(
     seal: dict[str, Any],
     pin: dict[str, Any],
     status: str,
+    producer_commit: str | None = None,
+    container_image_digest: str | None = None,
 ) -> HarborTraceBundleRef:
     """Write a redacted, self-contained archive from a terminal Harbor log.
 
@@ -116,6 +118,8 @@ def materialize_harbor_trace_bundle(
             redaction=redaction.to_dict(),
             spec=spec,
             status=status,
+            producer_commit=producer_commit,
+            container_image_digest=container_image_digest,
             frame_artifacts=frame_artifacts,
             event_artifact_ids=event_artifact_ids,
         )
@@ -437,6 +441,8 @@ def _document_from_source(
     redaction: dict[str, Any],
     spec: TargetSpec,
     status: str,
+    producer_commit: str | None = None,
+    container_image_digest: str | None = None,
     frame_artifacts: tuple[ArtifactRefV5, ...] = (),
     event_artifact_ids: dict[int, tuple[str, ...]] | None = None,
 ) -> tuple[TraceDocumentV5, Any]:
@@ -610,6 +616,8 @@ def _document_from_source(
             producer="synth-containers-harbor",
             producer_version="v0.8",
             source_format=PROMOTION_SCHEMA,
+            producer_commit=producer_commit,
+            container_image_digest=container_image_digest,
             model=model,
             provider=provider,
             harness="harbor",

@@ -7,6 +7,7 @@ import json
 import os
 import tempfile
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -19,6 +20,7 @@ from ..event_log import (
     stream_descriptor,
     validate_rollout_id,
 )
+from ..metadata import attach_runtime_provenance, runtime_provenance_from_environment
 from .affordances import bind_recipe
 from .http_requests import CreateRolloutRequest, ISOLATED_POLICY_HARNESS, NANOHORIZON_HARNESS
 from .policy_process import DEFAULT_HEURISTIC, IsolatedPolicyProcess
@@ -660,7 +662,7 @@ class CompatPlatform:
         }
         if contract := self._gepa_v2_contract():
             payload["optimizer_contracts"] = {"gepa": contract}
-        return payload
+        return attach_runtime_provenance(payload)
 
     def _gepa_v2_contract(self) -> dict[str, Any] | None:
         contract = self.spec.optimizer_contracts
@@ -1236,6 +1238,7 @@ class CompatPlatform:
                     # A derived archive may be regenerated without discarding
                     # either of them, including after a partial host write.
                     pass
+            runtime_provenance = runtime_provenance_from_environment()
             self.trace_bundles[pin.rollout_id] = materialize_harbor_trace_bundle(
                 output_path=archive_path,
                 spec=self.spec,
@@ -1249,6 +1252,8 @@ class CompatPlatform:
                     "task_instance_id": pin.task_instance_id,
                 },
                 status=pin.status,
+                producer_commit=runtime_provenance.producer_source_revision,
+                container_image_digest=runtime_provenance.image_digest,
             )
             self.trace_bundle_errors.pop(pin.rollout_id, None)
         except Exception as exc:  # Raw journal + lite seal remain the fallback evidence.
@@ -1811,12 +1816,24 @@ class CompatPlatform:
             product *= item
         return {"status": "scored", "reward": product}
 
-    def events_payload(self, rollout_id: str, after: int, limit: int = 1000) -> dict[str, Any]:
+    def events_payload(
+        self,
+        rollout_id: str,
+        after: int,
+        limit: int = 1000,
+        *,
+        ack: int | None = None,
+    ) -> dict[str, Any]:
         log = self.logs.get(rollout_id)
         if log is None:
             return {"error": "unknown_rollout", "status_code": 404}
         if isinstance(limit, bool) or limit < 1 or limit > 10_000:
             return {"error": "invalid_page_limit", "status_code": 422}
+        if ack is not None:
+            try:
+                log.record_ack(ack)
+            except ValueError:
+                return {"error": "invalid_ack", "status_code": 422}
         available = log.after(after)
         controls = [item for item in available if item.sequence is None]
         evidence = [item for item in available if item.sequence is not None]
@@ -1838,6 +1855,79 @@ class CompatPlatform:
                     [after, *(item.sequence for item in page if item.sequence is not None)]
                 ),
                 "has_more": len(evidence) > limit,
+                "chain_head": log.chain_head,
+                "acked": log.last_acked,
             },
+            "retention": self._journal_retention(log),
             "events": envelopes,
         }
+
+    def _retention_ttl_seconds(self) -> int:
+        raw = (self.runtime_config or {}).get("journal_retention_ttl_seconds")
+        try:
+            ttl = int(raw) if raw is not None else 0
+        except (TypeError, ValueError):
+            ttl = 0
+        return ttl if ttl > 0 else 604_800
+
+    def _journal_retention(
+        self, log: RolloutEventLog, *, now: float | None = None
+    ) -> dict[str, Any]:
+        ttl = self._retention_ttl_seconds()
+        moment = time.time() if now is None else now
+        expires_at = None
+        released = False
+        reason = None
+        if log.closed:
+            if log.last_acked >= log.high_water:
+                released = True
+                reason = "acked"
+            if log.closed_at:
+                closed_epoch = datetime.fromisoformat(
+                    log.closed_at.replace("Z", "+00:00")
+                ).timestamp()
+                expires_epoch = closed_epoch + ttl
+                expires_at = (
+                    datetime.fromtimestamp(expires_epoch, tz=timezone.utc)
+                    .isoformat(timespec="seconds")
+                    .replace("+00:00", "Z")
+                )
+                if not released and moment >= expires_epoch:
+                    released = True
+                    reason = "ttl_expired"
+        return {
+            "policy": "until-acked-or-ttl",
+            "ttl_seconds": ttl,
+            "acked": log.last_acked,
+            "high_water": log.high_water,
+            "closed": log.closed,
+            "released": released,
+            "released_reason": reason,
+            "expires_at": expires_at,
+        }
+
+    def release_retained_journals(
+        self,
+        *,
+        now: float | None = None,
+        remove: Any = None,
+    ) -> list[dict[str, Any]]:
+        released_rows: list[dict[str, Any]] = []
+        for rollout_id, log in list(self.logs.items()):
+            state = self._journal_retention(log, now=now)
+            if not state["released"]:
+                continue
+            paths: list[Path] = []
+            if log.journal_path is not None:
+                paths.append(log.journal_path)
+                rollout_key = hashlib.sha256(rollout_id.encode("utf-8")).hexdigest()
+                paths.append(self.storage_root / "frame_assets" / rollout_key)
+            row = {
+                "rollout_id": rollout_id,
+                "reason": state["released_reason"],
+                "paths": [str(item) for item in paths],
+            }
+            released_rows.append(row)
+            if callable(remove):
+                remove(rollout_id, [str(item) for item in paths])
+        return released_rows

@@ -32,7 +32,10 @@ ROLLOUT_ID = "roll_journal_v2"
 
 def _make_app(tmp_path: Path, **runtime_config):
     app = create_compat_app(
-        "craftax_engine",
+        # Journal v2 is target-agnostic. The legacy ``craftax_engine`` fixture
+        # was removed from the Nano registry; exercise the same contract on a
+        # retained offline target rather than reviving a deleted runtime.
+        "openenv_echo",
         storage_root=tmp_path / "storage",
         runtime_config=runtime_config or None,
     )

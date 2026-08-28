@@ -584,6 +584,9 @@ def up_image(
 
     merged = _merged_env(spec, env)
     digest = resolve_local_digest(spec, image=image, build=build, pull=pull, backend=docker)
+    # The daemon-resolved image config digest is authoritative. Never allow a
+    # caller-supplied value to attest a different workload than the one below.
+    merged["SYNTH_CONTAINER_IMAGE_DIGEST"] = digest
     reference = spec.pinned_name(digest)
     if docker.inspect_id(reference) is None:
         reference = f"{spec.image_name}:local"
