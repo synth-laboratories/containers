@@ -604,23 +604,134 @@ def test_compaction_generation_counts_against_rollout_provider_cap(monkeypatch) 
     class Policy:
         def run_episode(self, **kwargs):
             kwargs["sample"]([], tools=TOOLS, seed=1)
+            kwargs["step"]("do")
             assert kwargs["summarize"]([], 10) == "summary"
-            with pytest.raises(
-                NanoHorizonSamplerFailure,
-                match="provider_call_limit_reached",
-            ):
-                kwargs["sample"]([], tools=TOOLS, seed=2)
-            return {
-                "journal": [],
-                "proxy_request_ids": ["proxy-action"],
-                "achievements": [],
-                "reward": 0.0,
-            }
+            kwargs["sample"]([], tools=TOOLS, seed=2)
+            raise AssertionError("the local provider cap must stop before this point")
 
     class World:
         def reset(self, seed, *, max_steps):
             return StepResult(
                 observation={"private": {}},
+                reward=0.0,
+                done=False,
+                valid_actions=[],
+                ascii_map=".",
+                frame_digest="frame-0",
+                env_steps=0,
+            )
+
+        def drain_native_events(self):
+            return []
+
+        def step(self, action):
+            assert action == "do"
+            return StepResult(
+                observation={
+                    "private": {
+                        "total_reward": 1.25,
+                        "achievements": {"collect_wood": True, "drink_water": False},
+                    }
+                },
+                reward=1.25,
+                done=False,
+                valid_actions=[],
+                ascii_map=".",
+                frame_digest="frame-1",
+                env_steps=1,
+            )
+
+    class Log:
+        def __init__(self):
+            self.rows = []
+            self.closed = False
+
+        def append(self, kind, payload):
+            self.rows.append((kind, payload))
+
+        @property
+        def high_water(self):
+            return len(self.rows)
+
+        def mark_closed(self):
+            self.closed = True
+
+        def persist_frame(self, step, frame_bytes):
+            return None
+
+    planner.policy = Policy()
+    log = Log()
+
+    outcome = planner.run(world=World(), log=log, seed=1, max_steps=10)
+
+    assert planner.usage()["calls"] == 2
+    assert outcome["reward_signals"] == [1.25]
+    assert outcome["actions"] == ["do"]
+    assert outcome["episode"]["reward"] == 1.25
+    assert outcome["episode"]["achievements"] == ["collect_wood"]
+    assert outcome["episode"]["proxy_request_ids"] == ["proxy-action"]
+    assert outcome["episode"]["policy_calls"] == 1
+    assert outcome["episode"]["provider_calls"] == 2
+    assert outcome["episode"]["truncated"] is True
+    assert outcome["episode"]["stopped_on"] == "provider_call_limit"
+    assert log.closed is True
+    terminal = [payload for kind, payload in log.rows if kind == "status"][-1]
+    assert terminal == {
+        "status": "completed",
+        "steps": 1,
+        "reason": "provider_call_limit",
+        "truncated": True,
+    }
+    assert [payload["phase"] for kind, payload in log.rows if kind == "span.policy.data"] == [
+        "sample",
+        "compaction",
+    ]
+
+
+def test_premature_workshop_capability_exhaustion_remains_failure(monkeypatch) -> None:
+    planner = object.__new__(NanoHorizonPlanner)
+    planner.config_id = "test"
+    planner.config = {"max_calls": 10}
+    planner.sampler = HttpSampler(
+        {
+            "base_url": (
+                "http://host.docker.internal:17654/cap/wcap_test/"
+                "v1/providers/openrouter"
+            ),
+            "model": "z-ai/glm-5.3-flash",
+        }
+    )
+    planner.max_provider_calls = 10
+    planner._calls = 0
+    planner._last_events = []
+    planner._last_trace = {}
+    planner._call_gen_ai = []
+    planner._usage = {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "calls": 0,
+    }
+
+    failure = NanoHorizonSamplerFailure(
+        "workshop_capability_exhausted",
+        completion=nanohorizon._failure_completion("workshop_capability_exhausted"),
+    )
+    monkeypatch.setattr(
+        planner.sampler,
+        "complete",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(failure),
+    )
+
+    class Policy:
+        def run_episode(self, **kwargs):
+            kwargs["sample"]([], tools=TOOLS, seed=1)
+            raise AssertionError("premature exhaustion must abort the policy")
+
+    class World:
+        def reset(self, seed, *, max_steps):
+            return StepResult(
+                observation={"private": {"total_reward": 2.0}},
                 reward=0.0,
                 done=False,
                 valid_actions=[],
@@ -653,10 +764,15 @@ def test_compaction_generation_counts_against_rollout_provider_cap(monkeypatch) 
     planner.policy = Policy()
     log = Log()
 
-    planner.run(world=World(), log=log, seed=1, max_steps=10)
+    with pytest.raises(
+        NanoHorizonSamplerFailure,
+        match="workshop_capability_exhausted",
+    ):
+        planner.run(world=World(), log=log, seed=1, max_steps=10)
 
-    assert planner.usage()["calls"] == 2
-    assert [payload["phase"] for kind, payload in log.rows if kind == "span.policy.data"] == [
-        "sample",
-        "compaction",
-    ]
+    assert planner.usage()["calls"] == 1
+    assert log.closed is False
+    assert not [payload for kind, payload in log.rows if kind == "status"]
+    trace = [payload for kind, payload in log.rows if kind == "span.policy.data"][-1]
+    assert trace["error"] == "workshop_capability_exhausted"
+    assert trace["error_retryable"] is False

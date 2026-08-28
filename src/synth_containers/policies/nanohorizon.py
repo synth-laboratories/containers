@@ -160,6 +160,38 @@ def _failure_completion(code: str) -> dict[str, Any]:
     }
 
 
+def _terminal_achievements(observation: dict[str, Any]) -> list[str]:
+    """Read achieved labels from the actual terminal environment observation."""
+
+    private = observation.get("private")
+    if not isinstance(private, dict):
+        public = observation.get("public")
+        private = public.get("private") if isinstance(public, dict) else None
+    if not isinstance(private, dict):
+        return []
+    raw = private.get("achievements")
+    if isinstance(raw, dict):
+        return sorted(str(key) for key, value in raw.items() if value)
+    if isinstance(raw, list):
+        return sorted(str(value) for value in raw)
+    return []
+
+
+def _terminal_reward(
+    observation: dict[str, Any], signals: list[float | None]
+) -> float:
+    """Preserve environment authority when a policy budget ends the rollout."""
+
+    private = observation.get("private")
+    if not isinstance(private, dict):
+        public = observation.get("public")
+        private = public.get("private") if isinstance(public, dict) else None
+    value = private.get("total_reward") if isinstance(private, dict) else None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return sum(float(item) for item in signals if isinstance(item, (int, float)))
+
+
 def _workshop_budget_exhausted(
     url: str, exc: urllib.error.HTTPError, detail: str
 ) -> bool:
@@ -717,6 +749,7 @@ class NanoHorizonPlanner:
         self._last_events: list[dict[str, Any]] = []
         self._last_trace: dict[str, Any] = {}
         self._call_gen_ai: list[dict[str, Any]] = []
+        self._proxy_request_ids: list[str] = []
         self._usage = {
             "prompt_tokens": 0,
             "completion_tokens": 0,
@@ -780,6 +813,7 @@ class NanoHorizonPlanner:
     ) -> dict[str, Any]:
         log.append("env.episode.opened", {"seed": seed, "max_steps": max_steps})
         self._call_gen_ai = []
+        self._proxy_request_ids = []
         result: StepResult = world.reset(seed, max_steps=max_steps)
         events = world.drain_native_events()
         for event in events:
@@ -871,6 +905,9 @@ class NanoHorizonPlanner:
                     }
                 )
             self._call_gen_ai.append(copy_observation(self._last_trace))
+            proxy_request_id = str(completion.get("proxy_request_id") or "")
+            if proxy_request_id:
+                self._proxy_request_ids.append(proxy_request_id)
             log.append("span.policy.data", dict(self._last_trace))
             if failure is not None:
                 raise failure
@@ -920,19 +957,49 @@ class NanoHorizonPlanner:
             )
             return text
 
-        outcome = self.policy.run_episode(
-            opening={**result.observation, **({"done": True} if result.done else {})},
-            step=step_policy,
-            drain=drain,
-            sample=sample,
-            summarize=summarize,
-            is_done=lambda readout: bool(
-                (readout.get("private") or {}).get("terminated")
-                or (readout.get("private") or {}).get("truncated")
-                or readout.get("done")
-            ),
-            max_steps=max_steps,
-        )
+        try:
+            outcome = self.policy.run_episode(
+                opening={**result.observation, **({"done": True} if result.done else {})},
+                step=step_policy,
+                drain=drain,
+                sample=sample,
+                summarize=summarize,
+                is_done=lambda readout: bool(
+                    (readout.get("private") or {}).get("terminated")
+                    or (readout.get("private") or {}).get("truncated")
+                    or readout.get("done")
+                ),
+                max_steps=max_steps,
+            )
+        except NanoHorizonSamplerFailure as exc:
+            if exc.code != "provider_call_limit_reached":
+                raise
+            # Reaching the exact locally declared provider-generation ceiling
+            # is a normal bounded rollout stop, not an execution failure.  The
+            # uploaded policy can request an optional compaction after its last
+            # action call; refusing that extra generation must still preserve
+            # and evaluate the environment state already achieved.
+            log.append(
+                "policy.limit_reached",
+                {
+                    "limit": "provider_calls",
+                    "maximum": self.max_provider_calls,
+                    "calls": self._calls,
+                    "status": "truncated",
+                },
+            )
+            outcome = {
+                "journal": [],
+                "proxy_request_ids": list(self._proxy_request_ids),
+                "achievements": _terminal_achievements(result.observation),
+                "reward": _terminal_reward(result.observation, signals),
+                "steps": result.env_steps,
+                "policy_calls": len(self._call_gen_ai),
+                "provider_calls": self._calls,
+                "actions": list(executed),
+                "truncated": True,
+                "stopped_on": "provider_call_limit",
+            }
         for row in outcome.get("journal") or []:
             kind = str(row.get("kind") or "policy.event")
             payload = row.get("payload") if isinstance(row.get("payload"), dict) else row
@@ -949,6 +1016,10 @@ class NanoHorizonPlanner:
             log.append(kind, payload)
         log.append("span.policy.plan", {"actions": executed, "length": len(executed)})
         log.append("span.policy.closed", {"length": len(executed)})
+        stop_reason = str(outcome.get("stopped_on") or "").strip()
+        limit_fields = (
+            {"reason": stop_reason, "truncated": True} if stop_reason else {}
+        )
         log.append(
             "policy.session.closed",
             {
@@ -956,10 +1027,17 @@ class NanoHorizonPlanner:
                 "proxy_request_ids": outcome.get("proxy_request_ids"),
                 "achievements": outcome.get("achievements"),
                 "reward": outcome.get("reward"),
+                **limit_fields,
             },
         )
-        log.append("env.episode.closed", {"status": "completed", "steps": result.env_steps})
-        log.append("status", {"status": "completed", "steps": result.env_steps})
+        log.append(
+            "env.episode.closed",
+            {"status": "completed", "steps": result.env_steps, **limit_fields},
+        )
+        log.append(
+            "status",
+            {"status": "completed", "steps": result.env_steps, **limit_fields},
+        )
         log.append("capture.high_water", {"high_water": log.high_water})
         log.append("capture.closed", {"high_water": log.high_water})
         log.mark_closed()
