@@ -1,8 +1,10 @@
 import pytest
 
+from synth_containers.gold_http import StepResult
 from synth_containers.policies import nanohorizon
 from synth_containers.policies.nanohorizon import (
     HttpSampler,
+    NanoHorizonPlanner,
     NanoHorizonSamplerFailure,
 )
 
@@ -233,3 +235,100 @@ def test_sampler_rejects_any_response_without_exactly_one_action(
         match="expected_exactly_one_craftax_interact_tool_call",
     ):
         sampler.complete([{"role": "user", "content": "Act."}], tools=TOOLS)
+
+
+def test_planner_records_terminal_sampler_failure_before_aborting(monkeypatch) -> None:
+    completion = {
+        "text": "",
+        "message": {"role": "assistant", "reasoning_content": "Still thinking"},
+        "finish_reason": "length",
+        "proxy_request_id": "proxy-failed",
+        "prompt_tokens": 100,
+        "completion_tokens": 384,
+        "reasoning_tokens": 384,
+        "usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 384,
+            "completion_tokens_details": {"reasoning_tokens": 384},
+        },
+    }
+    planner = object.__new__(NanoHorizonPlanner)
+    planner.config_id = "test"
+    planner.config = {}
+    planner.sampler = HttpSampler(
+        {
+            "base_url": "http://host.docker.internal:8787/v1",
+            "model": "Qwen/Qwen3.5-2B",
+        }
+    )
+
+    def fail_once(*args, **kwargs):
+        raise NanoHorizonSamplerFailure(
+            "reasoning_budget_exhausted_before_tool", completion=completion
+        )
+
+    monkeypatch.setattr(planner.sampler, "complete", fail_once)
+
+    class Policy:
+        def run_episode(self, **kwargs):
+            kwargs["sample"](
+                [{"role": "user", "content": "Act."}], tools=TOOLS, seed=1
+            )
+            raise AssertionError("terminal sampler failure must abort the rollout")
+
+    class World:
+        def reset(self, seed, *, max_steps):
+            return StepResult(
+                observation={"private": {}},
+                reward=0.0,
+                done=False,
+                valid_actions=[],
+                ascii_map=".",
+                frame_digest="frame-0",
+                env_steps=0,
+            )
+
+        def drain_native_events(self):
+            return []
+
+    class Log:
+        def __init__(self):
+            self.rows = []
+
+        def append(self, kind, payload):
+            self.rows.append((kind, payload))
+
+        def persist_frame(self, step, frame_bytes):
+            return None
+
+    planner.policy = Policy()
+    planner._calls = 0
+    planner._last_events = []
+    planner._last_trace = {}
+    planner._call_gen_ai = []
+    planner._usage = {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "calls": 0,
+    }
+    log = Log()
+
+    with pytest.raises(
+        NanoHorizonSamplerFailure,
+        match="reasoning_budget_exhausted_before_tool",
+    ):
+        planner.run(world=World(), log=log, seed=1, max_steps=10)
+
+    assert planner.usage() == {
+        "prompt_tokens": 100,
+        "completion_tokens": 384,
+        "total_tokens": 484,
+        "calls": 1,
+    }
+    traces = [payload for kind, payload in log.rows if kind == "span.policy.data"]
+    assert len(traces) == 1
+    assert traces[0]["finish_reason"] == "length"
+    assert traces[0]["reasoning_tokens"] == 384
+    assert traces[0]["error"] == "reasoning_budget_exhausted_before_tool"
+    assert traces[0]["error_retryable"] is False
