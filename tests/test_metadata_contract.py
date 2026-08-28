@@ -34,8 +34,11 @@ from synth_containers.metadata import (
     COMPAT_OPTIMIZER_CONTRACT_DUPLICATES_THROUGH,
     CONTAINER_CONTRACT_PROTOCOL,
     EMIT_COMPAT_OPTIMIZER_CONTRACT_DUPLICATES,
+    LIVE_EVAL_PROTOCOL,
     METADATA_CONTRACT_VERSION,
 )
+from synth_containers.platform import create_compat_app
+from synth_containers.platform.targets import TARGETS
 from synth_containers.sdk import Container
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -140,6 +143,26 @@ def test_golden_fixtures_parse_against_typed_info_response_schema(
             for error in validator.iter_errors(payload)
         ]
         assert not errors, f"{name} does not satisfy InfoResponse: {errors}"
+
+
+@pytest.mark.parametrize("target", sorted(TARGETS))
+def test_retained_platform_info_satisfies_shared_schema(
+    target: str, tmp_path: Path
+) -> None:
+    payload = TestClient(
+        create_compat_app(target, storage_root=tmp_path / target)
+    ).get("/info").json()
+    errors = [
+        f"{'/'.join(str(part) for part in error.absolute_path) or '<root>'}: {error.message}"
+        for error in _info_response_validator().iter_errors(payload)
+    ]
+    assert not errors, f"{target} does not satisfy InfoResponse: {errors}"
+    capabilities = payload["capabilities"]
+    assert capabilities["protocol"] == LIVE_EVAL_PROTOCOL
+    assert capabilities["live_frames"] == payload["live_frames"]
+    assert capabilities["scale_leases"] == payload["scale_leases"]
+    assert isinstance(capabilities["metadata"]["policy_ready"], bool)
+    assert capabilities["metadata"]["program_ready"] is False
 
 
 # --- old-consumer regressions ----------------------------------------------

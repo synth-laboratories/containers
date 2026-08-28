@@ -4,8 +4,9 @@ Both producers — the authoring SDK (:mod:`synth_containers.sdk`) and the hoste
 compat platform (:mod:`synth_containers.platform.state`) — route their payloads
 through :func:`compose_metadata_payload` so the wire shape cannot drift between
 them again.  ``openapi/container-contract-v1.yaml`` (``InfoResponse``) types
-exactly the shape composed here, and ``contracts/fixtures/metadata/`` holds
-producer-generated golden fixtures for both producers.
+exactly the shape composed here. ``contracts/fixtures/metadata/`` holds the
+authoring-SDK golden; retained compat targets are validated live because their
+target-specific fields intentionally differ.
 
 Canonical locations (what new consumers should read):
 

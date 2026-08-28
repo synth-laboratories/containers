@@ -20,10 +20,6 @@ SCHEMA_STREAM_EVENT = "synth.trace-stream-event.v1"
 SCHEMA_EVENT_CHAIN = "synth.rollout.event-chain.v1"
 _ROLLOUT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
-STREAM_HEARTBEAT_INTERVAL_S = 5.0
-STREAM_TERMINAL_GRACE_S = 5.0
-MAX_STREAMS_PER_ROLLOUT = 2
-STREAM_RETRY_AFTER_S = 5
 DEFAULT_STREAM_RECONNECT = {
     "min_backoff_s": 1.0,
     "max_backoff_s": 30.0,

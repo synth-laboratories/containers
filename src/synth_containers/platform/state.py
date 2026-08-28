@@ -20,7 +20,12 @@ from ..event_log import (
     stream_descriptor,
     validate_rollout_id,
 )
-from ..metadata import attach_runtime_provenance, runtime_provenance_from_environment
+from ..metadata import (
+    LIVE_EVAL_PROTOCOL,
+    RuntimeReadiness,
+    compose_metadata_payload,
+    runtime_provenance_from_environment,
+)
 from .affordances import bind_recipe
 from .http_requests import CreateRolloutRequest, ISOLATED_POLICY_HARNESS, NANOHORIZON_HARNESS
 from .policy_process import DEFAULT_HEURISTIC, IsolatedPolicyProcess
@@ -660,9 +665,20 @@ class CompatPlatform:
                 "policy_refs": policy_refs,
             },
         }
+        optimizer_contracts = None
         if contract := self._gepa_v2_contract():
-            payload["optimizer_contracts"] = {"gepa": contract}
-        return attach_runtime_provenance(payload)
+            optimizer_contracts = {"gepa": contract}
+        return compose_metadata_payload(
+            base=payload,
+            protocol=LIVE_EVAL_PROTOCOL,
+            live_frames=self.spec.live_frames,
+            readiness=RuntimeReadiness(
+                policy_ready=any(ref.get("config") for ref in policy_refs),
+                program_ready=False,
+            ),
+            optimizer_contracts=optimizer_contracts,
+            scale_leases=self.spec.scale_leases,
+        )
 
     def _gepa_v2_contract(self) -> dict[str, Any] | None:
         contract = self.spec.optimizer_contracts

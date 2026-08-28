@@ -16,8 +16,6 @@ class TargetRuntimeKind(StrEnum):
     HARBOR = "harbor"
     DIGBENCH = "digbench"
     OPENENV = "openenv"
-    BANKING77 = "banking77"
-    HEALTHBENCH = "healthbench"
 
 
 class RewardKind(StrEnum):
