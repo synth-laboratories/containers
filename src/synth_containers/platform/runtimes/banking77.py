@@ -249,7 +249,17 @@ def _sample_chat_completion(
         {
             "model": model,
             "messages": [
-                {"role": "system", "content": str(observation.get("system") or CLASSIFY_SYSTEM)},
+                {
+                    # The GEPA /program overlay lands on the policy config's
+                    # system_prompt; the environment's observation system and
+                    # the CLASSIFY_SYSTEM seed are the fallbacks.
+                    "role": "system",
+                    "content": str(
+                        config.get("system_prompt")
+                        or observation.get("system")
+                        or CLASSIFY_SYSTEM
+                    ),
+                },
                 {"role": "user", "content": str(observation.get("prompt") or "")},
             ],
             "temperature": float(config.get("temperature", 0)),
@@ -341,7 +351,9 @@ def _sample_responses(
     body = json.dumps(
         {
             "model": model,
-            "instructions": CLASSIFY_SYSTEM,
+            # The GEPA /program overlay lands on the policy config's
+            # system_prompt; CLASSIFY_SYSTEM is the seed fallback.
+            "instructions": str(config.get("system_prompt") or CLASSIFY_SYSTEM),
             "input": user_prompt(str(observation["text"]), labels=label_vocabulary()),
             "max_output_tokens": maximum,
             "temperature": 0,

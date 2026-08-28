@@ -381,80 +381,158 @@ def create_compat_app(
             },
         }
 
+    def _seed_from_task_id(task_id: Any, *, family: str) -> int:
+        try:
+            return int(str(task_id).rsplit(":", 1)[-1])
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"invalid_{family}_task_id") from exc
+
     @app.get("/program")
     async def program() -> Any:
-        if spec.runtime_family.value != "healthbench":
-            raise HTTPException(status_code=404, detail="program_not_supported")
-        seed_prompt = (
-            "You are a careful health assistant. Give accurate, relevant, and safe guidance. "
-            "State uncertainty, ask useful follow-up questions, and recommend appropriate "
-            "professional or emergency care when warranted."
-        )
-        return {
-            "version": "prompt_program.v1",
-            "program_id": "healthbench.response.v1",
-            "modules": [
-                {
-                    "module_id": "system_prompt",
-                    "role": "system",
-                    "mutable": True,
-                    "candidate_field": "system_prompt",
-                    "content": seed_prompt,
-                }
-            ],
-            "target_modules": [
-                {
-                    "module_id": "system_prompt",
-                    "candidate_field": "system_prompt",
-                    "objective": "healthbench_physician_rubric_score",
-                }
-            ],
-            "seed_candidate": {"system_prompt": seed_prompt},
-            "rollout_task_id": "healthbench.response",
-            "rollout_overlay_schema": {"system_prompt": "policy.system_message"},
-        }
+        # GEPA-capable families must serve every route their advertised
+        # contract (CompatPlatform._gepa_v2_contract) declares.
+        family = spec.runtime_family.value
+        if family == "healthbench":
+            seed_prompt = (
+                "You are a careful health assistant. Give accurate, relevant, and safe guidance. "
+                "State uncertainty, ask useful follow-up questions, and recommend appropriate "
+                "professional or emergency care when warranted."
+            )
+            return {
+                "version": "prompt_program.v1",
+                "program_id": "healthbench.response.v1",
+                "modules": [
+                    {
+                        "module_id": "system_prompt",
+                        "role": "system",
+                        "mutable": True,
+                        "candidate_field": "system_prompt",
+                        "content": seed_prompt,
+                    }
+                ],
+                "target_modules": [
+                    {
+                        "module_id": "system_prompt",
+                        "candidate_field": "system_prompt",
+                        "objective": "healthbench_physician_rubric_score",
+                    }
+                ],
+                "seed_candidate": {"system_prompt": seed_prompt},
+                "rollout_task_id": "healthbench.response",
+                "rollout_overlay_schema": {"system_prompt": "policy.system_message"},
+            }
+        if family == "banking77":
+            from .banking77_world import CLASSIFY_SYSTEM
+
+            return {
+                "version": "prompt_program.v1",
+                "program_id": "banking77.classify.v1",
+                "modules": [
+                    {
+                        "module_id": "system_prompt",
+                        "role": "system",
+                        "mutable": True,
+                        "candidate_field": "system_prompt",
+                        "content": CLASSIFY_SYSTEM,
+                    }
+                ],
+                "target_modules": [
+                    {
+                        "module_id": "system_prompt",
+                        "candidate_field": "system_prompt",
+                        "objective": "banking77_classification_accuracy",
+                    }
+                ],
+                "seed_candidate": {"system_prompt": CLASSIFY_SYSTEM},
+                "rollout_task_id": "banking77.classify",
+                "rollout_overlay_schema": {"system_prompt": "policy.system_prompt"},
+            }
+        raise HTTPException(status_code=404, detail="program_not_supported")
 
     @app.get("/taskset")
     async def taskset() -> Any:
-        if spec.runtime_family.value != "healthbench":
-            raise HTTPException(status_code=404, detail="taskset_not_supported")
-        from .healthbench_world import rows
+        family = spec.runtime_family.value
+        if family == "healthbench":
+            from .healthbench_world import rows
 
-        count = len(rows())
-        return {
-            "taskset_id": "openai.healthbench.2025-05-07",
-            "splits": {"train": count, "heldout": count},
-            "source": "openai/healthbench",
-            "metadata": {"gold_visibility": "environment_only", "rubric_authority": "physician"},
-        }
+            count = len(rows())
+            return {
+                "taskset_id": "openai.healthbench.2025-05-07",
+                "splits": {"train": count, "heldout": count},
+                "source": "openai/healthbench",
+                "metadata": {
+                    "gold_visibility": "environment_only",
+                    "rubric_authority": "physician",
+                },
+            }
+        if family == "banking77":
+            from .banking77_world import HELDOUT_SPLIT, TRAIN_SPLIT, split_size
+
+            return {
+                "taskset_id": "banking77.classify.v1",
+                "splits": {
+                    TRAIN_SPLIT: split_size(TRAIN_SPLIT),
+                    HELDOUT_SPLIT: split_size(HELDOUT_SPLIT),
+                },
+                "source": "banking77",
+                "metadata": {
+                    "gold_visibility": "environment_only",
+                    "reward_authority": "environment",
+                },
+            }
+        raise HTTPException(status_code=404, detail="taskset_not_supported")
 
     @app.post("/taskset/tasks")
     async def taskset_tasks(request: Request) -> Any:
-        if spec.runtime_family.value != "healthbench":
-            raise HTTPException(status_code=404, detail="taskset_tasks_not_supported")
-        from .healthbench_world import load_row, public_observation
+        family = spec.runtime_family.value
+        if family == "healthbench":
+            from .healthbench_world import load_row, public_observation
 
-        body = await request.json()
-        tasks = []
-        for task_id in body.get("task_ids") or []:
-            try:
-                seed = int(str(task_id).rsplit(":", 1)[-1])
-            except ValueError as exc:
-                raise HTTPException(status_code=422, detail="invalid_healthbench_task_id") from exc
-            row = load_row(seed)
-            if row is None:
-                raise HTTPException(status_code=404, detail=f"unknown_healthbench_task:{task_id}")
-            tasks.append(
-                {
-                    "task_id": str(task_id),
-                    "task_instance_id": f"seed:{seed}",
-                    "seed": seed,
-                    "split": str(body.get("split") or "train"),
-                    "input": public_observation(row, seed),
-                    "objective": "healthbench physician-rubric score",
-                }
-            )
-        return {"tasks": tasks, "metadata": {"requested": len(tasks)}}
+            body = await request.json()
+            tasks = []
+            for task_id in body.get("task_ids") or []:
+                seed = _seed_from_task_id(task_id, family="healthbench")
+                row = load_row(seed)
+                if row is None:
+                    raise HTTPException(
+                        status_code=404, detail=f"unknown_healthbench_task:{task_id}"
+                    )
+                tasks.append(
+                    {
+                        "task_id": str(task_id),
+                        "task_instance_id": f"seed:{seed}",
+                        "seed": seed,
+                        "split": str(body.get("split") or "train"),
+                        "input": public_observation(row, seed),
+                        "objective": "healthbench physician-rubric score",
+                    }
+                )
+            return {"tasks": tasks, "metadata": {"requested": len(tasks)}}
+        if family == "banking77":
+            from .banking77_world import TRAIN_SPLIT, load_row, public_observation
+
+            body = await request.json()
+            split = str(body.get("split") or TRAIN_SPLIT)
+            tasks = []
+            for task_id in body.get("task_ids") or []:
+                seed = _seed_from_task_id(task_id, family="banking77")
+                row = load_row(split, seed)
+                if row is None:
+                    raise HTTPException(
+                        status_code=404, detail=f"unknown_banking77_task:{task_id}"
+                    )
+                tasks.append(
+                    {
+                        "task_id": str(task_id),
+                        "task_instance_id": f"seed:{seed}",
+                        "seed": seed,
+                        "split": split,
+                        "input": public_observation(row, seed=seed, split=split),
+                        "objective": "banking77 classification accuracy",
+                    }
+                )
+            return {"tasks": tasks, "metadata": {"requested": len(tasks)}}
+        raise HTTPException(status_code=404, detail="taskset_tasks_not_supported")
 
     @app.post("/rollouts/prepare")
     async def prepare(request: Request) -> dict[str, Any]:

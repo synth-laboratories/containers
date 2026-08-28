@@ -794,10 +794,16 @@ class CompatPlatform(CompletedRolloutMixin):
             "crash_signals": crashed,
         }
     def _gepa_v2_contract(self) -> dict[str, Any] | None:
+        # The contract semantics/version are owned by optimizers and vendored
+        # in synth_containers.vendored_gepa_contract; every declared route here
+        # must actually be served by platform/app.py for the family, and every
+        # route in GEPA_CONTRACT_REQUIRED_ROUTES must be declared.
+        from ..vendored_gepa_contract import GEPA_OPTIMIZER_CONTRACT_VERSION
+
         family = self.spec.runtime_family.value
         if family == "healthbench":
             return {
-                "version": "synth_optimizers.gepa.v2",
+                "version": GEPA_OPTIMIZER_CONTRACT_VERSION,
                 "program_route": "/program",
                 "taskset_route": "/taskset",
                 "taskset_tasks_route": "/taskset/tasks",
@@ -806,9 +812,10 @@ class CompatPlatform(CompletedRolloutMixin):
             }
         if family == "banking77":
             return {
-                "version": "synth_optimizers.gepa.v2",
+                "version": GEPA_OPTIMIZER_CONTRACT_VERSION,
                 "program_route": "/program",
                 "taskset_route": "/taskset",
+                "taskset_tasks_route": "/taskset/tasks",
                 "rollout_route": "/rollouts",
                 "prepare_route": "/rollouts/prepare",
                 "trace_route": "/rollouts/{rollout_id}/events",
