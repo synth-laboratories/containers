@@ -722,15 +722,119 @@ components:
         contract_version:
           type: string
       additionalProperties: true
+    GepaOptimizerContract:
+      type: object
+      description: >-
+        GEPA sub-contract advertisement (`synth_optimizers.gepa.v2`). The
+        optimizers Rust consumer validates version and absolute routes from
+        `metadata.optimizer_contracts.gepa`.
+      required: [version]
+      properties:
+        version:
+          type: string
+          examples: [synth_optimizers.gepa.v2]
+        program_route:
+          type: string
+        taskset_route:
+          type: string
+        taskset_tasks_route:
+          type: string
+        rollout_route:
+          type: string
+        prepare_route:
+          type: string
+        trace_route:
+          type: string
+      additionalProperties: true
+    OptimizerContracts:
+      type: object
+      description: >-
+        Optimizer sub-contract advertisements, keyed by contract name.
+        Canonical wire location: `metadata.optimizer_contracts`.
+      properties:
+        gepa:
+          $ref: '#/components/schemas/GepaOptimizerContract'
+      additionalProperties: true
+    InfoCapabilityMetadata:
+      type: object
+      description: >-
+        Runtime readiness, emitted for every runtime family and sourced from
+        the runtime's actual state (composed by
+        `synth_containers.metadata.compose_metadata_payload`).
+      required: [policy_ready, program_ready]
+      properties:
+        policy_ready:
+          type: boolean
+          description: The runtime can execute its policy path right now (for hosted-policy runtimes, the required credential is present).
+        program_ready:
+          type: boolean
+          description: The runtime serves a `/program` prompt-program surface.
+        grader_ready:
+          type: boolean
+          description: Present only on runtimes with a distinct scorer role; true when the scorer credential is present.
+      additionalProperties: true
+    InfoCapabilities:
+      type: object
+      required: [protocol, contract_version, live_frames, metadata]
+      properties:
+        protocol:
+          type: string
+          description: >-
+            Protocol id owned by containers. `synth.container.contract.v1`
+            for authoring-SDK containers; `synth.container.live-eval.v1`
+            for the hosted compat platform.
+          examples: [synth.container.live-eval.v1, synth.container.contract.v1]
+        contract_version:
+          type: string
+          description: >-
+            Stamped from the single Python constant
+            `synth_containers.metadata.METADATA_CONTRACT_VERSION`
+            (`synth_containers.ontology.CONTRACT_VERSION`).
+          examples: ['2026-05-28']
+        operations:
+          type: object
+          description: Supported operation flags (e.g. `rollouts.prepare`, `reward.get`, `trace_v5.capture`).
+          additionalProperties:
+            type: boolean
+        live_frames:
+          type: string
+          enum: [native, sampled, post_hoc, unsupported]
+          description: Frame-serving capability level for live observation.
+        scale_leases:
+          type: integer
+          minimum: 0
+          description: Maximum concurrent rollout leases the instance admits.
+        rollout_modes:
+          type: array
+          items:
+            type: string
+            enum: [blocking, async]
+        metadata:
+          $ref: '#/components/schemas/InfoCapabilityMetadata'
+        optimizer_contracts:
+          allOf:
+            - $ref: '#/components/schemas/OptimizerContracts'
+          deprecated: true
+          description: >-
+            COMPAT duplicate of `metadata.optimizer_contracts` (the old
+            healthbench-only app splice location). Will be removed; read
+            `metadata.optimizer_contracts` instead.
+      additionalProperties: true
+    InfoMetadata:
+      type: object
+      properties:
+        optimizer_contracts:
+          $ref: '#/components/schemas/OptimizerContracts'
+      additionalProperties: true
     InfoResponse:
       type: object
+      required: [capabilities]
       properties:
         runtime:
           type: object
           additionalProperties: true
         capabilities:
-          type: object
-          additionalProperties: true
+          $ref: '#/components/schemas/InfoCapabilities'
         capabilities_digest:
           type: string
           description: sha256 of canonical capability metadata, including per-capability input_schema.
@@ -739,8 +843,15 @@ components:
           additionalProperties: true
           description: Active-capability start contract (task_instance_id pattern, seed range, action vocabulary).
         metadata:
-          type: object
-          additionalProperties: true
+          $ref: '#/components/schemas/InfoMetadata'
+        optimizer_contracts:
+          allOf:
+            - $ref: '#/components/schemas/OptimizerContracts'
+          deprecated: true
+          description: >-
+            COMPAT duplicate of `metadata.optimizer_contracts` (the old
+            platform/state.py top-level location). Will be removed; read
+            `metadata.optimizer_contracts` instead.
       additionalProperties: true
     TaskInfoResponse:
       type: object
