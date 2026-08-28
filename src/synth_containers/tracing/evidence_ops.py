@@ -67,9 +67,19 @@ _COLLECTIONS: dict[str, tuple[str, type[Any], str]] = {
 }
 
 
-def new_evidence_bundle(document: TraceDocumentV5) -> TraceEvidenceBundleV5:
+def new_evidence_bundle(
+    document: TraceDocumentV5,
+    *,
+    created_at: str | None = None,
+) -> TraceEvidenceBundleV5:
+    """A fresh sealed evidence bundle for one sealed trace.
+
+    ``created_at`` may be pinned by importers that require byte-deterministic
+    bundles (the harbor job-dir adapter); it defaults to the wall clock.
+    """
+
     _require_sealed_trace(document)
-    created_at = utc_now()
+    created_at = created_at or utc_now()
     return TraceEvidenceBundleV5(
         bundle_id=record_id(
             "evb",
@@ -90,16 +100,18 @@ def attach(
     *,
     kind: str,
     record: Any,
+    created_at: str | None = None,
 ) -> TraceEvidenceBundleV5:
     """Return a new sealed evidence bundle; the prior bundle remains immutable."""
 
-    return attach_many(bundle, records=((kind, record),))
+    return attach_many(bundle, records=((kind, record),), created_at=created_at)
 
 
 def attach_many(
     bundle: TraceEvidenceBundleV5,
     *,
     records: tuple[tuple[str, Any], ...],
+    created_at: str | None = None,
 ) -> TraceEvidenceBundleV5:
     """Append an ordered batch as one immutable evidence revision.
 
@@ -148,7 +160,7 @@ def attach_many(
                 "records": revision_records,
             },
         ),
-        created_at=utc_now(),
+        created_at=created_at or utc_now(),
         content_digest="",
         metadata={
             **bundle.metadata,
