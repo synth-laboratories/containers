@@ -20,6 +20,7 @@ from typing import Any, Mapping
 from ..adapters import provider_adapters
 from ..adapters.base import NormalizedMessage, NormalizedProviderResult
 from ..canonical import bytes_digest, record_id, utc_now
+from ...gen_ai import request_observation
 from ..models.actors import (
     ActorKind,
     ActorV5,
@@ -1104,6 +1105,7 @@ class TraceFinalizer:
                 "provider_terminal_observed": provider_result.terminal_observed,
                 "correlation_headers": _correlation_headers(state.request_headers),
                 "native_correlation": state.native_correlation,
+                **request_observation(state.request_body),
             },
             input_message_ids=tuple(input_ids),
             output_message_ids=tuple(output_ids),
@@ -1137,7 +1139,11 @@ class TraceFinalizer:
             order=EventOrderV1(
                 chronological_sequence=state.started_ordinal, source_order_id=state.call_id
             ),
-            payload={"call_index": state.call_index, "model": state.model},
+            payload={
+                "call_index": state.call_index,
+                "model": state.model,
+                **request_observation(state.request_body),
+            },
         ).sealed()
         finished_event = EventV5(
             event_id=record_id(

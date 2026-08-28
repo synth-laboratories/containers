@@ -515,17 +515,24 @@ def _run_args(
 # ----------------------------------------------------------------------- up/down
 
 
-def _assert_serves_this_image(spec: ImageSpec, payload: object, *, url: str) -> None:
+def _assert_serves_this_image(
+    spec: ImageSpec,
+    payload: object,
+    *,
+    url: str,
+    env: Mapping[str, str] | None = None,
+) -> None:
     """Refuse a URL that answers with a different platform than we just started.
 
     Publishing a container port does not guarantee the host address reaches it:
     a process that already holds the port keeps answering, and `docker run`
     reports success anyway. `up` would then hand back a URL serving somebody
     else's environment, and a rollout would be attributed to the wrong image.
-    The platform states its target on `/health`, so compare it.
+    The platform states its target on `/health`, so compare it against the
+    merged runtime env (CLI `--env` overlays catalog `extra_env`).
     """
 
-    expected = str(spec.extra_env.get("SYNTH_CONTAINER_TARGET") or "").strip()
+    expected = str((env or spec.extra_env).get("SYNTH_CONTAINER_TARGET") or "").strip()
     if not expected:
         return
     served = ""
@@ -602,7 +609,7 @@ def up_image(
             raise LaunchError(f"container_image_exited:{spec.id}")
         try:
             payload = handle.health(timeout_seconds=2.0)
-            _assert_serves_this_image(spec, payload, url=url)
+            _assert_serves_this_image(spec, payload, url=url, env=merged)
             record = RunRecord(
                 id=spec.id,
                 port=host_port,

@@ -265,7 +265,29 @@ class NestedTrialRuntime:
             if named_by_caller:
                 raise NestedError(f"nested_trial_image_unknown:{requested}:{known}")
             raise NestedError(f"nested_default_trial_unknown:{requested}:{known}")
+        self._require_ready_release(trial)
         return trial
+
+    @staticmethod
+    def _require_ready_release(trial: TrialImage) -> None:
+        """Refuse a release that discovery says cannot start before Docker work.
+
+        A source-fresh, digest-pinned release still cannot run until its agent
+        and verifier images are local. Starting its extraction anyway converts a
+        useful prewarm diagnosis into an opaque child-container failure.
+        """
+
+        release = trial.environment_release
+        if not release or release.get("runnable") is not False:
+            return
+        prewarm = release.get("prewarm")
+        prewarm_state = (
+            str(prewarm.get("state") or "") if isinstance(prewarm, Mapping) else ""
+        )
+        if prewarm_state:
+            raise NestedError(f"harbor_environment_prewarm_{prewarm_state}:{trial.id}")
+        status = str(release.get("status") or "unavailable")
+        raise NestedError(f"harbor_environment_unavailable:{status}:{trial.id}")
 
     def _extract(
         self,

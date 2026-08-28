@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import argparse
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from .pid1 import ChildProcess, run_stack
@@ -39,6 +39,11 @@ def _parser(description: str, default_target: str) -> argparse.ArgumentParser:
     parser.add_argument("--host", default=os.environ.get("SYNTH_CONTAINER_HOST", "127.0.0.1"))
     parser.add_argument(
         "--port", type=int, default=int(os.environ.get("SYNTH_CONTAINER_PORT", "8080"))
+    )
+    parser.add_argument(
+        "--storage-root",
+        default=os.environ.get("SYNTH_CONTAINER_STORAGE", ""),
+        help="durable local journal/CAS root (or SYNTH_CONTAINER_STORAGE)",
     )
     parser.add_argument("--startup-timeout-seconds", type=float, default=120.0)
     parser.add_argument(
@@ -57,8 +62,15 @@ def image_main(
     children: Sequence[ChildProcess] = (),
     argv: list[str] | None = None,
     description: str = "",
+    extend_app: Callable[[Any], None] | None = None,
 ) -> int:
-    """Start baked children, serve this image's target, block until SIGTERM."""
+    """Start baked children, serve this image's target, block until SIGTERM.
+
+    ``extend_app`` runs against the built facade before it is served. An image
+    declares contracts the shared platform has no opinion about -- a training
+    contract, say -- beside the task they describe, without every image having
+    to reimplement argument parsing and process supervision to do it.
+    """
 
     args = _parser(description or f"{image_id} platform image", default_target).parse_args(argv)
     spec = targets.get(args.target)
@@ -67,9 +79,15 @@ def image_main(
 
     from .platform import create_compat_app
 
+    def app_factory() -> Any:
+        app = create_compat_app(spec, storage_root=args.storage_root or None)
+        if extend_app is not None:
+            extend_app(app)
+        return app
+
     return run_stack(
         children=list(children),
-        app_factory=lambda: create_compat_app(spec),
+        app_factory=app_factory,
         host=args.host,
         port=args.port,
         image_id=image_id,

@@ -6,6 +6,7 @@ from dataclasses import replace
 from typing import Any
 
 from ..canonical import record_id
+from ...gen_ai import request_observation
 from ..models.actors import (
     ActorKind,
     ActorV5,
@@ -463,6 +464,18 @@ def _lane_entities(
                         "observation": event.payload.get("observation"),
                         "finish_reason": event.payload.get("finish_reason"),
                         "native_event_id": event.event_id,
+                        **request_observation(
+                            {
+                                "model": event.payload.get("model"),
+                                "temperature": event.payload.get("temperature"),
+                                "top_p": event.payload.get("top_p"),
+                                "top_k": event.payload.get("top_k"),
+                                "max_tokens": event.payload.get("max_tokens"),
+                                "reasoning_effort": event.payload.get(
+                                    "reasoning_effort"
+                                ),
+                            }
+                        ),
                     },
                     aliases=(
                         AliasV1(

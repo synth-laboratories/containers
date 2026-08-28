@@ -173,7 +173,11 @@ class GoldRuntime:
                 if not log.closed:
                     log.append(
                         "span.policy.closed",
-                        {"status": "failed", "error_type": type(exc).__name__},
+                        {
+                            "status": "failed",
+                            "error_type": type(exc).__name__,
+                            "error": str(exc)[:400],
+                        },
                     )
                     log.append(
                         "policy.session.closed",
@@ -186,6 +190,7 @@ class GoldRuntime:
                             "status": "failed",
                             "reason": "policy_error",
                             "error_type": type(exc).__name__,
+                            "error": str(exc)[:400],
                         },
                     )
                     evidence_high_water = log.high_water
@@ -197,8 +202,13 @@ class GoldRuntime:
                 pin.usage = dict(planner.usage())
                 return
         finally:
-            if closer is not None:
-                closer()
+            try:
+                if closer is not None:
+                    closer()
+            finally:
+                # The gold engine retains each rollout until DELETE. Always
+                # release it, including policy errors and cancellation paths.
+                world.close()
         platform.step_calls += int(outcome["steps"])
         pin.reward_signals = list(outcome["reward_signals"])
         pin.status = "completed"
@@ -370,5 +380,4 @@ def _achievement_labels(observation: dict[str, Any]) -> list[str]:
 
     visit(observation)
     return sorted(labels)
-
 
