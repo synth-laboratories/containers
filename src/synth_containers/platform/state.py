@@ -913,6 +913,17 @@ class CompatPlatform:
             }
         if config_id and config_id not in self.policy_configs and harness != ISOLATED_POLICY_HARNESS:
             return {"error": "unknown_policy_config", "status_code": 404, "config_id": config_id}
+        registered_config = self.policy_configs.get(str(config_id or ""))
+        if registered_config is not None and registered_config.harness != harness:
+            return {
+                "error": "policy_configuration_mismatch",
+                "status_code": 409,
+                "requested_policy_ref": {"harness": harness, "config": config_id},
+                "registered_policy_config": {
+                    "harness": registered_config.harness,
+                    "config": registered_config.config_id,
+                },
+            }
         if harness == NANOHORIZON_HARNESS:
             installed_revision = self.policy_revisions.get(
                 str(self.current_policy_revision_id or "")
