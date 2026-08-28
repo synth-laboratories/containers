@@ -38,6 +38,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Mapping, Sequence
 
+from ...event_log import chain_extend, chain_genesis, envelope_digest
 from ..canonical import (
     bytes_digest,
     canonical_bytes,
@@ -168,6 +169,57 @@ def load_journal_events(
     return tuple(envelopes)
 
 
+def verify_journal_chain(
+    journal: tuple[dict[str, Any], ...],
+    *,
+    rollout_id: str,
+) -> str | None:
+    """Verify a journaled event stream's hash chain; return its head.
+
+    Chain semantics are ``synth.rollout.event-chain.v1`` (see
+    :func:`synth_containers.event_log.chain_genesis`).  Verification needs the
+    complete sequenced history (sequences contiguous from 1); a partial or
+    unsequenced journal returns ``None`` — nothing is recorded rather than a
+    head that cannot be proven.  A journal whose per-event digests or declared
+    ``capture.closed`` chain head disagree with the recomputation raises.
+    """
+
+    sequenced = sorted(
+        (
+            row
+            for row in journal
+            if isinstance(row.get("sequence"), int) and not isinstance(row.get("sequence"), bool)
+        ),
+        key=lambda row: row["sequence"],
+    )
+    if not sequenced:
+        return None
+    if [row["sequence"] for row in sequenced] != list(range(1, len(sequenced) + 1)):
+        return None
+    head = chain_genesis(rollout_id)
+    heads_by_sequence: dict[int, str] = {0: head}
+    for row in sequenced:
+        kind = str(row.get("kind") or row.get("event_type") or "")
+        payload = row.get("payload")
+        if not kind or not isinstance(payload, Mapping):
+            return None
+        expected = envelope_digest(kind, int(row["sequence"]), dict(payload))
+        declared = row.get("digest")
+        if declared is not None and declared != expected:
+            raise ValueError(f"harbor_journal_digest_mismatch:sequence={row['sequence']}")
+        head = chain_extend(head, expected)
+        heads_by_sequence[int(row["sequence"])] = head
+        if kind == "capture.closed":
+            declared_head = payload.get("chain_head")
+            declared_water = payload.get("high_water")
+            if isinstance(declared_head, str) and isinstance(declared_water, int):
+                if heads_by_sequence.get(declared_water) != declared_head:
+                    raise ValueError(
+                        f"harbor_journal_chain_head_mismatch:sequence={row['sequence']}"
+                    )
+    return head
+
+
 def import_harbor_job(
     job_dir: str | Path,
     *,
@@ -188,6 +240,10 @@ def import_harbor_job(
     journal = load_journal_events(journal_events)
     if not str(rollout_id).strip():
         raise ValueError("harbor import requires a rollout_id")
+    # Verify the supplied journal's hash chain before anything is imported;
+    # the head (when provable) is recorded in provenance, the harbor
+    # extension, and the bundle manifest metadata.
+    journal_chain_head = verify_journal_chain(journal, rollout_id=rollout_id)
 
     frame_digests = [
         {"step": step, "name": name, "digest": bytes_digest(content), "size_bytes": len(content)}
@@ -256,6 +312,7 @@ def import_harbor_job(
                     *frame_artifacts,
                     *((recording_artifact,) if recording_artifact else ()),
                 ),
+                journal_chain_head=journal_chain_head,
             ),
         )
         bundle.write_receipt(
@@ -268,16 +325,20 @@ def import_harbor_job(
                 "frame_count": len(job.frames),
                 "score_sample_count": len(job.skill_samples),
                 "journal_event_count": len(journal),
+                "journal_chain_head": journal_chain_head,
                 "redaction": redaction.to_dict(),
             },
         )
-        bundle.write_manifest(
-            metadata={
-                "imported_source_digest": source_digest,
-                "imported_stored_source_digest": stored_source_digest,
-                "imported_source_format": HARBOR_SOURCE_FORMAT,
-            }
-        )
+        manifest_metadata = {
+            "imported_source_digest": source_digest,
+            "imported_stored_source_digest": stored_source_digest,
+            "imported_source_format": HARBOR_SOURCE_FORMAT,
+        }
+        if journal_chain_head is not None:
+            # The verified journal chain head travels on the bundle manifest so
+            # the lite seal and the Trace V5 bundle carry the same head.
+            manifest_metadata["journal_chain_head"] = journal_chain_head
+        bundle.write_manifest(metadata=manifest_metadata)
         evidence_summary: dict[str, Any] = {}
         if job.reward is not None:
             evidence_summary = _attach_reward_evidence(
@@ -287,6 +348,12 @@ def import_harbor_job(
                 source_digest=source_digest,
                 produced_at=ended_at,
             )
+            # The evidence attachment rewrote the manifest through its own
+            # handles (dropping metadata); restore it on a fresh handle so the
+            # final manifest carries both the evidence entries and the
+            # import/chain metadata.
+            bundle = LocalTraceBundle(bundle.root, bundle_id=bundle.bundle_id)
+            bundle.write_manifest(metadata=manifest_metadata)
     return {
         **result,
         "stored_source_digest": stored_source_digest,
@@ -294,6 +361,7 @@ def import_harbor_job(
         "frame_count": len(job.frames),
         "score_sample_count": len(job.skill_samples),
         "journal_event_count": len(journal),
+        "journal_chain_head": journal_chain_head,
         **evidence_summary,
     }
 
@@ -356,6 +424,7 @@ def promote_harbor_document(
     source_digest: str,
     pins: HarborProvenancePins,
     artifacts: tuple[ArtifactRefV5, ...],
+    journal_chain_head: str | None = None,
 ) -> TraceDocumentV5:
     """Return the sealed V5 document with typed harbor planes.
 
@@ -502,6 +571,11 @@ def promote_harbor_document(
             "source_digest": source_digest,
             "frame_count": len(job.frames),
             "score_sample_count": len(job.skill_samples),
+            **(
+                {"journal_chain_head": journal_chain_head}
+                if journal_chain_head is not None
+                else {}
+            ),
         },
     )
     identity = replace(
@@ -529,6 +603,7 @@ def promote_harbor_document(
         ],
         "reward": reward_summary,
         "source_digest": source_digest,
+        "journal_chain_head": journal_chain_head,
     }
     return replace(
         document,
@@ -1047,4 +1122,5 @@ __all__ = [
     "load_journal_events",
     "materialize_harbor_trace_bundle",
     "promote_harbor_document",
+    "verify_journal_chain",
 ]

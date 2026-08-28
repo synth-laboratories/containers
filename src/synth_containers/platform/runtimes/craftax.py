@@ -193,10 +193,7 @@ class CraftaxRuntime:
                     if isinstance(status_code, int):
                         status_payload["status_code"] = status_code
                 log.append("status", status_payload)
-                evidence_high_water = log.high_water
-                log.append("capture.high_water", {"high_water": evidence_high_water})
-                log.append("capture.closed", {"high_water": evidence_high_water})
-                log.mark_closed()
+                log.seal_capture()
                 pin.status = "failed"
                 pin.terminal = True
                 pin.usage = dict(planner.usage())

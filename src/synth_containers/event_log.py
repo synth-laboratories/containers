@@ -17,6 +17,7 @@ from .tracing.capture.redaction import assert_no_secrets
 
 CONTROL_SUBSCRIBED = "stream.subscribed"
 SCHEMA_STREAM_EVENT = "synth.trace-stream-event.v1"
+SCHEMA_EVENT_CHAIN = "synth.rollout.event-chain.v1"
 _ROLLOUT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
 STREAM_HEARTBEAT_INTERVAL_S = 5.0
@@ -116,6 +117,52 @@ def _digest(kind: str, sequence: int | None, payload: dict[str, Any]) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
 
+def envelope_digest(kind: str, sequence: int | None, payload: dict[str, Any]) -> str:
+    """Public name for the canonical envelope digest (see :func:`_digest`)."""
+
+    return _digest(kind, sequence, payload)
+
+
+def chain_genesis(rollout_id: str) -> str:
+    """Genesis head of the per-rollout event chain (``synth.rollout.event-chain.v1``).
+
+    Byte-exact definition:
+
+    - ``genesis = sha256(utf8(rollout_id)).hexdigest()`` — 64 lowercase hex chars.
+    - ``head(i) = sha256(ascii(head(i-1) + digest(i))).hexdigest()`` where
+      ``digest(i)`` is the ``digest`` field of the i-th SEQUENCED
+    (``control: false``) envelope in sequence order — 16 lowercase hex chars,
+      itself the truncated sha256 of the canonical
+      ``{"kind","sequence","payload"}`` object (see :func:`_digest`).
+
+    Control records never enter the chain.  A consumer that drains every
+    sequenced event can recompute the head from the envelope digests alone and
+    compare it to the ``chain_head`` carried in the events-page cursor, the
+    ``capture.closed`` payload, and the lite seal.
+    """
+
+    import hashlib
+
+    return hashlib.sha256(rollout_id.encode("utf-8")).hexdigest()
+
+
+def chain_extend(head: str, digest: str) -> str:
+    """Fold one sequenced envelope digest into the chain head."""
+
+    import hashlib
+
+    return hashlib.sha256((head + digest).encode("ascii")).hexdigest()
+
+
+def chain_head_for(rollout_id: str, digests: "list[str] | tuple[str, ...]") -> str:
+    """Chain head over ``digests`` (sequenced-envelope digests, in order)."""
+
+    head = chain_genesis(rollout_id)
+    for digest in digests:
+        head = chain_extend(head, digest)
+    return head
+
+
 def _normalized_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Freeze a JSON-safe copy so persisted and published bytes cannot drift."""
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
@@ -132,13 +179,22 @@ class RolloutEventLog:
     closed: bool = False
     last_snapshot_key: str = ""
     journal_path: Path | None = None
+    closed_at: str | None = None
+    last_acked: int = 0
     _high_water: int = 0
+    _chain_head: str = ""
     _items: list[LogEnvelope] = field(default_factory=list)
     _lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
 
     @property
     def high_water(self) -> int:
         return self._high_water
+
+    @property
+    def chain_head(self) -> str:
+        """Head of the per-rollout event chain (see :func:`chain_genesis`)."""
+
+        return self._chain_head or chain_genesis(self.rollout_id)
 
     def append_control(self, kind: str, payload: dict[str, Any]) -> LogEnvelope:
         with self._lock:
@@ -173,6 +229,7 @@ class RolloutEventLog:
             )
             self._persist({"record": "envelope", "envelope": envelope.to_dict()})
             self._high_water = next_sequence
+            self._chain_head = chain_extend(self.chain_head, envelope.digest)
             self._items.append(envelope)
             return envelope
 
@@ -180,8 +237,79 @@ class RolloutEventLog:
         with self._lock:
             if self.closed:
                 return
-            self._persist({"record": "closed", "high_water": self._high_water})
+            closed_at = _utc_now()
+            self._persist(
+                {
+                    "record": "closed",
+                    "high_water": self._high_water,
+                    "closed_at": closed_at,
+                    "chain_head": self.chain_head,
+                }
+            )
             self.closed = True
+            self.closed_at = closed_at
+
+    def seal_capture(self) -> None:
+        """Append the capture watermark records and close the log.
+
+        ``capture.closed`` carries the chain head over the evidence events
+        (everything before the two ``capture.*`` records), so a consumer can
+        verify its drained evidence stream against a producer-signed head.
+        """
+
+        with self._lock:
+            evidence_high_water = self.high_water
+            evidence_chain_head = self.chain_head
+            self.append("capture.high_water", {"high_water": evidence_high_water})
+            self.append(
+                "capture.closed",
+                {
+                    "high_water": evidence_high_water,
+                    "chain_head": evidence_chain_head,
+                    "chain_schema": SCHEMA_EVENT_CHAIN,
+                },
+            )
+            self.mark_closed()
+
+    def record_ack(self, sequence: int) -> int:
+        """Record the consumer's durably-processed high water; returns the ack head.
+
+        Acks are monotonic and never run ahead of ``high_water`` (acking the
+        future is clamped).  The ack head is durably stored in a sidecar next
+        to the journal so retention decisions survive recovery.
+        """
+
+        with self._lock:
+            if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 0:
+                raise ValueError("event_log_ack_must_be_non_negative_integer")
+            acked = min(max(sequence, self.last_acked), self._high_water)
+            if acked != self.last_acked:
+                self.last_acked = acked
+                self._persist_ack()
+            return self.last_acked
+
+    def _ack_path(self) -> Path | None:
+        if self.journal_path is None:
+            return None
+        return self.journal_path.with_name(self.journal_path.name + ".ack.json")
+
+    def _persist_ack(self) -> None:
+        path = self._ack_path()
+        if path is None:
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        encoded = json.dumps(
+            {"rollout_id": self.rollout_id, "acked": self.last_acked, "ts": _utc_now()},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        with temporary.open("w", encoding="utf-8") as handle:
+            handle.write(encoded)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
 
     def subscribed_payload(self) -> dict[str, Any]:
         return {
@@ -280,7 +408,16 @@ class RolloutEventLog:
             if record == "closed":
                 if row.get("high_water") != log._high_water:
                     raise ValueError(f"event_log_close_high_water_mismatch:{line_number}")
+                declared_head = row.get("chain_head")
+                if declared_head is not None and declared_head != log.chain_head:
+                    # A journal whose per-event digests validate but whose
+                    # recomputed chain differs from the sealed head has been
+                    # rewritten; fail closed like every other corruption.
+                    raise ValueError(f"event_log_chain_head_mismatch:{line_number}")
                 closed = True
+                closed_at = row.get("closed_at")
+                if isinstance(closed_at, str) and closed_at:
+                    log.closed_at = closed_at
                 continue
             if record != "envelope" or not isinstance(row.get("envelope"), dict):
                 raise ValueError(f"event_log_unknown_record:{line_number}")
@@ -292,9 +429,24 @@ class RolloutEventLog:
                     raise ValueError(f"event_log_sequence_gap:{line_number}")
                 expected_sequence += 1
                 log._high_water = envelope.sequence
+                log._chain_head = chain_extend(log.chain_head, envelope.digest)
             log._items.append(envelope)
         log.closed = closed
+        log._recover_ack()
         return log
+
+    def _recover_ack(self) -> None:
+        path = self._ack_path()
+        if path is None or not path.exists():
+            return
+        try:
+            row = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError("event_log_ack_sidecar_malformed") from exc
+        acked = row.get("acked") if isinstance(row, dict) else None
+        if isinstance(acked, bool) or not isinstance(acked, int) or acked < 0:
+            raise ValueError("event_log_ack_sidecar_invalid")
+        self.last_acked = min(acked, self._high_water)
 
 
 def stream_descriptor(

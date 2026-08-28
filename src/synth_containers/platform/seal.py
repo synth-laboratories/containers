@@ -6,7 +6,7 @@ import hashlib
 import json
 from typing import Any
 
-from ..event_log import RolloutEventLog
+from ..event_log import SCHEMA_EVENT_CHAIN, RolloutEventLog, chain_head_for
 
 SCHEMA = "synth.trace.v5"
 
@@ -38,6 +38,11 @@ def seal_rollout_log(log: RolloutEventLog, *, pin: dict[str, Any] | None = None)
         "stream.id": log.stream_id,
         "high_water": log.high_water,
         "closed": log.closed,
+        # Head of the per-rollout event chain over the sequenced events above
+        # (synth.rollout.event-chain.v1); matches the events-page cursor and
+        # the capture.closed payload's evidence head lineage.
+        "chain_head": log.chain_head,
+        "chain_schema": SCHEMA_EVENT_CHAIN,
         "events": events,
         "pin": pin or {},
         "capture.closed": True,
@@ -65,3 +70,13 @@ def validate_rollout_seal(seal: dict[str, Any]) -> None:
         raise ValueError("trace_seal_sequence_mismatch")
     if seal.get("closed") is not True or seal.get("capture.closed") is not True:
         raise ValueError("trace_seal_not_closed")
+    declared_head = seal.get("chain_head")
+    if declared_head is not None:
+        # Additive check: seals from before the chain existed carry no head and
+        # remain valid; a declared head must match the recomputed chain.
+        computed = chain_head_for(
+            str(seal.get("rollout_id") or ""),
+            [str(row.get("digest") or "") for row in events],
+        )
+        if declared_head != computed:
+            raise ValueError("trace_seal_chain_head_mismatch")

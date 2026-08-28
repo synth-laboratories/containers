@@ -195,10 +195,7 @@ class HealthBenchRuntime:
 
     @staticmethod
     def _seal(log: RolloutEventLog) -> None:
-        high_water = log.high_water
-        log.append("capture.high_water", {"high_water": high_water})
-        log.append("capture.closed", {"high_water": high_water})
-        log.mark_closed()
+        log.seal_capture()
 
 
 def _chat(config: dict[str, Any], messages: list[dict[str, Any]]) -> dict[str, Any]:

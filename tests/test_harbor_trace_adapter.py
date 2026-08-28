@@ -15,9 +15,11 @@ from pathlib import Path
 
 import pytest
 
+from synth_containers.event_log import chain_head_for, envelope_digest
 from synth_containers.tracing.adapters.harbor import (
     HARBOR_SOURCE_FORMAT,
     materialize_harbor_trace_bundle,
+    verify_journal_chain,
 )
 from synth_containers.tracing.cli import main as synth_trace_main
 from synth_containers.tracing.inspection import inspect_trace_input
@@ -119,8 +121,7 @@ def job_dir(tmp_path: Path) -> Path:
     return root
 
 
-@pytest.fixture()
-def journal_path(tmp_path: Path) -> Path:
+def _journal_rows() -> list[dict]:
     rows = [
         {
             "kind": "rollout.started",
@@ -141,8 +142,30 @@ def journal_path(tmp_path: Path) -> Path:
             "payload": {"status": "succeeded"},
         },
     ]
+    for row in rows:
+        row["digest"] = envelope_digest(row["kind"], row["sequence"], row["payload"])
+    evidence_head = chain_head_for(ROLLOUT_ID, [row["digest"] for row in rows])
+    closed_payload = {"high_water": 3, "chain_head": evidence_head}
+    rows.append(
+        {
+            "kind": "capture.closed",
+            "sequence": 4,
+            "ts": "2026-08-27T00:00:05Z",
+            "payload": closed_payload,
+            "digest": envelope_digest("capture.closed", 4, closed_payload),
+        }
+    )
+    return rows
+
+
+def _journal_chain_head() -> str:
+    return chain_head_for(ROLLOUT_ID, [row["digest"] for row in _journal_rows()])
+
+
+@pytest.fixture()
+def journal_path(tmp_path: Path) -> Path:
     path = tmp_path / "journal.jsonl"
-    path.write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+    path.write_text("\n".join(json.dumps(row) for row in _journal_rows()), encoding="utf-8")
     return path
 
 
@@ -178,8 +201,8 @@ def test_harbor_bundle_grades_native_trusted_self_contained(
     assert trace.model == "test-model"
     assert trace.benchmark == "harbor"
     assert trace.task_id == "runebench.editor_task"
-    # 3 journal events + 4 turns + 2 score samples.
-    assert trace.event_count == 9
+    # 4 journal events + 4 turns + 2 score samples.
+    assert trace.event_count == 10
     # One model-call span per assistant turn with usage.
     assert trace.span_count == 2
     assert trace.prompt_tokens == 22
@@ -188,7 +211,8 @@ def test_harbor_bundle_grades_native_trusted_self_contained(
     assert trace.artifact_count == 3
     assert result["frame_count"] == 3
     assert result["score_sample_count"] == 2
-    assert result["journal_event_count"] == 3
+    assert result["journal_event_count"] == 4
+    assert result["journal_chain_head"] == _journal_chain_head()
 
 
 def test_harbor_archive_digest_is_deterministic_across_runs(
@@ -262,7 +286,17 @@ def test_harbor_document_planes_and_evidence(
         "harbor.journal.rollout.started",
         "harbor.journal.step.applied",
         "harbor.journal.rollout.terminal",
+        "harbor.journal.capture.closed",
     ]
+
+    # Journal chain head: verified from the supplied journal and recorded in
+    # provenance, the harbor extension, and the bundle manifest metadata.
+    expected_head = _journal_chain_head()
+    assert document.provenance.extra["journal_chain_head"] == expected_head
+    assert document.extensions["harbor"]["journal_chain_head"] == expected_head
+    manifest = LocalTraceBundle(bundle_root).read_manifest()
+    assert manifest["metadata"]["journal_chain_head"] == expected_head
+    assert manifest["metadata"]["imported_source_format"] == HARBOR_SOURCE_FORMAT
 
     # Frames -> content-addressed screenshot artifacts embedded in the blob store.
     bundle = LocalTraceBundle(bundle_root)
@@ -282,6 +316,51 @@ def test_harbor_document_planes_and_evidence(
     assert aggregation.grouping == "episode"
     assert result["reward_aggregation_id"] == aggregation.aggregation_id
     assert result["reward_validation_valid"] is True
+
+
+def test_harbor_rejects_a_tampered_journal(job_dir: Path, tmp_path: Path) -> None:
+    rows = _journal_rows()
+    rows[1]["payload"] = {"step": 999}  # digest no longer matches the payload
+    tampered = tmp_path / "tampered.jsonl"
+    tampered.write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+    with pytest.raises(ValueError, match="harbor_journal_digest_mismatch"):
+        materialize_harbor_trace_bundle(
+            job_dir,
+            archive_path=tmp_path / "never.zip",
+            rollout_id=ROLLOUT_ID,
+            journal_events=tampered,
+        )
+
+    # A consistent rewrite (payload + digest recomputed) is betrayed by the
+    # chain head declared in the capture.closed record.
+    rows = _journal_rows()
+    rows[1]["payload"] = {"step": 999}
+    rows[1]["digest"] = envelope_digest("step.applied", 2, {"step": 999})
+    rewritten = tmp_path / "rewritten.jsonl"
+    rewritten.write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+    with pytest.raises(ValueError, match="harbor_journal_chain_head_mismatch"):
+        materialize_harbor_trace_bundle(
+            job_dir,
+            archive_path=tmp_path / "never2.zip",
+            rollout_id=ROLLOUT_ID,
+            journal_events=rewritten,
+        )
+
+
+def test_harbor_records_no_head_for_an_unverifiable_journal(
+    job_dir: Path, tmp_path: Path
+) -> None:
+    # A journal slice that does not start at sequence 1 cannot be proven from
+    # genesis: import proceeds, but no head is recorded.
+    partial = tuple(row for row in _journal_rows() if row["sequence"] > 1)
+    assert verify_journal_chain(partial, rollout_id=ROLLOUT_ID) is None
+    result = materialize_harbor_trace_bundle(
+        job_dir,
+        archive_path=tmp_path / "partial.zip",
+        rollout_id=ROLLOUT_ID,
+        journal_events=list(partial),
+    )
+    assert result["journal_chain_head"] is None
 
 
 def test_synth_trace_cli_import_harbor_writes_trusted_archive(

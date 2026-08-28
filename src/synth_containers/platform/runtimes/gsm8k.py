@@ -245,10 +245,7 @@ class Gsm8kRuntime:
         self._seal_capture(log)
 
     def _seal_capture(self, log: RolloutEventLog) -> None:
-        evidence_high_water = log.high_water
-        log.append("capture.high_water", {"high_water": evidence_high_water})
-        log.append("capture.closed", {"high_water": evidence_high_water})
-        log.mark_closed()
+        log.seal_capture()
 
 
 _HOSTED_BASES = {

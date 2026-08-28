@@ -10,6 +10,7 @@ import time
 import uuid
 import shutil
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -1449,10 +1450,7 @@ class CompatPlatform(CompletedRolloutMixin):
                 payload["error_type"] = error_type
             log.append("env.episode.closed", payload)
             log.append("status", payload)
-            high_water = log.high_water
-            log.append("capture.high_water", {"high_water": high_water})
-            log.append("capture.closed", {"high_water": high_water})
-            log.mark_closed()
+            log.seal_capture()
         self._seal_and_persist(pin, log)
 
     def _hold_if_requested(self, pin: RolloutPin) -> None:
@@ -2073,12 +2071,24 @@ class CompatPlatform(CompletedRolloutMixin):
             product *= item
         return {"status": "scored", "reward": product}
 
-    def events_payload(self, rollout_id: str, after: int, limit: int = 1000) -> dict[str, Any]:
+    def events_payload(
+        self,
+        rollout_id: str,
+        after: int,
+        limit: int = 1000,
+        *,
+        ack: int | None = None,
+    ) -> dict[str, Any]:
         log = self.logs.get(rollout_id)
         if log is None:
             return {"error": "unknown_rollout", "status_code": 404}
         if isinstance(limit, bool) or limit < 1 or limit > 10_000:
             return {"error": "invalid_page_limit", "status_code": 422}
+        if ack is not None:
+            try:
+                log.record_ack(ack)
+            except ValueError:
+                return {"error": "invalid_ack", "status_code": 422}
         available = log.after(after)
         controls = [item for item in available if item.sequence is None]
         evidence = [item for item in available if item.sequence is not None]
@@ -2100,6 +2110,102 @@ class CompatPlatform(CompletedRolloutMixin):
                     [after, *(item.sequence for item in page if item.sequence is not None)]
                 ),
                 "has_more": len(evidence) > limit,
+                # Chain head at high_water (synth.rollout.event-chain.v1); a
+                # consumer that drains every sequenced event can recompute it
+                # from the envelope digests and compare.
+                "chain_head": log.chain_head,
+                "acked": log.last_acked,
             },
+            "retention": self._journal_retention(log),
             "events": envelopes,
         }
+
+    def _retention_ttl_seconds(self) -> int:
+        raw = (self.runtime_config or {}).get("journal_retention_ttl_seconds")
+        try:
+            ttl = int(raw) if raw is not None else 0
+        except (TypeError, ValueError):
+            ttl = 0
+        return ttl if ttl > 0 else 604_800  # default: 7 days
+
+    def _journal_retention(self, log: RolloutEventLog, *, now: float | None = None) -> dict[str, Any]:
+        """Retention contract state for one rollout journal (+ frame assets).
+
+        Contract: the journal and its frame assets are retained until the
+        consumer's ack reaches ``high_water`` after closure, OR until the TTL
+        (``runtime_config.journal_retention_ttl_seconds``, default 7 days)
+        elapses after closure — whichever happens first.  ``released`` reports
+        the decision; nothing is deleted here (see
+        :meth:`release_retained_journals`).
+        """
+
+        ttl = self._retention_ttl_seconds()
+        moment = time.time() if now is None else now
+        expires_at = None
+        released = False
+        reason = None
+        if log.closed:
+            if log.last_acked >= log.high_water:
+                released = True
+                reason = "acked"
+            if log.closed_at:
+                closed_epoch = datetime.fromisoformat(
+                    log.closed_at.replace("Z", "+00:00")
+                ).timestamp()
+                expires_epoch = closed_epoch + ttl
+                expires_at = (
+                    datetime.fromtimestamp(expires_epoch, tz=timezone.utc)
+                    .isoformat(timespec="seconds")
+                    .replace("+00:00", "Z")
+                )
+                if not released and moment >= expires_epoch:
+                    released = True
+                    reason = "ttl_expired"
+        return {
+            "policy": "until-acked-or-ttl",
+            "ttl_seconds": ttl,
+            "acked": log.last_acked,
+            "high_water": log.high_water,
+            "closed": log.closed,
+            "released": released,
+            "released_reason": reason,
+            "expires_at": expires_at,
+        }
+
+    def release_retained_journals(
+        self,
+        *,
+        now: float | None = None,
+        remove: Any = None,
+    ) -> list[dict[str, Any]]:
+        """Cleanup hook for the journal retention contract.
+
+        Returns one row per rollout whose retention is released (consumer ack
+        reached the closure high-water, or the TTL elapsed after closure) with
+        the journal path and the frame-assets directory eligible for removal.
+
+        Deletion is deliberately a no-op by default: pass ``remove`` — a
+        callable ``remove(rollout_id, paths)`` — to actually delete, where
+        ``paths`` is the list of filesystem paths in the row.  Deployments
+        without an operator hook keep every journal (the generous default).
+        """
+
+        released_rows: list[dict[str, Any]] = []
+        for rollout_id, log in list(self.logs.items()):
+            state = self._journal_retention(log, now=now)
+            if not state["released"]:
+                continue
+            paths: list[Path] = []
+            if log.journal_path is not None:
+                paths.append(log.journal_path)
+                rollout_key = hashlib.sha256(rollout_id.encode("utf-8")).hexdigest()
+                paths.append(self.storage_root / "frame_assets" / rollout_key)
+            row = {
+                "rollout_id": rollout_id,
+                "reason": state["released_reason"],
+                "paths": [str(item) for item in paths],
+            }
+            released_rows.append(row)
+            if callable(remove):
+                remove(rollout_id, [str(item) for item in paths])
+        return released_rows

@@ -268,10 +268,7 @@ def run_episode(
             "usage_status": usage.get("usage_status"),
         },
     )
-    evidence_high_water = log.high_water
-    log.append("capture.high_water", {"high_water": evidence_high_water})
-    log.append("capture.closed", {"high_water": evidence_high_water})
-    log.mark_closed()
+    log.seal_capture()
     return {
         "reward_signals": signals,
         "actions": actions,

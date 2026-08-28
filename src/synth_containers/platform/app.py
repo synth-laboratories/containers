@@ -693,8 +693,23 @@ def create_compat_app(
         rollout_id: str,
         after: int = Query(default=0, ge=0),
         limit: int = Query(default=1000, ge=1, le=10_000),
+        ack: int | None = Query(default=None, ge=0),
+        wait_ms: int = Query(default=0, ge=0, le=10_000),
     ) -> Any:
-        result = platform.events_payload(rollout_id, after, limit)
+        # Bounded long-poll: when the caller asks to wait and nothing new is
+        # visible past `after`, poll cheaply until an event lands, the log
+        # closes, or the (max 10s) budget elapses. No locks are held while
+        # waiting, and consumers that never send wait_ms are unaffected.
+        if wait_ms > 0:
+            deadline = time.monotonic() + wait_ms / 1000.0
+            while True:
+                log = platform.logs.get(rollout_id)
+                if log is None or log.closed or log.high_water > after:
+                    break
+                if time.monotonic() >= deadline:
+                    break
+                await asyncio.sleep(0.05)
+        result = platform.events_payload(rollout_id, after, limit, ack=ack)
         return _platform_response(result, default_status=404)
 
     @app.get("/rollouts/{rollout_id}/frames/{step}.png")
