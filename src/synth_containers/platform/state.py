@@ -1193,6 +1193,8 @@ class CompatPlatform:
             reference.update(
                 {
                     "bundle_url": f"/rollouts/{rollout_id}/trace/bundle",
+                    "kind": "trace_v5_bundle",
+                    "inspectable": True,
                     "bundle_digest": bundle.bundle_digest,
                     "bundle_archive_digest": bundle.archive_digest,
                     "bundle_trace_id": bundle.trace_id,

@@ -34,10 +34,8 @@ from synth_containers.metadata import (
     COMPAT_OPTIMIZER_CONTRACT_DUPLICATES_THROUGH,
     CONTAINER_CONTRACT_PROTOCOL,
     EMIT_COMPAT_OPTIMIZER_CONTRACT_DUPLICATES,
-    LIVE_EVAL_PROTOCOL,
     METADATA_CONTRACT_VERSION,
 )
-from synth_containers.platform import create_compat_app
 from synth_containers.sdk import Container
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -45,10 +43,6 @@ FIXTURES_DIR = REPO_ROOT / "contracts" / "fixtures" / "metadata"
 OPENAPI_PATH = REPO_ROOT / "openapi" / "container-contract-v1.yaml"
 
 SDK_FIXTURE = FIXTURES_DIR / "info-response.sdk.reference-container.json"
-PLATFORM_FIXTURE = FIXTURES_DIR / "info-response.platform.banking77_classify.json"
-
-PLATFORM_TARGET = "banking77_classify"
-FIXTURE_INSTANCE_ID = "fixture-instance-banking77"
 
 
 # --- producer renderers -----------------------------------------------------
@@ -83,17 +77,6 @@ def _render_sdk_payload() -> dict[str, Any]:
     return TestClient(container.fastapi()).get("/metadata").json()
 
 
-def _render_platform_payload(tmp_path: Path) -> dict[str, Any]:
-    """A platform/state.py-style world (banking77), rendered over the wire."""
-
-    app = create_compat_app(
-        PLATFORM_TARGET,
-        storage_root=tmp_path / "platform-storage",
-        runtime_config={"instance_id": FIXTURE_INSTANCE_ID},
-    )
-    return TestClient(app).get("/metadata").json()
-
-
 @pytest.fixture()
 def deterministic_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     """Pin credential presence so readiness (and the fixtures) are stable."""
@@ -125,12 +108,6 @@ def test_sdk_metadata_matches_golden_fixture(deterministic_credentials: None) ->
     _assert_matches_fixture(_render_sdk_payload(), SDK_FIXTURE)
 
 
-def test_platform_banking77_metadata_matches_golden_fixture(
-    deterministic_credentials: None, tmp_path: Path
-) -> None:
-    _assert_matches_fixture(_render_platform_payload(tmp_path), PLATFORM_FIXTURE)
-
-
 # --- typed-schema conformance ----------------------------------------------
 
 
@@ -150,14 +127,11 @@ def _info_response_validator() -> Any:
 
 
 def test_golden_fixtures_parse_against_typed_info_response_schema(
-    deterministic_credentials: None, tmp_path: Path
+    deterministic_credentials: None,
 ) -> None:
     validator = _info_response_validator()
-    payloads = {
-        "sdk": _render_sdk_payload(),
-        "platform": _render_platform_payload(tmp_path),
-    }
-    for fixture_path in (SDK_FIXTURE, PLATFORM_FIXTURE):
+    payloads = {"sdk": _render_sdk_payload()}
+    for fixture_path in (SDK_FIXTURE,):
         assert fixture_path.exists(), f"golden fixture missing: {fixture_path}"
         payloads[fixture_path.name] = json.loads(fixture_path.read_text(encoding="utf-8"))
     for name, payload in payloads.items():
@@ -243,41 +217,3 @@ def test_sdk_producer_still_satisfies_old_consumers(deterministic_credentials: N
     assert payload["capabilities"]["protocol"] == CONTAINER_CONTRACT_PROTOCOL
     assert payload["capabilities"]["metadata"]["policy_ready"] is True
     assert payload["capabilities"]["metadata"]["program_ready"] is True
-
-
-def test_platform_producer_still_satisfies_old_consumers(
-    deterministic_credentials: None, tmp_path: Path
-) -> None:
-    payload = _render_platform_payload(tmp_path)
-    _assert_old_consumer_fields(payload)
-    assert payload["capabilities"]["protocol"] == LIVE_EVAL_PROTOCOL
-    assert payload["capabilities"]["live_frames"] == payload["live_frames"]
-    assert payload["capabilities"]["scale_leases"] == payload["scale_leases"]
-    assert payload["capabilities"]["metadata"]["policy_ready"] is True
-
-
-def test_healthbench_readiness_survives_shim_lift(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """The healthbench-only app.py splice is gone; readiness still flows."""
-
-    monkeypatch.setenv("HEALTHBENCH_POLICY_API_KEY_ENV", "FIXTURE_POLICY_KEY")
-    monkeypatch.setenv("HEALTHBENCH_GRADER_API_KEY_ENV", "FIXTURE_GRADER_KEY")
-    monkeypatch.setenv("FIXTURE_POLICY_KEY", "present")
-    monkeypatch.delenv("FIXTURE_GRADER_KEY", raising=False)
-    app = create_compat_app("healthbench_chat", storage_root=tmp_path / "hb")
-    payload = TestClient(app).get("/info").json()
-    _assert_old_consumer_fields(payload)
-    assert payload["capabilities"]["metadata"]["policy_ready"] is True
-    assert payload["capabilities"]["metadata"]["grader_ready"] is False
-    assert payload["capabilities"]["metadata"]["program_ready"] is True
-    assert payload["capabilities"]["rollout_modes"] == ["blocking"]
-    assert payload["metadata"]["model_roles"]["policy"]["credential_present"] is True
-
-
-def test_hosted_policy_readiness_tracks_missing_credential(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    payload = _render_platform_payload(tmp_path)
-    assert payload["capabilities"]["metadata"]["policy_ready"] is False

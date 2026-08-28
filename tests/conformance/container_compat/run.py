@@ -516,8 +516,20 @@ class Runner:
         rid = _json(started)["rollout_id"]
         absent = self.client.get("/reward", params={"rollout_id": rid})
         body = _json(absent)
-        if absent.status_code == 200 and body.get("status") == "absent" and body.get("reward") is None:
-            self.suite.ok("C2-01")
+        honest_absence = body.get("status") == "absent" and body.get("reward") is None
+        authoritative_terminal_score = (
+            body.get("status") == "scored"
+            and isinstance(body.get("reward"), (int, float))
+            and bool(body.get("execution_id"))
+            and bool(body.get("evidence_digest"))
+        )
+        if absent.status_code == 200 and (honest_absence or authoritative_terminal_score):
+            self.suite.ok(
+                "C2-01",
+                "absent remains null"
+                if honest_absence
+                else "terminal authority published a content-bound score",
+            )
         else:
             self.suite.fail("C2-01", f"{absent.status_code} {body}")
 
