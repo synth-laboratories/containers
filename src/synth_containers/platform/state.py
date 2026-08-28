@@ -13,6 +13,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ..metadata import (
+    LIVE_EVAL_PROTOCOL,
+    RuntimeReadiness,
+    compose_metadata_payload,
+)
 from ..event_log import (
     CONTROL_SUBSCRIBED,
     MAX_STREAMS_PER_ROLLOUT,
@@ -669,7 +674,6 @@ class CompatPlatform(CompletedRolloutMixin):
             "input_schema": schema,
             "capabilities_digest": digest,
             "capabilities": {
-                "protocol": "synth.container.live-eval.v1",
                 "operations": {
                     "rollouts.prepare": True,
                     "rollouts.start_prepared": True,
@@ -694,9 +698,59 @@ class CompatPlatform(CompletedRolloutMixin):
             },
             "capacity": self._capacity_snapshot(),
         }
-        if contract := self._gepa_v2_contract():
-            payload["optimizer_contracts"] = {"gepa": contract}
-        return payload
+        family = self.spec.runtime_family.value
+        grader_ready: bool | None = None
+        program_ready = False
+        if family == "healthbench":
+            # Lazy import: runtimes.healthbench imports from this module.
+            from .runtimes.healthbench import model_roles
+
+            roles = model_roles()
+            policy_ready = bool(roles["policy"]["credential_present"])
+            grader_ready = bool(roles["scorer"]["credential_present"])
+            # /program (and /taskset) are served for this family only.
+            program_ready = True
+            payload["metadata"] = {"model_roles": roles}
+            payload["capabilities"]["rollout_modes"] = ["blocking"]
+        elif family in {"banking77", "gsm8k"}:
+            # Hosted-policy runtimes call a provider with an env credential at
+            # rollout time; readiness is that credential being present now.
+            policy_ready = self._hosted_policy_credential_present()
+        else:
+            # Environment-stepping runtimes execute caller-supplied policies
+            # with no hosted credential dependency.
+            policy_ready = True
+        contract = self._gepa_v2_contract()
+        return compose_metadata_payload(
+            base=payload,
+            protocol=LIVE_EVAL_PROTOCOL,
+            live_frames=str(self.spec.live_frames),
+            readiness=RuntimeReadiness(
+                policy_ready=policy_ready,
+                program_ready=program_ready,
+                grader_ready=grader_ready,
+            ),
+            optimizer_contracts={"gepa": contract} if contract else None,
+            scale_leases=self.spec.scale_leases,
+        )
+
+    def _hosted_policy_credential_present(self) -> bool:
+        """True when at least one registered (or default) policy credential resolves."""
+
+        from .local_provider import is_local_provider
+
+        key_envs: set[str] = set()
+        for registered in self.policy_configs.values():
+            config = registered.config or {}
+            if is_local_provider(config.get("provider")):
+                # The local MLX proxy needs no hosted credential.
+                return True
+            env_name = str(config.get("api_key_env") or "OPENAI_API_KEY").strip()
+            if env_name:
+                key_envs.add(env_name)
+        if not key_envs:
+            key_envs = {"OPENAI_API_KEY"}
+        return any(os.environ.get(name, "").strip() for name in key_envs)
 
     def _capacity_snapshot(self) -> dict[str, Any]:
         active = sum(1 for pin in self.pins.values() if pin.started and not pin.terminal and pin.simulating)

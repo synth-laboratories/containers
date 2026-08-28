@@ -156,53 +156,19 @@ def create_compat_app(
     @app.get("/metadata")
     @app.get("/info")
     async def metadata() -> dict[str, Any]:
+        # The full contract shape (capabilities.protocol/live_frames,
+        # capabilities.metadata readiness for every runtime family, and the
+        # optimizer_contracts locations) is composed once in
+        # synth_containers.metadata via CompatPlatform.metadata_payload; the
+        # healthbench-only splice that used to live here was lifted into that
+        # shared composition.
         payload = platform.metadata_payload()
-        container_digest = platform.capabilities_digest()
         payload["training"] = training_capabilities(
             target_id=spec.target_id,
             runtime_family=spec.runtime_family.value,
-            container_digest=container_digest,
+            container_digest=platform.capabilities_digest(),
             max_concurrency=spec.scale_leases,
         )
-        if spec.runtime_family.value == "healthbench":
-            from .runtimes.healthbench import model_roles
-
-            gepa = (payload.get("optimizer_contracts") or {}).get("gepa") or {
-                "version": "synth_optimizers.gepa.v2",
-                "program_route": "/program",
-                "taskset_route": "/taskset",
-                "taskset_tasks_route": "/taskset/tasks",
-                "rollout_route": "/rollout",
-                "trace_route": "/rollouts/{rollout_id}/events",
-            }
-            capabilities = payload.get("capabilities")
-            if not isinstance(capabilities, dict):
-                capabilities = {}
-            capabilities.setdefault("contract_version", "container_contract.v1")
-            capabilities.setdefault("rollout_modes", ["blocking"])
-            capabilities.setdefault(
-                "operations",
-                {
-                    "prepare": True,
-                    "start": True,
-                    "get": True,
-                    "poll": True,
-                    "reward": True,
-                },
-            )
-            roles = model_roles()
-            metadata_blob = capabilities.setdefault("metadata", {})
-            if isinstance(metadata_blob, dict):
-                metadata_blob["policy_ready"] = bool(roles["policy"]["credential_present"])
-                metadata_blob["grader_ready"] = bool(roles["scorer"]["credential_present"])
-            capabilities["optimizer_contracts"] = {"gepa": gepa}
-            payload["capabilities"] = capabilities
-            metadata = payload.get("metadata")
-            if not isinstance(metadata, dict):
-                metadata = {}
-            metadata["model_roles"] = roles
-            metadata["optimizer_contracts"] = {"gepa": gepa}
-            payload["metadata"] = metadata
         return payload
 
     @app.get("/training/capabilities")

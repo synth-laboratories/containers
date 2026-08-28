@@ -18,6 +18,11 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
+from .metadata import (
+    CONTAINER_CONTRACT_PROTOCOL,
+    RuntimeReadiness,
+    compose_metadata_payload,
+)
 from .ontology import CONTRACT_VERSION
 from .prompt_programs import gepa_optimizer_contract
 from .serde import JsonObject, jsonable
@@ -480,33 +485,34 @@ class Container:
                 payload = await _call(self._metadata, label="metadata")
             else:
                 payload = {}
-            base = {
-                "runtime": {
-                    "runtime_id": self.runtime_id,
-                    "name": self.name,
-                    "description": self.description,
-                },
-                "capabilities": {
-                    "contract_version": CONTRACT_VERSION,
-                    "rollout_modes": ["blocking", "async"],
-                    "route_hints": {
-                        "metadata_routes": ["/metadata", "/info"],
-                        "task_info_routes": ["/task_info"],
-                        "program_routes": ["/program"],
-                        "taskset_routes": ["/taskset", "/taskset/tasks"],
-                        "rollout_routes": ["/rollouts"],
-                        "state_routes": ["/rollouts/{rollout_id}/state"],
+            base = compose_metadata_payload(
+                base={
+                    "runtime": {
+                        "runtime_id": self.runtime_id,
+                        "name": self.name,
+                        "description": self.description,
                     },
-                    "metadata": {
-                        "policy_ready": self.policy_ready,
-                        "program_ready": self._program is not None,
+                    "capabilities": {
+                        "rollout_modes": ["blocking", "async"],
+                        "route_hints": {
+                            "metadata_routes": ["/metadata", "/info"],
+                            "task_info_routes": ["/task_info"],
+                            "program_routes": ["/program"],
+                            "taskset_routes": ["/taskset", "/taskset/tasks"],
+                            "rollout_routes": ["/rollouts"],
+                            "state_routes": ["/rollouts/{rollout_id}/state"],
+                        },
                     },
+                    "metadata": dict(self.metadata),
                 },
-                "metadata": _deep_merge(
-                    {"optimizer_contracts": {"gepa": gepa_optimizer_contract()}},
-                    dict(self.metadata),
+                protocol=CONTAINER_CONTRACT_PROTOCOL,
+                live_frames="unsupported",
+                readiness=RuntimeReadiness(
+                    policy_ready=self.policy_ready,
+                    program_ready=self._program is not None,
                 ),
-            }
+                optimizer_contracts={"gepa": gepa_optimizer_contract()},
+            )
             return _deep_merge(base, payload)
 
         async def task_info_payload() -> dict[str, Any]:
