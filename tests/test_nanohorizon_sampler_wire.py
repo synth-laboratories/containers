@@ -41,12 +41,47 @@ def test_workshop_capability_proxy_keeps_remote_provider_semantics() -> None:
     )
 
     assert sampler.local is False
+    assert sampler.workshop_capability_proxy is True
+    assert sampler.api_key_env == ""
+    assert sampler._auth_headers() == {}
     assert payload["tool_choice"] == "required"
     assert payload["max_tokens"] == 384
     assert payload["reasoning"] == {"effort": "medium"}
     assert "enable_thinking" not in payload
     assert "top_k" not in payload
     assert "stop" not in payload
+
+
+def test_workshop_capability_proxy_never_forwards_explicit_provider_key(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "must-not-cross-the-proxy")
+    sampler = HttpSampler(
+        {
+            "base_url": (
+                "http://host.docker.internal:17654/cap/wcap_test/"
+                "v1/providers/openrouter"
+            ),
+            "model": "z-ai/glm-5.3-flash",
+            "api_key_env": "OPENROUTER_API_KEY",
+        }
+    )
+
+    assert sampler.api_key_env == ""
+    assert sampler._auth_headers() == {}
+
+
+def test_public_openrouter_still_requires_its_declared_key(monkeypatch) -> None:
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    sampler = HttpSampler(
+        {
+            "base_url": "https://openrouter.ai/api/v1",
+            "model": "z-ai/glm-5.3-flash",
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="paid sampler requires OPENROUTER_API_KEY"):
+        sampler._auth_headers()
 
 
 def test_local_sampler_still_requires_the_declared_tool_call() -> None:

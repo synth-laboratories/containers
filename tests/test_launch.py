@@ -150,6 +150,23 @@ def test_resolve_builds_when_missing(tmp_path: Path) -> None:
     assert backend.built == ["evals-banking77:local"]
 
 
+def test_source_backed_resolve_rebuilds_even_when_a_stale_tag_exists(tmp_path: Path) -> None:
+    _write_catalog(tmp_path)
+    spec = load_catalog(tmp_path)["banking77"]
+    backend = FakeDocker()
+
+    assert resolve_local_digest(spec, build=True, backend=backend) == DIGEST
+    assert backend.built == ["evals-banking77:local"]
+
+
+def test_no_build_resolves_only_the_local_catalog_tag(tmp_path: Path) -> None:
+    _write_catalog(tmp_path)
+    spec = load_catalog(tmp_path)["banking77"]
+    backend = FakeDocker()
+
+    assert resolve_local_digest(spec, build=False, backend=backend) == DIGEST
+
+
 def test_harbor_image_cannot_http_up(tmp_path: Path) -> None:
     _write_catalog(tmp_path, contract="harbor_environment")
     with pytest.raises(LaunchError, match="not_http_task"):
@@ -179,9 +196,32 @@ def test_up_writes_run_record_and_down_clears_it(tmp_path: Path, healthy: None) 
     _, run_args = backend.ran[-1]
     assert f"SYNTH_CONTAINER_IMAGE_DIGEST={DIGEST}" in run_args
     assert f"SYNTH_CONTAINER_IMAGE_DIGEST={spoofed}" not in run_args
+    assert backend.ran[-1][0] == DIGEST
     assert down_image("banking77", port=8123, catalog=tmp_path, backend=backend) is True
     assert read_run_record("banking77", 8123) is None
     assert backend.containers == {}
+
+
+def test_up_refuses_when_selected_reference_does_not_match_resolved_digest(
+    tmp_path: Path, healthy: None
+) -> None:
+    _write_catalog(tmp_path)
+    backend = FakeDocker()
+    backend.images.clear()
+
+    def build_without_resolvable_reference(spec: ImageSpec, *, tag: str) -> str:
+        del spec, tag
+        return DIGEST
+
+    def inspect_nothing(reference: str) -> str | None:
+        del reference
+        return None
+
+    backend.build = build_without_resolvable_reference  # type: ignore[method-assign]
+    backend.inspect_id = inspect_nothing  # type: ignore[method-assign]
+    with pytest.raises(LaunchError, match="container_image_digest_mismatch"):
+        up_image("banking77", catalog=tmp_path, backend=backend, port=8129)
+    assert backend.ran == []
 
 
 def test_second_up_on_same_pair_refuses_without_replace(tmp_path: Path, healthy: None) -> None:

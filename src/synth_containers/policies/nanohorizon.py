@@ -271,6 +271,18 @@ def is_local_compat(url: str) -> bool:
     return host in {"127.0.0.1", "localhost", "host.docker.internal"}
 
 
+def is_workshop_capability_proxy(url: str) -> bool:
+    """Return whether *url* carries Workshop's scoped capability in its path.
+
+    These routes deliberately retain remote-provider wire semantics, but the
+    ``wcap_`` path segment is the credential.  Requiring or forwarding a raw
+    provider key would both break proxy-only launches and defeat the broker.
+    """
+
+    path = urlparse(url).path
+    return any(part.startswith("wcap_") and len(part) > 8 for part in path.split("/")) and "/cap/" in path
+
+
 def chat_completions_url(base_url: str) -> str:
     base = str(base_url or "").rstrip("/")
     if not base:
@@ -424,6 +436,7 @@ class HttpSampler:
         self.top_p = float(0.95 if top_p is None else top_p)
         self.top_k = int(20 if top_k is None else top_k)
         self.chat_url = chat_completions_url(str(config.get("base_url") or ""))
+        self.workshop_capability_proxy = is_workshop_capability_proxy(self.chat_url)
         # Modal / SGLang OpenAI-compatible student: same wire as MLX, not a paid teacher.
         self.local = is_local_compat(self.chat_url) or bool(
             config.get("openai_compatible_local")
@@ -433,7 +446,9 @@ class HttpSampler:
         )
         self.snapshot = str(config.get("policy_snapshot_id") or "").strip() or None
         self.api_key_env = str(config.get("api_key_env") or "").strip()
-        if not self.api_key_env and not self.local:
+        if self.workshop_capability_proxy:
+            self.api_key_env = ""
+        elif not self.api_key_env and not self.local:
             self.api_key_env = "OPENROUTER_API_KEY"
         self.effort = str(
             config.get("reasoning_effort") or config.get("effort") or "medium"
@@ -449,6 +464,8 @@ class HttpSampler:
         self.retry_max_wait = float(config.get("retry_max_wait") or (90.0 if not self.local else 20.0))
 
     def _auth_headers(self) -> dict[str, str]:
+        if self.workshop_capability_proxy:
+            return {}
         if not self.api_key_env:
             return {}
         key = os.environ.get(self.api_key_env, "").strip()

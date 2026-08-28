@@ -376,13 +376,14 @@ def resolve_local_digest(
     backend: DockerBackend | None = None,
 ) -> str:
     docker = backend or SubprocessDocker()
-    reference = (image or "").strip() or spec.image_name
+    explicit = (image or "").strip()
+    reference = explicit or f"{spec.image_name}:local"
     if reference.endswith(":latest") or reference == "latest":
         raise LaunchError("container_image_latest_forbidden")
-    existing = docker.inspect_id(reference)
-    if existing:
-        return existing
     if _PINNED.fullmatch(reference):
+        existing = docker.inspect_id(reference)
+        if existing:
+            return existing
         existing = docker.inspect_id(reference.split("@", 1)[0])
         if existing and reference.endswith(existing):
             return existing
@@ -390,11 +391,19 @@ def resolve_local_digest(
             return docker.pull(reference)
         raise LaunchError(f"container_image_not_local:{spec.id}")
     if pull or spec.pull:
-        return docker.pull(reference)
+        existing = docker.inspect_id(reference)
+        return existing or docker.pull(reference)
+    # A source-backed catalog launch must rebuild when build=True.  Reusing a
+    # coincidental unqualified/:latest tag can attest one digest while running
+    # another, and it disconnects the image from the validated build contexts.
+    if build:
+        return docker.build(spec, tag=f"{spec.image_name}:local")
+    existing = docker.inspect_id(reference)
+    if existing:
+        return existing
     if not build:
         raise LaunchError(f"container_image_not_local:{spec.id}")
-    tag = f"{spec.image_name}:local"
-    return docker.build(spec, tag=tag)
+    raise LaunchError(f"container_image_not_local:{spec.id}")
 
 
 def build_image(
@@ -587,11 +596,13 @@ def up_image(
     # The daemon-resolved image config digest is authoritative. Never allow a
     # caller-supplied value to attest a different workload than the one below.
     merged["SYNTH_CONTAINER_IMAGE_DIGEST"] = digest
-    reference = spec.pinned_name(digest)
-    if docker.inspect_id(reference) is None:
+    reference = digest
+    selected_digest = docker.inspect_id(reference)
+    if selected_digest != digest:
         reference = f"{spec.image_name}:local"
-        if docker.inspect_id(reference) is None:
-            raise LaunchError(f"container_image_not_local:{spec.id}")
+        selected_digest = docker.inspect_id(reference)
+    if selected_digest != digest:
+        raise LaunchError(f"container_image_digest_mismatch:{spec.id}")
 
     name = f"synth-{spec.id}-{host_port}"
     if docker.exists(name):
