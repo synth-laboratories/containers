@@ -979,7 +979,9 @@ components:
           deprecated: true
           description: >-
             COMPAT duplicate of `metadata.optimizer_contracts` (the old
-            healthbench-only app splice location). Will be removed; read
+            healthbench-only app splice location), emitted only while
+            `EMIT_COMPAT_OPTIMIZER_CONTRACT_DUPLICATES` is true through the
+            2026-08 release. Remove in the first subsequent release; read
             `metadata.optimizer_contracts` instead.
       additionalProperties: true
     InfoMetadata:
@@ -1012,7 +1014,9 @@ components:
           deprecated: true
           description: >-
             COMPAT duplicate of `metadata.optimizer_contracts` (the old
-            platform/state.py top-level location). Will be removed; read
+            platform/state.py top-level location), emitted only while
+            `EMIT_COMPAT_OPTIMIZER_CONTRACT_DUPLICATES` is true through the
+            2026-08 release. Remove in the first subsequent release; read
             `metadata.optimizer_contracts` instead.
       additionalProperties: true
     TaskInfoResponse:

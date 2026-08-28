@@ -13,6 +13,17 @@ Rendered by the producers themselves over the wire (see
 - `info-response.platform.banking77_classify.json` — hosted compat platform
   world (`platform/state.py::metadata_payload` via `create_compat_app`).
 
+The SDK fixture registers the full GEPA callback surface. SDK containers with
+only a subset of the required callbacks intentionally omit the GEPA contract
+from every metadata placement; `tests/test_gepa_contract_vendored.py` pins
+both the positive and negative advertisement cases.
+
+The top-level and `capabilities.optimizer_contracts` copies are compatibility
+aliases gated by `EMIT_COMPAT_OPTIMIZER_CONTRACT_DUPLICATES` only through the
+2026-08 release. Canonical consumers must read
+`metadata.optimizer_contracts`; the aliases are removed in the first
+subsequent release.
+
 Regenerate after an intentional contract change with:
 
 ```

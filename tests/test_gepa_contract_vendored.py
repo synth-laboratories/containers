@@ -137,3 +137,16 @@ def test_sdk_container_contract_conforms_when_routes_are_registered() -> None:
     )
     registered = {getattr(route, "path", None) for route in app.routes}
     assert contract["rollout_route"] in registered
+
+
+def test_sdk_container_does_not_advertise_gepa_for_partial_route_surface() -> None:
+    container = Container("gepa-incomplete")
+
+    @container.rollout
+    def _rollout(payload: dict[str, Any]) -> dict[str, Any]:  # pragma: no cover
+        raise NotImplementedError
+
+    payload = TestClient(container.fastapi()).get("/metadata").json()
+    assert "gepa" not in payload.get("metadata", {}).get("optimizer_contracts", {})
+    assert "gepa" not in payload.get("optimizer_contracts", {})
+    assert "gepa" not in payload["capabilities"].get("optimizer_contracts", {})

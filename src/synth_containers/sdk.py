@@ -485,6 +485,15 @@ class Container:
                 payload = await _call(self._metadata, label="metadata")
             else:
                 payload = {}
+            gepa_ready = all(
+                callback is not None
+                for callback in (
+                    self._program,
+                    self._taskset,
+                    self._taskset_tasks,
+                    self._rollout,
+                )
+            )
             base = compose_metadata_payload(
                 base={
                     "runtime": {
@@ -511,9 +520,31 @@ class Container:
                     policy_ready=self.policy_ready,
                     program_ready=self._program is not None,
                 ),
-                optimizer_contracts={"gepa": gepa_optimizer_contract()},
+                optimizer_contracts={"gepa": gepa_optimizer_contract()} if gepa_ready else None,
             )
-            return _deep_merge(base, payload)
+            merged = _deep_merge(base, payload)
+            if not gepa_ready:
+                # B2 ownership rule: the SDK may advertise the
+                # optimizers-owned GEPA contract only when every required
+                # callback is registered. Explicit user metadata must not
+                # claim a route surface that this app will answer with 404.
+                for parent in (
+                    merged,
+                    merged.get("capabilities"),
+                    merged.get("metadata"),
+                ):
+                    if not isinstance(parent, dict):
+                        continue
+                    contracts = parent.get("optimizer_contracts")
+                    if not isinstance(contracts, dict) or "gepa" not in contracts:
+                        continue
+                    contracts = dict(contracts)
+                    contracts.pop("gepa", None)
+                    if contracts:
+                        parent["optimizer_contracts"] = contracts
+                    else:
+                        parent.pop("optimizer_contracts", None)
+            return merged
 
         async def task_info_payload() -> dict[str, Any]:
             if self._task_info is None:

@@ -29,8 +29,11 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+import synth_containers.metadata as metadata_contract
 from synth_containers.metadata import (
+    COMPAT_OPTIMIZER_CONTRACT_DUPLICATES_THROUGH,
     CONTAINER_CONTRACT_PROTOCOL,
+    EMIT_COMPAT_OPTIMIZER_CONTRACT_DUPLICATES,
     LIVE_EVAL_PROTOCOL,
     METADATA_CONTRACT_VERSION,
 )
@@ -68,6 +71,14 @@ def _render_sdk_payload() -> dict[str, Any]:
     @container.program
     def _program() -> dict[str, Any]:  # pragma: no cover
         return {"version": "prompt_program.v1", "program_id": "golden.v1", "modules": []}
+
+    @container.taskset
+    def _taskset() -> dict[str, Any]:  # pragma: no cover
+        return {"taskset_id": "golden.v1", "splits": {"train": 1}}
+
+    @container.taskset_tasks
+    def _taskset_tasks(payload: dict[str, Any]) -> dict[str, Any]:  # pragma: no cover
+        return {"tasks": [], "metadata": {}}
 
     return TestClient(container.fastapi()).get("/metadata").json()
 
@@ -134,9 +145,7 @@ def _info_response_validator() -> Any:
         "$defs": schemas,
     }
     # OpenAPI refs -> local $defs refs so a plain JSON Schema validator runs them.
-    rewritten = json.loads(
-        json.dumps(bundled).replace("#/components/schemas/", "#/$defs/")
-    )
+    rewritten = json.loads(json.dumps(bundled).replace("#/components/schemas/", "#/$defs/"))
     return jsonschema.Draft202012Validator(rewritten)
 
 
@@ -176,8 +185,56 @@ def _assert_old_consumer_fields(payload: dict[str, Any]) -> None:
     # one constant stamps the wire contract_version.
     assert capabilities["contract_version"] == METADATA_CONTRACT_VERSION
     # COMPAT transitional duplicates old consumers still read.
+    assert EMIT_COMPAT_OPTIMIZER_CONTRACT_DUPLICATES is True
+    assert COMPAT_OPTIMIZER_CONTRACT_DUPLICATES_THROUGH == "2026-08"
     assert payload["optimizer_contracts"]["gepa"]["version"] == gepa["version"]
     assert capabilities["optimizer_contracts"]["gepa"]["version"] == gepa["version"]
+
+
+def test_sdk_gepa_advertisement_requires_every_required_callback() -> None:
+    container = Container(
+        "incomplete-gepa-sdk",
+        metadata={"optimizer_contracts": {"gepa": {"version": "synth_optimizers.gepa.v2"}}},
+    )
+
+    @container.rollout
+    def _rollout(payload: dict[str, Any]) -> dict[str, Any]:  # pragma: no cover
+        raise NotImplementedError
+
+    @container.program
+    def _program() -> dict[str, Any]:  # pragma: no cover
+        return {"version": "prompt_program.v1", "program_id": "incomplete.v1", "modules": []}
+
+    payload = TestClient(container.fastapi()).get("/metadata").json()
+    for parent in (
+        payload,
+        payload["capabilities"],
+        payload["metadata"],
+    ):
+        assert "gepa" not in parent.get("optimizer_contracts", {})
+
+
+def test_compat_gate_removes_only_legacy_contract_locations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        metadata_contract,
+        "EMIT_COMPAT_OPTIMIZER_CONTRACT_DUPLICATES",
+        False,
+    )
+    payload = metadata_contract.compose_metadata_payload(
+        base={},
+        protocol=CONTAINER_CONTRACT_PROTOCOL,
+        live_frames="unsupported",
+        readiness=metadata_contract.RuntimeReadiness(
+            policy_ready=True,
+            program_ready=True,
+        ),
+        optimizer_contracts={"gepa": {"version": "synth_optimizers.gepa.v2"}},
+    )
+    assert payload["metadata"]["optimizer_contracts"]["gepa"]["version"]
+    assert "optimizer_contracts" not in payload
+    assert "optimizer_contracts" not in payload["capabilities"]
 
 
 def test_sdk_producer_still_satisfies_old_consumers(deterministic_credentials: None) -> None:

@@ -49,6 +49,14 @@ LIVE_EVAL_PROTOCOL = "synth.container.live-eval.v1"
 # The typed vocabulary for ``capabilities.live_frames``.
 LIVE_FRAMES_LEVELS = ("native", "sampled", "post_hoc", "unsupported")
 
+# COMPAT removal gate: the canonical location has been
+# ``metadata.optimizer_contracts`` since the 2026-08 contract release.  Keep
+# the two legacy copies only through that release, then delete this flag and
+# both emit sites in the first subsequent release.  A named, pinned gate keeps
+# the migration window reviewable instead of turning the aliases permanent.
+EMIT_COMPAT_OPTIMIZER_CONTRACT_DUPLICATES = True
+COMPAT_OPTIMIZER_CONTRACT_DUPLICATES_THROUGH = "2026-08"
+
 
 @dataclass(frozen=True)
 class RuntimeReadiness:
@@ -142,13 +150,16 @@ def compose_metadata_payload(
         # Canonical location: the optimizers Rust consumer reads ONLY
         # metadata.optimizer_contracts.gepa.
         metadata["optimizer_contracts"] = contracts
-        # COMPAT: legacy platform consumers read optimizer_contracts at the
-        # payload top level (old platform/state.py location).  Remove after
-        # one release once all consumers read metadata.optimizer_contracts.
-        payload.setdefault("optimizer_contracts", copy.deepcopy(contracts))
-        # COMPAT: the healthbench-only platform/app.py splice also published
-        # the contract under capabilities.optimizer_contracts.  Remove with
-        # the top-level copy above.
-        capabilities.setdefault("optimizer_contracts", copy.deepcopy(contracts))
+        if EMIT_COMPAT_OPTIMIZER_CONTRACT_DUPLICATES:
+            # COMPAT through 2026-08: legacy platform consumers read
+            # optimizer_contracts at the payload top level (old
+            # platform/state.py location). Remove in the first subsequent
+            # release once all consumers read metadata.optimizer_contracts.
+            payload.setdefault("optimizer_contracts", copy.deepcopy(contracts))
+            # COMPAT through 2026-08: the healthbench-only platform/app.py
+            # splice also published the contract under
+            # capabilities.optimizer_contracts. Remove with the top-level
+            # copy above.
+            capabilities.setdefault("optimizer_contracts", copy.deepcopy(contracts))
 
     return payload
