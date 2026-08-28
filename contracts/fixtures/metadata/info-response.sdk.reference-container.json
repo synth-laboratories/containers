@@ -1,0 +1,72 @@
+{
+  "capabilities": {
+    "contract_version": "2026-05-28",
+    "live_frames": "unsupported",
+    "metadata": {
+      "policy_ready": true,
+      "program_ready": true
+    },
+    "optimizer_contracts": {
+      "gepa": {
+        "program_route": "/program",
+        "rollout_route": "/rollouts",
+        "taskset_route": "/taskset",
+        "taskset_tasks_route": "/taskset/tasks",
+        "version": "synth_optimizers.gepa.v2"
+      }
+    },
+    "protocol": "synth.container.contract.v1",
+    "rollout_modes": [
+      "blocking",
+      "async"
+    ],
+    "route_hints": {
+      "metadata_routes": [
+        "/metadata",
+        "/info"
+      ],
+      "program_routes": [
+        "/program"
+      ],
+      "rollout_routes": [
+        "/rollouts"
+      ],
+      "state_routes": [
+        "/rollouts/{rollout_id}/state"
+      ],
+      "task_info_routes": [
+        "/task_info"
+      ],
+      "taskset_routes": [
+        "/taskset",
+        "/taskset/tasks"
+      ]
+    }
+  },
+  "metadata": {
+    "fixture": "contracts/fixtures/metadata",
+    "optimizer_contracts": {
+      "gepa": {
+        "program_route": "/program",
+        "rollout_route": "/rollouts",
+        "taskset_route": "/taskset",
+        "taskset_tasks_route": "/taskset/tasks",
+        "version": "synth_optimizers.gepa.v2"
+      }
+    }
+  },
+  "optimizer_contracts": {
+    "gepa": {
+      "program_route": "/program",
+      "rollout_route": "/rollouts",
+      "taskset_route": "/taskset",
+      "taskset_tasks_route": "/taskset/tasks",
+      "version": "synth_optimizers.gepa.v2"
+    }
+  },
+  "runtime": {
+    "description": "Golden fixture: authoring-SDK reference container",
+    "name": "golden-sdk-container",
+    "runtime_id": "golden-sdk-container"
+  }
+}
