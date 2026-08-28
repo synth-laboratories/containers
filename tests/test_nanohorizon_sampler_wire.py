@@ -1,9 +1,14 @@
+import io
+import json
+import urllib.error
+
 import pytest
 
 from synth_containers.gold_http import StepResult
 from synth_containers.policies import nanohorizon
 from synth_containers.policies.nanohorizon import (
     HttpSampler,
+    NanoHorizonSamplerFailure,
     NanoHorizonPlanner,
 )
 
@@ -68,6 +73,100 @@ def test_workshop_capability_proxy_never_forwards_explicit_provider_key(
 
     assert sampler.api_key_env == ""
     assert sampler._auth_headers() == {}
+
+
+def _http_error(
+    url: str,
+    *,
+    status: int,
+    code: str,
+    origin: str,
+) -> urllib.error.HTTPError:
+    body = json.dumps({"error": {"code": code, "message": "bounded"}}).encode()
+    return urllib.error.HTTPError(
+        url,
+        status,
+        code,
+        {"content-type": "application/json", "x-workshop-proxy-origin": origin},
+        io.BytesIO(body),
+    )
+
+
+def test_workshop_capability_exhaustion_is_terminal_without_retry(monkeypatch) -> None:
+    url = (
+        "http://host.docker.internal:17654/cap/wcap_test/"
+        "v1/providers/openrouter/chat/completions"
+    )
+    attempts = 0
+
+    def urlopen(*_args, **_kwargs):
+        nonlocal attempts
+        attempts += 1
+        raise _http_error(
+            url,
+            status=429,
+            code="budget_exhausted",
+            origin="proxy",
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+    monkeypatch.setattr(nanohorizon._PACE, "wait", lambda *_args: None)
+
+    with pytest.raises(
+        NanoHorizonSamplerFailure,
+        match="workshop_capability_exhausted",
+    ) as raised:
+        nanohorizon._json_request(url, {"model": "test"}, timeout=1, retries=16)
+
+    assert attempts == 1
+    assert raised.value.retryable is False
+    assert raised.value.completion["error"] == "workshop_capability_exhausted"
+    assert "wcap_" not in str(raised.value)
+
+
+def test_provider_origin_429_remains_retryable_through_workshop_proxy(monkeypatch) -> None:
+    url = (
+        "http://host.docker.internal:17654/cap/wcap_test/"
+        "v1/providers/openrouter/chat/completions"
+    )
+    attempts = 0
+
+    class Response:
+        headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self):
+            return b'{"ok":true}'
+
+    def urlopen(*_args, **_kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise _http_error(
+                url,
+                status=429,
+                code="upstream_rate_limited",
+                origin="upstream",
+            )
+        return Response()
+
+    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+    monkeypatch.setattr(nanohorizon._PACE, "wait", lambda *_args: None)
+    monkeypatch.setattr(nanohorizon._PACE, "cool", lambda *_args: None)
+    monkeypatch.setattr(nanohorizon, "_backoff_seconds", lambda *_args, **_kwargs: 0.0)
+
+    assert nanohorizon._json_request(
+        url,
+        {"model": "test"},
+        timeout=1,
+        retries=1,
+    )["ok"] is True
+    assert attempts == 2
 
 
 def test_public_openrouter_still_requires_its_declared_key(monkeypatch) -> None:
@@ -452,3 +551,112 @@ def test_planner_allows_bounded_policy_recovery_and_counts_each_provider_call(
     )
     assert traces[1]["finish_reason"] == "tool_calls"
     assert traces[1]["sampler_validation_error"] is None
+
+
+def test_compaction_generation_counts_against_rollout_provider_cap(monkeypatch) -> None:
+    planner = object.__new__(NanoHorizonPlanner)
+    planner.config_id = "test"
+    planner.config = {"max_calls": 2}
+    planner.sampler = HttpSampler(
+        {
+            "base_url": "http://host.docker.internal:8787/v1",
+            "model": "Qwen/Qwen3.5-2B",
+        }
+    )
+    planner.policy = None
+    planner.max_provider_calls = 2
+    planner._calls = 0
+    planner._last_events = []
+    planner._last_trace = {}
+    planner._call_gen_ai = []
+    planner._usage = {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "calls": 0,
+    }
+
+    first = {
+        "text": "",
+        "message": {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {
+                        "name": "craftax_interact",
+                        "arguments": '{"actions":["do"]}',
+                    },
+                }
+            ],
+        },
+        "finish_reason": "tool_calls",
+        "proxy_request_id": "proxy-action",
+        "prompt_tokens": 10,
+        "completion_tokens": 5,
+        "reasoning_tokens": 0,
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+    }
+    monkeypatch.setattr(planner.sampler, "complete", lambda *_args, **_kwargs: first)
+    monkeypatch.setattr(planner.sampler, "summarize", lambda *_args, **_kwargs: "summary")
+
+    class Policy:
+        def run_episode(self, **kwargs):
+            kwargs["sample"]([], tools=TOOLS, seed=1)
+            assert kwargs["summarize"]([], 10) == "summary"
+            with pytest.raises(
+                NanoHorizonSamplerFailure,
+                match="provider_call_limit_reached",
+            ):
+                kwargs["sample"]([], tools=TOOLS, seed=2)
+            return {
+                "journal": [],
+                "proxy_request_ids": ["proxy-action"],
+                "achievements": [],
+                "reward": 0.0,
+            }
+
+    class World:
+        def reset(self, seed, *, max_steps):
+            return StepResult(
+                observation={"private": {}},
+                reward=0.0,
+                done=False,
+                valid_actions=[],
+                ascii_map=".",
+                frame_digest="frame-0",
+                env_steps=0,
+            )
+
+        def drain_native_events(self):
+            return []
+
+    class Log:
+        def __init__(self):
+            self.rows = []
+            self.closed = False
+
+        def append(self, kind, payload):
+            self.rows.append((kind, payload))
+
+        @property
+        def high_water(self):
+            return len(self.rows)
+
+        def mark_closed(self):
+            self.closed = True
+
+        def persist_frame(self, step, frame_bytes):
+            return None
+
+    planner.policy = Policy()
+    log = Log()
+
+    planner.run(world=World(), log=log, seed=1, max_steps=10)
+
+    assert planner.usage()["calls"] == 2
+    assert [payload["phase"] for kind, payload in log.rows if kind == "span.policy.data"] == [
+        "sample",
+        "compaction",
+    ]

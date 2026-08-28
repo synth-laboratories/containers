@@ -27,7 +27,7 @@ from .gold_http import GoldHttpWorld
 from .platform.policy_process import DEFAULT_HEURISTIC, IsolatedPolicyProcess
 from .platform.state import CompatPlatform, RolloutPin
 from .policies import NANOHORIZON_HARNESS, build_planner
-from .policies.nanohorizon import build_planner as build_nanohorizon
+from .policies.nanohorizon import NanoHorizonSamplerFailure, build_planner as build_nanohorizon
 
 
 def _last_environment_step(log: RolloutEventLog) -> int:
@@ -52,6 +52,17 @@ def _last_environment_step(log: RolloutEventLog) -> int:
             if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
                 steps = max(steps, value)
     return steps
+
+
+def _policy_failure_reason(exc: Exception) -> str:
+    """Project known bounded provider stops without leaking response detail."""
+
+    if isinstance(exc, NanoHorizonSamplerFailure):
+        if exc.code == "workshop_capability_exhausted":
+            return "capability_exhausted"
+        if exc.code == "provider_call_limit_reached":
+            return "provider_call_limit"
+    return "policy_error"
 
 
 @dataclass(frozen=True)
@@ -196,6 +207,7 @@ class GoldRuntime:
                 # let CompatPlatform seal it normally.
                 if not log.closed:
                     detail = str(exc)[:400]
+                    reason = _policy_failure_reason(exc)
                     failure_steps = _last_environment_step(log)
                     log.append(
                         "span.policy.closed",
@@ -209,7 +221,7 @@ class GoldRuntime:
                         "policy.session.closed",
                         {
                             "status": "failed",
-                            "reason": "policy_error",
+                            "reason": reason,
                             "detail": detail,
                             "calls": planner.usage().get("calls"),
                         },
@@ -219,7 +231,7 @@ class GoldRuntime:
                         {
                             "status": "failed",
                             "steps": failure_steps,
-                            "reason": "policy_error",
+                            "reason": reason,
                             "detail": detail,
                         },
                     )
@@ -227,7 +239,7 @@ class GoldRuntime:
                         "status",
                         {
                             "status": "failed",
-                            "reason": "policy_error",
+                            "reason": reason,
                             "detail": detail,
                             "steps": failure_steps,
                             "error_type": type(exc).__name__,

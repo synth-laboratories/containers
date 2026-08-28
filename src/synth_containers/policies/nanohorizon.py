@@ -143,6 +143,51 @@ class NanoHorizonSamplerFailure(RuntimeError):
         self.completion = copy.deepcopy(completion)
 
 
+def _failure_completion(code: str) -> dict[str, Any]:
+    """Return a secret-free terminal completion for a refused provider call."""
+
+    return {
+        "text": "",
+        "message": {"role": "assistant", "content": None},
+        "finish_reason": "error",
+        "proxy_request_id": "",
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "reasoning_tokens": 0,
+        "usage": {},
+        "sampler_validation_error": None,
+        "error": code,
+    }
+
+
+def _workshop_budget_exhausted(
+    url: str, exc: urllib.error.HTTPError, detail: str
+) -> bool:
+    """Recognize only Workshop's own capability-ceiling response.
+
+    A provider-origin 429 is still transient.  The proxy deliberately stamps
+    locally generated failures with ``x-workshop-proxy-origin: proxy`` and
+    emits the stable ``budget_exhausted`` code, so this check does not depend
+    on a human-facing message and cannot mistake an upstream rate limit for a
+    spent Workshop capability.
+    """
+
+    if exc.code != 429 or not is_workshop_capability_proxy(url):
+        return False
+    try:
+        origin = str(exc.headers.get("x-workshop-proxy-origin") or "").strip().lower()
+    except Exception:  # noqa: BLE001
+        origin = ""
+    if origin != "proxy":
+        return False
+    try:
+        payload = json.loads(detail)
+    except json.JSONDecodeError:
+        return False
+    error = payload.get("error") if isinstance(payload, dict) else None
+    return isinstance(error, dict) and error.get("code") == "budget_exhausted"
+
+
 def _retry_after_seconds(exc: urllib.error.HTTPError, detail: str) -> float | None:
     raw = ""
     try:
@@ -220,6 +265,11 @@ def _json_request(
             return parsed
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace")[:400]
+            if _workshop_budget_exhausted(url, exc, detail):
+                raise NanoHorizonSamplerFailure(
+                    "workshop_capability_exhausted",
+                    completion=_failure_completion("workshop_capability_exhausted"),
+                ) from exc
             last_error = RuntimeError(f"sampler_http_{exc.code}:{detail}")
             if exc.code not in _RETRY_HTTP or attempt >= retries:
                 raise last_error from exc
@@ -662,6 +712,7 @@ class NanoHorizonPlanner:
         self.config = {**defaults, **dict(config)}
         self.sampler = HttpSampler(self.config)
         self.policy = policy_cls(**self.config)
+        self.max_provider_calls = max(0, int(self.config.get("max_calls", 10)))
         self._calls = 0
         self._last_events: list[dict[str, Any]] = []
         self._last_trace: dict[str, Any] = {}
@@ -690,6 +741,29 @@ class NanoHorizonPlanner:
 
     def trace_data(self) -> dict[str, Any]:
         return dict(self._last_trace)
+
+    def _reserve_provider_call(self) -> int:
+        """Consume one rollout-local slot for every provider generation.
+
+        NanoHorizon treats compaction as an implementation detail, but it is a
+        real provider generation and therefore must consume the same approved
+        call budget as an action sample.  Keeping the guard in the producer
+        prevents optional summaries from escaping the per-rollout ceiling.
+        """
+
+        maximum = getattr(
+            self,
+            "max_provider_calls",
+            max(0, int(getattr(self, "config", {}).get("max_calls", 10))),
+        )
+        if self._calls >= maximum:
+            raise NanoHorizonSamplerFailure(
+                "provider_call_limit_reached",
+                completion=_failure_completion("provider_call_limit_reached"),
+            )
+        self._calls += 1
+        self._usage["calls"] = self._calls
+        return self._calls
 
     def plan(self, observation: dict[str, Any], on_delta: Any = None) -> list[str]:
         del observation, on_delta
@@ -748,8 +822,8 @@ class NanoHorizonPlanner:
             return list(self._last_events)
 
         def sample(messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
-            self._calls += 1
-            log.append("span.policy.opened", {"harness": HARNESS, "call": self._calls})
+            call_number = self._reserve_provider_call()
+            log.append("span.policy.opened", {"harness": HARNESS, "call": call_number})
             failure: NanoHorizonSamplerFailure | None = None
             try:
                 completion = self.sampler.complete(messages, **kwargs)
@@ -803,9 +877,10 @@ class NanoHorizonPlanner:
             return completion
 
         def summarize(messages: list[dict[str, Any]], max_tokens: int) -> str:
+            call_number = self._reserve_provider_call()
             log.append(
                 "agent.context_compacting",
-                {"call": self._calls, "max_tokens": max_tokens},
+                {"call": call_number, "max_tokens": max_tokens},
             )
             compact_payload = self.sampler.wire_payload(
                 messages,
@@ -817,7 +892,21 @@ class NanoHorizonPlanner:
             else:
                 compact_payload.pop("reasoning", None)
                 compact_payload.pop("reasoning_effort", None)
-            text = self.sampler.summarize(messages, max_tokens)
+            try:
+                text = self.sampler.summarize(messages, max_tokens)
+            except NanoHorizonSamplerFailure as exc:
+                log.append(
+                    "span.policy.data",
+                    {
+                        "phase": "compaction",
+                        "turn_kind": "summary",
+                        "trainable": False,
+                        "error": exc.code,
+                        "error_retryable": exc.retryable,
+                        **self.sampler.request_observation(compact_payload),
+                    },
+                )
+                raise
             log.append(
                 "span.policy.data",
                 {
