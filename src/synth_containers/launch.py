@@ -377,7 +377,9 @@ def resolve_local_digest(
 ) -> str:
     docker = backend or SubprocessDocker()
     explicit = (image or "").strip()
-    reference = explicit or f"{spec.image_name}:local"
+    reference = explicit or (
+        spec.image_name if pull or spec.pull else f"{spec.image_name}:local"
+    )
     if reference.endswith(":latest") or reference == "latest":
         raise LaunchError("container_image_latest_forbidden")
     if _PINNED.fullmatch(reference):

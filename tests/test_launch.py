@@ -167,6 +167,25 @@ def test_no_build_resolves_only_the_local_catalog_tag(tmp_path: Path) -> None:
     assert resolve_local_digest(spec, build=False, backend=backend) == DIGEST
 
 
+def test_pull_catalog_uses_declared_image_name_not_the_local_build_tag(tmp_path: Path) -> None:
+    _write_catalog(tmp_path, extra="pull = true")
+    spec = load_catalog(tmp_path)["banking77"]
+
+    class PullDocker(FakeDocker):
+        def __init__(self) -> None:
+            super().__init__()
+            self.images.clear()
+            self.pulled: list[str] = []
+
+        def pull(self, reference: str) -> str:
+            self.pulled.append(reference)
+            return DIGEST
+
+    backend = PullDocker()
+    assert resolve_local_digest(spec, backend=backend) == DIGEST
+    assert backend.pulled == ["evals-banking77"]
+
+
 def test_harbor_image_cannot_http_up(tmp_path: Path) -> None:
     _write_catalog(tmp_path, contract="harbor_environment")
     with pytest.raises(LaunchError, match="not_http_task"):
