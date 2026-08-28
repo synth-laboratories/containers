@@ -133,6 +133,16 @@ _PACE = _RequestPace()
 _RETRY_HTTP = {408, 409, 429, 500, 502, 503, 529}
 
 
+class NanoHorizonSamplerFailure(RuntimeError):
+    """A terminal provider response that cannot produce a policy action."""
+
+    def __init__(self, code: str, *, completion: dict[str, Any]) -> None:
+        super().__init__(code)
+        self.code = code
+        self.retryable = False
+        self.completion = copy.deepcopy(completion)
+
+
 def _retry_after_seconds(exc: urllib.error.HTTPError, detail: str) -> float | None:
     raw = ""
     try:
@@ -425,7 +435,9 @@ class HttpSampler:
         self.api_key_env = str(config.get("api_key_env") or "").strip()
         if not self.api_key_env and not self.local:
             self.api_key_env = "OPENROUTER_API_KEY"
-        self.effort = str(config.get("effort") or "medium")
+        self.effort = str(
+            config.get("reasoning_effort") or config.get("effort") or "medium"
+        )
         self.min_interval = float(config.get("min_request_interval") or 0.0)
         if not self.local and self.min_interval <= 0:
             self.min_interval = 2.0
@@ -488,14 +500,12 @@ class HttpSampler:
         elif thinking:
             if "groq.com" in self.chat_url:
                 payload["reasoning_effort"] = self.effort or "low"
-            elif self.thinking_budget > 0:
-                # OpenRouter treats `max_tokens` as the combined reasoning +
-                # answer ceiling. Give reasoning its own smaller ceiling so
-                # the policy's answer budget remains available for the
-                # required tool call. `effort` and `max_tokens` are mutually
-                # exclusive in OpenRouter's normalized reasoning contract.
-                payload["reasoning"] = {"max_tokens": self.thinking_budget}
             else:
+                # OpenRouter's normalized effort contract works across its
+                # providers. An exact reasoning-token budget is model-specific
+                # and can be translated to a larger minimum allocation by an
+                # effort-only provider, so retain the approved total output
+                # ceiling and request the configured effort instead.
                 payload["reasoning"] = {"effort": self.effort}
         return payload
 
@@ -541,11 +551,21 @@ class HttpSampler:
                 wired["reasoning_content"] = _text_field(
                     message.get("reasoning") or message.get("reasoning_content")
                 )
+        reasoning_details = message.get("reasoning_details")
+        if isinstance(reasoning_details, list):
+            wired["reasoning_details"] = copy.deepcopy(reasoning_details)
         usage = body.get("usage") if isinstance(body.get("usage"), dict) else {}
+        usage = copy.deepcopy(usage)
+        completion_details = (
+            usage.get("completion_tokens_details")
+            if isinstance(usage.get("completion_tokens_details"), dict)
+            else {}
+        )
         headers = body.get("_headers") if isinstance(body.get("_headers"), dict) else {}
-        return {
+        completion = {
             "text": _text_field(wired.get("content")),
             "message": wired,
+            "finish_reason": str(choice.get("finish_reason") or ""),
             "proxy_request_id": str(
                 headers.get("x-proxy-request-id")
                 or headers.get("x-request-id")
@@ -554,8 +574,28 @@ class HttpSampler:
             ),
             "prompt_tokens": int(usage.get("prompt_tokens") or 0),
             "completion_tokens": int(usage.get("completion_tokens") or 0),
+            "reasoning_tokens": int(
+                completion_details.get("reasoning_tokens")
+                or usage.get("reasoning_tokens")
+                or 0
+            ),
+            "usage": usage,
             **self.request_observation(payload),
         }
+        tool_calls = wired.get("tool_calls")
+        calls = tool_calls if isinstance(tool_calls, list) else []
+        exactly_one_action = (
+            len(calls) == 1
+            and isinstance(calls[0], dict)
+            and isinstance(calls[0].get("function"), dict)
+            and calls[0]["function"].get("name") == TOOL_NAME
+        )
+        if not exactly_one_action:
+            code = "expected_exactly_one_craftax_interact_tool_call"
+            if not calls and completion["finish_reason"] == "length":
+                code = "reasoning_budget_exhausted_before_tool"
+            raise NanoHorizonSamplerFailure(code, completion=completion)
+        return completion
 
     def summarize(self, messages: list[dict[str, Any]], max_tokens: int) -> str:
         payload = self.wire_payload(
@@ -687,7 +727,12 @@ class NanoHorizonPlanner:
         def sample(messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
             self._calls += 1
             log.append("span.policy.opened", {"harness": HARNESS, "call": self._calls})
-            completion = self.sampler.complete(messages, **kwargs)
+            failure: NanoHorizonSamplerFailure | None = None
+            try:
+                completion = self.sampler.complete(messages, **kwargs)
+            except NanoHorizonSamplerFailure as exc:
+                completion = exc.completion
+                failure = exc
             self._usage["prompt_tokens"] = int(self._usage["prompt_tokens"] or 0) + int(
                 completion.get("prompt_tokens") or 0
             )
@@ -706,8 +751,11 @@ class NanoHorizonPlanner:
                 "tools": copy.deepcopy(list(kwargs.get("tools") or [])),
                 "assistant": copy.deepcopy(completion.get("message") or {}),
                 "proxy_request_id": completion.get("proxy_request_id"),
+                "finish_reason": completion.get("finish_reason"),
                 "prompt_tokens": completion.get("prompt_tokens"),
                 "completion_tokens": completion.get("completion_tokens"),
+                "reasoning_tokens": completion.get("reasoning_tokens"),
+                "usage": copy.deepcopy(completion.get("usage") or {}),
                 "text": completion.get("text"),
                 **{
                     key: value
@@ -715,8 +763,17 @@ class NanoHorizonPlanner:
                     if key == "modelParameters" or str(key).startswith("gen_ai.")
                 },
             }
+            if failure is not None:
+                self._last_trace.update(
+                    {
+                        "error": failure.code,
+                        "error_retryable": failure.retryable,
+                    }
+                )
             self._call_gen_ai.append(copy_observation(self._last_trace))
             log.append("span.policy.data", dict(self._last_trace))
+            if failure is not None:
+                raise failure
             return completion
 
         def summarize(messages: list[dict[str, Any]], max_tokens: int) -> str:
