@@ -30,6 +30,30 @@ from .policies import NANOHORIZON_HARNESS, build_planner
 from .policies.nanohorizon import build_planner as build_nanohorizon
 
 
+def _last_environment_step(log: RolloutEventLog) -> int:
+    """Return the last explicit environment step, never journal high-water."""
+
+    step_kinds = {
+        "action",
+        "action_applied",
+        "frame",
+        "observation",
+        "reward_signal",
+        "span.step.closed",
+        "state_transition",
+        "terminal",
+    }
+    steps = 0
+    for envelope in log.after(0):
+        if envelope.kind not in step_kinds:
+            continue
+        for key in ("steps", "step"):
+            value = envelope.payload.get(key)
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                steps = max(steps, value)
+    return steps
+
+
 @dataclass(frozen=True)
 class GoldRuntime:
     """``TargetSpec.runtime`` for a baked gold HTTP engine.
@@ -171,26 +195,43 @@ class GoldRuntime:
                 # returned 500. Persist a secret-free terminal lifecycle and
                 # let CompatPlatform seal it normally.
                 if not log.closed:
+                    detail = str(exc)[:400]
+                    failure_steps = _last_environment_step(log)
                     log.append(
                         "span.policy.closed",
                         {
                             "status": "failed",
                             "error_type": type(exc).__name__,
-                            "error": str(exc)[:400],
+                            "error": detail,
                         },
                     )
                     log.append(
                         "policy.session.closed",
-                        {"status": "failed", "calls": planner.usage().get("calls")},
+                        {
+                            "status": "failed",
+                            "reason": "policy_error",
+                            "detail": detail,
+                            "calls": planner.usage().get("calls"),
+                        },
                     )
-                    log.append("env.episode.closed", {"status": "failed", "steps": 0})
+                    log.append(
+                        "env.episode.closed",
+                        {
+                            "status": "failed",
+                            "steps": failure_steps,
+                            "reason": "policy_error",
+                            "detail": detail,
+                        },
+                    )
                     log.append(
                         "status",
                         {
                             "status": "failed",
                             "reason": "policy_error",
+                            "detail": detail,
+                            "steps": failure_steps,
                             "error_type": type(exc).__name__,
-                            "error": str(exc)[:400],
+                            "error": detail,
                         },
                     )
                     evidence_high_water = log.high_water
@@ -380,4 +421,3 @@ def _achievement_labels(observation: dict[str, Any]) -> list[str]:
 
     visit(observation)
     return sorted(labels)
-

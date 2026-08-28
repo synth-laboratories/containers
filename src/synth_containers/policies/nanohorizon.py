@@ -134,7 +134,7 @@ _RETRY_HTTP = {408, 409, 429, 500, 502, 503, 529}
 
 
 class NanoHorizonSamplerFailure(RuntimeError):
-    """A terminal provider response that cannot produce a policy action."""
+    """A sampler failure that must abort rather than enter policy parsing."""
 
     def __init__(self, code: str, *, completion: dict[str, Any]) -> None:
         super().__init__(code)
@@ -611,7 +611,12 @@ class HttpSampler:
             code = "expected_exactly_one_craftax_interact_tool_call"
             if not calls and completion["finish_reason"] == "length":
                 code = "reasoning_budget_exhausted_before_tool"
-            raise NanoHorizonSamplerFailure(code, completion=completion)
+            # The provider call itself succeeded.  Tool-shape validation belongs
+            # to the uploaded policy, whose invalid-parse path consumes this
+            # call and may recover on a later call within its declared
+            # ``max_calls`` bound.  Raising here used to terminalize the entire
+            # rollout before that bounded recovery path could run.
+            completion["sampler_validation_error"] = code
         return completion
 
     def summarize(self, messages: list[dict[str, Any]], max_tokens: int) -> str:
@@ -772,6 +777,9 @@ class NanoHorizonPlanner:
                 "prompt_tokens": completion.get("prompt_tokens"),
                 "completion_tokens": completion.get("completion_tokens"),
                 "reasoning_tokens": completion.get("reasoning_tokens"),
+                "sampler_validation_error": completion.get(
+                    "sampler_validation_error"
+                ),
                 "usage": copy.deepcopy(completion.get("usage") or {}),
                 "text": completion.get("text"),
                 **{

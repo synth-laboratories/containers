@@ -5,7 +5,6 @@ from synth_containers.policies import nanohorizon
 from synth_containers.policies.nanohorizon import (
     HttpSampler,
     NanoHorizonPlanner,
-    NanoHorizonSamplerFailure,
 )
 
 
@@ -172,7 +171,7 @@ def test_completion_preserves_provider_reasoning_and_usage(monkeypatch) -> None:
     ]
 
 
-def test_length_without_tool_is_terminal_reasoning_budget_failure(monkeypatch) -> None:
+def test_length_without_tool_flows_to_policy_as_invalid_completion(monkeypatch) -> None:
     sampler = HttpSampler(
         {
             "base_url": "https://openrouter.ai/api/v1",
@@ -204,15 +203,17 @@ def test_length_without_tool_is_terminal_reasoning_budget_failure(monkeypatch) -
     monkeypatch.setattr(nanohorizon, "_json_request", response)
     monkeypatch.setattr(sampler, "_auth_headers", lambda: {})
 
-    with pytest.raises(NanoHorizonSamplerFailure) as caught:
-        sampler.complete([{"role": "user", "content": "Act."}], tools=TOOLS)
+    completion = sampler.complete(
+        [{"role": "user", "content": "Act."}], tools=TOOLS
+    )
 
     assert requests == 1
-    assert caught.value.code == "reasoning_budget_exhausted_before_tool"
-    assert caught.value.retryable is False
-    assert caught.value.completion["finish_reason"] == "length"
-    assert caught.value.completion["reasoning_tokens"] == 384
-    assert caught.value.completion["usage"]["completion_tokens_details"] == {
+    assert completion["sampler_validation_error"] == (
+        "reasoning_budget_exhausted_before_tool"
+    )
+    assert completion["finish_reason"] == "length"
+    assert completion["reasoning_tokens"] == 384
+    assert completion["usage"]["completion_tokens_details"] == {
         "reasoning_tokens": 384
     }
 
@@ -242,7 +243,7 @@ def test_length_without_tool_is_terminal_reasoning_budget_failure(monkeypatch) -
         ],
     ],
 )
-def test_sampler_rejects_any_response_without_exactly_one_action(
+def test_sampler_marks_any_response_without_exactly_one_action_for_policy_parse(
     monkeypatch, tool_calls
 ) -> None:
     sampler = HttpSampler(
@@ -265,15 +266,19 @@ def test_sampler_rejects_any_response_without_exactly_one_action(
     )
     monkeypatch.setattr(sampler, "_auth_headers", lambda: {})
 
-    with pytest.raises(
-        NanoHorizonSamplerFailure,
-        match="expected_exactly_one_craftax_interact_tool_call",
-    ):
-        sampler.complete([{"role": "user", "content": "Act."}], tools=TOOLS)
+    completion = sampler.complete(
+        [{"role": "user", "content": "Act."}], tools=TOOLS
+    )
+
+    assert completion["sampler_validation_error"] == (
+        "expected_exactly_one_craftax_interact_tool_call"
+    )
 
 
-def test_planner_records_terminal_sampler_failure_before_aborting(monkeypatch) -> None:
-    completion = {
+def test_planner_allows_bounded_policy_recovery_and_counts_each_provider_call(
+    monkeypatch,
+) -> None:
+    invalid_completion = {
         "text": "",
         "message": {"role": "assistant", "reasoning_content": "Still thinking"},
         "finish_reason": "length",
@@ -286,6 +291,29 @@ def test_planner_records_terminal_sampler_failure_before_aborting(monkeypatch) -
             "completion_tokens": 384,
             "completion_tokens_details": {"reasoning_tokens": 384},
         },
+        "sampler_validation_error": "reasoning_budget_exhausted_before_tool",
+    }
+    valid_completion = {
+        "text": "",
+        "message": {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": "call-2",
+                    "type": "function",
+                    "function": {
+                        "name": "craftax_interact",
+                        "arguments": '{"actions":["do"]}',
+                    },
+                }
+            ],
+        },
+        "finish_reason": "tool_calls",
+        "proxy_request_id": "proxy-recovered",
+        "prompt_tokens": 120,
+        "completion_tokens": 20,
+        "reasoning_tokens": 5,
+        "usage": {"prompt_tokens": 120, "completion_tokens": 20},
     }
     planner = object.__new__(NanoHorizonPlanner)
     planner.config_id = "test"
@@ -297,19 +325,34 @@ def test_planner_records_terminal_sampler_failure_before_aborting(monkeypatch) -
         }
     )
 
-    def fail_once(*args, **kwargs):
-        raise NanoHorizonSamplerFailure(
-            "reasoning_budget_exhausted_before_tool", completion=completion
-        )
+    completions = iter([invalid_completion, valid_completion])
 
-    monkeypatch.setattr(planner.sampler, "complete", fail_once)
+    monkeypatch.setattr(
+        planner.sampler,
+        "complete",
+        lambda *args, **kwargs: next(completions),
+    )
 
     class Policy:
         def run_episode(self, **kwargs):
-            kwargs["sample"](
+            first = kwargs["sample"](
                 [{"role": "user", "content": "Act."}], tools=TOOLS, seed=1
             )
-            raise AssertionError("terminal sampler failure must abort the rollout")
+            assert first["sampler_validation_error"] == (
+                "reasoning_budget_exhausted_before_tool"
+            )
+            second = kwargs["sample"](
+                [{"role": "user", "content": "Try again."}], tools=TOOLS, seed=2
+            )
+            assert second["message"]["tool_calls"][0]["function"]["name"] == (
+                "craftax_interact"
+            )
+            return {
+                "journal": [],
+                "proxy_request_ids": ["proxy-failed", "proxy-recovered"],
+                "achievements": [],
+                "reward": 0.0,
+            }
 
     class World:
         def reset(self, seed, *, max_steps):
@@ -329,9 +372,17 @@ def test_planner_records_terminal_sampler_failure_before_aborting(monkeypatch) -
     class Log:
         def __init__(self):
             self.rows = []
+            self.closed = False
 
         def append(self, kind, payload):
             self.rows.append((kind, payload))
+
+        @property
+        def high_water(self):
+            return len(self.rows)
+
+        def mark_closed(self):
+            self.closed = True
 
         def persist_frame(self, step, frame_bytes):
             return None
@@ -349,21 +400,20 @@ def test_planner_records_terminal_sampler_failure_before_aborting(monkeypatch) -
     }
     log = Log()
 
-    with pytest.raises(
-        NanoHorizonSamplerFailure,
-        match="reasoning_budget_exhausted_before_tool",
-    ):
-        planner.run(world=World(), log=log, seed=1, max_steps=10)
+    planner.run(world=World(), log=log, seed=1, max_steps=10)
 
     assert planner.usage() == {
-        "prompt_tokens": 100,
-        "completion_tokens": 384,
-        "total_tokens": 484,
-        "calls": 1,
+        "prompt_tokens": 220,
+        "completion_tokens": 404,
+        "total_tokens": 624,
+        "calls": 2,
     }
     traces = [payload for kind, payload in log.rows if kind == "span.policy.data"]
-    assert len(traces) == 1
+    assert len(traces) == 2
     assert traces[0]["finish_reason"] == "length"
     assert traces[0]["reasoning_tokens"] == 384
-    assert traces[0]["error"] == "reasoning_budget_exhausted_before_tool"
-    assert traces[0]["error_retryable"] is False
+    assert traces[0]["sampler_validation_error"] == (
+        "reasoning_budget_exhausted_before_tool"
+    )
+    assert traces[1]["finish_reason"] == "tool_calls"
+    assert traces[1]["sampler_validation_error"] is None

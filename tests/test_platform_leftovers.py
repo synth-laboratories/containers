@@ -76,6 +76,73 @@ def test_start_rollout_reads_create_rollout_request() -> None:
     assert pin.policy_ref["config"] == "echo"
     assert body["terminated"] is True
     assert body["status"] == "completed"
+    assert body["steps"] == 1
+    assert body["reward"] is None
+    assert body["reward_status"] == "absent"
+
+
+def test_terminal_env_sum_is_materialized_without_a_reward_post() -> None:
+    platform = CompatPlatform(TARGETS["openenv_echo"])
+    body = platform.start_rollout(
+        parse_create_rollout(
+            {
+                "task_instance_id": "seed:4",
+                "policy_ref": {"harness": "gym_loop", "config": "echo"},
+            }
+        )
+    )
+
+    assert body["terminated"] is True
+    assert body["status"] == "completed"
+    assert body["steps"] == 1
+    assert body["reward"] == 1.0
+    assert body["reward_status"] == "scored"
+    receipt = platform.get_reward(body["rollout_id"])
+    assert receipt["reward"] == 1.0
+    assert receipt["status"] == "scored"
+
+
+def test_failed_rollout_projects_terminal_reason_detail_and_environment_steps() -> None:
+    platform = CompatPlatform(TARGETS["openenv_echo"])
+    body = platform.start_rollout(
+        parse_create_rollout(
+            {
+                "submission_mode": "async",
+                "task_instance_id": "seed:4",
+                "policy_ref": {"harness": "gym_loop", "config": "echo"},
+            }
+        )
+    )
+    rollout_id = body["rollout_id"]
+    pin = platform.pins[rollout_id]
+    log = platform.logs[rollout_id]
+    log.append("action", {"step": 4, "action": "do"})
+    log.append(
+        "env.episode.closed",
+        {
+            "status": "failed",
+            "steps": 4,
+            "reason": "policy_error",
+            "detail": "bounded public diagnostic",
+        },
+    )
+    log.append(
+        "status",
+        {
+            "status": "failed",
+            "steps": 4,
+            "reason": "policy_error",
+            "error": "bounded public diagnostic",
+        },
+    )
+    pin.status = "failed"
+    pin.terminal = True
+
+    terminal = platform.rollout_status(rollout_id)
+
+    assert terminal["steps"] == 4
+    assert terminal["reason"] == "policy_error"
+    assert terminal["detail"] == "bounded public diagnostic"
 
 
 def test_start_rollout_refuses_silent_policy_pin() -> None:

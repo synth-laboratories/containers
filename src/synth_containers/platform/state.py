@@ -32,7 +32,14 @@ from .policy_process import DEFAULT_HEURISTIC, IsolatedPolicyProcess
 from .reward_plan import PlanOutcome, classify_plan_outcome
 from .runtime import runtime_for
 from .seal import seal_rollout_log, validate_rollout_seal
-from .targets import PolicyInstallStatus, TargetRuntimeKind, TargetSpec, TaskInstanceStatus
+from .terminal_projection import terminal_journal_facts
+from .targets import (
+    PolicyInstallStatus,
+    RewardKind,
+    TargetRuntimeKind,
+    TargetSpec,
+    TaskInstanceStatus,
+)
 from .trace_bundle import (
     HarborTraceBundleRef,
     inspect_harbor_trace_bundle,
@@ -1155,6 +1162,19 @@ class CompatPlatform:
 
     def _rollout_response(self, pin: RolloutPin, descriptor: dict[str, Any]) -> dict[str, Any]:
         reward = self.reward_executions.get(pin.rollout_id)
+        terminal = terminal_journal_facts(self.logs.get(pin.rollout_id))
+        failed_terminal = pin.terminal and pin.status in {
+            "failed",
+            "truncated",
+            "cancelled",
+            "terminated",
+            "stopped",
+        }
+        reason = terminal.get("reason")
+        detail = terminal.get("detail") or terminal.get("error")
+        if failed_terminal:
+            reason = reason or "producer_failure"
+            detail = detail or f"producer terminated rollout with status {pin.status}"
         return {
             "rollout_id": pin.rollout_id,
             "status": pin.status,
@@ -1171,6 +1191,9 @@ class CompatPlatform:
             # record as well as on the dedicated reward route.
             "reward": reward.get("reward") if reward is not None else None,
             "reward_status": reward.get("status") if reward is not None else None,
+            "steps": terminal.get("steps"),
+            "reason": reason,
+            "detail": detail,
             "child_rollout_id": pin.child_rollout_id,
             "child_resource_ref": pin.child_resource_ref,
             "engine_generation": pin.engine_generation,
@@ -1298,12 +1321,15 @@ class CompatPlatform:
     def _simulate(self, pin: RolloutPin, log: RolloutEventLog) -> None:
         pin.env_generation += 1
         runtime_for(self.spec).simulate(self, pin, log)
-        # Harbor's native verifier is the terminal scoring authority. Persist
-        # that result as soon as the sibling verifier has completed, instead
-        # of requiring a separate, caller-authored POST /reward after the run
-        # has already closed. This preserves null for unscored verifier
-        # outcomes while making an authoritative 0.0 discoverable.
-        if pin.terminal and self.spec.runtime_family == TargetRuntimeKind.HARBOR:
+        # Persist a terminal reward receipt as soon as its authority has
+        # finished, instead of requiring a separate caller-authored POST after
+        # the run closes. Harbor supplies a native verifier; ENV_SUM targets
+        # already hold authoritative environment signals. This preserves null
+        # for missing evidence while making an authoritative 0.0 discoverable.
+        if pin.terminal and (
+            self.spec.runtime_family == TargetRuntimeKind.HARBOR
+            or self.spec.reward_kind == RewardKind.ENV_SUM
+        ):
             self.compute_reward(
                 rollout_id=pin.rollout_id,
                 evidence=None,
