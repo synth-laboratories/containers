@@ -99,6 +99,42 @@ def create_compat_app(
                 payload = extra
         return payload
 
+    @app.get("/task_catalog")
+    async def task_catalog() -> dict[str, Any]:
+        return platform.task_catalog_payload()
+
+    @app.get("/task_info")
+    async def task_info() -> dict[str, Any]:
+        return platform.task_info_payload()
+
+    @app.post("/task_instances/materialize")
+    async def materialize_task_instances(request: Request) -> dict[str, Any]:
+        body = await request.json()
+        task_id = body.get("task_id")
+        seeds = body.get("seeds")
+        if not isinstance(task_id, str) or not task_id.strip():
+            raise HTTPException(status_code=422, detail="task_id_required")
+        if (
+            not isinstance(seeds, list)
+            or not seeds
+            or len(seeds) > 100
+            or any(isinstance(seed, bool) or not isinstance(seed, int) for seed in seeds)
+            or len(set(seeds)) != len(seeds)
+        ):
+            raise HTTPException(status_code=422, detail="seeds_must_be_1_to_100_distinct_integers")
+        try:
+            instances = platform.materialize_task_instances(task_id.strip(), seeds)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {
+            "schema_version": "synth.container.task-instances.v1",
+            "instances": instances,
+        }
+
+    @app.get("/policy")
+    async def get_policy() -> dict[str, Any]:
+        return platform.policy_state_payload()
+
     @app.post("/rollouts/prepare")
     async def prepare(request: Request) -> dict[str, Any]:
         try:
@@ -135,7 +171,12 @@ def create_compat_app(
                 "replayed": True,
             }
         try:
-            descriptor = platform.prepare(rollout_id, req.telemetry.transport, retention)
+            descriptor = platform.prepare(
+                rollout_id,
+                req.telemetry.transport,
+                retention,
+                request=req,
+            )
         except RuntimeError as exc:
             detail = str(exc)
             if detail.startswith(("event_log_sealed:", "event_log_unrecoverable:")):
@@ -208,9 +249,21 @@ def create_compat_app(
 
         async def generate():
             nonlocal after
+            # Control records intentionally have no semantic sequence and are
+            # therefore visible at cursor 0.  A prepared SSE consumer keeps
+            # cursor 0 until its first semantic event; without this local
+            # replay guard the `stream.subscribed` control record is emitted
+            # on every heartbeat tick, producing an unbounded duplicate flood
+            # before the rollout starts.
+            emitted_controls: set[str] = set()
             while not await request.is_disconnected():
                 emitted = False
                 for envelope in log.after(after):
+                    if envelope.control:
+                        control_key = f"{envelope.kind}:{envelope.digest}"
+                        if control_key in emitted_controls:
+                            continue
+                        emitted_controls.add(control_key)
                     sse_id = envelope.sequence if envelope.sequence is not None else 0
                     if envelope.sequence is not None:
                         after = envelope.sequence
@@ -375,6 +428,17 @@ def create_compat_app(
         if seal is None:
             raise HTTPException(status_code=404, detail=f"trace_not_sealed:{rollout_id}")
         return seal
+
+    @app.get("/rollouts/{rollout_id}/trace/bundle")
+    async def get_trace_bundle(rollout_id: str) -> FileResponse:
+        archive = platform.trace_bundle_archive(rollout_id)
+        if archive is None:
+            raise HTTPException(status_code=404, detail=f"trace_bundle_not_sealed:{rollout_id}")
+        return FileResponse(
+            archive,
+            media_type="application/zip",
+            filename=f"{rollout_id}.trace-v5.zip",
+        )
 
     @app.post("/rollouts/{rollout_id}/drop_session")
     async def drop_session(rollout_id: str) -> Any:
