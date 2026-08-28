@@ -21,7 +21,7 @@ POLICY_PINS = {
 
 
 def consume(target: str, tmp: Path) -> dict:
-    client = TestClient(create_compat_app(target))
+    client = TestClient(create_compat_app(target, storage_root=tempfile.mkdtemp(prefix="headless-visual-consumer-")))
     prepared = client.post(
         "/rollouts/prepare",
         json={"telemetry": {"enabled": True, "transport": "sse"}},

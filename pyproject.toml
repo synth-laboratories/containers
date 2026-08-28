@@ -30,6 +30,11 @@ dev = [
     "twine>=5.0.0",
     "ruff>=0.6.0",
     "ty>=0.0.32",
+    # Contract conformance tests (tests/test_metadata_contract.py) validate the
+    # producer-generated golden fixtures against openapi/container-contract-v1.yaml.
+    "pytest>=8.0.0",
+    "pyyaml>=6.0.0",
+    "jsonschema>=4.21.0",
 ]
 
 [project.scripts]

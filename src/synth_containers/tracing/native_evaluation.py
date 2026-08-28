@@ -44,8 +44,14 @@ def attach_native_evaluation(
     *,
     payload: Mapping[str, Any],
     source_name: str,
+    produced_at: str | None = None,
 ) -> dict[str, Any]:
-    """Redact, retain, and type one native evaluation without mutating the trace."""
+    """Redact, retain, and type one native evaluation without mutating the trace.
+
+    ``produced_at`` may be pinned by importers that require byte-deterministic
+    bundles (the harbor job-dir adapter pins it to the trace's last observed
+    timestamp); it defaults to the wall clock.
+    """
 
     redacted, report = redact_payload(payload)
     if not isinstance(redacted, dict):
@@ -74,7 +80,7 @@ def attach_native_evaluation(
             "idempotent": True,
         }
 
-    now = utc_now()
+    now = produced_at or utc_now()
     authority = str(redacted.get("authority") or "native-evaluator")
     source_version = str(redacted.get("schema_version") or "unknown")
     producer = ProducerRefV1(
@@ -117,11 +123,11 @@ def attach_native_evaluation(
     )
     evidence = inspected.evidence
     if evidence is None:
-        evidence = new_evidence_bundle(document)
+        evidence = new_evidence_bundle(document, created_at=produced_at)
         bundle.write_evidence(evidence)
     additions = _new_records(evidence, typed["records"])
     if additions:
-        evidence = attach_many(evidence, records=additions)
+        evidence = attach_many(evidence, records=additions, created_at=produced_at)
         bundle.write_evidence(evidence)
 
     validation = validate(document, evidence)

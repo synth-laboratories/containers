@@ -29,6 +29,7 @@ class DockEvalExtension:
     manifest_path: Path
     bundle_root: Path
     bundle_digest: str
+    agent_credentials: str | None = None
 
     @classmethod
     def from_file(cls, path: str | Path) -> "DockEvalExtension":
@@ -58,26 +59,39 @@ class DockEvalExtension:
         digest = str(bundle.get("digest") or "").strip().lower()
         if not _DIGEST.fullmatch(digest):
             raise DockExtensionError("dock_extension_bundle_pin_required")
+        # Credentials for an authoring agent are launcher-owned, not bundle
+        # content, so a pinned bundle stays portable and secret-free.
+        credentials_raw = payload.get("agent_credentials")
+        agent_credentials: str | None = None
+        if credentials_raw is not None:
+            credentials_path = Path(str(credentials_raw)).expanduser()
+            if not credentials_path.is_absolute() or not credentials_path.is_dir():
+                raise DockExtensionError("dock_extension_agent_credentials_invalid")
+            agent_credentials = str(credentials_path.resolve())
         return cls(
             extension_id=extension_id,
             manifest_path=manifest_path,
             bundle_root=bundle_root,
             bundle_digest=digest,
+            agent_credentials=agent_credentials,
         )
 
     def runtime_config(self) -> dict[str, Any]:
-        return {
+        config: dict[str, Any] = {
             "harbor_pinned_bundle": {
                 "root": str(self.bundle_root),
                 "digest": self.bundle_digest,
             }
         }
+        if self.agent_credentials:
+            config["agent_credentials"] = self.agent_credentials
+        return config
 
 
 def create_dock_eval_app(
     extension: DockEvalExtension | str | Path,
     *,
-    storage_root: str | Path | None = None,
+    storage_root: str | Path,
 ):
     """Create the ordinary Containers app from a private Dock extension."""
     if not isinstance(extension, DockEvalExtension):

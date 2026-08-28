@@ -1,0 +1,24 @@
+{
+  "schema": "synth.harbor-pinned-bundle.v1",
+  "bundle_id": "harbor-fixture/cardbench-pokemon@1",
+  "image": "example.invalid/harbor-fixture@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "instruction_path": "instruction.md",
+  "agent": {
+    "command": ["sh", "/harbor/bundle/agent.sh"]
+  },
+  "required_paths": [
+    "agent.sh",
+    "tests/test.sh",
+    "cardbench/tasks/pokemon/task.txt"
+  ],
+  "verifier": {
+    "command": ["sh", "/harbor/bundle/tests/test.sh"],
+    "tests": "tests/test.sh",
+    "reward_path": "verifier/reward.txt"
+  },
+  "task_tree": {
+    "path": "cardbench/tasks/pokemon",
+    "mount": "/workspace/cardbench/tasks/pokemon",
+    "digest": "sha256:515f44bcb241cc15098b73a97751469b36c50dc2bddefe3e1fdabbe59277abeb"
+  }
+}

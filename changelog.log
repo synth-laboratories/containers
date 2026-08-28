@@ -1,5 +1,10 @@
 # synth-containers changelog
 
+## 2026-08-14
+
+* Prepared `0.4.1.dev20260814` as the Workshop v0.3 development-channel Containers substrate.
+* Included the merged platform, tunnel credential rotation, Harbor authoring, verifier, and immutable local-build registration work from `dev`.
+
 ## 2026-08-13
 
 * Added a no-argument command that registers immutable local development builds for Workshop.

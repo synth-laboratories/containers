@@ -1,0 +1,230 @@
+{
+  "metadata": {
+    "active_leases": 0,
+    "adapter_chain": [],
+    "affordance_booleans": {
+      "environment": {
+        "bind_policy_config": true,
+        "fork": false,
+        "live_frames": false,
+        "live_reward": true,
+        "poll": true,
+        "restart_policy": true,
+        "restore": false,
+        "scale_leases": true,
+        "sse": true,
+        "step": true,
+        "true_checkpoint": false,
+        "websocket": true
+      },
+      "evaluator": {},
+      "policy": {}
+    },
+    "affordances": {
+      "environment": {
+        "bind_policy_config": "native",
+        "fork": "unsupported",
+        "live_frames": "unsupported",
+        "live_reward": "native",
+        "poll": "native",
+        "restart_policy": "native",
+        "restore": "unsupported",
+        "scale_leases": "native",
+        "sse": "derived",
+        "step": "native",
+        "true_checkpoint": "unsupported",
+        "websocket": "derived"
+      },
+      "evaluator": {},
+      "policy": {}
+    },
+    "blocking_trial": "unsupported",
+    "capabilities": {
+      "gsm8k_solve": {
+        "input_schema": {
+          "properties": {
+            "seed": {
+              "maximum": 7472,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "task_instance_id": {
+              "examples": [
+                "seed:0"
+              ],
+              "pattern": "^.*:(-?\\d+)$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "task_instance_id"
+          ],
+          "type": "object"
+        },
+        "runtime_family": "gsm8k"
+      }
+    },
+    "capabilities_digest": "sha256:396719e96d02af3e693c837f96c3096c8963ce95d8c3d9b227f35d9b9cb96b66",
+    "capacity": {
+      "active": 0,
+      "by_owner": {},
+      "declared": 8,
+      "reserved": 0
+    },
+    "dataset": {
+      "config": "main",
+      "dataset": "openai/gsm8k",
+      "order": "random.Random(shuffle_seed).shuffle(list(range(rows)))",
+      "parse_modes": [
+        "exact",
+        "trailing_number",
+        "unparsed"
+      ],
+      "pinned": true,
+      "profile": "hf",
+      "profile_source": "declared",
+      "revision": "740312add88f781978c0658806c59bc2815b9866",
+      "schema_version": "gsm8k.dataset-manifest.v1",
+      "shuffle_seed": 20260820,
+      "snapshot_dir": null,
+      "splits": {
+        "heldout": {
+          "digest": "sha256:32c548f08195e19e33408b844dd7be6aa4bcae457d957bc05909ff4bd4a00595",
+          "hf_split": "test",
+          "rows": 1319
+        },
+        "train": {
+          "digest": "sha256:dca449882e67a1e7716b5da453650a7b16588a1f2d1a0d82394a43d75ea7e9ca",
+          "hf_split": "train",
+          "rows": 7473
+        }
+      }
+    },
+    "environment_ref": "env:gsm8k_dataset",
+    "evaluation_plan_ref": "gsm8k_eval.v1",
+    "event_kinds": [
+      "trace.opened",
+      "env.episode.opened",
+      "observation",
+      "action",
+      "token_capture",
+      "reward_signal",
+      "span.policy.opened",
+      "span.policy.closed",
+      "env.episode.closed",
+      "capture.closed",
+      "status"
+    ],
+    "identity": {
+      "instance_id": "834587a9-ddbe-46f9-a71b-241c759a9937",
+      "target_id": "gsm8k_solve"
+    },
+    "input_schema": {
+      "properties": {
+        "seed": {
+          "maximum": 7472,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "task_instance_id": {
+          "examples": [
+            "seed:0"
+          ],
+          "pattern": "^.*:(-?\\d+)$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_instance_id"
+      ],
+      "type": "object"
+    },
+    "live_frames": "unsupported",
+    "live_reward": true,
+    "logical_service_ids": {
+      "environment": "env:gsm8k_dataset",
+      "evaluator": "gsm8k_eval.v1",
+      "policy": "policy:solve",
+      "relay": "relay:event_log",
+      "world": "world:gsm8k@heldout"
+    },
+    "max_episode_steps": null,
+    "mcp_bind": "unused",
+    "policy_ref": {
+      "code": null,
+      "config": null,
+      "harness": "solve"
+    },
+    "policy_refs": [
+      {
+        "code": null,
+        "config": "dataset_gold",
+        "harness": "dataset_gold"
+      },
+      {
+        "code": null,
+        "config": "solve",
+        "harness": "solve"
+      }
+    ],
+    "reconnect": "derived",
+    "retention": "run",
+    "reward_authority": "environment",
+    "runtime_family": "gsm8k",
+    "scale_leases": 8,
+    "target_id": "gsm8k_solve",
+    "task_instance_id": null,
+    "training": {
+      "capability_hash": "sha256:f1b600534e2d3f60191455b91b09eacd537e7e23e0517577d7c056fcde1c1be7",
+      "connection_modes": [
+        "close",
+        "keep_alive"
+      ],
+      "container_digest": "sha256:396719e96d02af3e693c837f96c3096c8963ce95d8c3d9b227f35d9b9cb96b66",
+      "container_id": "gsm8k_solve",
+      "max_concurrency": 8,
+      "operations": [
+        "rollout",
+        "reward",
+        "heartbeat"
+      ],
+      "protocol_versions": [
+        "training.rollout.request.v1",
+        "training.rollout.action.v1",
+        "training.rollout.reward.v1",
+        "training.rollout.summary.v1"
+      ],
+      "schema_version": "training.rollout.capabilities.v1",
+      "supports_idempotency": true,
+      "supports_sampler_https": true,
+      "task_id": "gsm8k"
+    },
+    "true_checkpoint": "unsupported",
+    "world_ref": "world:gsm8k@heldout"
+  },
+  "training_capabilities": {
+    "capability_hash": "sha256:f1b600534e2d3f60191455b91b09eacd537e7e23e0517577d7c056fcde1c1be7",
+    "connection_modes": [
+      "close",
+      "keep_alive"
+    ],
+    "container_digest": "sha256:396719e96d02af3e693c837f96c3096c8963ce95d8c3d9b227f35d9b9cb96b66",
+    "container_id": "gsm8k_solve",
+    "max_concurrency": 8,
+    "operations": [
+      "rollout",
+      "reward",
+      "heartbeat"
+    ],
+    "protocol_versions": [
+      "training.rollout.request.v1",
+      "training.rollout.action.v1",
+      "training.rollout.reward.v1",
+      "training.rollout.summary.v1"
+    ],
+    "schema_version": "training.rollout.capabilities.v1",
+    "supports_idempotency": true,
+    "supports_sampler_https": true,
+    "task_id": "gsm8k"
+  }
+}

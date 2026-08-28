@@ -1,0 +1,317 @@
+{
+  "active_leases": 0,
+  "adapter_chain": [],
+  "affordance_booleans": {
+    "environment": {
+      "bind_policy_config": true,
+      "fork": false,
+      "live_frames": false,
+      "live_reward": true,
+      "poll": true,
+      "restart_policy": true,
+      "restore": false,
+      "scale_leases": true,
+      "sse": true,
+      "step": true,
+      "true_checkpoint": false,
+      "websocket": true
+    },
+    "evaluator": {},
+    "policy": {}
+  },
+  "affordances": {
+    "environment": {
+      "bind_policy_config": "native",
+      "fork": "unsupported",
+      "live_frames": "unsupported",
+      "live_reward": "native",
+      "poll": "native",
+      "restart_policy": "native",
+      "restore": "unsupported",
+      "scale_leases": "native",
+      "sse": "derived",
+      "step": "native",
+      "true_checkpoint": "unsupported",
+      "websocket": "derived"
+    },
+    "evaluator": {},
+    "policy": {}
+  },
+  "blocking_trial": "unsupported",
+  "capabilities": {
+    "banking77_classify": {
+      "input_schema": {
+        "properties": {
+          "action_vocabulary": {
+            "items": {
+              "enum": [
+                "apple_pay_or_google_pay",
+                "automatic_top_up",
+                "beneficiary_not_allowed",
+                "cancel_transfer",
+                "card_acceptance",
+                "card_arrival",
+                "card_delivery_estimate",
+                "card_linking",
+                "card_not_working",
+                "card_payment_wrong_exchange_rate",
+                "cash_withdrawal_not_recognised",
+                "change_pin",
+                "declined_card_payment",
+                "declined_cash_withdrawal",
+                "exchange_rate",
+                "exchange_via_app",
+                "extra_charge_on_statement",
+                "fiat_currency_support",
+                "get_physical_card",
+                "lost_or_stolen_phone",
+                "order_physical_card",
+                "passcode_forgotten",
+                "pending_cash_withdrawal",
+                "pending_top_up",
+                "request_refund",
+                "reverted_card_payment",
+                "top_up_by_bank_transfer_charge",
+                "top_up_reverted",
+                "transfer_not_received_by_recipient",
+                "transfer_timing",
+                "verify_my_identity",
+                "virtual_card_not_working"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "seed": {
+            "maximum": 15,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "task_instance_id": {
+            "examples": [
+              "seed:0"
+            ],
+            "pattern": "^.*:(-?\\d+)$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_instance_id"
+        ],
+        "type": "object"
+      },
+      "runtime_family": "banking77"
+    },
+    "contract_version": "2026-05-28",
+    "live_frames": "unsupported",
+    "metadata": {
+      "policy_ready": true,
+      "program_ready": false
+    },
+    "operations": {
+      "reward.get": true,
+      "rollouts.get": true,
+      "rollouts.poll": true,
+      "rollouts.prepare": true,
+      "rollouts.start_prepared": true,
+      "trace_v5.capture": true
+    },
+    "optimizer_contracts": {
+      "gepa": {
+        "prepare_route": "/rollouts/prepare",
+        "program_route": "/program",
+        "rollout_route": "/rollouts",
+        "taskset_route": "/taskset",
+        "taskset_tasks_route": "/taskset/tasks",
+        "trace_route": "/rollouts/{rollout_id}/events",
+        "version": "synth_optimizers.gepa.v2"
+      }
+    },
+    "policy_refs": [
+      {
+        "code": null,
+        "config": "dataset_gold",
+        "harness": "dataset_gold"
+      },
+      {
+        "code": null,
+        "config": "classify",
+        "harness": "classify"
+      }
+    ],
+    "protocol": "synth.container.live-eval.v1",
+    "scale_leases": 8
+  },
+  "capabilities_digest": "sha256:e5993245819abe155ef07a3042d23a59e784547521254b7cc3eeb8ca56d78a50",
+  "capacity": {
+    "active": 0,
+    "by_owner": {},
+    "declared": 8,
+    "reserved": 0
+  },
+  "dataset": null,
+  "environment_ref": "env:banking77_dataset",
+  "evaluation_plan_ref": "banking77_eval.v1",
+  "event_kinds": [
+    "trace.opened",
+    "env.episode.opened",
+    "observation",
+    "action",
+    "reward_signal",
+    "span.policy.opened",
+    "span.policy.closed",
+    "env.episode.closed",
+    "capture.closed",
+    "status"
+  ],
+  "identity": {
+    "instance_id": "fixture-instance-banking77",
+    "target_id": "banking77_classify"
+  },
+  "input_schema": {
+    "properties": {
+      "action_vocabulary": {
+        "items": {
+          "enum": [
+            "apple_pay_or_google_pay",
+            "automatic_top_up",
+            "beneficiary_not_allowed",
+            "cancel_transfer",
+            "card_acceptance",
+            "card_arrival",
+            "card_delivery_estimate",
+            "card_linking",
+            "card_not_working",
+            "card_payment_wrong_exchange_rate",
+            "cash_withdrawal_not_recognised",
+            "change_pin",
+            "declined_card_payment",
+            "declined_cash_withdrawal",
+            "exchange_rate",
+            "exchange_via_app",
+            "extra_charge_on_statement",
+            "fiat_currency_support",
+            "get_physical_card",
+            "lost_or_stolen_phone",
+            "order_physical_card",
+            "passcode_forgotten",
+            "pending_cash_withdrawal",
+            "pending_top_up",
+            "request_refund",
+            "reverted_card_payment",
+            "top_up_by_bank_transfer_charge",
+            "top_up_reverted",
+            "transfer_not_received_by_recipient",
+            "transfer_timing",
+            "verify_my_identity",
+            "virtual_card_not_working"
+          ],
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "seed": {
+        "maximum": 15,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "task_instance_id": {
+        "examples": [
+          "seed:0"
+        ],
+        "pattern": "^.*:(-?\\d+)$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "task_instance_id"
+    ],
+    "type": "object"
+  },
+  "live_frames": "unsupported",
+  "live_reward": true,
+  "logical_service_ids": {
+    "environment": "env:banking77_dataset",
+    "evaluator": "banking77_eval.v1",
+    "policy": "policy:classify",
+    "relay": "relay:event_log",
+    "world": "world:banking77@heldout"
+  },
+  "max_episode_steps": null,
+  "mcp_bind": "unused",
+  "metadata": {
+    "optimizer_contracts": {
+      "gepa": {
+        "prepare_route": "/rollouts/prepare",
+        "program_route": "/program",
+        "rollout_route": "/rollouts",
+        "taskset_route": "/taskset",
+        "taskset_tasks_route": "/taskset/tasks",
+        "trace_route": "/rollouts/{rollout_id}/events",
+        "version": "synth_optimizers.gepa.v2"
+      }
+    }
+  },
+  "optimizer_contracts": {
+    "gepa": {
+      "prepare_route": "/rollouts/prepare",
+      "program_route": "/program",
+      "rollout_route": "/rollouts",
+      "taskset_route": "/taskset",
+      "taskset_tasks_route": "/taskset/tasks",
+      "trace_route": "/rollouts/{rollout_id}/events",
+      "version": "synth_optimizers.gepa.v2"
+    }
+  },
+  "policy_ref": {
+    "code": null,
+    "config": null,
+    "harness": "classify"
+  },
+  "policy_refs": [
+    {
+      "code": null,
+      "config": "dataset_gold",
+      "harness": "dataset_gold"
+    },
+    {
+      "code": null,
+      "config": "classify",
+      "harness": "classify"
+    }
+  ],
+  "reconnect": "derived",
+  "retention": "run",
+  "reward_authority": "environment",
+  "runtime_family": "banking77",
+  "scale_leases": 8,
+  "target_id": "banking77_classify",
+  "task_instance_id": null,
+  "training": {
+    "capability_hash": "sha256:ea52ac8e26984ccf168bac620bb907a67ae7475539de289eadebc3dc349f3654",
+    "connection_modes": [
+      "close",
+      "keep_alive"
+    ],
+    "container_digest": "sha256:e5993245819abe155ef07a3042d23a59e784547521254b7cc3eeb8ca56d78a50",
+    "container_id": "banking77_classify",
+    "max_concurrency": 8,
+    "operations": [
+      "rollout",
+      "reward",
+      "heartbeat"
+    ],
+    "protocol_versions": [
+      "training.rollout.request.v1",
+      "training.rollout.action.v1",
+      "training.rollout.reward.v1",
+      "training.rollout.summary.v1"
+    ],
+    "schema_version": "training.rollout.capabilities.v1",
+    "supports_idempotency": true,
+    "supports_sampler_https": true,
+    "task_id": "banking77"
+  },
+  "true_checkpoint": "unsupported",
+  "world_ref": "world:banking77@heldout"
+}

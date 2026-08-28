@@ -19,6 +19,11 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
+from .metadata import (
+    CONTAINER_CONTRACT_PROTOCOL,
+    RuntimeReadiness,
+    compose_metadata_payload,
+)
 from .ontology import CONTRACT_VERSION
 from .prompt_programs import gepa_optimizer_contract
 from .serde import JsonObject, jsonable
@@ -528,34 +533,66 @@ class Container:
                 payload = await _call(self._metadata, label="metadata")
             else:
                 payload = {}
-            base = {
-                "runtime": {
-                    "runtime_id": self.runtime_id,
-                    "name": self.name,
-                    "description": self.description,
-                },
-                "capabilities": {
-                    "contract_version": CONTRACT_VERSION,
-                    "rollout_modes": ["blocking", "async"],
-                    "route_hints": {
-                        "metadata_routes": ["/metadata", "/info"],
-                        "task_info_routes": ["/task_info"],
-                        "program_routes": ["/program"],
-                        "taskset_routes": ["/taskset", "/taskset/tasks"],
-                        "rollout_routes": ["/rollouts"],
-                        "state_routes": ["/rollouts/{rollout_id}/state"],
+            gepa_ready = all(
+                callback is not None
+                for callback in (
+                    self._program,
+                    self._taskset,
+                    self._taskset_tasks,
+                    self._rollout,
+                )
+            )
+            base = compose_metadata_payload(
+                base={
+                    "runtime": {
+                        "runtime_id": self.runtime_id,
+                        "name": self.name,
+                        "description": self.description,
                     },
-                    "metadata": {
-                        "policy_ready": self.policy_ready,
-                        "program_ready": self._program is not None,
+                    "capabilities": {
+                        "rollout_modes": ["blocking", "async"],
+                        "route_hints": {
+                            "metadata_routes": ["/metadata", "/info"],
+                            "task_info_routes": ["/task_info"],
+                            "program_routes": ["/program"],
+                            "taskset_routes": ["/taskset", "/taskset/tasks"],
+                            "rollout_routes": ["/rollouts"],
+                            "state_routes": ["/rollouts/{rollout_id}/state"],
+                        },
                     },
+                    "metadata": dict(self.metadata),
                 },
-                "metadata": _deep_merge(
-                    {"optimizer_contracts": {"gepa": gepa_optimizer_contract()}},
-                    dict(self.metadata),
+                protocol=CONTAINER_CONTRACT_PROTOCOL,
+                live_frames="unsupported",
+                readiness=RuntimeReadiness(
+                    policy_ready=self.policy_ready,
+                    program_ready=self._program is not None,
                 ),
-            }
-            return _deep_merge(base, payload)
+                optimizer_contracts={"gepa": gepa_optimizer_contract()} if gepa_ready else None,
+            )
+            merged = _deep_merge(base, payload)
+            if not gepa_ready:
+                # B2 ownership rule: the SDK may advertise the
+                # optimizers-owned GEPA contract only when every required
+                # callback is registered. Explicit user metadata must not
+                # claim a route surface that this app will answer with 404.
+                for parent in (
+                    merged,
+                    merged.get("capabilities"),
+                    merged.get("metadata"),
+                ):
+                    if not isinstance(parent, dict):
+                        continue
+                    contracts = parent.get("optimizer_contracts")
+                    if not isinstance(contracts, dict) or "gepa" not in contracts:
+                        continue
+                    contracts = dict(contracts)
+                    contracts.pop("gepa", None)
+                    if contracts:
+                        parent["optimizer_contracts"] = contracts
+                    else:
+                        parent.pop("optimizer_contracts", None)
+            return merged
 
         async def task_info_payload() -> dict[str, Any]:
             if self._task_info is None:

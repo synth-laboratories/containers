@@ -23,6 +23,7 @@ One umbrella: `TargetRuntime`. Callers say “run this target.” Children live 
 | `digbench` | `runtimes/digbench.py` | Mock dungeon (`env:digbench_mock`) or live Agent API (`env:digbench_relay`). No frames. |
 | `openenv` | `runtimes/openenv.py` | Echo-shaped gym wrap (`env:echo` via `echo_world.py`). Observation / action / env reward. Not a fold. Not an unmodified image. |
 | `banking77` | `runtimes/banking77.py` | One-shot classify. Content, not a fold. Gold private. Classify, Tinker, or scoped Responses policy. |
+| `gsm8k` | `runtimes/gsm8k.py` | One-turn grade-school math. Content, not a fold. Reference answer private. Exact match on the parsed number; an unparseable completion is null, not zero. |
 | `healthbench` | `runtimes/healthbench.py` | Open-text physician-rubric chat. Policy and scorer are independent paid roles. |
 
 Dispatch is `_BY_FAMILY` in `runtimes/__init__.py` — the one umbrella layer.
