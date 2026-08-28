@@ -171,6 +171,41 @@ def test_completion_preserves_provider_reasoning_and_usage(monkeypatch) -> None:
     ]
 
 
+def test_completion_retains_generation_id_when_proxy_headers_are_absent(
+    monkeypatch,
+) -> None:
+    sampler = HttpSampler(
+        {
+            "base_url": "https://openrouter.ai/api/v1",
+            "model": "z-ai/glm-5.3-flash",
+        }
+    )
+    monkeypatch.setattr(
+        nanohorizon,
+        "_json_request",
+        lambda *args, **kwargs: {
+            "id": "gen-accounting-fallback",
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {"content": None, "tool_calls": []},
+                }
+            ],
+            "usage": {},
+        },
+    )
+    monkeypatch.setattr(sampler, "_auth_headers", lambda: {})
+
+    completion = sampler.complete(
+        [{"role": "user", "content": "Act."}], tools=TOOLS
+    )
+
+    assert completion["proxy_request_id"] == "gen-accounting-fallback"
+    assert completion["sampler_validation_error"] == (
+        "expected_exactly_one_craftax_interact_tool_call"
+    )
+
+
 def test_length_without_tool_flows_to_policy_as_invalid_completion(monkeypatch) -> None:
     sampler = HttpSampler(
         {

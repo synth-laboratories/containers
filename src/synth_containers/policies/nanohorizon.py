@@ -587,6 +587,7 @@ class HttpSampler:
                 headers.get("x-proxy-request-id")
                 or headers.get("x-request-id")
                 or headers.get("x-openrouter-id")
+                or body.get("id")
                 or ""
             ),
             "prompt_tokens": int(usage.get("prompt_tokens") or 0),
