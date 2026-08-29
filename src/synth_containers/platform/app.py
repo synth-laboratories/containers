@@ -113,6 +113,7 @@ def create_compat_app(
         body = await request.json()
         task_id = body.get("task_id")
         seeds = body.get("seeds")
+        limits = body.get("limits")
         if not isinstance(task_id, str) or not task_id.strip():
             raise HTTPException(status_code=422, detail="task_id_required")
         if (
@@ -123,13 +124,15 @@ def create_compat_app(
             or len(set(seeds)) != len(seeds)
         ):
             raise HTTPException(status_code=422, detail="seeds_must_be_1_to_100_distinct_integers")
+        if not isinstance(limits, dict):
+            raise HTTPException(status_code=422, detail="limits_required")
         try:
             instances = platform.materialize_task_instances(task_id.strip(), seeds)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return {
             "schema_version": "synth.container.task-instances.v1",
-            "instances": instances,
+            "instances": [{**instance, "limits": limits} for instance in instances],
         }
 
     @app.get("/policy")
