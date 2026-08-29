@@ -169,6 +169,42 @@ def test_provider_origin_429_remains_retryable_through_workshop_proxy(monkeypatc
     assert attempts == 2
 
 
+def test_sampler_read_timeout_is_retried_within_declared_retry_budget(monkeypatch) -> None:
+    attempts = 0
+
+    class Response:
+        headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self):
+            return b'{"ok":true}'
+
+    def urlopen(*_args, **_kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise TimeoutError("timed out")
+        return Response()
+
+    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+    monkeypatch.setattr(nanohorizon._PACE, "wait", lambda *_args: None)
+    monkeypatch.setattr(nanohorizon._PACE, "cool", lambda *_args: None)
+    monkeypatch.setattr(nanohorizon, "_backoff_seconds", lambda *_args, **_kwargs: 0.0)
+
+    assert nanohorizon._json_request(
+        "https://example.test/v1/chat/completions",
+        {"model": "test"},
+        timeout=1,
+        retries=1,
+    )["ok"] is True
+    assert attempts == 2
+
+
 def test_public_openrouter_still_requires_its_declared_key(monkeypatch) -> None:
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     sampler = HttpSampler(

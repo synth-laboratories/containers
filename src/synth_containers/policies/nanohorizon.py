@@ -331,6 +331,21 @@ def _json_request(
                 flush=True,
             )
             continue
+        except TimeoutError as exc:
+            last_error = RuntimeError("sampler_timeout")
+            if attempt >= retries:
+                raise last_error from exc
+            wait = _backoff_seconds(
+                attempt, base=1.0, cap=min(20.0, max_wait), retry_after=None
+            )
+            _PACE.cool(wait)
+            print(
+                f"nanohorizon sampler timeout; backing off {wait:.1f}s "
+                f"(attempt {attempt + 1}/{retries + 1})",
+                file=sys.stderr,
+                flush=True,
+            )
+            continue
     raise last_error or RuntimeError("sampler_http_failed")
 
 
