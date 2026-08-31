@@ -166,6 +166,8 @@ class DockerBackend(Protocol):
 
     def exists(self, name: str) -> bool: ...
 
+    def is_running(self, name: str) -> bool: ...
+
 
 @dataclass(frozen=True, slots=True)
 class SubprocessDocker:
@@ -256,6 +258,12 @@ class SubprocessDocker:
     def exists(self, name: str) -> bool:
         completed = self._run(["inspect", "--format", "{{.Id}}", name], check=False)
         return completed.returncode == 0 and bool(completed.stdout.strip())
+
+    def is_running(self, name: str) -> bool:
+        completed = self._run(
+            ["inspect", "--format", "{{.State.Running}}", name], check=False
+        )
+        return completed.returncode == 0 and completed.stdout.strip().lower() == "true"
 
 
 # --------------------------------------------------------------------- run record
@@ -587,8 +595,10 @@ def up_image(
     existing = read_run_record(spec.id, host_port)
     if existing is not None:
         if not replace:
-            if docker.exists(existing.container_name):
+            if docker.is_running(existing.container_name):
                 raise LaunchError(f"container_image_already_up:{spec.id}:{host_port}")
+            if docker.exists(existing.container_name):
+                docker.stop(existing.container_name)
             delete_run_record(spec.id, host_port)
         else:
             down_image(spec.id, port=host_port, catalog=catalog, backend=docker)
