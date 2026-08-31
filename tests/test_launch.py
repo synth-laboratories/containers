@@ -101,6 +101,9 @@ class FakeDocker:
     def exists(self, name: str) -> bool:
         return name in self.containers
 
+    def is_running(self, name: str) -> bool:
+        return self.exists(name)
+
     def spawn_child(self, name: str, parent: str) -> None:
         self.containers[name] = ("--label", f"{PARENT_LABEL}={parent}")
 
@@ -183,6 +186,25 @@ def test_second_up_on_same_pair_refuses_without_replace(tmp_path: Path, healthy:
     replaced = up_image("banking77", catalog=tmp_path, backend=backend, port=8124, replace=True)
     assert replaced.container_name == "synth-banking77-8124"
     assert len(list_run_records("banking77")) == 1
+
+
+def test_up_recovers_a_stopped_record_without_replace(tmp_path: Path, healthy: None) -> None:
+    _write_catalog(tmp_path)
+
+    class StoppedDocker(FakeDocker):
+        stopped_name: str | None = None
+
+        def is_running(self, name: str) -> bool:
+            return self.exists(name) and name != self.stopped_name
+
+    backend = StoppedDocker()
+    first = up_image("banking77", catalog=tmp_path, backend=backend, port=8127)
+    backend.stopped_name = first.container_name
+
+    restarted = up_image("banking77", catalog=tmp_path, backend=backend, port=8127)
+
+    assert restarted.container_name == first.container_name
+    assert first.container_name in backend.removed
 
 
 def test_down_reaps_labelled_siblings_first(tmp_path: Path, healthy: None) -> None:
