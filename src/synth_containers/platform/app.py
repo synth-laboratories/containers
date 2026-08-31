@@ -27,7 +27,7 @@ from .http_requests import (
     to_policy_config_dict,
     to_put_policy_dict,
 )
-from .state import CompatPlatform
+from .state import CompatPlatform, _seed_from_task_instance_id
 from .targets import TARGETS, TargetSpec
 
 
@@ -169,8 +169,52 @@ def create_compat_app(
                 raise HTTPException(
                     status_code=409, detail=f"rollout_prepare_identity_conflict:{rollout_id}"
                 )
+            pin = platform.pins.get(rollout_id)
+            if pin is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"rollout_prepare_identity_missing:{rollout_id}",
+                )
+            if pin.seed is None:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"rollout_prepare_seed_missing:{rollout_id}",
+                )
+            requested_seed = (
+                int(pin.seed)
+                if req.task_instance_id is None
+                else _seed_from_task_instance_id(req.task_instance_id)
+            )
+            requested_task = req.task_instance_id or f"seed:{requested_seed}"
+            requested_revision = req.policy_revision_id or pin.policy_revision_id
+            if (
+                pin.seed != requested_seed
+                or pin.task_instance_id != requested_task
+                or pin.policy_revision_id != requested_revision
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": "rollout_prepare_identity_conflict",
+                        "rollout_id": rollout_id,
+                        "prepared": {
+                            "seed": pin.seed,
+                            "task_instance_id": pin.task_instance_id,
+                            "policy_revision_id": pin.policy_revision_id,
+                        },
+                        "requested": {
+                            "seed": requested_seed,
+                            "task_instance_id": requested_task,
+                            "policy_revision_id": requested_revision,
+                        },
+                    },
+                )
             return {
                 "rollout_id": rollout_id,
+                "seed": pin.seed,
+                "task_instance_id": pin.task_instance_id,
+                "policy_ref": pin.policy_ref,
+                "policy_revision_id": pin.policy_revision_id,
                 "stream": platform.stream_descriptor_for(rollout_id),
                 "replayed": True,
             }
@@ -186,7 +230,20 @@ def create_compat_app(
             if detail.startswith(("event_log_sealed:", "event_log_unrecoverable:")):
                 raise HTTPException(status_code=409, detail=detail) from exc
             raise
-        return {"rollout_id": rollout_id, "stream": descriptor}
+        pin = platform.pins.get(rollout_id)
+        if pin is None:
+            raise HTTPException(
+                status_code=500,
+                detail=f"rollout_prepare_pin_missing:{rollout_id}",
+            )
+        return {
+            "rollout_id": rollout_id,
+            "seed": pin.seed,
+            "task_instance_id": pin.task_instance_id,
+            "policy_ref": pin.policy_ref,
+            "policy_revision_id": pin.policy_revision_id,
+            "stream": descriptor,
+        }
 
     @app.post("/rollouts")
     async def start(request: Request) -> Any:

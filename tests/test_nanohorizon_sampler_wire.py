@@ -27,6 +27,52 @@ TOOLS = [
     }
 ]
 
+GOAL_TOOLS = TOOLS + [
+    {
+        "type": "function",
+        "function": {
+            "name": "set_goal",
+            "parameters": {
+                "type": "object",
+                "properties": {"goal": {"type": "string"}},
+                "required": ["goal"],
+            },
+        },
+    }
+]
+
+GOAL_LIFECYCLE_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "goal_and_interact",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "goal_events": {"type": "array"},
+                    "actions": {"type": "array"},
+                },
+                "required": ["goal_events", "actions"],
+            },
+        },
+    }
+]
+
+SUBGOAL_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "update_goals",
+            "parameters": {
+                "type": "object",
+                "properties": {"goal_events": {"type": "array"}},
+                "required": ["goal_events"],
+            },
+        },
+    },
+    *TOOLS,
+]
+
 
 def test_workshop_capability_proxy_keeps_remote_provider_semantics() -> None:
     sampler = HttpSampler(
@@ -218,7 +264,7 @@ def test_public_openrouter_still_requires_its_declared_key(monkeypatch) -> None:
         sampler._auth_headers()
 
 
-def test_local_sampler_still_requires_the_declared_tool_call() -> None:
+def test_local_sampler_uses_supported_auto_tool_choice() -> None:
     sampler = HttpSampler(
         {
             "base_url": "http://host.docker.internal:8787/v1",
@@ -231,8 +277,63 @@ def test_local_sampler_still_requires_the_declared_tool_call() -> None:
     )
 
     assert sampler.local is True
-    assert payload["tool_choice"] == "required"
+    assert payload["tool_choice"] == "auto"
     assert payload["enable_thinking"] is True
+
+
+def test_local_sampler_canonicalizes_reasoning_history_for_mlx() -> None:
+    sampler = HttpSampler(
+        {
+            "base_url": "http://host.docker.internal:8787/v1",
+            "model": "Qwen/Qwen3.5-2B",
+        }
+    )
+
+    payload = sampler.wire_payload(
+        [
+            {
+                "role": "assistant",
+                "content": None,
+                "reasoning_content": "I should chop the tree.",
+                "tool_calls": [
+                    {
+                        "id": "call-1",
+                        "type": "function",
+                        "function": {
+                            "name": "craftax_interact",
+                            "arguments": '{"actions":["do"]}',
+                        },
+                    }
+                ],
+            }
+        ],
+        tools=TOOLS,
+    )
+
+    message = payload["messages"][0]
+    assert "reasoning_content" not in message
+    assert message["content"] == "<think>\nI should chop the tree.\n</think>"
+    assert message["tool_calls"][0]["function"]["name"] == "craftax_interact"
+
+
+def test_qwen_text_lifts_goal_and_action_tool_calls_in_order() -> None:
+    message = nanohorizon._message_from_sample(
+        "<think>choose wood</think>\n"
+        "<tool_call><function=update_goals>"
+        '<parameter=goal_events>[{"operation":"set","goal":"Collect wood"}]</parameter>'
+        "</function></tool_call>\n"
+        "<tool_call><function=craftax_interact>"
+        '<parameter=actions>["left","do"]</parameter>'
+        "</function></tool_call>"
+    )
+
+    assert [call["function"]["name"] for call in message["tool_calls"]] == [
+        "update_goals",
+        "craftax_interact",
+    ]
+    assert json.loads(message["tool_calls"][1]["function"]["arguments"]) == {
+        "actions": ["left", "do"]
+    }
 
 
 def test_reasoning_effort_alias_uses_openrouter_normalized_wire() -> None:
@@ -443,6 +544,213 @@ def test_sampler_marks_any_response_without_exactly_one_action_for_policy_parse(
     assert completion["sampler_validation_error"] == (
         "expected_exactly_one_craftax_interact_tool_call"
     )
+
+
+def test_sampler_accepts_goal_then_environment_tool_when_both_advertised(
+    monkeypatch,
+) -> None:
+    sampler = HttpSampler(
+        {
+            "base_url": "https://openrouter.ai/api/v1",
+            "model": "z-ai/glm-5.3-flash",
+        }
+    )
+    monkeypatch.setattr(
+        nanohorizon,
+        "_json_request",
+        lambda *args, **kwargs: {
+            "choices": [
+                {
+                    "finish_reason": "tool_calls",
+                    "message": {
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": "goal-1",
+                                "type": "function",
+                                "function": {
+                                    "name": "set_goal",
+                                    "arguments": '{"goal":"Collect wood"}',
+                                },
+                            },
+                            {
+                                "id": "act-1",
+                                "type": "function",
+                                "function": {
+                                    "name": "craftax_interact",
+                                    "arguments": '{"actions":["do"]}',
+                                },
+                            }
+                        ],
+                    },
+                }
+            ],
+            "usage": {},
+        },
+    )
+    monkeypatch.setattr(sampler, "_auth_headers", lambda: {})
+
+    completion = sampler.complete(
+        [{"role": "user", "content": "Set a goal."}], tools=GOAL_TOOLS
+    )
+
+    assert [
+        call["function"]["name"]
+        for call in completion["message"]["tool_calls"]
+    ] == ["set_goal", "craftax_interact"]
+    assert "sampler_validation_error" not in completion
+
+
+def test_sampler_accepts_atomic_goal_lifecycle_action(monkeypatch) -> None:
+    sampler = HttpSampler(
+        {
+            "base_url": "https://openrouter.ai/api/v1",
+            "model": "z-ai/glm-5.3-flash",
+        }
+    )
+    monkeypatch.setattr(
+        nanohorizon,
+        "_json_request",
+        lambda *args, **kwargs: {
+            "choices": [
+                {
+                    "finish_reason": "tool_calls",
+                    "message": {
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": "atomic-1",
+                                "type": "function",
+                                "function": {
+                                    "name": "goal_and_interact",
+                                    "arguments": (
+                                        '{"goal_events":[{"operation":"set",'
+                                        '"goal":"Collect wood"}],"actions":["do"]}'
+                                    ),
+                                },
+                            }
+                        ],
+                    },
+                }
+            ],
+            "usage": {},
+        },
+    )
+    monkeypatch.setattr(sampler, "_auth_headers", lambda: {})
+
+    completion = sampler.complete(
+        [{"role": "user", "content": "Set a goal and act."}],
+        tools=GOAL_LIFECYCLE_TOOLS,
+    )
+
+    assert completion["message"]["tool_calls"][0]["function"]["name"] == (
+        "goal_and_interact"
+    )
+    assert "sampler_validation_error" not in completion
+
+
+def test_sampler_accepts_update_goals_then_craftax_interact(monkeypatch) -> None:
+    sampler = HttpSampler(
+        {
+            "base_url": "https://openrouter.ai/api/v1",
+            "model": "z-ai/glm-5.3-flash",
+        }
+    )
+    monkeypatch.setattr(
+        nanohorizon,
+        "_json_request",
+        lambda *args, **kwargs: {
+            "choices": [
+                {
+                    "finish_reason": "tool_calls",
+                    "message": {
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": "goal-1",
+                                "type": "function",
+                                "function": {
+                                    "name": "update_goals",
+                                    "arguments": (
+                                        '{"goal_events":[{"operation":"set",'
+                                        '"goal":"Collect wood"}]}'
+                                    ),
+                                },
+                            },
+                            {
+                                "id": "act-1",
+                                "type": "function",
+                                "function": {
+                                    "name": "craftax_interact",
+                                    "arguments": '{"actions":["do"]}',
+                                },
+                            },
+                        ],
+                    },
+                }
+            ],
+            "usage": {},
+        },
+    )
+    monkeypatch.setattr(sampler, "_auth_headers", lambda: {})
+
+    completion = sampler.complete(
+        [{"role": "user", "content": "Set a goal and act."}],
+        tools=SUBGOAL_TOOLS,
+    )
+
+    assert [
+        call["function"]["name"]
+        for call in completion["message"]["tool_calls"]
+    ] == ["update_goals", "craftax_interact"]
+    assert "sampler_validation_error" not in completion
+
+
+def test_sampler_accepts_update_goals_as_its_own_tool_turn(monkeypatch) -> None:
+    sampler = HttpSampler(
+        {
+            "base_url": "https://openrouter.ai/api/v1",
+            "model": "z-ai/glm-5.3-flash",
+        }
+    )
+    monkeypatch.setattr(
+        nanohorizon,
+        "_json_request",
+        lambda *args, **kwargs: {
+            "choices": [
+                {
+                    "finish_reason": "tool_calls",
+                    "message": {
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": "goal-only",
+                                "type": "function",
+                                "function": {
+                                    "name": "update_goals",
+                                    "arguments": (
+                                        '{"goal_events":[{"operation":"set",'
+                                        '"goal":"Collect wood"}]}'
+                                    ),
+                                },
+                            }
+                        ],
+                    },
+                }
+            ],
+            "usage": {},
+        },
+    )
+    monkeypatch.setattr(sampler, "_auth_headers", lambda: {})
+
+    completion = sampler.complete(
+        [{"role": "user", "content": "Set a goal."}], tools=SUBGOAL_TOOLS
+    )
+
+    assert completion["message"]["tool_calls"][0]["function"]["name"] == (
+        "update_goals"
+    )
+    assert "sampler_validation_error" not in completion
 
 
 def test_planner_allows_bounded_policy_recovery_and_counts_each_provider_call(

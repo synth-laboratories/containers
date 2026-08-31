@@ -31,6 +31,9 @@ from ..gen_ai import copy_observation, request_observation as gen_ai_request_obs
 PROTOCOL = "nanohorizon.policy.v1"
 HARNESS = "nanohorizon"
 TOOL_NAME = "craftax_interact"
+GOAL_TOOL_NAME = "set_goal"
+GOAL_INTERACT_TOOL_NAME = "goal_and_interact"
+UPDATE_GOALS_TOOL_NAME = "update_goals"
 TOOL_CALL_BLOCK = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
 FUNCTION_BLOCK = re.compile(
     r"<function=(?P<name>[^\s>]+)>(?P<body>.*?)</function>", re.DOTALL
@@ -47,15 +50,8 @@ def _thinking_text(text: str) -> str | None:
     return stripped or None
 
 
-def _parse_qwen_tool_xml(text: str) -> dict[str, Any] | None:
-    block = TOOL_CALL_BLOCK.search(text)
-    if block:
-        inner = block.group(1).strip()
-    else:
-        opened = re.search(r"<tool_call>\s*(.*)\Z", text, re.DOTALL)
-        inner = opened.group(1).strip() if opened else ""
-        if not inner and "<function=" in text:
-            inner = text
+def _parse_qwen_tool_inner(inner: str) -> dict[str, Any] | None:
+    inner = inner.strip()
     if not inner:
         return None
     if inner.startswith("{"):
@@ -76,6 +72,29 @@ def _parse_qwen_tool_xml(text: str) -> dict[str, Any] | None:
         except json.JSONDecodeError:
             arguments[param.group("key")] = raw
     return {"name": fn.group("name"), "arguments": arguments}
+
+
+def _parse_qwen_tool_xml(text: str) -> dict[str, Any] | None:
+    block = TOOL_CALL_BLOCK.search(text)
+    if block:
+        return _parse_qwen_tool_inner(block.group(1))
+    opened = re.search(r"<tool_call>\s*(.*)\Z", text, re.DOTALL)
+    inner = opened.group(1).strip() if opened else ""
+    if not inner and "<function=" in text:
+        inner = text
+    return _parse_qwen_tool_inner(inner)
+
+
+def _parse_qwen_tool_xml_all(text: str) -> list[dict[str, Any]]:
+    payloads = [
+        parsed
+        for block in TOOL_CALL_BLOCK.finditer(text)
+        if (parsed := _parse_qwen_tool_inner(block.group(1))) is not None
+    ]
+    if payloads:
+        return payloads
+    fallback = _parse_qwen_tool_xml(text)
+    return [fallback] if fallback is not None else []
 
 
 def load_policy_class(code: bytes) -> type:
@@ -479,31 +498,52 @@ def _wire_message(message: dict[str, Any]) -> dict[str, Any]:
     return row
 
 
+def _advertised_tool_names(tools: object) -> set[str]:
+    names: set[str] = set()
+    if not isinstance(tools, list):
+        return names
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        function = tool.get("function")
+        if not isinstance(function, dict):
+            continue
+        name = str(function.get("name") or "").strip()
+        if name:
+            names.add(name)
+    return names
+
+
 def _message_from_sample(text: str) -> dict[str, Any]:
     """Lift Qwen's native tool XML into Chat Completions ``tool_calls``."""
 
-    payload = _parse_qwen_tool_xml(text)
+    payloads = _parse_qwen_tool_xml_all(text)
     thinking = _thinking_text(text)
-    if not payload:
+    if not payloads:
         return {"role": "assistant", "content": text or None}
-    name = str(payload.get("name") or TOOL_NAME)
-    args = payload.get("arguments") if "arguments" in payload else payload
-    if isinstance(args, str):
-        try:
-            args = json.loads(args)
-        except json.JSONDecodeError:
+    calls: list[dict[str, Any]] = []
+    for index, payload in enumerate(payloads):
+        name = str(payload.get("name") or TOOL_NAME)
+        args = payload.get("arguments") if "arguments" in payload else payload
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except json.JSONDecodeError:
+                args = {"_raw": args}
+        if not isinstance(args, dict):
             args = {"_raw": args}
-    if not isinstance(args, dict):
-        args = {"_raw": args}
-    call = {
-        "id": f"call_{hashlib.sha256(text.encode('utf-8')).hexdigest()[:12]}",
-        "type": "function",
-        "function": {
-            "name": name,
-            "arguments": json.dumps(args, separators=(",", ":")),
-        },
-    }
-    return {"role": "assistant", "content": thinking, "tool_calls": [call]}
+        digest = hashlib.sha256(f"{index}:{text}".encode("utf-8")).hexdigest()[:12]
+        calls.append(
+            {
+                "id": f"call_{digest}",
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "arguments": json.dumps(args, separators=(",", ":")),
+                },
+            }
+        )
+    return {"role": "assistant", "content": thinking, "tool_calls": calls}
 
 
 class HttpSampler:
@@ -537,6 +577,13 @@ class HttpSampler:
         # Modal / SGLang OpenAI-compatible student: same wire as MLX, not a paid teacher.
         self.local = is_local_compat(self.chat_url) or bool(
             config.get("openai_compatible_local")
+        )
+        # The local synth-mlx-rl OpenAI-compatible schema accepts ``auto`` or
+        # ``none``. Remote providers support ``required``, which remains the
+        # stronger default there. The policy validates that a tool call was
+        # actually produced before allowing the environment to advance.
+        self.tool_choice = str(
+            config.get("tool_choice") or ("auto" if self.local else "required")
         )
         self.timeout = float(
             config.get("timeout_seconds") or (120.0 if self.local else 180.0)
@@ -586,9 +633,22 @@ class HttpSampler:
         enable_thinking: bool | None = None,
     ) -> dict[str, Any]:
         thinking = self.enable_thinking if enable_thinking is None else bool(enable_thinking)
+        wired_messages = [_wire_message(row) for row in messages]
+        if self.local:
+            # synth-mlx-rl's strict ChatMessage schema intentionally excludes
+            # the non-standard ``reasoning_content`` field. Preserve the
+            # reasoning in Qwen's native chat-template representation so a
+            # valid first tool turn can be used as history on the next call.
+            for row in wired_messages:
+                reasoning = _text_field(row.pop("reasoning_content", None)).strip()
+                if not reasoning:
+                    continue
+                think = f"<think>\n{reasoning}\n</think>"
+                content = _text_field(row.get("content")).strip()
+                row["content"] = f"{think}\n{content}" if content else think
         payload: dict[str, Any] = {
             "model": self.model,
-            "messages": [_wire_message(row) for row in messages],
+            "messages": wired_messages,
             "temperature": self.temperature,
             "top_p": self.top_p,
             "max_tokens": int(
@@ -599,11 +659,7 @@ class HttpSampler:
         }
         if tools:
             payload["tools"] = tools
-            # NanoHorizon's policy contract requires exactly one
-            # craftax_interact call. Letting the provider choose `auto` can
-            # spend the entire completion budget on reasoning and return no
-            # action, leaving a nominally completed rollout at step zero.
-            payload["tool_choice"] = "required"
+            payload["tool_choice"] = self.tool_choice
         if self.local:
             payload["enable_thinking"] = thinking
             payload["top_k"] = self.top_k
@@ -699,14 +755,37 @@ class HttpSampler:
         }
         tool_calls = wired.get("tool_calls")
         calls = tool_calls if isinstance(tool_calls, list) else []
-        exactly_one_action = (
-            len(calls) == 1
-            and isinstance(calls[0], dict)
-            and isinstance(calls[0].get("function"), dict)
-            and calls[0]["function"].get("name") == TOOL_NAME
+        advertised = _advertised_tool_names(tools)
+        call_names = [
+            str(call["function"].get("name") or "")
+            for call in calls
+            if isinstance(call, dict) and isinstance(call.get("function"), dict)
+        ]
+        valid_tool_sequence = len(call_names) == len(calls) and (
+            (call_names == [TOOL_NAME] and TOOL_NAME in advertised)
+            or (
+                call_names == [GOAL_INTERACT_TOOL_NAME]
+                and GOAL_INTERACT_TOOL_NAME in advertised
+            )
+            or (
+                call_names == [GOAL_TOOL_NAME, TOOL_NAME]
+                and {GOAL_TOOL_NAME, TOOL_NAME}.issubset(advertised)
+            )
+            or (
+                call_names == [UPDATE_GOALS_TOOL_NAME, TOOL_NAME]
+                and {UPDATE_GOALS_TOOL_NAME, TOOL_NAME}.issubset(advertised)
+            )
+            or (
+                call_names == [UPDATE_GOALS_TOOL_NAME]
+                and UPDATE_GOALS_TOOL_NAME in advertised
+            )
         )
-        if not exactly_one_action:
-            code = "expected_exactly_one_craftax_interact_tool_call"
+        if not valid_tool_sequence:
+            code = (
+                "expected_exactly_one_craftax_interact_tool_call"
+                if advertised == {TOOL_NAME}
+                else "expected_exactly_one_advertised_tool_call"
+            )
             if not calls and completion["finish_reason"] == "length":
                 code = "reasoning_budget_exhausted_before_tool"
             # The provider call itself succeeded.  Tool-shape validation belongs

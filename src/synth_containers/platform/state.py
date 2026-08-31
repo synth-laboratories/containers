@@ -772,7 +772,16 @@ class CompatPlatform:
                 task_instance_id=task_instance_id or f"seed:{seed}",
                 stream_id=stream_id,
                 engine_generation=self.engine_generation,
-                policy_revision_id=self.current_policy_revision_id,
+                # Prepare is an identity reservation as well as a stream
+                # reservation. Preserve the caller's immutable revision when
+                # supplied; falling back to the mutable current pointer is
+                # retained only for legacy callers that prepare without a
+                # policy pin.
+                policy_revision_id=(
+                    request.policy_revision_id
+                    if request is not None and request.policy_revision_id
+                    else self.current_policy_revision_id
+                ),
                 seed=seed,
             )
         return stream_descriptor(
@@ -866,6 +875,7 @@ class CompatPlatform:
                 existing_pin.policy_ref.get("harness") == requested_harness
                 and existing_pin.policy_ref.get("config") == requested_config
                 and existing_pin.policy_ref.get("code") == request.policy_ref.code
+                and existing_pin.policy_revision_id == request.policy_revision_id
                 and existing_pin.task_instance_id == requested_task
                 and existing_pin.world_ref == str(request.world_ref or self.spec.world_ref)
                 and existing_pin.evaluation_plan_ref
@@ -949,38 +959,39 @@ class CompatPlatform:
                     "config": registered_config.config_id,
                 },
             }
-        if harness == NANOHORIZON_HARNESS:
-            installed_revision = self.policy_revisions.get(
-                str(self.current_policy_revision_id or "")
-            )
-            if installed_revision is None:
-                return {
-                    "error": "policy_not_installed",
-                    "status_code": 409,
-                    "detail": "harness nanohorizon requires PUT /policy before POST /rollouts",
-                }
-            requested_revision = request.policy_revision_id
-            if not requested_revision:
-                return {
-                    "error": "policy_revision_required",
-                    "status_code": 422,
-                    "detail": "POST /rollouts requires policy_revision_id for harness nanohorizon",
-                }
+        if harness == NANOHORIZON_HARNESS and not self.policy_revisions:
+            return {
+                "error": "policy_not_installed",
+                "status_code": 409,
+                "detail": "harness nanohorizon requires PUT /policy before POST /rollouts",
+            }
+        requested_revision = request.policy_revision_id
+        if requested_revision:
             revision = self.policy_revisions.get(requested_revision)
-            if revision is None or not revision.code:
+            if revision is None or (harness == NANOHORIZON_HARNESS and not revision.code):
                 return {
                     "error": "policy_revision_unknown",
                     "status_code": 404,
                     "policy_revision_id": requested_revision,
                     "detail": "the requested immutable policy revision is not installed",
                 }
-            if requested_revision != self.current_policy_revision_id:
+            if revision.harness != harness:
                 return {
-                    "error": "policy_revision_mismatch",
+                    "error": "policy_harness_mismatch",
                     "status_code": 409,
-                    "requested_policy_revision_id": requested_revision,
-                    "installed_policy_revision_id": self.current_policy_revision_id,
+                    "policy_revision_id": requested_revision,
+                    "requested_harness": harness,
+                    "installed_harness": revision.harness,
                 }
+        if harness == NANOHORIZON_HARNESS:
+            if not requested_revision:
+                return {
+                    "error": "policy_revision_required",
+                    "status_code": 422,
+                    "detail": "POST /rollouts requires policy_revision_id for harness nanohorizon",
+                }
+            # PUT advances GET /policy's default pointer; older immutable
+            # revisions remain explicitly selectable by concurrent rollouts.
             # Only the harness is an identity claim about the revision. The
             # revision deliberately does not own a config id -- PUT stores
             # config_id=None -- because a policy is installed once while sampler
@@ -991,18 +1002,6 @@ class CompatPlatform:
             # a category error, and it 409s every rollout for any caller that
             # binds config per episode. config_id is already validated above
             # against self.policy_configs (404 unknown_policy_config).
-            if revision.harness != harness:
-                return {
-                    "error": "policy_configuration_mismatch",
-                    "status_code": 409,
-                    "policy_revision_id": requested_revision,
-                    "requested_policy_ref": {"namespace": harness, "name": config_id},
-                    "installed_policy_ref": {
-                        "namespace": revision.namespace,
-                        "name": revision.name,
-                    },
-                }
-
         if self.spec.admission is not None:
             refusal = self.spec.admission(self, request)
             if isinstance(refusal, dict) and refusal:
@@ -1071,6 +1070,7 @@ class CompatPlatform:
                         "harness": harness,
                         "config": config_id,
                     },
+                    "policy_revision_id": pin.policy_revision_id,
                 },
             )
         pin.started = True

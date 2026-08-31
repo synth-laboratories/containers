@@ -83,6 +83,7 @@ for complete containers: Banking77, HotpotQA, MiniGrid, TBLite, and Crafter.
 - [Cookbooks](https://github.com/synth-laboratories/synth-cookbooks-public) — runnable containers
 - [Agent skill](skills/containers/SKILL.md) — drop into a coding agent to build and debug containers
 - [Contract OpenAPI](openapi/container-contract-v1.yaml)
+- [Immutable live policy revisions](docs/immutable_policy_revisions.md) — install multiple harness variants and pin each rollout explicitly
 
 ## License
 
