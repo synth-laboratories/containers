@@ -1,0 +1,8 @@
+# Dedicated live-eval catalog. Keep NanoHorizon isolated from unrelated image
+# directories that may exist only as untracked work in an Evals checkout.
+catalog_version = 2
+
+[[image]]
+id = "craftax-gamebench-rust"
+path = "."
+
