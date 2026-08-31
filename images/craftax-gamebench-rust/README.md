@@ -9,7 +9,7 @@ Do not use `nonsensitive/craftax_go_explore` (JAX). Do not serve a fixture world
 ## Up
 
 Needs the rust binary (or a crate it can build): sibling
-`gamebench/tasks/craftax-singleplayer/gold_rust`, or pin
+`craftax-runtime/gold_rust`, or pin
 `SYNTH_CRAFTAX_GOLD_BIN` / `SYNTH_CRAFTAX_GOLD_ROOT`.
 
 Prefer the module so Ctrl+C stops **both** rust and the façade. Catalog `up`
@@ -59,7 +59,7 @@ checkout fallbacks:
 
 ```bash
 export CONTAINERS_ROOT=/path/to/clean/containers
-export GAMEBENCH_CRAFTAX_ROOT=/path/to/clean/gamebench/tasks/craftax-singleplayer
+export CRAFTAX_RUNTIME_ROOT=/path/to/clean/craftax-runtime
 ```
 
 Use this directory's dedicated `catalog.toml` for NanoHorizon and live evals.

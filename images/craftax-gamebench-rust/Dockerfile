@@ -9,7 +9,7 @@
 #
 # Named build contexts:
 #   containers = the synth-containers source checkout
-#   gamebench  = gamebench/tasks/craftax-singleplayer (crate + defaults/)
+#   gamebench  = the pinned public craftax-runtime repository
 
 # --------------------------------------------------------------- rust-builder
 FROM rust:1.90-slim-bookworm AS rust-builder
@@ -64,4 +64,3 @@ EXPOSE 8080
 VOLUME ["/var/lib/synth/storage"]
 
 CMD ["python", "-m", "craftax_gold", "--host", "0.0.0.0", "--port", "8080"]
-

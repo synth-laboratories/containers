@@ -31,19 +31,18 @@ IMAGE_ROOT = Path(__file__).resolve().parents[1]
 
 def test_image_build_contexts_are_explicit_and_fail_closed(monkeypatch) -> None:
     monkeypatch.delenv("CONTAINERS_ROOT", raising=False)
-    monkeypatch.delenv("GAMEBENCH_CRAFTAX_ROOT", raising=False)
+    monkeypatch.delenv("CRAFTAX_RUNTIME_ROOT", raising=False)
     with pytest.raises(LaunchError, match=r"build_context_missing.*\$CONTAINERS_ROOT"):
         load_catalog(IMAGE_ROOT)
 
 
 def test_image_build_contexts_resolve_to_operator_selected_sources(monkeypatch, tmp_path) -> None:
     containers_root = tmp_path / "containers-source"
-    gamebench_root = tmp_path / "gamebench-source"
-    craftax_root = gamebench_root / "tasks" / "craftax-singleplayer"
+    craftax_root = tmp_path / "craftax-runtime-source"
     containers_root.mkdir()
     craftax_root.mkdir(parents=True)
     monkeypatch.setenv("CONTAINERS_ROOT", str(containers_root))
-    monkeypatch.setenv("GAMEBENCH_CRAFTAX_ROOT", str(gamebench_root))
+    monkeypatch.setenv("CRAFTAX_RUNTIME_ROOT", str(craftax_root))
     specs = load_catalog(IMAGE_ROOT / "catalog.toml")
     assert list(specs) == ["craftax-gamebench-rust"]
     spec = get_image_spec("craftax-gamebench-rust", catalog=IMAGE_ROOT)

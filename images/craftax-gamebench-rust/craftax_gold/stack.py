@@ -21,7 +21,7 @@ from .world import URL_ENV
 IMAGE_ID = "craftax-gamebench-rust"
 DEFAULT_TARGET = "craftax_react"
 
-_CRATE = Path("gamebench/tasks/craftax-singleplayer/gold_rust")
+_CRATE = Path("craftax-runtime/gold_rust")
 _BIN = "craftax_gold"
 
 

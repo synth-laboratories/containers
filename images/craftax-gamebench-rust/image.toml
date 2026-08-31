@@ -14,7 +14,7 @@ startup_timeout_seconds = 180
 
 [build_contexts]
 containers = "$CONTAINERS_ROOT"
-gamebench  = "$GAMEBENCH_CRAFTAX_ROOT/tasks/craftax-singleplayer"
+gamebench  = "$CRAFTAX_RUNTIME_ROOT"
 
 [extra_env]
 # Workshop default. Contest speedrun: --target craftax_nanohorizon
