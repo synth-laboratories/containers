@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import tempfile
 import os
 import platform as host_platform
 import subprocess
@@ -116,7 +117,7 @@ def main() -> int:
     snapshot_id = snapshot["policy_snapshot_id"]
     _write(out / "service.json", {"healthz": health, "capability": capability, "snapshot": snapshot})
 
-    client = TestClient(create_compat_app("gsm8k_solve"))
+    client = TestClient(create_compat_app("gsm8k_solve", storage_root=tempfile.mkdtemp(prefix="gsm8k-loopback-receipt-")))
     metadata = client.get("/metadata").json()
     training_caps = client.get("/training/capabilities").json()
     _write(out / "metadata.json", {"metadata": metadata, "training_capabilities": training_caps})

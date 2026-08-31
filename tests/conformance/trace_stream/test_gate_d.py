@@ -8,12 +8,12 @@ from synth_containers.platform import create_compat_app
 
 
 def test_ts_d02_d03_closed_high_water_matches_seal() -> None:
-    client = TestClient(create_compat_app("craftax_engine"))
+    client = TestClient(create_compat_app("openenv_echo"))
     started = client.post(
         "/rollouts",
         json={
             "telemetry": {"enabled": True, "transport": "sse"},
-            "policy_ref": {"harness": "react", "config": "luna_med"},
+            "policy_ref": {"harness": "gym_loop", "config": "echo"},
         },
     )
     assert started.status_code == 200, started.text

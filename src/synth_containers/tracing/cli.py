@@ -35,6 +35,11 @@ from .models.rollout_inspector import ROLLOUT_INSPECTOR_PROJECTION_SCHEMA_VERSIO
 from .store.bundle import LocalTraceBundle, rebuild_catalog
 from .validation.schema import all_schemas
 from .validation.validator import validate
+from .adapters.harbor import (
+    HarborProvenancePins,
+    import_harbor_job,
+    materialize_harbor_trace_bundle,
+)
 from .adapters.legacy import import_legacy
 from .adapters.native import import_native_to_bundle, write_imported_document
 from .native_evaluation import attach_native_evaluation
@@ -135,6 +140,21 @@ def main(argv: list[str] | None = None) -> int:
     import_parser.add_argument("--input", dest="input_path", type=Path)
     import_parser.add_argument("--bundle", type=Path)
     import_parser.add_argument("--out", type=Path)
+
+    import_harbor = subparsers.add_parser(
+        "import-harbor",
+        help="import a harbor job dir (+ journal) into a trusted deterministic bundle",
+    )
+    import_harbor.add_argument("job_dir", type=Path)
+    import_harbor.add_argument("--rollout-id", required=True)
+    import_harbor.add_argument("--journal", type=Path, help="journal event JSONL/JSON file")
+    import_harbor.add_argument("--bundle", type=Path, help="bundle directory to import into")
+    import_harbor.add_argument(
+        "--archive", type=Path, help="write a verified deterministic bundle ZIP here"
+    )
+    import_harbor.add_argument("--producer-commit")
+    import_harbor.add_argument("--image-digest", dest="image_digest")
+    import_harbor.add_argument("--runtime-version")
 
     attach_parser = subparsers.add_parser(
         "attach",
@@ -525,6 +545,35 @@ def main(argv: list[str] | None = None) -> int:
                 }
             )
         )
+        return 0
+
+    if args.command == "import-harbor":
+        if bool(args.bundle) == bool(args.archive):
+            raise SystemExit("import-harbor requires exactly one of --bundle or --archive")
+        if args.archive is not None:
+            result = materialize_harbor_trace_bundle(
+                args.job_dir,
+                archive_path=args.archive,
+                rollout_id=args.rollout_id,
+                journal_events=args.journal,
+                producer_commit=args.producer_commit,
+                container_image_digest=args.image_digest,
+                runtime_version=args.runtime_version,
+            )
+        else:
+            result = import_harbor_job(
+                args.job_dir,
+                bundle=LocalTraceBundle(args.bundle),
+                rollout_id=args.rollout_id,
+                journal_events=args.journal,
+                pins=HarborProvenancePins(
+                    producer_commit=args.producer_commit,
+                    container_image_digest=args.image_digest,
+                    runtime_version=args.runtime_version,
+                ),
+            )
+            result["bundle"] = str(args.bundle)
+        print(readable_json(result))
         return 0
 
     if args.command == "attach":

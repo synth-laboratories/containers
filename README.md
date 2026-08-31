@@ -54,9 +54,9 @@ uv sync --group dev
 | `/health` | GET | liveness |
 
 The Python SDK also provides `Container`, `Container.serve()`,
-`ContainerHandle`, and `ContainerConnection` for URL-only optimizer handoff.
-Use generic route hints and capability metadata here; optimizer-specific GEPA
-settings belong in `synth-optimizers`.
+`ContainerHandle`, `ContainerConnection`, and `ContainerRunner` (url, command,
+in-process app, or local `image_id`). CLI: `synth-containers serve` and
+`synth-containers up`.
 
 ## Example
 
@@ -83,6 +83,7 @@ for complete containers: Banking77, HotpotQA, MiniGrid, TBLite, and Crafter.
 - [Cookbooks](https://github.com/synth-laboratories/synth-cookbooks-public) — runnable containers
 - [Agent skill](skills/containers/SKILL.md) — drop into a coding agent to build and debug containers
 - [Contract OpenAPI](openapi/container-contract-v1.yaml)
+- [Immutable live policy revisions](docs/immutable_policy_revisions.md) — install multiple harness variants and pin each rollout explicitly
 
 ## License
 

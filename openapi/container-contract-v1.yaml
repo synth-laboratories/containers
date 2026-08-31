@@ -303,52 +303,6 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-  /rollouts/{rollout_id}/manifest:
-    get:
-      operationId: getRolloutManifest
-      summary: Read the write-once terminal execution manifest
-      parameters:
-        - $ref: '#/components/parameters/RolloutId'
-      responses:
-        '200':
-          description: Self-digested terminal execution manifest
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [rollout_id, status, digests, content_digest]
-                properties:
-                  rollout_id:
-                    type: string
-                  status:
-                    type: string
-                  taxonomy:
-                    type: object
-                    additionalProperties: true
-                  usage:
-                    type: object
-                    additionalProperties: true
-                    nullable: true
-                  reward:
-                    type: object
-                    additionalProperties: true
-                  digests:
-                    type: object
-                    properties:
-                      config_digest:
-                        type: string
-                      capability_digest:
-                        type: string
-                  trace_digest:
-                    type: string
-                  timestamps:
-                    type: object
-                    additionalProperties: true
-                  content_digest:
-                    type: string
-                additionalProperties: true
-        '404':
-          description: Manifest not sealed
   /rollouts/{rollout_id}/artifacts:
     get:
       operationId: getRolloutArtifacts
@@ -373,25 +327,76 @@ paths:
   /rollouts/{rollout_id}/events:
     get:
       operationId: getRolloutEvents
-      summary: Read emitted rollout events
+      summary: Read a page of the durable rollout event journal
+      description: |
+        Journal contract v2. Cursor semantics:
+
+        - `after` is the resume token: the page contains sequenced events with
+          `sequence > after` (control records are included only when
+          `after == 0`). Resuming after a disconnect means re-requesting with
+          the last durably processed sequence as `after`.
+        - `cursor.next` is the highest sequence on the page (pass it as the
+          next `after`); `cursor.has_more` reports a truncated page;
+          `cursor.high_water`/`cursor.closed` report the journal head state.
+        - `cursor.chain_head` is the per-rollout event hash chain head
+          (`synth.rollout.event-chain.v1`) at `cursor.high_water`:
+          `genesis = sha256(utf8(rollout_id))` (64 lowercase hex);
+          `head(i) = sha256(ascii(head(i-1) + digest(i)))` folding each
+          sequenced envelope's 16-hex `digest` in sequence order. The same
+          head appears in the `capture.closed` payload (at the evidence
+          watermark) and in the lite seal. Consumers that ignore it are
+          unaffected.
+        - `ack` records the consumer's durably-processed high water. Acks are
+          monotonic and clamped to `high_water`; the current ack head is
+          echoed as `cursor.acked`.
+        - Retention contract (`retention`): the journal and its frame assets
+          are retained until `acked >= high_water` after closure OR until
+          `ttl_seconds` elapses after closure, whichever comes first;
+          `released` reports the decision (deletion is a deployment hook,
+          never automatic).
+        - `wait_ms` (bounded long-poll, max 10000): the server may hold the
+          request until an event newer than `after` arrives, the journal
+          closes, or the budget elapses.
       parameters:
         - $ref: '#/components/parameters/RolloutId'
+        - name: after
+          in: query
+          description: Resume token; return sequenced events with sequence > after.
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          description: Maximum sequenced events on the page.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 10000
+            default: 1000
+        - name: ack
+          in: query
+          description: Consumer's durably-processed high water (monotonic; clamped to high_water).
+          schema:
+            type: integer
+            minimum: 0
+        - name: wait_ms
+          in: query
+          description: Bounded long-poll budget in milliseconds.
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 10000
+            default: 0
       responses:
         '200':
-          description: Event payload
+          description: One journal page with cursor, chain head, and retention state
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  rollout_id:
-                    type: string
-                  events:
-                    type: array
-                    items:
-                      type: object
-                      additionalProperties: true
-                additionalProperties: true
+                $ref: '#/components/schemas/RolloutEventsPage'
+        '404':
+          description: Unknown rollout
   /rollouts/{rollout_id}/trace:
     get:
       operationId: getRolloutTrace
@@ -722,15 +727,245 @@ components:
         contract_version:
           type: string
       additionalProperties: true
+    RolloutEventEnvelope:
+      type: object
+      description: One journal record (`synth.trace-stream-event.v1`).
+      required: [schema, kind, ts, control, payload, digest, event_id]
+      properties:
+        schema:
+          type: string
+          enum: [synth.trace-stream-event.v1]
+        kind:
+          type: string
+        ts:
+          type: string
+        control:
+          type: boolean
+          description: Control records carry no sequence and never enter the hash chain.
+        sequence:
+          type: integer
+          minimum: 1
+          description: Present exactly when control is false.
+        event_id:
+          type: string
+        payload:
+          type: object
+          additionalProperties: true
+        digest:
+          type: string
+          pattern: '^[0-9a-f]{16}$'
+          description: Truncated sha256 under digest_schema over {kind, sequence, payload}.
+        digest_schema:
+          type: string
+          enum: [synth.envelope-digest.v2]
+          description: >-
+            Byte contract used for digest. Omitted only by legacy persisted envelopes.
+        rollout_id:
+          type: string
+      additionalProperties: true
+    RolloutEventsCursor:
+      type: object
+      required: [kind, after, high_water, closed, next, has_more]
+      properties:
+        kind:
+          type: string
+          enum: [sequence]
+        after:
+          type: integer
+          minimum: 0
+        high_water:
+          type: integer
+          minimum: 0
+        closed:
+          type: boolean
+        next:
+          type: integer
+          minimum: 0
+          description: Highest sequence on this page; the next request's `after`.
+        has_more:
+          type: boolean
+        chain_head:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: >-
+            Event hash chain head (synth.rollout.event-chain.v1) at
+            high_water; genesis sha256(utf8(rollout_id)), extended per
+            sequenced event by sha256(ascii(head + digest)).
+        acked:
+          type: integer
+          minimum: 0
+          description: The consumer ack head recorded for this rollout.
+      additionalProperties: true
+    RolloutJournalRetention:
+      type: object
+      description: >-
+        Retention contract state - the journal and frame assets are retained
+        until acked >= high_water after closure OR the TTL elapses after
+        closure. Deletion is a deployment hook, never automatic.
+      required: [policy, ttl_seconds, acked, high_water, closed, released]
+      properties:
+        policy:
+          type: string
+          enum: [until-acked-or-ttl]
+        ttl_seconds:
+          type: integer
+          minimum: 1
+        acked:
+          type: integer
+          minimum: 0
+        high_water:
+          type: integer
+          minimum: 0
+        closed:
+          type: boolean
+        released:
+          type: boolean
+        released_reason:
+          type: [string, 'null']
+          enum: [acked, ttl_expired, null]
+        expires_at:
+          type: [string, 'null']
+      additionalProperties: true
+    RolloutEventsPage:
+      type: object
+      required: [rollout_id, cursor, events]
+      properties:
+        rollout_id:
+          type: string
+        stream_id:
+          type: string
+        cursor:
+          $ref: '#/components/schemas/RolloutEventsCursor'
+        retention:
+          $ref: '#/components/schemas/RolloutJournalRetention'
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/RolloutEventEnvelope'
+      additionalProperties: true
+    GepaOptimizerContract:
+      type: object
+      description: >-
+        GEPA sub-contract advertisement (`synth_optimizers.gepa.v2`). The
+        optimizers Rust consumer validates version and absolute routes from
+        `metadata.optimizer_contracts.gepa`.
+      required: [version]
+      properties:
+        version:
+          type: string
+          examples: [synth_optimizers.gepa.v2]
+        program_route:
+          type: string
+        taskset_route:
+          type: string
+        taskset_tasks_route:
+          type: string
+        rollout_route:
+          type: string
+        prepare_route:
+          type: string
+        trace_route:
+          type: string
+      additionalProperties: true
+    OptimizerContracts:
+      type: object
+      description: >-
+        Optimizer sub-contract advertisements, keyed by contract name.
+        Canonical wire location: `metadata.optimizer_contracts`.
+      properties:
+        gepa:
+          $ref: '#/components/schemas/GepaOptimizerContract'
+      additionalProperties: true
+    InfoCapabilityMetadata:
+      type: object
+      description: >-
+        Runtime readiness, emitted for every runtime family and sourced from
+        the runtime's actual state (composed by
+        `synth_containers.metadata.compose_metadata_payload`).
+      required: [policy_ready, program_ready]
+      properties:
+        policy_ready:
+          type: boolean
+          description: The runtime can execute its policy path right now (for hosted-policy runtimes, the required credential is present).
+        program_ready:
+          type: boolean
+          description: The runtime serves a `/program` prompt-program surface.
+        grader_ready:
+          type: boolean
+          description: Present only on runtimes with a distinct scorer role; true when the scorer credential is present.
+      additionalProperties: true
+    InfoCapabilities:
+      type: object
+      required: [protocol, contract_version, live_frames, metadata]
+      properties:
+        protocol:
+          type: string
+          description: >-
+            Protocol id owned by containers. `synth.container.contract.v1`
+            for authoring-SDK containers; `synth.container.live-eval.v1`
+            for the hosted compat platform.
+          examples: [synth.container.live-eval.v1, synth.container.contract.v1]
+        contract_version:
+          type: string
+          description: >-
+            Stamped from the single Python constant
+            `synth_containers.metadata.METADATA_CONTRACT_VERSION`
+            (`synth_containers.ontology.CONTRACT_VERSION`).
+          examples: ['2026-05-28']
+        operations:
+          type: object
+          description: Supported operation flags (e.g. `rollouts.prepare`, `reward.get`, `trace_v5.capture`).
+          additionalProperties:
+            type: boolean
+        live_frames:
+          type: string
+          enum: [native, sampled, post_hoc, unsupported]
+          description: Frame-serving capability level for live observation.
+        scale_leases:
+          type: integer
+          minimum: 0
+          description: Maximum concurrent rollout leases the instance admits.
+        rollout_modes:
+          type: array
+          items:
+            type: string
+            enum: [blocking, async]
+        metadata:
+          $ref: '#/components/schemas/InfoCapabilityMetadata'
+        optimizer_contracts:
+          allOf:
+            - $ref: '#/components/schemas/OptimizerContracts'
+          deprecated: true
+          description: >-
+            COMPAT duplicate of `metadata.optimizer_contracts` (the old
+            healthbench-only app splice location), emitted only while
+            `EMIT_COMPAT_OPTIMIZER_CONTRACT_DUPLICATES` is true through the
+            2026-08 release. Remove in the first subsequent release; read
+            `metadata.optimizer_contracts` instead.
+      additionalProperties: true
+    InfoMetadata:
+      type: object
+      properties:
+        optimizer_contracts:
+          $ref: '#/components/schemas/OptimizerContracts'
+      additionalProperties: true
     InfoResponse:
       type: object
+      required: [capabilities]
       properties:
         runtime:
           type: object
           additionalProperties: true
         capabilities:
-          type: object
-          additionalProperties: true
+          $ref: '#/components/schemas/InfoCapabilities'
+        imageDigest:
+          type: string
+          pattern: '^sha256:[0-9a-f]{64}$'
+          description: Immutable digest of the image resolved by the trusted launcher.
+        producerSourceRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$'
+          description: Git revision of the Containers producer source used by the launcher.
         capabilities_digest:
           type: string
           description: sha256 of canonical capability metadata, including per-capability input_schema.
@@ -739,8 +974,17 @@ components:
           additionalProperties: true
           description: Active-capability start contract (task_instance_id pattern, seed range, action vocabulary).
         metadata:
-          type: object
-          additionalProperties: true
+          $ref: '#/components/schemas/InfoMetadata'
+        optimizer_contracts:
+          allOf:
+            - $ref: '#/components/schemas/OptimizerContracts'
+          deprecated: true
+          description: >-
+            COMPAT duplicate of `metadata.optimizer_contracts` (the old
+            platform/state.py top-level location), emitted only while
+            `EMIT_COMPAT_OPTIMIZER_CONTRACT_DUPLICATES` is true through the
+            2026-08 release. Remove in the first subsequent release; read
+            `metadata.optimizer_contracts` instead.
       additionalProperties: true
     TaskInfoResponse:
       type: object

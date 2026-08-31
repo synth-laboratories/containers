@@ -1,0 +1,21 @@
+# Craftax GameBench gold (rust engine baked in as a child of PID 1).
+#   synth-containers up   craftax-gamebench-rust
+#   synth-containers down craftax-gamebench-rust
+
+contract   = "http_task"
+id         = "craftax-gamebench-rust"
+image_name = "synth-craftax-gamebench-rust"
+dockerfile = "Dockerfile"
+context    = "."
+port       = 8080
+pull       = false
+required_env = []
+startup_timeout_seconds = 180
+
+[build_contexts]
+containers = "$CONTAINERS_ROOT"
+gamebench  = "$CRAFTAX_RUNTIME_ROOT"
+
+[extra_env]
+# Workshop default. Contest speedrun: --target craftax_nanohorizon
+SYNTH_CONTAINER_TARGET = "craftax_react"

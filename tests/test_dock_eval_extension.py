@@ -42,7 +42,7 @@ def _prepare_subscribe(client: TestClient, rollout_id: str) -> dict:
     return stream
 
 
-def test_dock_extension_uses_pinned_harbor_runtime_and_public_stream(monkeypatch) -> None:
+def test_dock_extension_uses_pinned_harbor_runtime_and_public_stream(monkeypatch, tmp_path) -> None:
     extension = DockEvalExtension.from_file(FIXTURE)
     assert extension.bundle_digest == compute_bundle_digest(extension.bundle_root)
     assert "dock" not in TARGETS
@@ -100,7 +100,7 @@ def test_dock_extension_uses_pinned_harbor_runtime_and_public_stream(monkeypatch
         "synth_containers.platform.runtimes.harbor_docker.execute_docker_role",
         fake_execute,
     )
-    client = TestClient(create_dock_eval_app(extension))
+    client = TestClient(create_dock_eval_app(extension, storage_root=tmp_path / "p0"))
     stream = _prepare_subscribe(client, "dock_fixture_1")
     started = client.post(
         "/rollouts",
@@ -157,7 +157,7 @@ def test_dock_extension_tampered_bundle_fails_before_docker(monkeypatch, tmp_pat
         "synth_containers.platform.runtimes.harbor_docker.execute_docker_role",
         unexpected_execute,
     )
-    client = TestClient(create_dock_eval_app(copied / "extension.json"))
+    client = TestClient(create_dock_eval_app(copied / "extension.json", storage_root=tmp_path / "p1"))
     _prepare_subscribe(client, "dock_tampered")
     started = client.post(
         "/rollouts",
@@ -256,7 +256,7 @@ def test_authoring_agent_gets_declared_egress_while_verifier_stays_hermetic(
         fake_execute,
     )
 
-    client = TestClient(create_dock_eval_app(extension_path))
+    client = TestClient(create_dock_eval_app(extension_path, storage_root=tmp_path / "p2"))
     _prepare_subscribe(client, "dock_authoring")
     started = client.post(
         "/rollouts",
@@ -333,7 +333,7 @@ def test_task_tree_mount_rejects_unscoped_and_traversing_paths(tmp_path: Path, m
         _pin_bundle(copied)
 
 
-def test_cardbench_pinned_bundle_is_accepted_by_dock_eval(monkeypatch) -> None:
+def test_cardbench_pinned_bundle_is_accepted_by_dock_eval(monkeypatch, tmp_path) -> None:
     extension = DockEvalExtension.from_file(CARDBENCH_FIXTURE)
     assert extension.bundle_digest == compute_bundle_digest(extension.bundle_root)
     calls: list[dict[str, object]] = []
@@ -375,7 +375,7 @@ def test_cardbench_pinned_bundle_is_accepted_by_dock_eval(monkeypatch) -> None:
         "synth_containers.platform.runtimes.harbor_docker.execute_docker_role",
         fake_execute,
     )
-    client = TestClient(create_dock_eval_app(extension))
+    client = TestClient(create_dock_eval_app(extension, storage_root=tmp_path / "p3"))
     stream = _prepare_subscribe(client, "dock_cardbench_1")
     started = client.post(
         "/rollouts",

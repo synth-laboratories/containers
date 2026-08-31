@@ -87,6 +87,7 @@ missing events mean the rollout should be rerun.
   "control": false,
   "sequence": 5,
   "event_id": "5",
+  "digest_schema": "synth.envelope-digest.v2",
   "digest": "1f0bb1d82f55e24c",
   "payload": {}
 }
@@ -98,8 +99,11 @@ missing events mean the rollout should be rerun.
 - Control records have `sequence = null`, `control = true`, and do not advance
   evidence high-water. In JSON the sequence field is omitted.
 - `event_id` is the decimal sequence for evidence and the kind for control.
-- `digest` is the first 16 hexadecimal characters of SHA-256 over canonical
-  JSON `{kind, sequence, payload}`. Timestamps are provenance but do not change
+- `digest_schema` names the byte contract for `digest`. New envelopes use
+  `synth.envelope-digest.v2`, whose tagged encoding is specified in
+  `docs/specs/envelope-digest-v2.md`; legacy persisted envelopes may omit it.
+- `digest` is the first 16 hexadecimal characters of SHA-256 over the bytes
+  selected by `digest_schema`. Timestamps are provenance but do not change
   semantic identity.
 - `payload` is a JSON object. Secret-bearing keys/values are rejected before
   persistence.

@@ -22,8 +22,8 @@ _PUT_POLICY = "PUT /policy"
 _TRANSPORTS = frozenset({"poll", "sse", "websocket", "auto"})
 _REWARD_MODES = frozenset({"terminal", "provisional"})
 _SUBMISSION_MODES = frozenset({"sync", "async"})
-_EXECUTION_MODES = frozenset({"background", "on_complete"})
 ISOLATED_POLICY_HARNESS = "isolated_policy_process"
+NANOHORIZON_HARNESS = "nanohorizon"
 
 
 class RequestParseError(ValueError):
@@ -62,10 +62,9 @@ class CreateRolloutRequest:
     outcome: Optional[str]
     slot: str
     metadata: dict[str, Any]
+    policy_revision_id: Optional[str] = None
     checkpoint_schedule: Optional[dict[str, Any]] = None
     resume_from_checkpoint_id: Optional[str] = None
-    execution: Optional[str] = None
-    idempotency_key: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -95,6 +94,11 @@ class PolicyConfigRequest:
 class PutPolicyRequest:
     code: Any
     harness: Optional[str]
+    namespace: Optional[str]
+    name: Optional[str]
+    configuration: dict[str, Any]
+    model: dict[str, Any]
+    source_revision: Optional[str]
 
 
 def require_json_object(body: object, *, operation: str) -> dict[str, Any]:
@@ -145,18 +149,6 @@ def parse_create_rollout(
         raise RequestParseError(
             f"{operation}: submission_mode must be sync or async, got {submission_mode!r}"
         )
-    execution = _optional_str(raw, "execution", operation=operation)
-    if execution is not None and execution not in _EXECUTION_MODES:
-        raise RequestParseError(
-            f"{operation}: execution must be background or on_complete, got {execution!r}"
-        )
-    if submission_mode == "async" and execution is None:
-        # Async defaults to background so a dropped caller / poller reaches
-        # terminal without POST /complete. on_complete is the deferred lease hold.
-        execution = "background"
-    elif submission_mode == "sync":
-        execution = None
-    idempotency_key = _optional_str(raw, "idempotency_key", operation=operation)
     rollout_id = _optional_str(raw, "rollout_id", operation=operation)
     if rollout_id == "":
         rollout_id = None
@@ -178,13 +170,12 @@ def parse_create_rollout(
         outcome=_optional_str(raw, "outcome", operation=operation) or None,
         slot=slot,
         metadata=metadata,
+        policy_revision_id=_optional_str(raw, "policy_revision_id", operation=operation),
         checkpoint_schedule=_optional_object(raw, "checkpoint_schedule", operation=operation),
         resume_from_checkpoint_id=_optional_str(
             raw, "resume_from_checkpoint_id", operation=operation
         )
         or None,
-        execution=execution,
-        idempotency_key=idempotency_key or None,
     )
 
 
@@ -219,10 +210,9 @@ def to_platform_dict(req: CreateRolloutRequest) -> dict[str, Any]:
         "slot": req.slot,
         "stream_slot": req.slot,
         "metadata": req.metadata,
+        "policy_revision_id": req.policy_revision_id,
         "checkpoint_schedule": req.checkpoint_schedule,
         "resume_from_checkpoint_id": req.resume_from_checkpoint_id,
-        "execution": req.execution,
-        "idempotency_key": req.idempotency_key,
     }
 
 
@@ -316,11 +306,24 @@ def parse_put_policy(body: dict) -> PutPolicyRequest:
     return PutPolicyRequest(
         code=raw["code"],
         harness=_optional_str(raw, "harness", operation=_PUT_POLICY),
+        namespace=_optional_str(raw, "namespace", operation=_PUT_POLICY),
+        name=_optional_str(raw, "name", operation=_PUT_POLICY),
+        configuration=_optional_object(raw, "configuration", operation=_PUT_POLICY) or {},
+        model=_optional_object(raw, "model", operation=_PUT_POLICY) or {},
+        source_revision=_optional_str(raw, "source_revision", operation=_PUT_POLICY),
     )
 
 
 def to_put_policy_dict(req: PutPolicyRequest) -> dict[str, Any]:
-    return {"code": req.code, "harness": req.harness}
+    return {
+        "code": req.code,
+        "harness": req.harness,
+        "namespace": req.namespace,
+        "name": req.name,
+        "configuration": req.configuration,
+        "model": req.model,
+        "source_revision": req.source_revision,
+    }
 
 
 def _parse_telemetry(body: dict[str, Any], *, operation: str) -> TelemetrySpec:

@@ -11,6 +11,10 @@
     "control": { "type": "boolean" },
     "payload": { "type": "object" },
     "digest": { "type": "string", "minLength": 1 },
+    "digest_schema": {
+      "type": "string",
+      "enum": ["synth.envelope-digest.v2"]
+    },
     "event_id": { "type": "string", "minLength": 1 },
     "sequence": { "type": ["integer", "null"] }
   },

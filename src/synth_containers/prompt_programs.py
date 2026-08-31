@@ -5,8 +5,10 @@ from typing import Any
 
 from .serde import JsonDataclassMixin
 
-
-GEPA_OPTIMIZER_CONTRACT_VERSION = "synth_optimizers.gepa.v2"
+# The GEPA sub-contract version is owned by optimizers (boundary B2) and
+# vendored in synth_containers.vendored_gepa_contract; re-exported here for
+# backwards compatibility with existing importers.
+from .vendored_gepa_contract import GEPA_OPTIMIZER_CONTRACT_VERSION
 
 
 @dataclass(slots=True)

@@ -16,15 +16,8 @@ from synth_containers.platform.runtimes.harbor_docker import (
 )
 from synth_containers.platform.targets import PR_TARGETS, TARGETS
 
-_CRAFTAX_KINDS = {
-    "frame",
-    "observation",
-    "action",
-    "reward_signal",
-    "env.episode.opened",
-    "env.episode.closed",
-}
-
+# Harbor trials must not emit GameBench Craftax kinds (LCD lie).
+_GAME_KINDS = {"frame", "achievement_unlocked", "action_applied", "task_resolved"}
 
 def test_harbor_docker_is_not_a_pr_target() -> None:
     assert TARGETS["harbor_docker"].environment_ref == "env:harbor_docker"
@@ -116,7 +109,7 @@ def test_harbor_docker_distinct_executions_read_verifier_reward_txt(monkeypatch)
     assert "span.agent.opened" in kinds
     assert "span.verifier.opened" in kinds
     assert kinds.index("span.agent.closed") < kinds.index("span.verifier.opened")
-    assert not _CRAFTAX_KINDS.intersection(kinds)
+    assert not _GAME_KINDS.intersection(kinds)
     assert [row["role"] for row in calls] == ["agent", "verifier"]
     assert calls[0]["environment"] is None
     assert calls[1]["environment"] is None
@@ -235,7 +228,7 @@ def test_harbor_docker_live_agent_and_verifier_are_distinct() -> None:
     assert "span.agent.opened" in kinds
     assert "span.verifier.opened" in kinds
     assert kinds.index("span.agent.closed") < kinds.index("span.verifier.opened")
-    assert not _CRAFTAX_KINDS.intersection(kinds)
+    assert not _GAME_KINDS.intersection(kinds)
     launched = next(item["payload"] for item in events if item["kind"] == "trial.launched")
     assert launched["sandbox"] == "env:harbor_docker"
     tools = next(item["payload"] for item in events if item["kind"] == "tools")
@@ -275,7 +268,7 @@ def test_harbor_fixture_keeps_verifier_on_parent_with_distinct_spans() -> None:
     assert project_harbor_atif(events)["reward.txt"] == 1.0
 
 
-def test_deo_nested_child_is_code_policy() -> None:
+def test_deo_nested_records_child_ref_without_a_particular_world() -> None:
     client = TestClient(create_compat_app("deo_nested"))
     started = client.post(
         "/rollouts",
@@ -287,22 +280,14 @@ def test_deo_nested_child_is_code_policy() -> None:
     )
     assert started.status_code == 200, started.text
     body = started.json()
-    child_id = body["child_rollout_id"]
-    child = client.get(f"/rollouts/{child_id}").json()
-    assert child["environment_ref"] == "env:craftax_fixture"
-    assert child["policy_ref"]["harness"] == "isolated_policy_process"
+    assert body["child_rollout_id"]
     parent_events = client.get(
         f"/rollouts/{body['rollout_id']}/events", params={"after": 0}
     ).json()["events"]
-    child_events = client.get(f"/rollouts/{child_id}/events", params={"after": 0}).json()["events"]
     parent_kinds = {item["kind"] for item in parent_events}
-    child_kinds = {item["kind"] for item in child_events}
-    assert "frame" in child_kinds
     assert "frame" not in parent_kinds
+    assert "trial.planned" in parent_kinds
     parent_reward = client.post(
         "/reward", json={"rollout_id": body["rollout_id"], "mode": "terminal"}
     ).json()
-    child_reward = client.post("/reward", json={"rollout_id": child_id, "mode": "terminal"}).json()
-    assert parent_reward.get("reward") != child_reward.get("reward")
     assert parent_reward.get("reward") is not None
-    assert child_reward.get("reward") is not None

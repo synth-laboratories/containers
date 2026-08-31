@@ -16,6 +16,7 @@ from ..adapters.openai_responses import (
     NORMALIZER_VERSION as RESPONSES_ADAPTER_VERSION,
 )
 from ..canonical import bytes_digest, canonical_bytes, canonical_text
+from ...gen_ai import request_observation
 from ..models.capture_data import CapturedBodyRefV1, RawCaptureDisposition
 from ..models.identity import TraceContextV1
 from .envelope import RawRecordType
@@ -115,6 +116,9 @@ class ResponsesWebSocketRelay:
                             "request_body_ref": request_ref.to_dict(),
                             "redaction": request_redaction,
                             "transport": "websocket",
+                            **request_observation(
+                                response if isinstance(response, Mapping) else body
+                            ),
                         },
                     )
                     in_flight = True

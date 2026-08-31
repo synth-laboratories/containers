@@ -8,6 +8,10 @@ by a consumer that already knew to ask — which is not discoverability.
 
 from __future__ import annotations
 
+import io
+import json
+import zipfile
+
 from fastapi.testclient import TestClient
 
 from synth_containers.platform import create_compat_app
@@ -16,13 +20,13 @@ from synth_containers.platform import create_compat_app
 BODY = {
     "rollout_id": "seal_reference_1",
     "task_instance_id": "seed:7",
-    "policy_ref": {"harness": "react", "config": "luna_med"},
+    "policy_ref": {"harness": "gym_loop", "config": "echo"},
     "telemetry": {"enabled": True, "transport": "sse", "retention": "run"},
 }
 
 
 def test_terminal_record_names_the_sealed_trace(tmp_path) -> None:
-    app = create_compat_app("craftax_engine", storage_root=tmp_path)
+    app = create_compat_app("openenv_echo", storage_root=tmp_path)
     client = TestClient(app)
     prepared = client.post(
         "/rollouts/prepare",
@@ -45,12 +49,12 @@ def test_terminal_record_names_the_sealed_trace(tmp_path) -> None:
     assert reference["closed"] is True
     assert reference["url"] == f"/rollouts/{BODY['rollout_id']}/trace"
     assert reference["bundle_url"] == f"/rollouts/{BODY['rollout_id']}/trace/bundle"
-    assert reference["kind"] == "lite_seal"
-    assert reference["inspectable"] is False
+    assert reference["kind"] == "trace_v5_bundle"
+    assert reference["inspectable"] is True
 
 
 def test_prepared_but_unstarted_rollout_announces_no_trace(tmp_path) -> None:
-    app = create_compat_app("craftax_engine", storage_root=tmp_path)
+    app = create_compat_app("openenv_echo", storage_root=tmp_path)
     client = TestClient(app)
     prepared = client.post(
         "/rollouts/prepare",
@@ -61,3 +65,35 @@ def test_prepared_but_unstarted_rollout_announces_no_trace(tmp_path) -> None:
     # A prepared rollout has sealed nothing; claiming otherwise would be worse
     # than saying nothing at all.
     assert status.get("trace") is None
+
+
+def test_trace_v5_provenance_matches_the_advertised_runtime_identity(
+    monkeypatch, tmp_path
+) -> None:
+    image_digest = "sha256:" + ("ab" * 32)
+    producer_revision = "cd" * 20
+    monkeypatch.setenv("SYNTH_CONTAINER_IMAGE_DIGEST", image_digest)
+    monkeypatch.setenv("SYNTH_CONTAINER_PRODUCER_SOURCE_REVISION", producer_revision)
+    body = {**BODY, "rollout_id": "seal_reference_provenance"}
+    client = TestClient(create_compat_app("openenv_echo", storage_root=tmp_path))
+    client.post(
+        "/rollouts/prepare",
+        json={"rollout_id": body["rollout_id"], "telemetry": body["telemetry"]},
+    )
+    started = client.post("/rollouts", json=body)
+    assert started.status_code == 200, started.text
+
+    info = client.get("/info").json()
+    assert info["imageDigest"] == image_digest
+    assert info["producerSourceRevision"] == producer_revision
+    archive = client.get(f"/rollouts/{body['rollout_id']}/trace/bundle")
+    assert archive.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(archive.content)) as bundle:
+        trace_path = next(
+            name
+            for name in bundle.namelist()
+            if "/sealed/" in name and name.endswith(".json")
+        )
+        provenance = json.loads(bundle.read(trace_path))["provenance"]
+    assert provenance["container_image_digest"] == info["imageDigest"]
+    assert provenance["producer_commit"] == info["producerSourceRevision"]

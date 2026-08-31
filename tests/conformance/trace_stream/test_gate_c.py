@@ -26,12 +26,12 @@ def _parse_sse(body: str) -> list[dict]:
 
 
 def test_ts_c01_poll_and_sse_same_ids() -> None:
-    client = TestClient(create_compat_app("craftax_engine"))
+    client = TestClient(create_compat_app("openenv_echo"))
     started = client.post(
         "/rollouts",
         json={
             "telemetry": {"enabled": True, "transport": "sse"},
-            "policy_ref": {"harness": "react", "config": "luna_med"},
+            "policy_ref": {"harness": "gym_loop", "config": "echo"},
         },
     )
     assert started.status_code == 200, started.text
@@ -47,7 +47,7 @@ def test_ts_c01_poll_and_sse_same_ids() -> None:
 
 
 def test_ts_c04_subscribed_is_control_and_does_not_advance_sequence() -> None:
-    client = TestClient(create_compat_app("craftax_engine"))
+    client = TestClient(create_compat_app("openenv_echo"))
     prepared = client.post(
         "/rollouts/prepare",
         json={"rollout_id": "roll_ts_c04", "telemetry": {"enabled": True, "transport": "sse"}},
@@ -59,7 +59,7 @@ def test_ts_c04_subscribed_is_control_and_does_not_advance_sequence() -> None:
 
 
 def test_ts_c08_absent_transports_are_null_when_unbound() -> None:
-    client = TestClient(create_compat_app("craftax_engine"))
+    client = TestClient(create_compat_app("openenv_echo"))
     prepared = client.post(
         "/rollouts/prepare",
         json={"rollout_id": "roll_ts_c08", "telemetry": {"enabled": True, "transport": "poll"}},

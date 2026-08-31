@@ -18,13 +18,10 @@ One umbrella: `TargetRuntime`. Callers say “run this target.” Children live 
 
 | Kind | Module | What it owns |
 | ---- | ------ | ------------ |
-| `craftax` | `runtimes/craftax.py` | Fixture world (`env:craftax_fixture`) or gold HTTP (`env:craftax_gold`). Planner follows environment_ref, not `target_id`. |
+| `external` | `TargetSpec.runtime` | Image-owned world (not in this package). |
 | `harbor` | `runtimes/harbor.py` | Trial/verifier fold. Fixture keeps verifier on the parent log. `env:harbor_docker` runs agent vs verifier as distinct `docker run`s; native `reward.txt` ≡ `/reward`. |
 | `digbench` | `runtimes/digbench.py` | Mock dungeon (`env:digbench_mock`) or live Agent API (`env:digbench_relay`). No frames. |
 | `openenv` | `runtimes/openenv.py` | Echo-shaped gym wrap (`env:echo` via `echo_world.py`). Observation / action / env reward. Not a fold. Not an unmodified image. |
-| `banking77` | `runtimes/banking77.py` | One-shot classify. Content, not a fold. Gold private. Classify, Tinker, or scoped Responses policy. |
-| `gsm8k` | `runtimes/gsm8k.py` | One-turn grade-school math. Content, not a fold. Reference answer private. Exact match on the parsed number; an unparseable completion is null, not zero. |
-| `healthbench` | `runtimes/healthbench.py` | Open-text physician-rubric chat. Policy and scorer are independent paid roles. |
 
 Dispatch is `_BY_FAMILY` in `runtimes/__init__.py` — the one umbrella layer.
 
@@ -51,10 +48,7 @@ Trace Streaming Profile kit: `docs/specs/trace-streaming-profile-v1.md` + `tests
 - `create_compat_app(target)` — HTTP edge
 - `project_envelopes` — honest headless projection
 - `project_harbor_atif` — Harbor-only overlay of the log
-- `examples/serve_banking77.py` — loopback `banking77_classify` (default `:8099`, optional `--storage-root`)
-- `examples/serve_healthbench.py` — loopback `healthbench_chat` (default `:8114`)
-- `examples/serve_craftax_react.py` — loopback gold Craftax ReAct (default `:8097`)
-- `examples/craftax_ten_seeds.py`, `examples/deo_nested_reward.py`, `examples/banking77_datagen.py` — headless C3-01 / C4-06 / Banking77 data gen (no Desktop, no `--paid`)
+- `examples/deo_nested_reward.py` — headless C4-06 nested reward example
 
 ## Live-stream order
 
