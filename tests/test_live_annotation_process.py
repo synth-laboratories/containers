@@ -110,3 +110,17 @@ class Protocol:
         assert process.alive is True
     finally:
         process.close()
+
+
+def test_model_settings_and_lenient_json() -> None:
+    from synth_containers.live_annotation.model import ModelSettings, parse_json_object
+
+    settings = ModelSettings.from_configuration({"model": {"model": "z-ai/glm-5.3-flash", "effort": "low", "drain_timeout_seconds": 120, "max_calls": 3}})
+    assert settings is not None
+    assert settings.reasoning_effort == "low" and settings.drain_timeout_seconds == 120.0 and settings.max_calls == 3
+    assert settings.public()["reasoning_effort"] == "low" and "api_key_env" not in settings.public()
+    assert ModelSettings.from_configuration({"model": {"model": "m", "effort": "none"}}).reasoning_effort == "none"
+    assert parse_json_object('{"a": 1}') == {"a": 1}
+    assert parse_json_object('Thinking... then: {"progress": "stalled", "x": [1]} done') == {"progress": "stalled", "x": [1]}
+    assert parse_json_object("no json here") is None
+    assert parse_json_object("[1, 2]") is None

@@ -347,7 +347,7 @@ class LiveAnnotationService:
                 limits = RunnerLimits(
                     max_model_calls=min(settings.max_calls, self.limits.max_model_calls),
                     max_model_output_tokens=min(settings.max_output_tokens, self.limits.max_model_output_tokens),
-                    drain_timeout_seconds=self.limits.drain_timeout_seconds,
+                    drain_timeout_seconds=max(self.limits.drain_timeout_seconds, settings.drain_timeout_seconds),
                     idle_wait_seconds=self.limits.idle_wait_seconds,
                     model_workers=self.limits.model_workers,
                 )

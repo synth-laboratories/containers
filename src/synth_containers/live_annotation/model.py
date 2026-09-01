@@ -43,6 +43,25 @@ class ModelCaller(Protocol):
     ) -> ModelResult: ...
 
 
+def parse_json_object(text: str) -> dict[str, Any] | None:
+    """The whole text as JSON, else the outermost ``{...}`` inside it (models wrap JSON in prose)."""
+
+    try:
+        candidate = json.loads(text)
+        if isinstance(candidate, dict):
+            return candidate
+    except json.JSONDecodeError:
+        pass
+    start, end = text.find("{"), text.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        candidate = json.loads(text[start : end + 1])
+    except json.JSONDecodeError:
+        return None
+    return candidate if isinstance(candidate, dict) else None
+
+
 class ModelUnavailable(RuntimeError):
     """No usable provider configuration or credential; recorded as ``annotation.model.failed``."""
 
@@ -57,6 +76,15 @@ class ModelSettings:
     max_calls: int = 20
     max_output_tokens: int = 800
     timeout_seconds: float = 120.0
+    # Provider reasoning effort for judges on reasoning models (`effort`
+    # in the configuration block). Reasoning tokens count against the output
+    # budget on OpenRouter, so "low" keeps the JSON answer inside it.
+    reasoning_effort: str | None = "low"
+    # How long the runner waits for in-flight judgments after the rollout
+    # log closes. A reasoning model routinely needs more than the
+    # deterministic default, and a judgment lost to the drain is a hole in
+    # the evidence, not a saving.
+    drain_timeout_seconds: float = 90.0
 
     @classmethod
     def from_configuration(cls, configuration: dict[str, Any]) -> "ModelSettings | None":
@@ -73,6 +101,8 @@ class ModelSettings:
             max_calls=max(0, int(block.get("max_calls") or cls.max_calls)),
             max_output_tokens=max(16, int(block.get("max_output_tokens") or cls.max_output_tokens)),
             timeout_seconds=float(block.get("timeout_seconds") or cls.timeout_seconds),
+            drain_timeout_seconds=float(block.get("drain_timeout_seconds") or cls.drain_timeout_seconds),
+            reasoning_effort=(str(block["effort"]).strip() or None) if block.get("effort") is not None else cls.reasoning_effort,
         )
 
     def public(self) -> dict[str, Any]:
@@ -83,6 +113,9 @@ class ModelSettings:
             "base_url": self.base_url,
             "max_calls": self.max_calls,
             "max_output_tokens": self.max_output_tokens,
+            "timeout_seconds": self.timeout_seconds,
+            "drain_timeout_seconds": self.drain_timeout_seconds,
+            "reasoning_effort": self.reasoning_effort,
         }
 
 
@@ -118,6 +151,8 @@ class OpenAICompatibleCaller:
                 "type": "json_schema",
                 "json_schema": {"name": "annotation", "schema": schema, "strict": False},
             }
+        if self.settings.reasoning_effort and self.settings.reasoning_effort != "none":
+            payload["reasoning"] = {"effort": self.settings.reasoning_effort}
         request = urllib.request.Request(
             f"{self.settings.base_url}/chat/completions",
             data=json.dumps(payload).encode("utf-8"),
@@ -146,11 +181,7 @@ class OpenAICompatibleCaller:
         text = str(text or "")
         parsed: dict[str, Any] | None = None
         if schema is not None:
-            try:
-                candidate = json.loads(text)
-                parsed = candidate if isinstance(candidate, dict) else None
-            except json.JSONDecodeError:
-                parsed = None
+            parsed = parse_json_object(text)
         usage = body.get("usage") or {}
 
         def _int(key: str) -> int | None:
