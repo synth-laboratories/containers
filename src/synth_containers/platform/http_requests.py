@@ -62,6 +62,10 @@ class CreateRolloutRequest:
     outcome: Optional[str]
     slot: str
     metadata: dict[str, Any]
+    # Caller-admitted execution ceilings. These must survive the HTTP trust
+    # boundary rather than falling back to broader image defaults.
+    max_steps: Optional[int] = None
+    max_calls: Optional[int] = None
     policy_revision_id: Optional[str] = None
     checkpoint_schedule: Optional[dict[str, Any]] = None
     resume_from_checkpoint_id: Optional[str] = None
@@ -159,6 +163,11 @@ def parse_create_rollout(
             rollout_id = validate_rollout_id(rollout_id)
         except ValueError as exc:
             raise RequestParseError(f"{operation}: {exc}") from exc
+    max_steps = _optional_int(raw, "max_steps", operation=operation)
+    max_calls = _optional_int(raw, "max_calls", operation=operation)
+    for name, value in (("max_steps", max_steps), ("max_calls", max_calls)):
+        if value is not None and value <= 0:
+            raise RequestParseError(f"{operation}: {name} must be greater than zero")
     return CreateRolloutRequest(
         rollout_id=rollout_id,
         telemetry=telemetry,
@@ -172,6 +181,8 @@ def parse_create_rollout(
         outcome=_optional_str(raw, "outcome", operation=operation) or None,
         slot=slot,
         metadata=metadata,
+        max_steps=max_steps,
+        max_calls=max_calls,
         policy_revision_id=_optional_str(raw, "policy_revision_id", operation=operation),
         checkpoint_schedule=_optional_object(raw, "checkpoint_schedule", operation=operation),
         resume_from_checkpoint_id=_optional_str(
@@ -216,6 +227,8 @@ def to_platform_dict(req: CreateRolloutRequest) -> dict[str, Any]:
         "slot": req.slot,
         "stream_slot": req.slot,
         "metadata": req.metadata,
+        "max_steps": req.max_steps,
+        "max_calls": req.max_calls,
         "policy_revision_id": req.policy_revision_id,
         "checkpoint_schedule": req.checkpoint_schedule,
         "resume_from_checkpoint_id": req.resume_from_checkpoint_id,

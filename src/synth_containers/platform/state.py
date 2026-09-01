@@ -129,6 +129,8 @@ class RolloutPin:
     engine_generation: int
     policy_revision_id: str | None
     seed: int | None
+    max_steps: int | None = None
+    max_calls: int | None = None
     child_rollout_id: str | None = None
     child_resource_ref: dict[str, Any] | None = None
     usage: dict[str, Any] | None = None
@@ -317,6 +319,8 @@ class CompatPlatform:
                 "engine_generation": pin.engine_generation,
                 "policy_revision_id": pin.policy_revision_id,
                 "seed": pin.seed,
+                "max_steps": pin.max_steps,
+                "max_calls": pin.max_calls,
                 "child_rollout_id": pin.child_rollout_id,
                 "child_resource_ref": pin.child_resource_ref,
                 "usage": pin.usage,
@@ -399,6 +403,8 @@ class CompatPlatform:
                 engine_generation=int(raw_pin["engine_generation"]),
                 policy_revision_id=raw_pin.get("policy_revision_id"),
                 seed=raw_pin.get("seed"),
+                max_steps=raw_pin.get("max_steps"),
+                max_calls=raw_pin.get("max_calls"),
                 child_rollout_id=raw_pin.get("child_rollout_id"),
                 child_resource_ref=raw_pin.get("child_resource_ref"),
                 usage=raw_pin.get("usage"),
@@ -1063,6 +1069,8 @@ class CompatPlatform:
             engine_generation=self.engine_generation,
             policy_revision_id=request.policy_revision_id,
             seed=seed_i,
+            max_steps=request.max_steps,
+            max_calls=request.max_calls,
             usage=None,
             omit_reward=request.omit_reward,
             outcome=request.outcome,

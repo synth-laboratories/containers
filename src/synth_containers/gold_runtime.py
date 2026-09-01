@@ -45,7 +45,7 @@ class GoldRuntime:
     frame_path: str = "/rollouts/{rollout_id}/frames/{env_steps}.png"
 
     def simulate(self, platform: CompatPlatform, pin: RolloutPin, log: RolloutEventLog) -> None:
-        max_steps = self._max_steps(platform)
+        max_steps = self._max_steps(platform, pin)
         world = self._world_for(platform, max_steps=max_steps)
         harness = str(pin.policy_ref.get("harness") or "").strip()
         if not harness:
@@ -163,6 +163,7 @@ class GoldRuntime:
                         emit_policy_spans=True,
                         resume_checkpoint=resume_checkpoint,
                         checkpoint_callback=checkpoint_callback,
+                        max_calls=pin.max_calls,
                     )
             except Exception as exc:
                 # The stream is the durable authority. A provider/configuration
@@ -201,7 +202,7 @@ class GoldRuntime:
                 closer()
         platform.step_calls += int(outcome["steps"])
         pin.reward_signals = list(outcome["reward_signals"])
-        pin.status = "completed"
+        pin.status = str(outcome.get("status") or "completed")
         pin.terminal = True
         pin.usage = dict(outcome["usage"])
         pin.scheduled_checkpoints = list(outcome.get("scheduled_checkpoints") or [])
@@ -212,17 +213,19 @@ class GoldRuntime:
         for frame in records:
             _put_frame_artifact(platform, pin, frame, fallback_digest=digest)
 
-    def _max_steps(self, platform: CompatPlatform) -> int:
+    def _max_steps(self, platform: CompatPlatform, pin: RolloutPin) -> int:
         override = os.environ.get(self.max_steps_env)
         if override:
-            return int(override)
+            target_limit = int(override)
+            return min(target_limit, pin.max_steps) if pin.max_steps is not None else target_limit
         pinned = platform.spec.max_episode_steps
         if pinned is None or pinned <= 0:
             raise ValueError(
                 "max_episode_steps must be pinned on the target spec; "
                 "do not inherit the engine's silent world default"
             )
-        return int(pinned)
+        target_limit = int(pinned)
+        return min(target_limit, pin.max_steps) if pin.max_steps is not None else target_limit
 
     def _world_for(self, platform: CompatPlatform, *, max_steps: int) -> GoldHttpWorld:
         ref = platform.spec.environment_ref
@@ -370,5 +373,4 @@ def _achievement_labels(observation: dict[str, Any]) -> list[str]:
 
     visit(observation)
     return sorted(labels)
-
 
