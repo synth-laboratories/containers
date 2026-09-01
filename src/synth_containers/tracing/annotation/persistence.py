@@ -109,6 +109,40 @@ def _read_sealed_json(path: Path, *, expected_digest: str | None = None) -> dict
     return payload
 
 
+def _verifier_result_summary(item: Any) -> dict[str, Any]:
+    """Bounded projection of a sealed verifier result for host scorecards."""
+
+    payload = item if isinstance(item, dict) else {}
+    criteria = payload.get("criterion_results") or payload.get("judgments") or ()
+    rows: list[dict[str, Any]] = []
+    for criterion in criteria:
+        if not isinstance(criterion, dict):
+            continue
+        rows.append(
+            {
+                "criterion_id": criterion.get("criterion_id"),
+                "score": criterion.get("score"),
+                "verdict": criterion.get("verdict"),
+                "passed": criterion.get("passed"),
+                "status": criterion.get("status"),
+                "rationale": str(criterion.get("rationale") or "")[:500],
+            }
+        )
+    return {
+        "verifier_result_id": payload.get("verifier_result_id"),
+        "content_digest": payload.get("content_digest"),
+        "verifier_id": payload.get("verifier_id"),
+        "rubric_id": payload.get("rubric_id"),
+        "rubric_digest": payload.get("rubric_digest"),
+        "score": payload.get("score"),
+        "passed": payload.get("passed"),
+        "verdict": payload.get("verdict"),
+        "verification_status": payload.get("verification_status"),
+        "pass_threshold": payload.get("pass_threshold"),
+        "criterion_results": rows,
+    }
+
+
 def _write_immutable(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
@@ -544,6 +578,7 @@ class AnnotationStore:
         rows: list[dict[str, Any]] = []
         for path in folder.glob("*.json"):
             payload = _read_sealed_json(path)
+            verifier_payloads = list(payload.get("verifier_results") or ())
             rows.append(
                 {
                     "bundle_id": payload.get("bundle_id"),
@@ -554,8 +589,9 @@ class AnnotationStore:
                         "supersedes_bundle_digest"
                     ),
                     "annotation_count": len(payload.get("annotations") or ()),
-                    "verifier_result_count": len(payload.get("verifier_results") or ()),
+                    "verifier_result_count": len(verifier_payloads),
                     "is_head": payload.get("content_digest") == head,
+                    "verifier_results": [_verifier_result_summary(item) for item in verifier_payloads],
                 }
             )
         rows.sort(key=lambda item: (str(item["created_at"]), str(item["bundle_digest"])))

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from synth_containers.platform import create_compat_app
@@ -52,6 +53,12 @@ def test_container_mount_annotates_sealed_bundles_and_serves_evidence(tmp_path: 
     assert job["job"]["state"] in {AnnotationJobState.SEALED.value, AnnotationJobState.ABSTAINED.value}, job["job"].get("error")
     bundles = client.get(f"/traces/{trace_id}/evidence-bundles").json()["bundles"]
     assert bundles and bundles[-1]["trace_digest"] == digest
+    head = client.get(f"/traces/{trace_id}/evidence-head").json()["head"]
+    assert head["bundle_digest"] == bundles[-1]["bundle_digest"]
+    assert "verifier_results" in head
+    assert isinstance(head["verifier_results"], list)
+    one = client.get(f"/traces/{trace_id}/evidence-bundles/{head['bundle_digest']}").json()["bundle"]
+    assert one["bundle_digest"] == head["bundle_digest"]
     # post-rollout stage: the watcher submits the configured annotator for every new seal
     run = mounted.watcher.poll_once()
     assert run is not None and run.enqueued + run.cache_hits == 1 and not run.refused
@@ -74,9 +81,30 @@ def test_install_from_env_is_gated_and_fail_soft(tmp_path: Path, monkeypatch) ->
     monkeypatch.setenv("SYNTH_ANNOTATION", "off")
     assert install_from_env(app, storage_root=tmp_path) is None
     monkeypatch.setenv("SYNTH_ANNOTATION", "on")
+    monkeypatch.delenv("SYNTH_ANNOTATION_DOMAINS", raising=False)
     monkeypatch.setenv("SYNTH_ANNOTATION_POST_ROLLOUT", f"{TOOL_CALL_INTEGRITY_ID},does.not.exist")
-    monkeypatch.setenv("SYNTH_ANNOTATION_DOMAINS", "nope.module:register,domains.craftax.annotations:register_craftax_annotators")
     mounted = install_from_env(app, storage_root=tmp_path)
     assert mounted is not None and [p.annotator_id for p in mounted.watcher.annotators] == [TOOL_CALL_INTEGRITY_ID]
     with TestClient(app) as client:  # startup/shutdown events run the scheduler and watcher
-        assert client.get("/annotation/status").json()["post_rollout"] == [TOOL_CALL_INTEGRITY_ID]
+        status = client.get("/annotation/status").json()
+        assert status["post_rollout"] == [TOOL_CALL_INTEGRITY_ID]
+        assert status["api"] == "synth.container.annotation-api.v1"
+        info = client.get("/info").json()
+        assert info["annotation_api"]["mounted"] is True
+        assert info["annotation_api"]["catalog"] == "/annotation/catalog"
+        assert info["annotation_api"]["rewrites_reward_signal"] is False
+        catalog = client.get("/annotation/catalog").json()
+        assert catalog["schema"] == "synth.container.annotation-api.v1"
+        assert "/annotation-jobs/{job_id}/stream" in {item["path"] for item in catalog["endpoints"]}
+        health = client.get("/health").json()
+        assert health["annotation"] == "mounted"
+
+
+def test_install_from_env_declared_registrar_fails_closed(tmp_path: Path, monkeypatch) -> None:
+    from synth_containers.tracing.annotation.container import RegistrarLoadError
+
+    app = create_compat_app("openenv_echo", storage_root=tmp_path)
+    monkeypatch.setenv("SYNTH_ANNOTATION", "on")
+    monkeypatch.setenv("SYNTH_ANNOTATION_DOMAINS", "nope.module:register")
+    with pytest.raises(RegistrarLoadError, match="nope.module:register"):
+        install_from_env(app, storage_root=tmp_path)

@@ -29,6 +29,7 @@ class AnnotatorPlan:
     repeats: int = 1
     model: str | None = None
     reasoning_effort: str | None = None
+    runner_kind: str | None = None
     rubric_id: str | None = None
     limits: AnnotationJobLimitsV1 | None = None
     scope_session_ids: tuple[str, ...] = ()
@@ -121,6 +122,7 @@ class AnnotationCampaign:
                                 mode=item.mode,
                                 model=item.model,
                                 reasoning_effort=item.reasoning_effort,
+                                runner_kind=item.runner_kind,
                                 rubric_id=item.rubric_id,
                                 repeat_index=repeat,
                                 limits=item.limits,
@@ -152,7 +154,7 @@ class AnnotationCampaign:
                 paid_new += 1
                 row["paid_new"] += 1
                 # One reservation per paid job: the host issues them from this list.
-                paid_jobs.append({"trace_id": request.source_trace_id, "trace_digest": request.source_trace_digest, "annotator_id": request.annotator_id, "repeat_index": request.repeat_index, "model": estimate.resolved_model, "reasoning_effort": estimate.resolved_reasoning_effort, "max_cost_usd": estimate.max_cost_usd, "max_total_tokens": estimate.max_total_tokens, "idempotency_key": estimate.idempotency_key})
+                paid_jobs.append({"trace_id": request.source_trace_id, "trace_digest": request.source_trace_digest, "annotator_id": request.annotator_id, "repeat_index": request.repeat_index, "model": estimate.resolved_model, "reasoning_effort": estimate.resolved_reasoning_effort, "runner_kind": estimate.runner_kind, "max_cost_usd": estimate.max_cost_usd, "max_total_tokens": estimate.max_total_tokens, "idempotency_key": estimate.idempotency_key})
                 if estimate.max_cost_usd is None:
                     notes.append(f"{item.annotator_id}: no max_cost_usd declared; the reservation cap will bound it")
                 else:

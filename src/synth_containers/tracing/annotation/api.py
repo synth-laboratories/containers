@@ -5,9 +5,9 @@ serves lightweight runtime rollout annotations.
 
 Writes are asynchronous: ``POST .../annotation-jobs`` enqueues and answers
 ``202 Accepted``; an ``AnnotationWorker`` runs the job; clients poll
-``GET /annotation-jobs/{job_id}``. Nothing on the request path executes an
-app-server task, and no authorization object is ever read from a body — only an
-opaque ``reservation_id`` the host broker issued.
+``GET /annotation-jobs/{job_id}`` or subscribe to ``.../stream``. Nothing on the
+request path executes an app-server task, and no authorization object is ever
+read from a body — only an opaque ``reservation_id`` the host broker issued.
 
 Mount with ``app.include_router(build_annotation_router(service))`` and start a
 worker (``create_annotation_app`` does both).
@@ -17,7 +17,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
+
+from synth_containers.event_log import SSE_HEADERS, iter_sse
 
 from .operations import AnnotationOperations
 from .service import AnnotationService, AnnotationServiceError
@@ -42,6 +45,10 @@ def build_annotation_router(service: AnnotationService, *, prefix: str = "", sch
         except AnnotationServiceError as error:
             status = 402 if error.code == "reservation_required" else 403 if error.code == "reservation_rejected" else 409 if error.code == "revision_conflict" else 400
             raise HTTPException(status_code=status, detail=error.as_error().to_dict()) from error
+
+    @router.get("/annotation/catalog")
+    async def annotation_catalog() -> dict[str, Any]:
+        return operations.catalog()
 
     @router.get("/annotation/operations")
     async def list_operations() -> dict[str, Any]:
@@ -77,6 +84,52 @@ def build_annotation_router(service: AnnotationService, *, prefix: str = "", sch
             raise HTTPException(status_code=404, detail={"code": "job_not_found", "job_id": job_id})
         return payload
 
+    def _events(job_id: str, after: int, limit: int) -> dict[str, Any]:
+        payload = operations.annotation_events(job_id=job_id, after=after, limit=limit)
+        if payload is None:
+            raise HTTPException(status_code=404, detail={"code": "job_not_found", "job_id": job_id})
+        return payload
+
+    @router.get("/annotation-jobs/{job_id}/events")
+    async def annotation_job_events(
+        job_id: str,
+        after: int = Query(default=0, ge=0),
+        limit: int = Query(default=1000, ge=1, le=10_000),
+    ) -> dict[str, Any]:
+        return _events(job_id, after, limit)
+
+    @router.get("/verification-jobs/{job_id}/events")
+    async def verification_job_events(
+        job_id: str,
+        after: int = Query(default=0, ge=0),
+        limit: int = Query(default=1000, ge=1, le=10_000),
+    ) -> dict[str, Any]:
+        return _events(job_id, after, limit)
+
+    async def _stream(job_id: str, request: Request) -> StreamingResponse:
+        job = service.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail={"code": "job_not_found", "job_id": job_id})
+        log = service.events.hydrate(job)
+        raw_last = request.headers.get("last-event-id", "0")
+        try:
+            after = int(raw_last)
+        except ValueError:
+            after = 0
+        return StreamingResponse(
+            iter_sse(log, request, after=after, extra={"job_id": job_id}),
+            media_type="text/event-stream",
+            headers=SSE_HEADERS,
+        )
+
+    @router.get("/annotation-jobs/{job_id}/stream")
+    async def annotation_job_stream(job_id: str, request: Request) -> StreamingResponse:
+        return await _stream(job_id, request)
+
+    @router.get("/verification-jobs/{job_id}/stream")
+    async def verification_job_stream(job_id: str, request: Request) -> StreamingResponse:
+        return await _stream(job_id, request)
+
     @router.post("/annotation-jobs/{job_id}/cancel")
     async def cancel_annotation_job(job_id: str) -> dict[str, Any]:
         return guard(operations.annotation_cancel, job_id=job_id)
@@ -84,6 +137,25 @@ def build_annotation_router(service: AnnotationService, *, prefix: str = "", sch
     @router.get("/traces/{trace_id}/evidence-bundles")
     async def evidence_bundles(trace_id: str) -> dict[str, Any]:
         return {"trace_id": trace_id, "bundles": list(service.evidence_bundles(trace_id))}
+
+    @router.get("/traces/{trace_id}/evidence-head")
+    async def evidence_head(trace_id: str) -> dict[str, Any]:
+        rows = list(service.evidence_bundles(trace_id))
+        head = next((row for row in rows if row.get("is_head")), rows[-1] if rows else None)
+        if head is None:
+            raise HTTPException(status_code=404, detail={"code": "evidence_head_missing", "trace_id": trace_id})
+        return {"trace_id": trace_id, "head": head}
+
+    @router.get("/traces/{trace_id}/evidence-bundles/{bundle_digest:path}")
+    async def evidence_bundle(trace_id: str, bundle_digest: str) -> dict[str, Any]:
+        rows = list(service.evidence_bundles(trace_id))
+        found = next((row for row in rows if row.get("bundle_digest") == bundle_digest), None)
+        if found is None:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "evidence_bundle_not_found", "trace_id": trace_id, "bundle_digest": bundle_digest},
+            )
+        return {"trace_id": trace_id, "bundle": found}
 
     @router.get("/traces/{trace_id}/annotations")
     async def list_annotations(

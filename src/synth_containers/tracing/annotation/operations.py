@@ -14,6 +14,7 @@ from synth_containers.serde import jsonable
 
 from .jobs import AnnotationJobMode, AnnotationJobRequestV1
 from .service import AnnotationService, AnnotationServiceError
+from .endpoints import annotation_api_catalog, annotation_stream_descriptor
 from ..validation.rehydrate import build
 
 
@@ -51,9 +52,11 @@ OPERATION_DESCRIPTORS: tuple[dict[str, Any], ...] = (
         "read_only": False,
         "paid": True,
         "description": (
-            "Enqueue one annotation job (accepted, not finished: poll annotation_get). Returns the existing "
-            "sealed job when the idempotency key matches (no paid compute). Paid annotators require a "
+            "Enqueue one annotation job (accepted, not finished: poll annotation_get or "
+            "subscribe to the job stream). Returns the existing sealed job when the "
+            "idempotency key matches (no paid compute). Paid annotators require a "
             "reservation_id issued by the host's paid-compute broker; it is claimed once and bound to this job. "
+            "Request must bear model, reasoning_effort, and runner_kind. "
             "Job, annotation, bundle, and execution-trace ids are immutable."
         ),
         "arguments": {"request": "AnnotationJobRequestV1", "reservation_id": "opaque broker reservation id (paid annotators only)", "session_id": "optional session binding"},
@@ -62,8 +65,18 @@ OPERATION_DESCRIPTORS: tuple[dict[str, Any], ...] = (
         "name": "annotation_get",
         "read_only": True,
         "paid": False,
-        "description": "Fetch a job with its state, typed error, receipts, usage, and sealed output ids.",
+        "description": "Fetch a job with its state, typed error, receipts, usage, sealed output ids, and stream URLs.",
         "arguments": {"job_id": "immutable job id"},
+    },
+    {
+        "name": "annotation_events",
+        "read_only": True,
+        "paid": False,
+        "description": (
+            "Poll the annotation job event log (sequence cursor). Events cover prepared → running → "
+            "tool → validating → sealed/abstained/failed/cancelled. Hidden chain-of-thought is never included."
+        ),
+        "arguments": {"job_id": "immutable job id", "after": "sequence cursor, default 0", "limit": "page size, default 1000"},
     },
     {
         "name": "annotation_cancel",
@@ -176,6 +189,12 @@ class AnnotationOperations:
         job = self.service.get(job_id)
         return self._job_payload(job) if job is not None else None
 
+    def annotation_events(self, *, job_id: str, after: int = 0, limit: int = 1000) -> dict[str, Any] | None:
+        job = self.service.get(job_id)
+        if job is None:
+            return None
+        return self.service.events.payload(job, after=int(after or 0), limit=int(limit or 1000))
+
     verification_get = annotation_get
 
     def annotation_cancel(self, *, job_id: str) -> dict[str, Any]:
@@ -227,9 +246,13 @@ class AnnotationOperations:
             "terminal": job.terminal,
             "accepted": not job.terminal,
             "poll": None if job.terminal else "annotation_get",
+            "stream": annotation_stream_descriptor(job.job_id),
             "receipts": [jsonable(item) for item in receipts],
             "cached": job.cached_from_job_id is not None or any(item.status == "cached" for item in receipts),
         }
+
+    def catalog(self) -> dict[str, Any]:
+        return annotation_api_catalog(operations=self.descriptors(), guidance=GUIDANCE)
 
 
 __all__ = ["GUIDANCE", "OPERATION_DESCRIPTORS", "AnnotationOperations"]

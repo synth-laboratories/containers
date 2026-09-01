@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import uuid
 from pathlib import Path
+import os
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
@@ -14,7 +14,7 @@ from ..nested import NestedError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
-from ..event_log import RolloutEventLog
+from ..event_log import SSE_HEADERS, RolloutEventLog, iter_sse
 from .http_requests import (
     RequestParseError,
     parse_combine_reward,
@@ -26,8 +26,9 @@ from .http_requests import (
     to_policy_config_dict,
     to_put_policy_dict,
 )
-from .state import CompatPlatform
-from .targets import TARGETS, TargetSpec
+from .state import CompatPlatform, _seed_from_task_instance_id
+from .reward import REWARD_STREAM_KINDS, reward_api_catalog
+from .targets import TARGETS, TargetSpec, advertised_reward_authority, advertised_reward_calculator
 
 
 def _raise_platform(result: dict[str, Any]) -> dict[str, Any]:
@@ -68,10 +69,35 @@ def create_compat_app(
     app.state.platform = platform
     app.state.spec = spec
 
+    def _runtime_identity() -> dict[str, Any]:
+        """Safe, non-secret identity used by orchestrators for adoption receipts."""
+        instance_id = (os.environ.get("SYNTH_CONTAINER_INSTANCE_ID") or os.environ.get("HOSTNAME") or "").strip()
+        image_digest = (os.environ.get("SYNTH_CONTAINER_IMAGE_DIGEST") or "").strip()
+        producer_revision = (os.environ.get("SYNTH_CONTAINER_PRODUCER_SOURCE_REVISION") or "").strip()
+        return {
+            "schema_version": "synth.container-runtime-identity.v1",
+            "instance_id": instance_id or None,
+            "image_digest": image_digest or None,
+            "producer_source_revision": producer_revision or None,
+        }
+
     def _sse_event(rollout_id: str, envelope: Any) -> dict[str, Any]:
         row = envelope.to_dict()
         row["rollout_id"] = rollout_id
         return row
+
+    def _annotation_surface() -> dict[str, Any] | None:
+        mounted = getattr(app.state, "annotation", None)
+        if mounted is None:
+            return None
+        return {
+            "schema": "synth.container.annotation-api.v1",
+            "mounted": True,
+            "catalog": "/annotation/catalog",
+            "status": "/annotation/status",
+            "rewrites_reward_signal": False,
+            "hidden_cot": False,
+        }
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
@@ -80,6 +106,7 @@ def create_compat_app(
             "target": spec.target_id,
             "runtime_family": spec.runtime_family.value,
             "environment_ref": spec.environment_ref,
+            "runtime_identity": _runtime_identity(),
         }
         if spec.health_probe is not None:
             extra = spec.health_probe()
@@ -87,6 +114,10 @@ def create_compat_app(
                 payload.update(extra)
             if str(payload.get("status") or "ok") != "ok":
                 return JSONResponse(status_code=503, content=payload)
+        surface = _annotation_surface()
+        if surface is not None:
+            payload["annotation"] = "mounted"
+            payload["annotation_api"] = surface
         return payload
 
     @app.get("/metadata")
@@ -97,7 +128,47 @@ def create_compat_app(
             extra = spec.metadata_extra(payload)
             if isinstance(extra, dict):
                 payload = extra
+        payload["runtime_identity"] = _runtime_identity()
+        surface = _annotation_surface()
+        if surface is not None:
+            payload["annotation_api"] = surface
         return payload
+
+    @app.get("/task_catalog")
+    async def task_catalog() -> dict[str, Any]:
+        return platform.task_catalog_payload()
+
+    @app.get("/task_info")
+    async def task_info() -> dict[str, Any]:
+        return platform.task_info_payload()
+
+    @app.post("/task_instances/materialize")
+    async def materialize_task_instances(request: Request) -> dict[str, Any]:
+        body = await request.json()
+        task_id = body.get("task_id")
+        seeds = body.get("seeds")
+        if not isinstance(task_id, str) or not task_id.strip():
+            raise HTTPException(status_code=422, detail="task_id_required")
+        if (
+            not isinstance(seeds, list)
+            or not seeds
+            or len(seeds) > 100
+            or any(isinstance(seed, bool) or not isinstance(seed, int) for seed in seeds)
+            or len(set(seeds)) != len(seeds)
+        ):
+            raise HTTPException(status_code=422, detail="seeds_must_be_1_to_100_distinct_integers")
+        try:
+            instances = platform.materialize_task_instances(task_id.strip(), seeds)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {
+            "schema_version": "synth.container.task-instances.v1",
+            "instances": instances,
+        }
+
+    @app.get("/policy")
+    async def get_policy() -> dict[str, Any]:
+        return platform.policy_state_payload()
 
     @app.post("/rollouts/prepare")
     async def prepare(request: Request) -> dict[str, Any]:
@@ -129,19 +200,81 @@ def create_compat_app(
                 raise HTTPException(
                     status_code=409, detail=f"rollout_prepare_identity_conflict:{rollout_id}"
                 )
+            pin = platform.pins.get(rollout_id)
+            if pin is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"rollout_prepare_identity_missing:{rollout_id}",
+                )
+            if pin.seed is None:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"rollout_prepare_seed_missing:{rollout_id}",
+                )
+            requested_seed = (
+                int(pin.seed)
+                if req.task_instance_id is None
+                else _seed_from_task_instance_id(req.task_instance_id)
+            )
+            requested_task = req.task_instance_id or f"seed:{requested_seed}"
+            requested_revision = req.policy_revision_id or pin.policy_revision_id
+            if (
+                pin.seed != requested_seed
+                or pin.task_instance_id != requested_task
+                or pin.policy_revision_id != requested_revision
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": "rollout_prepare_identity_conflict",
+                        "rollout_id": rollout_id,
+                        "prepared": {
+                            "seed": pin.seed,
+                            "task_instance_id": pin.task_instance_id,
+                            "policy_revision_id": pin.policy_revision_id,
+                        },
+                        "requested": {
+                            "seed": requested_seed,
+                            "task_instance_id": requested_task,
+                            "policy_revision_id": requested_revision,
+                        },
+                    },
+                )
             return {
                 "rollout_id": rollout_id,
+                "seed": pin.seed,
+                "task_instance_id": pin.task_instance_id,
+                "policy_ref": pin.policy_ref,
+                "policy_revision_id": pin.policy_revision_id,
                 "stream": platform.stream_descriptor_for(rollout_id),
                 "replayed": True,
             }
         try:
-            descriptor = platform.prepare(rollout_id, req.telemetry.transport, retention)
+            descriptor = platform.prepare(
+                rollout_id,
+                req.telemetry.transport,
+                retention,
+                request=req,
+            )
         except RuntimeError as exc:
             detail = str(exc)
             if detail.startswith(("event_log_sealed:", "event_log_unrecoverable:")):
                 raise HTTPException(status_code=409, detail=detail) from exc
             raise
-        return {"rollout_id": rollout_id, "stream": descriptor}
+        pin = platform.pins.get(rollout_id)
+        if pin is None:
+            raise HTTPException(
+                status_code=500,
+                detail=f"rollout_prepare_pin_missing:{rollout_id}",
+            )
+        return {
+            "rollout_id": rollout_id,
+            "seed": pin.seed,
+            "task_instance_id": pin.task_instance_id,
+            "policy_ref": pin.policy_ref,
+            "policy_revision_id": pin.policy_revision_id,
+            "stream": descriptor,
+        }
 
     @app.post("/rollouts")
     async def start(request: Request) -> Any:
@@ -205,34 +338,10 @@ def create_compat_app(
         except ValueError:
             # Invalid Last-Event-ID is a cursor reset, not a failed request: resume from sequence 0.
             after = 0
-
-        async def generate():
-            nonlocal after
-            while not await request.is_disconnected():
-                emitted = False
-                for envelope in log.after(after):
-                    sse_id = envelope.sequence if envelope.sequence is not None else 0
-                    if envelope.sequence is not None:
-                        after = envelope.sequence
-                    event = _sse_event(rollout_id, envelope)
-                    yield (
-                        f"id: {sse_id}\n"
-                        f"event: {event['kind']}\n"
-                        f"data: {json.dumps(event, separators=(',', ':'))}\n\n"
-                    )
-                    emitted = True
-                if log.closed:
-                    break
-                # Heartbeats must not end the stream. Luna plan calls are idle
-                # for seconds; cutting SSE after 1s dropped span.policy.data.
-                if not emitted:
-                    yield ": heartbeat\n\n"
-                await asyncio.sleep(0.05)
-
         return StreamingResponse(
-            generate(),
+            iter_sse(log, request, after=after, extra={"rollout_id": rollout_id}),
             media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            headers=SSE_HEADERS,
         )
 
     @app.websocket("/rollouts/{rollout_id}/ws")
@@ -259,6 +368,15 @@ def create_compat_app(
         except WebSocketDisconnect:
             return
 
+    @app.get("/reward/catalog")
+    async def reward_catalog() -> dict[str, Any]:
+        return reward_api_catalog(
+            calculator=advertised_reward_calculator(spec),
+            authority=advertised_reward_authority(spec),
+            aggregation=str(spec.reward_kind),
+            live=bool(spec.live_reward),
+        )
+
     @app.get("/reward")
     async def get_reward(rollout_id: str = Query(...)) -> dict[str, Any]:
         return platform.get_reward(rollout_id)
@@ -266,6 +384,37 @@ def create_compat_app(
     @app.get("/rollouts/{rollout_id}/reward")
     async def get_reward_path(rollout_id: str) -> dict[str, Any]:
         return platform.get_reward(rollout_id)
+
+    @app.get("/rollouts/{rollout_id}/reward/events")
+    async def reward_events(
+        rollout_id: str,
+        after: int = Query(default=0, ge=0),
+        limit: int = Query(default=1000, ge=1, le=10_000),
+    ) -> Any:
+        result = platform.events_payload(rollout_id, after, limit, kinds=tuple(REWARD_STREAM_KINDS))
+        return _platform_response(result, default_status=404)
+
+    @app.get("/rollouts/{rollout_id}/reward/stream")
+    async def reward_sse(rollout_id: str, request: Request) -> StreamingResponse:
+        log = platform.logs.get(rollout_id)
+        if log is None or not platform.transport_is_bound(rollout_id, "sse"):
+            raise HTTPException(status_code=404, detail=f"telemetry_not_enabled:{rollout_id}")
+        raw_last = request.headers.get("last-event-id", "0")
+        try:
+            after = int(raw_last)
+        except ValueError:
+            after = 0
+        return StreamingResponse(
+            iter_sse(
+                log,
+                request,
+                after=after,
+                extra={"rollout_id": rollout_id},
+                kinds=REWARD_STREAM_KINDS,
+            ),
+            media_type="text/event-stream",
+            headers=SSE_HEADERS,
+        )
 
     @app.post("/reward")
     async def post_reward(request: Request) -> Any:
@@ -375,6 +524,17 @@ def create_compat_app(
         if seal is None:
             raise HTTPException(status_code=404, detail=f"trace_not_sealed:{rollout_id}")
         return seal
+
+    @app.get("/rollouts/{rollout_id}/trace/bundle")
+    async def get_trace_bundle(rollout_id: str) -> FileResponse:
+        archive = platform.trace_bundle_archive(rollout_id)
+        if archive is None:
+            raise HTTPException(status_code=404, detail=f"trace_bundle_not_sealed:{rollout_id}")
+        return FileResponse(
+            archive,
+            media_type="application/zip",
+            filename=f"{rollout_id}.trace-v5.zip",
+        )
 
     @app.post("/rollouts/{rollout_id}/drop_session")
     async def drop_session(rollout_id: str) -> Any:

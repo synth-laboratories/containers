@@ -12,7 +12,11 @@ Environment (read by ``install_from_env``)::
     SYNTH_ANNOTATION=off                      disable entirely (default: on)
     SYNTH_ANNOTATION_POST_ROLLOUT=id1,id2     annotators to run after every seal (default: none)
     SYNTH_ANNOTATION_MAX_CONCURRENT=4         scheduler global cap
-    SYNTH_ANNOTATION_DOMAINS=mod:fn,mod:fn    extra ``fn(registry)`` registrars to import if available
+    SYNTH_ANNOTATION_DOMAINS=mod:fn,mod:fn    extra ``fn(registry)`` registrars; missing imports fail closed
+    SYNTH_ANNOTATION_CODEX=on                mount Codex app-server paid runner (needs broker)
+    SYNTH_ANNOTATION_JESTERKY=on             mount jesterky swarm paid runner (needs broker)
+    SYNTH_ANNOTATION_JESTERKY_COMMAND=jesterky
+    SYNTH_ANNOTATION_JESTERKY_ACTOR=codex     jesterky --actor (codex|fake)
     SYNTH_ANNOTATION_PROMOTE=mod:fn           ``fn(document, sealed_digest) -> document`` promotion (e.g. Craftax lanes)
     SYNTH_ANNOTATION_BROKER_SECRET=...        enables host-signed reservations (SignedReservationBroker)
     SYNTH_ANNOTATION_BROKER_URL=...           where reconciliations are pushed (else pulled from /annotation/reservations)
@@ -44,6 +48,7 @@ from .broker import PaidComputeBroker
 from .builtin import register_builtin_annotators
 from .campaign import AnnotationCampaign, AnnotatorPlan, CampaignPlan, CampaignRun
 from .definitions import DefinitionRegistry
+from .endpoints import ANNOTATION_API_SCHEMA, ANNOTATION_STREAM_SCHEMA
 from .persistence import AnnotationStore
 from .pricing import PRICE_TABLE_ENV, PriceTable, PriceTableError
 from .scheduler import AnnotationScheduler, ThroughputLimits
@@ -195,6 +200,8 @@ class ContainerAnnotation:
     def status(self) -> dict[str, Any]:
         return {
             "storage_root": str(self.storage_root),
+            "api": ANNOTATION_API_SCHEMA,
+            "stream_schema": ANNOTATION_STREAM_SCHEMA,
             "annotators": [entry.annotator_id for entry in self.registry.list()],
             "post_rollout": [plan.annotator_id for plan in self.watcher.annotators],
             "post_rollout_runs": len(self.watcher.runs),
@@ -225,19 +232,41 @@ class ContainerAnnotation:
         }
 
 
+class RegistrarLoadError(RuntimeError):
+    """A declared ``module:function`` registrar could not be imported or called."""
+
+
 def default_registry(extra_registrars: Iterable[str] = ()) -> DefinitionRegistry:
+    """Load builtins plus every declared registrar.
+
+    Declared registrars are fail-closed: a missing ``module:function`` is an
+    image-build / boot error, not a silent empty catalog.
+    """
+
     registry = DefinitionRegistry()
     register_builtin_annotators(registry)
     for spec in extra_registrars:
         module_name, _, function_name = spec.partition(":")
         if not module_name or not function_name:
-            continue
+            raise RegistrarLoadError(f"annotation registrar spec must be module:function, got {spec!r}")
         try:
             module = importlib.import_module(module_name)
             getattr(module, function_name)(registry)
-        except Exception as error:  # noqa: BLE001 - optional domain packs must never block an image
-            log.warning("annotation: registrar %s unavailable: %s", spec, error)
+        except Exception as error:  # noqa: BLE001 - surface the declared pack, never skip it
+            raise RegistrarLoadError(f"declared registrar {spec} cannot import: {error}") from error
     return registry
+
+
+def check_declared_registrars(specs: Iterable[str] | None = None) -> DefinitionRegistry:
+    """Image-build hook: import every ``SYNTH_ANNOTATION_DOMAINS`` registrar or exit.
+
+    Empty / unset domains is a no-op so generic images still bake.
+    """
+
+    declared = list(specs) if specs is not None else [
+        item.strip() for item in os.environ.get("SYNTH_ANNOTATION_DOMAINS", "").split(",") if item.strip()
+    ]
+    return default_registry(declared)
 
 
 def load_promote(spec: str) -> Promote | None:
@@ -325,7 +354,12 @@ def mount_annotation(app: Any, *, storage_root: Path, registry: DefinitionRegist
 
 
 def install_from_env(app: Any, *, storage_root: Path | None) -> ContainerAnnotation | None:
-    """Image entrypoint hook. Fail-soft: annotation never prevents a container from serving."""
+    """Image entrypoint hook.
+
+    Annotation stays optional (``SYNTH_ANNOTATION=off``). A *declared* domain
+    registrar that cannot import fails closed so the image does not boot with an
+    empty catalog. Other mount errors still fail-soft so an eval image can serve.
+    """
 
     if os.environ.get("SYNTH_ANNOTATION", "on").strip().lower() in {"off", "0", "false", "no"}:
         return None
@@ -350,16 +384,40 @@ def install_from_env(app: Any, *, storage_root: Path | None) -> ContainerAnnotat
         # No table is safer than a wrong one: unpriced models fail closed at submit.
         log.warning("annotation: price table ignored: %s", error)
     runners: dict[str, AnnotatorRunner] | None = None
-    if secret and os.environ.get("SYNTH_ANNOTATION_CODEX", "").strip().lower() in {"on", "1", "true", "yes"}:
+    if secret:
         from .codex_app_server import CodexAppServerRunner
+        from .jesterky_runner import JesterkyRunner
 
         price = os.environ.get("SYNTH_ANNOTATION_USD_PER_MILLION_TOKENS")
-        runners = {"codex_app_server": CodexAppServerRunner(default_effort=os.environ.get("SYNTH_ANNOTATION_DEFAULT_EFFORT") or "medium", usd_per_million_tokens=float(price) if price else None, proxy_enforces_reservation=os.environ.get("SYNTH_ANNOTATION_PROXY_ENFORCES", "").lower() in {"on", "1", "true", "yes"}, price_table=price_table)}
+        usd = float(price) if price else None
+        proxy = os.environ.get("SYNTH_ANNOTATION_PROXY_ENFORCES", "").lower() in {"on", "1", "true", "yes"}
+        runners = {}
+        if os.environ.get("SYNTH_ANNOTATION_CODEX", "").strip().lower() in {"on", "1", "true", "yes"}:
+            runners["codex_app_server"] = CodexAppServerRunner(default_effort=os.environ.get("SYNTH_ANNOTATION_DEFAULT_EFFORT") or "medium", usd_per_million_tokens=usd, proxy_enforces_reservation=proxy, price_table=price_table)
+        if os.environ.get("SYNTH_ANNOTATION_JESTERKY", "").strip().lower() in {"on", "1", "true", "yes"}:
+            command = tuple(item for item in os.environ.get("SYNTH_ANNOTATION_JESTERKY_COMMAND", "jesterky").split() if item)
+            runners["jesterky"] = JesterkyRunner(command=command or ("jesterky",), actor=os.environ.get("SYNTH_ANNOTATION_JESTERKY_ACTOR") or "codex", default_effort=os.environ.get("SYNTH_ANNOTATION_DEFAULT_EFFORT") or "medium", usd_per_million_tokens=usd, proxy_enforces_reservation=proxy, price_table=price_table)
+        if not runners:
+            runners = None
     try:
-        return mount_annotation(app, storage_root=root, registry=default_registry(registrars), runners=runners, broker=broker, limits=ThroughputLimits(max_concurrent_total=max(1, limit), poll_seconds=0.5), post_rollout=post_rollout, promote=promote, price_table=price_table)
+        registry = default_registry(registrars)
+    except RegistrarLoadError:
+        raise
+    try:
+        return mount_annotation(app, storage_root=root, registry=registry, runners=runners, broker=broker, limits=ThroughputLimits(max_concurrent_total=max(1, limit), poll_seconds=0.5), post_rollout=post_rollout, promote=promote, price_table=price_table)
     except Exception as error:  # noqa: BLE001
         log.warning("annotation: not mounted: %s", error)
         return None
 
 
-__all__ = ["ContainerAnnotation", "ContainerTraceSource", "PostRolloutWatcher", "default_registry", "install_from_env", "load_promote", "mount_annotation"]
+__all__ = [
+    "ContainerAnnotation",
+    "ContainerTraceSource",
+    "PostRolloutWatcher",
+    "RegistrarLoadError",
+    "check_declared_registrars",
+    "default_registry",
+    "install_from_env",
+    "load_promote",
+    "mount_annotation",
+]

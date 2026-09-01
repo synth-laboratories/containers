@@ -24,9 +24,11 @@ from .definitions import AnnotatorProgramV1, DefinitionRegistry, ProgramContext,
 from .evidence_check import validate_appended_evidence
 from .execution_trace import ExecutionCapture, build_execution_trace
 from .fixtures import build_craftax_compaction_trace, build_craftax_smoke_trace
+from .jesterky_runner import JesterkyRunner, extract_proposal, swarm_spec
 from .ledger import PaidLedger, PaidLedgerEntryV1
 from .model_api import CompletionResult, ModelApiRunner, render_trace_digest
 from .scheduler import AnnotationScheduler, SchedulerStats, ThroughputLimits
+from .streams import AnnotationEventStreamer
 from .sources import bundle_trace_loader, bundle_trace_refs, chain_loaders
 from .jobs import (
     AnnotationEstimateV1,
@@ -40,6 +42,14 @@ from .jobs import (
     AnnotationJobV1,
     idempotency_key,
 )
+from .endpoints import (
+    ANNOTATION_API_SCHEMA,
+    ANNOTATION_ENDPOINTS,
+    ANNOTATION_EVENT_KINDS,
+    ANNOTATION_STREAM_SCHEMA,
+    annotation_api_catalog,
+    annotation_stream_descriptor,
+)
 from .operations import AnnotationOperations, OPERATION_DESCRIPTORS
 from .persistence import AnnotationStore, RevisionConflict, StoreCorruption
 from .pricing import PRICE_TABLE_ENV, ModelPrice, PriceTable, PriceTableError
@@ -51,6 +61,10 @@ from .validation import ProposalValidationResult, ProposalValidator
 from .worker import AnnotationWorker
 
 __all__ = [
+    "ANNOTATION_API_SCHEMA",
+    "ANNOTATION_ENDPOINTS",
+    "ANNOTATION_EVENT_KINDS",
+    "ANNOTATION_STREAM_SCHEMA",
     "OPERATION_DESCRIPTORS",
     "PRICE_TABLE_ENV",
     "PROPOSAL_JSON_SCHEMA",
@@ -68,6 +82,7 @@ __all__ = [
     "AnnotationJobUsageV1",
     "AnnotationJobV1",
     "AnnotationCampaign",
+    "AnnotationEventStreamer",
     "AnnotationScheduler",
     "AnnotatorPlan",
     "CampaignEstimate",
@@ -95,6 +110,7 @@ __all__ = [
     "PaidLedgerEntryV1",
     "DeterministicRunner",
     "ExecutionCapture",
+    "JesterkyRunner",
     "LocalReservationBroker",
     "PaidComputeBroker",
     "PaidComputeReservationV1",
@@ -117,6 +133,8 @@ __all__ = [
     "TraceInspectionTools",
     "adjudication_annotation",
     "agreement",
+    "annotation_api_catalog",
+    "annotation_stream_descriptor",
     "build_craftax_compaction_trace",
     "bundle_trace_loader",
     "bundle_trace_refs",
@@ -126,10 +144,12 @@ __all__ = [
     "check_proposal_shape",
     "consensus_annotation",
     "empty_proposal",
+    "extract_proposal",
     "idempotency_key",
     "plan_from_refs",
     "render_trace_digest",
     "register_builtin_annotators",
+    "swarm_spec",
     "tool_contract_digest",
     "usd_to_micros",
     "validate_appended_evidence",

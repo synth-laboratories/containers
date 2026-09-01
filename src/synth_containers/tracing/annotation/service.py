@@ -55,6 +55,7 @@ from .jobs import (
 )
 from .persistence import AnnotationStore, RevisionConflict, StoreCorruption
 from .receipts import job_receipt
+from .streams import AnnotationEventStreamer
 from .tools import TraceInspectionTools, tool_contract_digest
 from .trace_index import SealedTraceCache, SealedTraceIndex
 from .validation import ProposalValidator, producer_for
@@ -197,6 +198,7 @@ class AnnotationService:
         # digest. Sealed traces are immutable, so nothing here ever goes stale;
         # the LRU only bounds memory.
         self.trace_index = SealedTraceCache(max_traces=trace_cache_size)
+        self.events = AnnotationEventStreamer(store)
 
     def index_for(self, document: TraceDocumentV5) -> SealedTraceIndex:
         return self.trace_index.get(document)
@@ -245,6 +247,7 @@ class AnnotationService:
         mode: AnnotationJobMode | str = AnnotationJobMode.ANNOTATE,
         model: str | None = None,
         reasoning_effort: str | None = None,
+        runner_kind: str | None = None,
         rubric_id: str | None = None,
         repeat_index: int = 0,
         parent_job_id: str | None = None,
@@ -261,6 +264,14 @@ class AnnotationService:
 
         entry = self._entry(annotator_id)
         rubric = self._rubric_for(entry, rubric_id)
+        resolved_limits = limits or AnnotationJobLimitsV1()
+        declared_tools = entry.program.parameters.get("max_tool_calls")
+        if (
+            limits is None
+            and isinstance(declared_tools, int)
+            and declared_tools > resolved_limits.max_tool_calls
+        ):
+            resolved_limits = replace(resolved_limits, max_tool_calls=declared_tools)
         request = AnnotationJobRequestV1(
             source_trace_id=document.trace_id,
             source_trace_digest=document.content_digest,
@@ -268,14 +279,15 @@ class AnnotationService:
             annotator_digest=entry.definition.content_digest,
             model=model if model is not None else entry.definition.model,
             reasoning_effort=reasoning_effort,
-            mode=AnnotationJobMode(str(mode)),
+            runner_kind=runner_kind,
+            mode=_inferred_mode(entry, mode),
             rubric_id=rubric.rubric_id if rubric else None,
             rubric_digest=rubric.content_digest if rubric else None,
             repeat_index=repeat_index,
             parent_job_id=parent_job_id,
             source_annotation_ids=tuple(source_annotation_ids),
             target_selector_ids=tuple(f"session:{item}" for item in scope_session_ids),
-            limits=limits or AnnotationJobLimitsV1(),
+            limits=resolved_limits,
             runner_version=RUNNER_VERSION,
             metadata=dict(metadata or {}),
         )
@@ -301,17 +313,43 @@ class AnnotationService:
             raise AnnotationServiceError(AnnotationJobErrorCode.RUBRIC_REQUIRED, f"unknown rubric {rubric_id}")
         return rubric
 
+    def _resolved_runner_kind(self, request: AnnotationJobRequestV1, entry: RegisteredAnnotator) -> str:
+        """Pin the runner on the request. Agentic programs may switch Codex / model-api / jesterky."""
+
+        default = str(entry.program.runner_kind)
+        requested = str(request.runner_kind) if request.runner_kind else default
+        if default == RunnerKind.DETERMINISTIC and requested != default:
+            raise AnnotationServiceError(
+                AnnotationJobErrorCode.RUNNER_UNAVAILABLE,
+                f"annotator {entry.annotator_id} is deterministic; cannot run as {requested}",
+            )
+        if requested == RunnerKind.DETERMINISTIC and default != RunnerKind.DETERMINISTIC:
+            raise AnnotationServiceError(
+                AnnotationJobErrorCode.RUNNER_UNAVAILABLE,
+                f"annotator {entry.annotator_id} is paid; cannot run as deterministic",
+            )
+        allowed = {
+            RunnerKind.DETERMINISTIC.value,
+            RunnerKind.MODEL_API.value,
+            RunnerKind.CODEX_APP_SERVER.value,
+            RunnerKind.JESTERKY.value,
+        }
+        if requested not in allowed:
+            raise AnnotationServiceError(AnnotationJobErrorCode.RUNNER_UNAVAILABLE, f"unknown runner_kind {requested}")
+        return requested
+
     def _resolve(self, request: AnnotationJobRequestV1, entry: RegisteredAnnotator) -> AnnotationJobRequestV1:
-        """Pin model and effort *before* anything is keyed or stored.
+        """Pin model, effort, and runner_kind *before* anything is keyed or stored.
 
         A request that leaves them blank inherits the definition/program/runner
         defaults now, so a later change of default can never serve this job's
-        cached output to a different model.
+        cached output to a different model or runner.
         """
 
-        runner = self.runners.get(str(entry.program.runner_kind))
-        if str(entry.program.runner_kind) == RunnerKind.DETERMINISTIC:
-            return replace(request, model=None, reasoning_effort=None)
+        runner_kind = self._resolved_runner_kind(request, entry)
+        runner = self.runners.get(runner_kind)
+        if runner_kind == RunnerKind.DETERMINISTIC:
+            return replace(request, model=None, reasoning_effort=None, runner_kind=runner_kind)
         model = request.model or entry.definition.model
         effort = request.reasoning_effort or entry.program.parameters.get("default_effort")
         if runner is not None:
@@ -319,12 +357,12 @@ class AnnotationService:
             effort = runner.resolve_effort(request.reasoning_effort, entry.program.parameters.get("default_effort")) if hasattr(runner, "resolve_effort") else effort
         if not model:
             raise AnnotationServiceError(AnnotationJobErrorCode.RUNNER_UNAVAILABLE, f"annotator {entry.annotator_id} has no model: pass one or configure a runner default")
-        return replace(request, model=model, reasoning_effort=effort)
+        return replace(request, model=model, reasoning_effort=effort, runner_kind=runner_kind)
 
     def _key(self, request: AnnotationJobRequestV1, entry: RegisteredAnnotator) -> tuple[str, str, str]:
         tool_names = entry.program.tool_names or None
         contract_digest = tool_contract_digest(tool_names)
-        runner = self.runners.get(str(entry.program.runner_kind))
+        runner = self.runners.get(str(request.runner_kind or entry.program.runner_kind))
         key = idempotency_key(
             request,
             program_digest=entry.program.content_digest,
@@ -344,9 +382,17 @@ class AnnotationService:
         if cached is not None:
             notes.append("identical sealed request exists; no new provider call will be made")
         if entry.paid and cached is None:
-            notes.append("starts one paid Codex app-server task; needs a broker reservation id bound to this trace/annotator/model")
+            kind = str(request.runner_kind)
+            if kind == RunnerKind.JESTERKY:
+                notes.append("starts one paid jesterky swarm; needs a broker reservation id bound to this trace/annotator/model")
+            elif kind == RunnerKind.MODEL_API:
+                notes.append("starts one paid model-api completion; needs a broker reservation id bound to this trace/annotator/model")
+            else:
+                notes.append("starts one paid Codex app-server task; needs a broker reservation id bound to this trace/annotator/model")
             if request.limits.max_total_tokens is None:
                 notes.append("paid jobs must declare max_total_tokens; the runner enforces cost as a token ceiling")
+            if kind not in self.runners:
+                notes.append(f"runner {kind} is not mounted on this container")
         if str(request.mode) == AnnotationJobMode.VERIFY and self._rubric_for(entry, request.rubric_id) is None:
             notes.append("verification requires a rubric")
         return AnnotationEstimateV1(
@@ -354,7 +400,7 @@ class AnnotationService:
             cached=cached is not None,
             cached_job_id=cached.job_id if cached else None,
             paid=entry.paid and cached is None,
-            runner_kind=str(entry.program.runner_kind),
+            runner_kind=str(request.runner_kind or entry.program.runner_kind),
             model=request.model,
             reasoning_effort=request.reasoning_effort,
             max_tool_calls=request.limits.max_tool_calls,
@@ -436,7 +482,7 @@ class AnnotationService:
                         "paid jobs must be bound to a session_id",
                         {"reason": "session_required"},
                     )
-                runner = self.runners.get(str(entry.program.runner_kind))
+                runner = self.runners.get(str(request.runner_kind or entry.program.runner_kind))
                 enforcement = cost_enforcement_for(runner, request.model)
                 if enforcement is None:
                     raise AnnotationServiceError(
@@ -468,6 +514,7 @@ class AnnotationService:
                 job.job_id,
                 job_receipt(job, operation="annotation.prepare", status="prepared", started_at=job.created_at, new_state=str(job.state)),
             )
+            self.events.prepared(job)
             return job
 
     def _claim_and_prepare(self, job: AnnotationJobV1, request: AnnotationJobRequestV1, entry: RegisteredAnnotator, *, reservation_id: str, session_id: str | None) -> AnnotationJobV1:
@@ -661,6 +708,7 @@ class AnnotationService:
             self.store.save_job(job)
         started = utc_now()
         clock = time.monotonic()
+        self.events.running(job)
         self.store.save_receipt(
             job.job_id,
             job_receipt(job, operation="annotation.start", status="running", started_at=started, previous_state="prepared", new_state="running"),
@@ -671,11 +719,11 @@ class AnnotationService:
             rubric = self._rubric_for(entry, job.request.rubric_id, job.request.rubric_digest)
             if entry.requires_rubric and rubric is None:
                 raise AnnotationServiceError(AnnotationJobErrorCode.RUBRIC_REQUIRED, "annotator requires a rubric")
-            runner = self.runners.get(str(entry.program.runner_kind))
+            runner = self.runners.get(str(job.request.runner_kind or entry.program.runner_kind))
             if runner is None:
                 raise AnnotationServiceError(
                     AnnotationJobErrorCode.RUNNER_UNAVAILABLE,
-                    f"no runner registered for {entry.program.runner_kind}",
+                    f"no runner registered for {job.request.runner_kind or entry.program.runner_kind}",
                 )
         except AnnotationServiceError as error:
             return self._fail(job, error.as_error())
@@ -693,7 +741,13 @@ class AnnotationService:
 
         projections = self.projections(document.trace_id, document.content_digest) if self.projections else ()
         tool_names = entry.program.tool_names or None
-        tools = TraceInspectionTools(document, limits=job.request.limits, tool_names=tool_names, projections=projections)
+        tools = TraceInspectionTools(
+            document,
+            limits=job.request.limits,
+            tool_names=tool_names,
+            projections=projections,
+            on_call=lambda record, current=job: self.events.tool(current, record),
+        )
         manifest = build_workspace_manifest(
             job_id=job.job_id,
             request=job.request,
@@ -784,6 +838,7 @@ class AnnotationService:
             execution_trace_digest=execution_trace.content_digest if execution_trace else None,
         )
         self.store.save_job(job)
+        self.events.validating(job)
         producer = outcome.producer or producer_for(
             entry.definition,
             kind=ProducerKind.AGENTIC if agentic else ProducerKind.DETERMINISTIC,
@@ -856,6 +911,9 @@ class AnnotationService:
         self.store.save_receipt(job.job_id, receipt)
         self._mark_terminal(terminal)
         self.store.save_job(terminal)
+        for annotation in result.annotations:
+            self.events.finding(terminal, annotation)
+        self.events.terminal(terminal)
         self._reconcile(terminal)
         return terminal
 
@@ -1006,6 +1064,7 @@ class AnnotationService:
         next_job = current.transition(state, receipt_ids=tuple(current.receipt_ids) + (receipt.receipt_id,), **changes)
         self._mark_terminal(next_job)
         self.store.save_job(next_job)
+        self.events.terminal(next_job)
         self._reconcile(next_job)
         return next_job
 
@@ -1176,6 +1235,20 @@ class AnnotationService:
                 )
             self.store.put_evidence(candidate, expected_prior_digest=head.content_digest, job_id=None)
         return fresh
+
+
+def _inferred_mode(entry: RegisteredAnnotator, requested: AnnotationJobMode | str) -> AnnotationJobMode:
+    """Honor an explicit mode; otherwise take ``metadata.mode`` or ``requires_rubric``."""
+
+    mode = AnnotationJobMode(str(requested))
+    if mode != AnnotationJobMode.ANNOTATE:
+        return mode
+    declared = str((entry.definition.metadata or {}).get("mode") or "").strip().lower()
+    if declared == "verify" or entry.requires_rubric:
+        return AnnotationJobMode.VERIFY
+    if declared == "adjudicate":
+        return AnnotationJobMode.ADJUDICATE
+    return mode
 
 
 def _placeholder_job(annotation: AnnotationV1, trace_id: str) -> AnnotationJobV1:

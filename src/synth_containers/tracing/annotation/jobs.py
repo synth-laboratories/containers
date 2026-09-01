@@ -137,6 +137,7 @@ class AnnotationJobRequestV1(JsonDataclassMixin):
     annotator_digest: str
     model: str | None = None
     reasoning_effort: str | None = None
+    runner_kind: str | None = None
     mode: AnnotationJobMode | str = AnnotationJobMode.ANNOTATE
     rubric_id: str | None = None
     rubric_digest: str | None = None
@@ -276,6 +277,7 @@ def idempotency_key(
         "program_digest": program_digest,
         "model": request.model,
         "reasoning_effort": request.reasoning_effort,
+        "runner_kind": request.runner_kind,
         "mode": str(request.mode),
         "tool_contract_digest": tool_contract_digest,
         "allowed_projection_digests": sorted(request.allowed_projection_digests),

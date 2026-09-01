@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -10,7 +11,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, AsyncIterator, Iterable
 
 from .tracing.capture.redaction import assert_no_secrets
 
@@ -307,7 +308,102 @@ def stream_descriptor(
             "websocket": {"url": ws_url} if bound_transport == "websocket" else None,
         },
         "cursor": {"kind": "sequence", "producer_kind": None},
-        "reward": {"url": f"/rollouts/{rollout_id}/reward"},
+        "reward": {
+            "url": f"/rollouts/{rollout_id}/reward",
+            "events": f"/rollouts/{rollout_id}/reward/events",
+            "stream": f"/rollouts/{rollout_id}/reward/stream",
+        },
         "auth": {"mode": "none"},
         "retention": retention,
     }
+
+
+SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+
+
+def format_sse(envelope: LogEnvelope, extra: dict[str, Any] | None = None) -> str:
+    """One SSE record. ``id`` is the semantic sequence, or 0 for control records."""
+
+    row = envelope.to_dict()
+    if extra:
+        row.update(extra)
+    sse_id = envelope.sequence if envelope.sequence is not None else 0
+    return (
+        f"id: {sse_id}\n"
+        f"event: {row['kind']}\n"
+        f"data: {json.dumps(row, separators=(',', ':'))}\n\n"
+    )
+
+
+def poll_payload(
+    log: RolloutEventLog,
+    *,
+    after: int,
+    limit: int = 1000,
+    kinds: Iterable[str] | None = None,
+    subject_id_field: str = "rollout_id",
+    subject_id: str | None = None,
+) -> dict[str, Any]:
+    """Page of envelopes after ``after``, optionally restricted to ``kinds``."""
+
+    if isinstance(limit, bool) or limit < 1 or limit > 10_000:
+        raise ValueError("invalid_page_limit")
+    allowed = frozenset(kinds) if kinds is not None else None
+    available = []
+    for item in log.after(after):
+        if allowed is not None and not item.control and item.kind not in allowed:
+            continue
+        available.append(item)
+    controls = [item for item in available if item.sequence is None]
+    evidence = [item for item in available if item.sequence is not None]
+    page = [*controls, *evidence[:limit]]
+    envelopes = [item.to_dict() for item in page]
+    identity = subject_id if subject_id is not None else log.rollout_id
+    for row in envelopes:
+        row[subject_id_field] = identity
+    return {
+        subject_id_field: identity,
+        "stream_id": log.stream_id,
+        "cursor": {
+            "kind": "sequence",
+            "after": after,
+            "high_water": log.high_water,
+            "closed": log.closed,
+            "next": max([after, *(item.sequence for item in page if item.sequence is not None)], default=after),
+            "has_more": len(evidence) > limit,
+        },
+        "events": envelopes,
+    }
+
+
+async def iter_sse(
+    log: RolloutEventLog,
+    request: Any,
+    *,
+    after: int = 0,
+    extra: dict[str, Any] | None = None,
+    kinds: Iterable[str] | None = None,
+) -> AsyncIterator[str]:
+    """Replay then follow a log. Heartbeats keep Luna-idle streams open."""
+
+    allowed = frozenset(kinds) if kinds is not None else None
+    emitted_controls: set[str] = set()
+    while not await request.is_disconnected():
+        emitted = False
+        for envelope in log.after(after):
+            if envelope.sequence is not None:
+                after = envelope.sequence
+            if allowed is not None and not envelope.control and envelope.kind not in allowed:
+                continue
+            if envelope.control:
+                control_key = f"{envelope.kind}:{envelope.digest}"
+                if control_key in emitted_controls:
+                    continue
+                emitted_controls.add(control_key)
+            yield format_sse(envelope, extra)
+            emitted = True
+        if log.closed:
+            break
+        if not emitted:
+            yield ": heartbeat\n\n"
+        await asyncio.sleep(0.05)

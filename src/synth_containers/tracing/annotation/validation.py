@@ -394,7 +394,16 @@ class ProposalValidator:
                         message="verification jobs need a sealed rubric",
                     ),
                 )
-            outcome = self._judgments(proposal.get("judgments") or [], rejected)
+            judgments = proposal.get("judgments") or []
+            if not judgments and (proposal.get("findings") or []):
+                return ProposalValidationResult(
+                    rejected=tuple(rejected),
+                    fatal=AnnotationJobErrorV1(
+                        code=AnnotationJobErrorCode.MALFORMED_OUTPUT,
+                        message="verification jobs must return judgments, not findings",
+                    ),
+                )
+            outcome = self._judgments(judgments, rejected)
             if isinstance(outcome, AnnotationJobErrorV1):
                 return ProposalValidationResult(rejected=tuple(rejected), fatal=outcome)
             verifier_definition, verifier_result = outcome

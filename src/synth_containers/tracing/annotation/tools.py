@@ -272,12 +272,14 @@ class TraceInspectionTools:
         limits: AnnotationJobLimitsV1,
         tool_names: tuple[str, ...] | None = None,
         projections: tuple[ProjectionManifestV1, ...] = (),
+        on_call: Callable[[ToolCallRecordV1], None] | None = None,
     ) -> None:
         if not document.content_digest:
             raise ValueError("trace inspection requires a sealed document")
         self.document = document
         self.limits = limits
         self.projections = projections
+        self.on_call = on_call
         self.tool_names = tuple(tool_names) if tool_names is not None else TOOL_NAMES
         unknown = set(self.tool_names) - set(TOOL_NAMES)
         if unknown:
@@ -319,7 +321,7 @@ class TraceInspectionTools:
         started = utc_now()
         index = len(self.calls)
         if index >= self.limits.max_tool_calls:
-            self.calls.append(
+            self._record(
                 ToolCallRecordV1(
                     index=index,
                     tool=name,
@@ -335,7 +337,7 @@ class TraceInspectionTools:
                 f"annotator exceeded {self.limits.max_tool_calls} tool calls",
             )
         if name not in self.tool_names:
-            self.calls.append(
+            self._record(
                 ToolCallRecordV1(
                     index=index,
                     tool=name,
@@ -351,7 +353,7 @@ class TraceInspectionTools:
         try:
             response = handler(**arguments)
         except TypeError as error:
-            self.calls.append(
+            self._record(
                 ToolCallRecordV1(
                     index=index,
                     tool=name,
@@ -364,7 +366,7 @@ class TraceInspectionTools:
             )
             raise ToolArgumentError(str(error)) from error
         except ToolArgumentError as error:
-            self.calls.append(
+            self._record(
                 ToolCallRecordV1(
                     index=index,
                     tool=name,
@@ -379,7 +381,7 @@ class TraceInspectionTools:
         bounded, truncated = bound_payload(response, self.limits.max_tool_response_bytes)
         size = len(canonical_bytes(bounded))
         self.total_bytes += size
-        self.calls.append(
+        self._record(
             ToolCallRecordV1(
                 index=index,
                 tool=name,
@@ -400,6 +402,11 @@ class TraceInspectionTools:
         if truncated:
             bounded = {**bounded, "truncated": True}
         return bounded
+
+    def _record(self, record: ToolCallRecordV1) -> None:
+        self.calls.append(record)
+        if self.on_call is not None:
+            self.on_call(record)
 
     # -- selectors ----------------------------------------------------------------
 

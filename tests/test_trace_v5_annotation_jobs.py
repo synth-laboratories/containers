@@ -477,12 +477,14 @@ def test_verify_mode_seals_rubric_result_and_recomputes_score(tmp_path: Path) ->
 
     definition = _definition("test.verifier", scope="trace")
     registry = DefinitionRegistry()
-    registry.register(definition, _program("test.verifier.program"), rubric=rubric, deterministic_program=program, domain="test")
+    registry.register(definition, _program("test.verifier.program"), rubric=rubric, deterministic_program=program, domain="test", requires_rubric=True)
     service = AnnotationService(store=AnnotationStore(tmp_path / "store"), registry=registry)
     trace = build_craftax_smoke_trace()
     service.register_trace(trace)
     job = service.submit_and_run(service.request_for(trace, "test.verifier", mode=AnnotationJobMode.VERIFY))
     assert str(job.state) == AnnotationJobState.SEALED, job.error
+    inferred = service.request_for(trace, "test.verifier")
+    assert str(inferred.mode) == AnnotationJobMode.VERIFY
     assert job.verifier_result_ids and job.rejected_count == 1
     head = service.evidence_head(trace.trace_id)
     assert not _errors(validate_evidence(trace, head)[0])
@@ -496,6 +498,35 @@ def test_verify_mode_seals_rubric_result_and_recomputes_score(tmp_path: Path) ->
     judgments = {item.criterion_id: item for item in result.judgments}
     assert judgments["grounding"].passed is False and judgments["grounding"].verdict == "fail"
     assert judgments["tooling"].passed is True
+    listed = service.evidence_bundles(trace.trace_id)
+    assert listed and listed[0]["verifier_result_count"] == 1
+    summary = listed[0]["verifier_results"][0]
+    assert summary["score"] == pytest.approx(0.625) and len(summary["criterion_results"]) == 2
+
+
+def test_verify_mode_refuses_findings_in_place_of_judgments(tmp_path: Path) -> None:
+    criteria = (
+        CriterionDefinitionV1(criterion_id="grounding", name="State grounding", requirement="decisions match visible state", min_score=0.0, max_score=4.0, pass_threshold=2.0, allows_abstention=True).sealed(),
+    )
+    rubric = RubricDefinitionV2(rubric_id="test.rubric", name="test rubric", task_family="craftax", criteria=criteria, aggregation=RubricAggregationV1(pass_threshold=0.5)).sealed()
+
+    def program(document, context):
+        del context
+        proposal = empty_proposal(trace_id=document.trace_id, trace_digest=document.content_digest)
+        reply = next(m for m in document.messages if str(m.role) == "assistant")
+        proposal["findings"].append(_finding({"kind": "message", "entity_id": reply.message_id}, ["belief.correct"], [{"kind": "message", "entity_id": reply.message_id}]))
+        return proposal
+
+    definition = _definition("test.verifier.findings", scope="trace")
+    registry = DefinitionRegistry()
+    registry.register(definition, _program("test.verifier.findings.program"), rubric=rubric, deterministic_program=program, domain="test", requires_rubric=True)
+    service = AnnotationService(store=AnnotationStore(tmp_path / "store"), registry=registry)
+    trace = build_craftax_smoke_trace()
+    service.register_trace(trace)
+    job = service.submit_and_run(service.request_for(trace, "test.verifier.findings"))
+    assert str(job.state) == AnnotationJobState.FAILED
+    assert job.error is not None and "judgments" in job.error.message
+    assert not job.verifier_result_ids
 
 
 def test_consensus_over_repeats_appends_derived_record(tmp_path: Path) -> None:
@@ -570,6 +601,7 @@ def test_http_router_serves_definitions_jobs_and_evidence(tmp_path: Path) -> Non
     assert evidence["target"]["resolved"] is True and evidence["evidence"][0]["resolved"] is True
     bundles = client.get(f"/traces/{trace.trace_id}/evidence-bundles").json()["bundles"]
     assert len(bundles) == 1 and bundles[0]["is_head"] is True
+    assert bundles[0]["verifier_result_count"] == 0 and bundles[0]["verifier_results"] == []
     reviewed = client.post(f"/annotations/{annotation_id}/reviews", json={"decision": "accepted", "reviewer": "josh"}).json()
     assert reviewed["supersedes_id"] == annotation_id
     assert client.get("/annotation/operations").json()["operations"][0]["name"] == "annotation_list_definitions"

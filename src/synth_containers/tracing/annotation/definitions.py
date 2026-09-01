@@ -28,6 +28,7 @@ class RunnerKind(StrEnum):
     DETERMINISTIC = "deterministic"  # in-process Python; CPU-bound; free
     MODEL_API = "model_api"  # one structured completion, no tools; paid; I/O-bound
     CODEX_APP_SERVER = "codex_app_server"  # agentic task with trace tools; paid; I/O-bound
+    JESTERKY = "jesterky"  # jesterky map/reduce swarm of actors; paid; I/O-bound
 
 
 DeterministicProgram = Callable[[TraceDocumentV5, "ProgramContext"], dict[str, Any]]
@@ -114,7 +115,7 @@ class DefinitionRegistry:
             raise ValueError("annotator program must be sealed before registration")
         if str(program.runner_kind) == RunnerKind.DETERMINISTIC and deterministic_program is None:
             raise ValueError("deterministic programs need a callable")
-        if str(program.runner_kind) in {RunnerKind.CODEX_APP_SERVER, RunnerKind.MODEL_API} and not program.prompt.strip():
+        if str(program.runner_kind) in {RunnerKind.CODEX_APP_SERVER, RunnerKind.MODEL_API, RunnerKind.JESTERKY} and not program.prompt.strip():
             raise ValueError(f"{program.runner_kind} programs need a prompt")
         if definition.annotator_id in self._by_id:
             raise ValueError(f"annotator already registered: {definition.annotator_id}")

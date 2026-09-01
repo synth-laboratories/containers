@@ -16,6 +16,7 @@ from typing import Any
 from ..event_log import (
     CONTROL_SUBSCRIBED,
     RolloutEventLog,
+    poll_payload,
     stream_descriptor,
     validate_rollout_id,
 )
@@ -25,7 +26,15 @@ from .policy_process import DEFAULT_HEURISTIC, IsolatedPolicyProcess
 from .reward_plan import PlanOutcome, classify_plan_outcome
 from .runtime import runtime_for
 from .seal import seal_rollout_log, validate_rollout_seal
-from .targets import PolicyInstallStatus, TargetRuntimeKind, TargetSpec, TaskInstanceStatus
+from .targets import (
+    PolicyInstallStatus,
+    TargetRuntimeKind,
+    TargetSpec,
+    TaskInstanceStatus,
+    advertised_reward_authority,
+    advertised_reward_calculator,
+)
+from .reward import reward_api_catalog
 from .trace_bundle import (
     HarborTraceBundleRef,
     inspect_harbor_trace_bundle,
@@ -627,9 +636,8 @@ class CompatPlatform:
             "active_leases": self.active_leases,
             "retention": self.spec.retention,
             "logical_service_ids": services,
-            "reward_authority": (
-                "trusted_scorer" if self.spec.reward_kind == "script" else "environment"
-            ),
+            "reward_authority": advertised_reward_authority(self.spec),
+            "reward_calculator": advertised_reward_calculator(self.spec).value,
             "live_reward": self.spec.live_reward,
             "live_frames": self.spec.live_frames,
             "true_checkpoint": self.spec.true_checkpoint,
@@ -640,6 +648,12 @@ class CompatPlatform:
             "target_id": self.spec.target_id,
             "runtime_family": self.spec.runtime_family.value,
             "max_episode_steps": self.spec.max_episode_steps,
+            "reward_api": reward_api_catalog(
+                calculator=advertised_reward_calculator(self.spec),
+                authority=advertised_reward_authority(self.spec),
+                aggregation=str(self.spec.reward_kind),
+                live=bool(self.spec.live_reward),
+            ),
             # This facade owns the complete prepare → start → reconcile →
             # reward workflow and seals its durable event log on terminal
             # rollout.  Advertise that contract explicitly so Workshop can
@@ -747,7 +761,11 @@ class CompatPlatform:
                 task_instance_id=task_instance_id or f"seed:{seed}",
                 stream_id=stream_id,
                 engine_generation=self.engine_generation,
-                policy_revision_id=self.current_policy_revision_id,
+                policy_revision_id=(
+                    request.policy_revision_id
+                    if request is not None and request.policy_revision_id
+                    else self.current_policy_revision_id
+                ),
                 seed=seed,
             )
         return stream_descriptor(
@@ -913,6 +931,17 @@ class CompatPlatform:
             }
         if config_id and config_id not in self.policy_configs and harness != ISOLATED_POLICY_HARNESS:
             return {"error": "unknown_policy_config", "status_code": 404, "config_id": config_id}
+        registered_config = self.policy_configs.get(str(config_id or ""))
+        if registered_config is not None and registered_config.harness != harness:
+            return {
+                "error": "policy_configuration_mismatch",
+                "status_code": 409,
+                "requested_policy_ref": {"harness": harness, "config": config_id},
+                "registered_policy_config": {
+                    "harness": registered_config.harness,
+                    "config": registered_config.config_id,
+                },
+            }
         if harness == NANOHORIZON_HARNESS:
             installed_revision = self.policy_revisions.get(
                 str(self.current_policy_revision_id or "")
@@ -1264,12 +1293,12 @@ class CompatPlatform:
     def _simulate(self, pin: RolloutPin, log: RolloutEventLog) -> None:
         pin.env_generation += 1
         runtime_for(self.spec).simulate(self, pin, log)
-        # Harbor's native verifier is the terminal scoring authority. Persist
-        # that result as soon as the sibling verifier has completed, instead
-        # of requiring a separate, caller-authored POST /reward after the run
-        # has already closed. This preserves null for unscored verifier
-        # outcomes while making an authoritative 0.0 discoverable.
-        if pin.terminal and self.spec.runtime_family == TargetRuntimeKind.HARBOR:
+        # Persist terminal scoring as part of the producer transaction instead
+        # of requiring a separate caller-authored POST after the run closes.
+        # Gold/external environments already hold their authoritative signals,
+        # just as Harbor holds its verifier result; reward.get must therefore
+        # be complete for every successfully terminal runtime.
+        if pin.terminal and pin.status == "completed":
             self.compute_reward(
                 rollout_id=pin.rollout_id,
                 evidence=None,
@@ -1734,13 +1763,16 @@ class CompatPlatform:
             gate_value = gates[0].value if gates else None
             return float(gate_value) if gate_value is not None else None, nodes, "scored", None
         kind = pin.reward_kind
-        if kind == "env_sum":
+        if kind in {"env_sum", "verifier"}:
+            authority = "verifier" if kind == "verifier" else "environment"
+            node_kind = "verifier_reward" if kind == "verifier" else "env_reward"
+            node_id = "verifier" if kind == "verifier" else "env_sum"
             if any(item is None for item in pin.reward_signals):
                 return None, [
                     {
-                        "node_id": "env_sum",
-                        "kind": "env_reward",
-                        "authority": "environment",
+                        "node_id": node_id,
+                        "kind": node_kind,
+                        "authority": authority,
                         "status": "skipped",
                         "value": None,
                     }
@@ -1750,9 +1782,9 @@ class CompatPlatform:
             )
             return total, [
                 {
-                    "node_id": "env_sum",
-                    "kind": "env_reward",
-                    "authority": "environment",
+                    "node_id": node_id,
+                    "kind": node_kind,
+                    "authority": authority,
                     "status": "scored",
                     "value": total,
                 }
@@ -1800,33 +1832,21 @@ class CompatPlatform:
             product *= item
         return {"status": "scored", "reward": product}
 
-    def events_payload(self, rollout_id: str, after: int, limit: int = 1000) -> dict[str, Any]:
+    def events_payload(
+        self,
+        rollout_id: str,
+        after: int,
+        limit: int = 1000,
+        kinds: list[str] | tuple[str, ...] | None = None,
+    ) -> dict[str, Any]:
         log = self.logs.get(rollout_id)
         if log is None:
             return {"error": "unknown_rollout", "status_code": 404}
-        if isinstance(limit, bool) or limit < 1 or limit > 10_000:
+        try:
+            payload = poll_payload(log, after=after, limit=limit, kinds=kinds, subject_id=rollout_id)
+        except ValueError:
             return {"error": "invalid_page_limit", "status_code": 422}
-        available = log.after(after)
-        controls = [item for item in available if item.sequence is None]
-        evidence = [item for item in available if item.sequence is not None]
-        page = [*controls, *evidence[:limit]]
-        envelopes = [item.to_dict() for item in page]
-        for row in envelopes:
-            row["rollout_id"] = rollout_id
+        for row in payload["events"]:
             if "Authorization" in json.dumps(row) or "DIGBENCH_API_TOKEN" in json.dumps(row):
                 raise RuntimeError("token_leaked_into_log")
-        return {
-            "rollout_id": rollout_id,
-            "stream_id": log.stream_id,
-            "cursor": {
-                "kind": "sequence",
-                "after": after,
-                "high_water": log.high_water,
-                "closed": log.closed,
-                "next": max(
-                    [after, *(item.sequence for item in page if item.sequence is not None)]
-                ),
-                "has_more": len(evidence) > limit,
-            },
-            "events": envelopes,
-        }
+        return payload

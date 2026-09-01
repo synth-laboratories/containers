@@ -38,6 +38,7 @@ class ThroughputLimits:
             RunnerKind.DETERMINISTIC.value: 4,
             RunnerKind.MODEL_API.value: 8,
             RunnerKind.CODEX_APP_SERVER.value: 2,
+            RunnerKind.JESTERKY.value: 2,
         }
     )
     max_inflight_paid_usd_micros: int | None = None
@@ -91,6 +92,8 @@ class AnnotationScheduler:
     # -- queue ----------------------------------------------------------------------
 
     def runner_class(self, job: AnnotationJobV1) -> str:
+        if job.request.runner_kind:
+            return str(job.request.runner_kind)
         entry = self.service.registry.get(job.request.annotator_id)
         return str(entry.program.runner_kind) if entry else RunnerKind.DETERMINISTIC.value
 

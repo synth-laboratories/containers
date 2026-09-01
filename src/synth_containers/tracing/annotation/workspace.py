@@ -244,6 +244,19 @@ def render_instructions(
         lines.append("")
     lines.append("## Output")
     lines.append("")
+    if manifest.mode == "verify":
+        lines.append(
+            "This is a **verification** job. Populate the `judgments` array (one object per "
+            "rubric criterion). `findings` and `abstentions` may be empty. Do not emit "
+            "classification findings in place of judgments — that seals an empty verifier result."
+        )
+        lines.append("")
+    elif manifest.mode == "adjudicate":
+        lines.append(
+            "This is an **adjudication** job. Each finding must name `source_annotation_ids` "
+            "from the source list above."
+        )
+        lines.append("")
     lines.append(
         f"Reply with a single JSON object conforming to `{manifest.output_schema_id}` "
         "(see output_schema.json). Set `source_trace_id` and `source_trace_digest` to:"
