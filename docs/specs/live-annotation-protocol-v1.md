@@ -1,6 +1,6 @@
 # Live Annotation Protocol v1
 
-**Status:** implemented in `synth_containers.live_annotation`; proven over the compat façade (`tests/test_live_annotation_*.py`) and over a real Craftax seal replayed through the isolated host (evals `tests/test_craftax_live_protocol.py`).
+**Status:** implemented in `synth_containers.live_annotation`; proven over the compat façade (`tests/test_live_annotation_*.py`) and on the live Craftax Rust engine in both directions (`scripts/live_annotation_craftax_e2e.py`, `scripts/live_annotation_craftax_control_e2e.py`, 2026-09-01).
 **Relation to post-hoc annotation:** additive. The sealed `tracing/annotation` path stays the evidence authority; this lane only adds *provisional* findings while a rollout is still running.
 **Workshop consumer:** `workshop/docs/HANDOFF_LIVE_ANNOTATION_PROTOCOLS_2026-09-01.md`.
 
