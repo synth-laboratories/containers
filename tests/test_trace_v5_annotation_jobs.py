@@ -273,6 +273,34 @@ def test_invented_selector_becomes_typed_abstention(tmp_path: Path) -> None:
     assert applied.evidence[0].quote == "tree directly in front" and applied.confidence == 1.0
 
 
+def test_paraphrased_json_quote_is_quote_mismatch() -> None:
+    from synth_containers.tracing.models.selectors import (
+        SelectorKind,
+        TraceSelectorV1,
+        resolve_selector,
+    )
+
+    trace = build_craftax_smoke_trace()
+    reply = next(message for message in trace.messages if str(message.role) == "assistant")
+    paraphrased = TraceSelectorV1(
+        trace_id=trace.trace_id,
+        trace_digest=trace.content_digest,
+        kind=SelectorKind.MESSAGE,
+        entity_id=reply.message_id,
+        quote='{"actions": ["up"]}',
+    )
+    resolution = resolve_selector(trace, paraphrased)
+    assert resolution.resolved is False and resolution.reason == "quote_mismatch"
+    verbatim = TraceSelectorV1(
+        trace_id=trace.trace_id,
+        trace_digest=trace.content_digest,
+        kind=SelectorKind.MESSAGE,
+        entity_id=reply.message_id,
+        quote="tree directly in front",
+    )
+    assert resolve_selector(trace, verbatim).resolved is True
+
+
 def test_fail_closed_definition_rejects_unsupported_finding(tmp_path: Path) -> None:
     def program(document, context):
         proposal = empty_proposal(trace_id=document.trace_id, trace_digest=document.content_digest)
@@ -373,6 +401,99 @@ def test_crash_recovery_fails_interrupted_jobs_without_inventing_results(tmp_pat
     assert service.evidence_head(trace.trace_id) is None
     rerun = service.submit_and_run(service.request_for(trace, ENVIRONMENT_STEP_STATUS_ID))
     assert rerun.job_id != job.job_id and str(rerun.state) == AnnotationJobState.SEALED
+
+
+def test_container_restart_reruns_prepared_job_to_sealed_without_a_new_id(tmp_path: Path) -> None:
+    """jobs.sqlite is the authority across process restart.
+
+    Prepared jobs stay prepared (RUNNING is fail-closed in recover_interrupted).
+    A restarted service re-reads the same job, runs it to sealed, and a second
+    submit of the same request is a cache hit — no new job, no new reservation.
+    """
+
+    service, trace = _service(tmp_path)
+    request = service.request_for(trace, ENVIRONMENT_STEP_STATUS_ID)
+    job = service.submit(request)
+    assert str(job.state) == AnnotationJobState.PREPARED
+    key = job.idempotency_key
+    job_id = job.job_id
+
+    registry = DefinitionRegistry()
+    register_builtin_annotators(registry)
+    reopened = AnnotationService(store=AnnotationStore(tmp_path / "store"), registry=registry)
+    recovered = reopened.recover_interrupted()
+    assert all(item.job_id != job_id for item in recovered)
+    loaded = reopened.get(job_id)
+    assert loaded is not None and str(loaded.state) == AnnotationJobState.PREPARED
+    assert loaded.idempotency_key == key
+    same = reopened.submit(request)
+    assert same.job_id == job_id and same.idempotency_key == key
+    sealed = reopened.run(job_id)
+    assert str(sealed.state) == AnnotationJobState.SEALED and sealed.job_id == job_id
+    cached = reopened.submit_and_run(request)
+    assert cached.job_id == job_id
+    assert len(reopened.store.list_jobs(trace_id=trace.trace_id)) == 1
+
+
+def test_paid_job_survives_restart_on_the_same_reservation(tmp_path: Path) -> None:
+    broker = LocalReservationBroker(tmp_path / "broker")
+    service, trace = _paid_service(tmp_path, broker)
+    request = service.request_for(
+        trace, "test.paid", limits=AnnotationJobLimitsV1(max_total_tokens=50_000)
+    )
+    binding = ReservationBindingV1(
+        trace_digest=trace.content_digest,
+        annotator_id="test.paid",
+        model="gpt-5.6-luna",
+        session_id="sess-1",
+    )
+    reservation = broker.issue(cap_usd_micros=300_000, binding=binding)
+    job = service.submit(
+        request, reservation_id=reservation.reservation_id, session_id="sess-1"
+    )
+    job_id = job.job_id
+    key = job.idempotency_key
+
+    registry = DefinitionRegistry()
+    definition = _definition("test.paid")
+    program = AnnotatorProgramV1(
+        program_id="test.paid.program",
+        runner_kind=RunnerKind.CODEX_APP_SERVER,
+        prompt="Find beliefs.",
+        paid=True,
+    ).sealed()
+    registry.register(definition, program, domain="test")
+    from synth_containers.tracing.annotation import CodexAppServerRunner
+
+    runner = CodexAppServerRunner(
+        lambda cwd: None,
+        default_model="gpt-5.6-luna",
+        default_effort="medium",
+        proxy_enforces_reservation=True,
+    )
+    reopened = AnnotationService(
+        store=AnnotationStore(tmp_path / "store"),
+        registry=registry,
+        runners={runner.kind: runner},
+        broker=broker,
+    )
+    recovered = reopened.recover_interrupted()
+    assert all(item.job_id != job_id for item in recovered)
+    loaded = reopened.get(job_id)
+    assert loaded is not None and str(loaded.state) == AnnotationJobState.PREPARED
+    assert loaded.idempotency_key == key
+    assert loaded.reservation_id == reservation.reservation_id
+    again = reopened.submit(
+        request, reservation_id=reservation.reservation_id, session_id="sess-1"
+    )
+    assert again.job_id == job_id
+    with pytest.raises(AnnotationServiceError) as error:
+        reopened.submit(
+            replace(request, repeat_index=1),
+            reservation_id=reservation.reservation_id,
+            session_id="sess-1",
+        )
+    assert error.value.detail["reason"] == "reservation_consumed"
 
 
 def test_cancel_prepared_job(tmp_path: Path) -> None:
