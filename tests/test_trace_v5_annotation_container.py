@@ -98,6 +98,10 @@ def test_install_from_env_is_gated_and_fail_soft(tmp_path: Path, monkeypatch) ->
         assert "/annotation-jobs/{job_id}/stream" in {item["path"] for item in catalog["endpoints"]}
         health = client.get("/health").json()
         assert health["annotation"] == "mounted"
+        estimate = client.post("/annotation/campaigns", json={"estimate_only": True, "annotators": [], "traces": []})
+        assert estimate.status_code == 200, estimate.text
+        body = estimate.json()["estimate"]
+        assert body["job_count"] == 0 and body["paid_new"] == 0
 
 
 def test_install_from_env_declared_registrar_fails_closed(tmp_path: Path, monkeypatch) -> None:

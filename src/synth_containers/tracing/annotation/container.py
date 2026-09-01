@@ -315,8 +315,10 @@ def mount_annotation(app: Any, *, storage_root: Path, registry: DefinitionRegist
 
         plan = plan_from_refs(refs, plans, session_id=body.get("session_id"), label=str(body.get("label") or ""))
         if body.get("estimate_only"):
+            from dataclasses import asdict
+
             estimate = mounted.campaign.estimate(plan)
-            return {"estimate": {**estimate.__dict__, "paid_jobs": list(estimate.paid_jobs), "notes": list(estimate.notes)}}
+            return {"estimate": asdict(estimate)}
         reservations = body.get("reservations") or {}
         reservation_for = None
         if isinstance(reservations, dict) and reservations:
