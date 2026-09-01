@@ -21,7 +21,7 @@ Environment (read by ``install_from_env``)::
     SYNTH_ANNOTATION_BROKER_SECRET=...        enables host-signed reservations (SignedReservationBroker)
     SYNTH_ANNOTATION_BROKER_URL=...           where reconciliations are pushed (else pulled from /annotation/reservations)
     SYNTH_ANNOTATION_BROKER_TOKEN=...         bearer for the push
-    SYNTH_ANNOTATION_PRICE_TABLE=path.json    per-model USD/1M-token prices (JSON or TOML); no default prices exist
+    SYNTH_ANNOTATION_PRICE_TABLE=path.json    per-model USD/1M-token prices (JSON or TOML); when unset, packaged openai-2026-08 (gpt-5.6-luna) loads
     SYNTH_ANNOTATION_USD_PER_MILLION_TOKENS=  legacy flat price (token ceiling only, no USD reported)
     SYNTH_ANNOTATION_PROXY_ENFORCES=on        host asserts its provider proxy enforces reservations
 
@@ -380,11 +380,20 @@ def install_from_env(app: Any, *, storage_root: Path | None) -> ContainerAnnotat
 
         broker = SignedReservationBroker(root / "annotation" / "reservations", secret=secret.encode("utf-8"), reconcile_url=os.environ.get("SYNTH_ANNOTATION_BROKER_URL") or None, reconcile_token=os.environ.get("SYNTH_ANNOTATION_BROKER_TOKEN") or None)
     price_table: PriceTable | None = None
+    env_price_path = (os.environ.get(PRICE_TABLE_ENV) or "").strip()
     try:
         price_table = PriceTable.from_env()
     except PriceTableError as error:
         # No table is safer than a wrong one: unpriced models fail closed at submit.
         log.warning("annotation: price table ignored: %s", error)
+        price_table = None
+    else:
+        if price_table is None and not env_price_path:
+            try:
+                price_table = PriceTable.packaged()
+            except PriceTableError as error:
+                log.warning("annotation: packaged price table ignored: %s", error)
+                price_table = None
     runners: dict[str, AnnotatorRunner] | None = None
     if secret:
         from .codex_app_server import CodexAppServerRunner

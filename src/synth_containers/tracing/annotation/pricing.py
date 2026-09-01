@@ -6,11 +6,13 @@ ceiling* (``limits.max_cost_usd``, what the broker reserved). Turning one into
 the other needs a price, and the wrong price is worse than none: it would let a
 job report a confident ``cost_usd`` that the reconciliation trusts.
 
-So this module ships **no prices**. A ``PriceTable`` is loaded from an explicit
-mapping, a JSON/TOML file, or the path in ``SYNTH_ANNOTATION_PRICE_TABLE``; a
-model absent from the table is *unpriced* and the runner fails closed for it
-(``cost_status="unavailable"``, paid submit refused unless the host's provider
-proxy enforces the reservation).
+``PriceTable()`` ships **no prices**. A table is loaded from an explicit
+mapping, a JSON/TOML file, or the path in ``SYNTH_ANNOTATION_PRICE_TABLE``.
+``PriceTable.packaged()`` is the openai-2026-08 file next to this module
+(``gpt-5.6-luna``); ``install_from_env`` uses it only when the env var is
+unset. A model absent from the loaded table is *unpriced* and the runner
+fails closed for it (``cost_status="unavailable"``, paid submit refused
+unless the host's provider proxy enforces the reservation).
 
 File shape (JSON or TOML)::
 
@@ -191,6 +193,13 @@ class PriceTable:
         path = (env.get(variable) or "").strip()
         if not path:
             return None
+        return cls.from_file(path)
+
+    @classmethod
+    def packaged(cls) -> "PriceTable":
+        """openai-2026-08 rates shipped beside this module. Not used by ``PriceTable()``."""
+
+        path = Path(__file__).resolve().parent / "prices" / "openai-2026-08.json"
         return cls.from_file(path)
 
     # -- queries ------------------------------------------------------------------------

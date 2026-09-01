@@ -1,0 +1,15 @@
+{
+  "source": "openai-2026-08",
+  "models": {
+    "gpt-5.6-luna": {
+      "input_usd_per_million": 1.25,
+      "cached_input_usd_per_million": 0.125,
+      "output_usd_per_million": 10.0
+    },
+    "openai/gpt-5.6-luna": {
+      "input_usd_per_million": 1.25,
+      "cached_input_usd_per_million": 0.125,
+      "output_usd_per_million": 10.0
+    }
+  }
+}

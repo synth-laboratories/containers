@@ -71,6 +71,10 @@ def test_price_table_loads_only_explicit_prices(tmp_path: Path, monkeypatch) -> 
 
     monkeypatch.delenv("SYNTH_ANNOTATION_PRICE_TABLE", raising=False)
     assert PriceTable.from_env() is None
+    packaged = PriceTable.packaged()
+    assert "gpt-5.6-luna" in packaged and "openai/gpt-5.6-luna" in packaged
+    luna = packaged.get("gpt-5.6-luna")
+    assert luna is not None and luna.input_usd_per_million == 1.25
     monkeypatch.setenv("SYNTH_ANNOTATION_PRICE_TABLE", str(json_path))
     assert PriceTable.from_env().models() == (MODEL,)
 
