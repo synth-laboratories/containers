@@ -344,6 +344,108 @@ paths:
                       type: object
                       additionalProperties: true
                 additionalProperties: true
+  /rollouts/{rollout_id}/annotations/events:
+    get:
+      operationId: getRolloutAnnotationEvents
+      summary: Read the provisional live annotation stream a bound protocol published beside the rollout
+      description: >-
+        Declared by the rollout stream descriptor as `annotation.events` when a live
+        annotation protocol revision was pinned at prepare/start; never guess this route.
+        Same envelope and cursor semantics as `/rollouts/{rollout_id}/events`, own
+        sequence space. Rows carry `rollout_id` and `stream_id`. Findings are
+        `provisional`; they never alter reward, achievements, terminal status or the
+        sealed trace. See docs/specs/live-annotation-protocol-v1.md.
+      parameters:
+        - $ref: '#/components/parameters/RolloutId'
+        - in: query
+          name: after
+          schema:
+            type: integer
+            minimum: 0
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 10000
+      responses:
+        '200':
+          description: Annotation event page (synth.live-annotation-stream.v1)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  schema:
+                    type: string
+                    enum: [synth.live-annotation-stream.v1]
+                  rollout_id:
+                    type: string
+                  stream_id:
+                    type: string
+                  cursor:
+                    type: object
+                    additionalProperties: true
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                  summary:
+                    type: object
+                    nullable: true
+                    additionalProperties: true
+                additionalProperties: true
+        '404':
+          description: No protocol was bound to this rollout
+  /annotation-protocol:
+    get:
+      operationId: getAnnotationProtocol
+      summary: Installed live annotation protocol identity (never source or credentials)
+      responses:
+        '200':
+          description: synth.container-annotation-protocol.v1
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+    put:
+      operationId: putAnnotationProtocol
+      summary: Install a digest-pinned live annotation protocol revision
+      description: >-
+        Mirrors `PUT /policy`: content-addressed `anprev_<sha256[:16]>` revision over
+        code, protocol_id, configuration and source_revision; idempotent on identical
+        inputs; refuses credential-shaped configuration keys and code that cannot boot
+        in an isolated stdlib-only process.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, protocol_id]
+              properties:
+                code:
+                  type: string
+                protocol_id:
+                  type: string
+                configuration:
+                  type: object
+                  additionalProperties: true
+                source_revision:
+                  type: string
+                  nullable: true
+      responses:
+        '200':
+          description: Installed identity plus idempotency flag and isolation receipt
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '422':
+          description: protocol_identity_required, protocol_source_required, protocol_credential_forbidden, protocol_boot_failed, or protocol_identity_mismatch
   /rollouts/{rollout_id}/trace:
     get:
       operationId: getRolloutTrace

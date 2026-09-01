@@ -62,8 +62,11 @@ class CreateRolloutRequest:
     outcome: Optional[str]
     slot: str
     metadata: dict[str, Any]
+    policy_revision_id: Optional[str] = None
     checkpoint_schedule: Optional[dict[str, Any]] = None
     resume_from_checkpoint_id: Optional[str] = None
+    # Live annotation protocol pin. None means no observer runs for this rollout.
+    annotation_protocol_revision_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -93,6 +96,11 @@ class PolicyConfigRequest:
 class PutPolicyRequest:
     code: Any
     harness: Optional[str]
+    namespace: Optional[str]
+    name: Optional[str]
+    configuration: dict[str, Any]
+    model: dict[str, Any]
+    source_revision: Optional[str]
 
 
 def require_json_object(body: object, *, operation: str) -> dict[str, Any]:
@@ -164,9 +172,14 @@ def parse_create_rollout(
         outcome=_optional_str(raw, "outcome", operation=operation) or None,
         slot=slot,
         metadata=metadata,
+        policy_revision_id=_optional_str(raw, "policy_revision_id", operation=operation),
         checkpoint_schedule=_optional_object(raw, "checkpoint_schedule", operation=operation),
         resume_from_checkpoint_id=_optional_str(
             raw, "resume_from_checkpoint_id", operation=operation
+        )
+        or None,
+        annotation_protocol_revision_id=_optional_str(
+            raw, "annotation_protocol_revision_id", operation=operation
         )
         or None,
     )
@@ -203,8 +216,10 @@ def to_platform_dict(req: CreateRolloutRequest) -> dict[str, Any]:
         "slot": req.slot,
         "stream_slot": req.slot,
         "metadata": req.metadata,
+        "policy_revision_id": req.policy_revision_id,
         "checkpoint_schedule": req.checkpoint_schedule,
         "resume_from_checkpoint_id": req.resume_from_checkpoint_id,
+        "annotation_protocol_revision_id": req.annotation_protocol_revision_id,
     }
 
 
@@ -298,11 +313,24 @@ def parse_put_policy(body: dict) -> PutPolicyRequest:
     return PutPolicyRequest(
         code=raw["code"],
         harness=_optional_str(raw, "harness", operation=_PUT_POLICY),
+        namespace=_optional_str(raw, "namespace", operation=_PUT_POLICY),
+        name=_optional_str(raw, "name", operation=_PUT_POLICY),
+        configuration=_optional_object(raw, "configuration", operation=_PUT_POLICY) or {},
+        model=_optional_object(raw, "model", operation=_PUT_POLICY) or {},
+        source_revision=_optional_str(raw, "source_revision", operation=_PUT_POLICY),
     )
 
 
 def to_put_policy_dict(req: PutPolicyRequest) -> dict[str, Any]:
-    return {"code": req.code, "harness": req.harness}
+    return {
+        "code": req.code,
+        "harness": req.harness,
+        "namespace": req.namespace,
+        "name": req.name,
+        "configuration": req.configuration,
+        "model": req.model,
+        "source_revision": req.source_revision,
+    }
 
 
 def _parse_telemetry(body: dict[str, Any], *, operation: str) -> TelemetrySpec:
