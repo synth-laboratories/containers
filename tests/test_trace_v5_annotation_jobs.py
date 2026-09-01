@@ -127,6 +127,49 @@ def test_deterministic_vertical_slice_seals_indexes_and_preserves_trace(tmp_path
     assert [str(item.state) for item in history] == ["prepared", "running", "validating", "sealed"]
 
 
+def test_new_source_revision_rolls_evidence_head_without_cross_digest_selectors(
+    tmp_path: Path,
+) -> None:
+    service, trace = _service(tmp_path)
+    first = service.submit_and_run(
+        service.request_for(trace, ENVIRONMENT_STEP_STATUS_ID)
+    )
+    first_head = service.evidence_head(trace.trace_id)
+    assert first_head is not None
+
+    revised = replace(
+        trace,
+        extensions={**trace.extensions, "recovered_events": True},
+        content_digest="",
+    ).sealed()
+    assert revised.trace_id == trace.trace_id
+    assert revised.content_digest != trace.content_digest
+    service.register_trace(revised)
+
+    second = service.submit_and_run(
+        service.request_for(revised, ENVIRONMENT_STEP_STATUS_ID)
+    )
+    assert str(second.state) == AnnotationJobState.SEALED, second.error
+    assert second.prior_bundle_digest == first.bundle_digest
+    second_head = service.evidence_head(trace.trace_id)
+    assert second_head is not None
+    assert second_head.trace_ref.content_digest == revised.content_digest
+    assert second_head.metadata["supersedes_bundle_digest"] == first_head.content_digest
+    assert second_head.metadata["source_trace_revision_from_digest"] == trace.content_digest
+    assert len(second_head.annotations) == 11
+    assert all(
+        selector.trace_digest == revised.content_digest
+        for annotation in second_head.annotations
+        for selector in (annotation.target, *annotation.evidence)
+    )
+    assert not _errors(validate_evidence(revised, second_head)[0])
+    revisions = service.evidence_bundles(trace.trace_id)
+    assert {item["trace_digest"] for item in revisions} == {
+        trace.content_digest,
+        revised.content_digest,
+    }
+
+
 @pytest.mark.parametrize("crash_after_evidence_write", [False, True])
 def test_validated_commit_recovers_on_both_sides_of_evidence_write(
     tmp_path: Path, crash_after_evidence_write: bool

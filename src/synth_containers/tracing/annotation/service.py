@@ -933,7 +933,23 @@ class AnnotationService:
         """Attach this job's records to ``head`` and validate; a failed job means refusal."""
 
         prior_digest = head.content_digest if head is not None else None
-        bundle = head if head is not None else new_evidence_bundle(document)
+        source_revision_changed = (
+            head is not None
+            and head.trace_ref.content_digest != document.content_digest
+        )
+        # A trace id can acquire a new immutable source revision (for example,
+        # when recovered/out-of-band events are promoted after an initial
+        # annotation pass). Evidence cannot be carried across that boundary:
+        # every selector is pinned to one exact trace digest. Keep the old
+        # evidence revision immutable, but start the candidate from a fresh
+        # bundle for the requested source digest. The final candidate still
+        # supersedes the current store head so the pointer update remains one
+        # atomic compare-and-set operation.
+        bundle = (
+            new_evidence_bundle(document)
+            if head is None or source_revision_changed
+            else head
+        )
         records: list[tuple[str, Any]] = []
         if not any(item.annotator_id == entry.definition.annotator_id for item in bundle.annotator_definitions):
             records.append(("annotator_definition", entry.definition))
@@ -985,7 +1001,23 @@ class AnnotationService:
             candidate = attach_many(bundle, records=tuple(records))
         except (ValueError, TypeError) as error:
             return self._fail(job, AnnotationJobErrorV1(code=AnnotationJobErrorCode.EVIDENCE_INVALID, message=f"evidence append refused: {error}"), usage=usage)
-        findings, _ = validate_appended_evidence(index, candidate, prior=head)
+        if source_revision_changed:
+            assert head is not None
+            candidate = replace(
+                candidate,
+                metadata={
+                    **candidate.metadata,
+                    "supersedes_bundle_id": head.bundle_id,
+                    "supersedes_bundle_digest": head.content_digest,
+                    "source_trace_revision_from_digest": head.trace_ref.content_digest,
+                },
+                content_digest="",
+            ).sealed()
+        findings, _ = validate_appended_evidence(
+            index,
+            candidate,
+            prior=None if source_revision_changed else head,
+        )
         errors = [item for item in findings if str(item.severity) == Severity.ERROR]
         if errors:
             return self._fail(

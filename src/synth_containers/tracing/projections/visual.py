@@ -98,6 +98,7 @@ def visual_from_sealed(
     if not document.content_digest:
         raise ValueError("sealed visual projection requires a sealed trace")
     actor_by_id = {item.actor_id: item for item in document.actors}
+    artifact_by_id = {item.artifact_id: item for item in document.artifacts}
     active_session_ids = {
         *(item.session_id for item in document.events),
         *(item.session_id for item in document.spans),
@@ -172,7 +173,15 @@ def visual_from_sealed(
                 ),
                 source_digest=event.content_digest,
                 visibility=visibility,
-                detail=dict(event.payload),
+                detail={
+                    **dict(event.payload),
+                    "artifact_ids": list(event.artifact_ids),
+                    "artifacts": [
+                        artifact_by_id[artifact_id].to_dict()
+                        for artifact_id in event.artifact_ids
+                        if artifact_id in artifact_by_id
+                    ],
+                },
             )
         )
     for span in document.spans:
