@@ -37,6 +37,14 @@ class Protocol:
 
 `event` is `{"kind", "sequence", "ts", "payload"}` for every semantic envelope of the rollout stream, in sequence order; control records are not delivered. `on_close` runs once the rollout log closed (or the runtime returned) and everything durable was consumed.
 
+Optional hooks for the consumer direction and hot-swaps:
+
+```python
+    def on_message(self, message: dict) -> list[dict] | None: ...   # a consumer control `message`
+    def snapshot(self) -> dict: ...                                  # carry-over state for protocol.update
+    def restore(self, state: dict) -> None: ...                      # called at boot when state is carried
+```
+
 ### Emissions
 
 | `op` | Fields | Published as |
@@ -99,13 +107,34 @@ Order:
 
 1. control `stream.subscribed`;
 2. `annotation.protocol.bound` — revision, protocol id, configuration digest, judge model, isolation receipt;
-3. any of `annotation.finding`, `annotation.finding.retracted`, `annotation.metric`, `annotation.model.requested|completed|failed`, `annotation.protocol.error`, each with `source_sequence` (the rollout sequence the protocol had consumed) and `protocol_revision_id`;
-4. `annotation.closed` — outcome (`completed`, `protocol_failed`, `spawn_failed`, `runner_failed`), counters, `source_closed`;
+3. any of `annotation.finding`, `annotation.finding.retracted`, `annotation.metric`, `annotation.model.requested|completed|failed`, `annotation.protocol.error`, `annotation.control.received|refused`, `annotation.protocol.rebound`, each with `source_sequence` (the rollout sequence the protocol had consumed) and, for protocol output, `protocol_revision_id`;
+4. `annotation.closed` — outcome (`completed`, `stopped_by_consumer`, `protocol_failed`, `spawn_failed`, `runner_failed`), counters, `source_closed`;
 5. `capture.high_water`, `capture.closed`, then the journal closes.
 
 The stream seals after the rollout journal: the runner drains everything durable, waits (bounded by `drain_timeout_seconds`, default 30 s) for in-flight judgments, flushes `on_close`, and closes. Consumers should expect `capture.closed` on the annotation stream shortly after the rollout's own.
 
 Poll pages add `schema: synth.live-annotation-stream.v1` and a `summary` of the runner while it is in memory.
+
+### Consumer → annotator: control
+
+The stream is bidirectional. Any consumer (Workshop, an agent, a person) can send a control message to a running annotator:
+
+```
+POST /rollouts/{id}/annotations/control        {"schema": "synth.live-annotation-control.v1", "op": ..., "control_id"?: ...}
+WS   /rollouts/{id}/annotations/ws             duplex: envelopes out, the same control JSON in, `{"type": "control.ack", ...}` back
+```
+
+| `op` | Fields | Effect |
+| --- | --- | --- |
+| `message` | `message: {"type": ..., ...}` (≤16 KiB, no credentials) | delivered to `on_message`; its emissions are published as usual |
+| `protocol.update` | `protocol_revision_id`, `carry_state?` (default true) | hot-swap: `snapshot()` the running protocol, boot the new installed revision with that state (`restore`), retire the old process; refused without touching the running protocol if the new one cannot boot |
+| `stop` | `reason?` | the annotator seals its stream with outcome `stopped_by_consumer`; the rollout is untouched |
+
+The sender gets an immediate answer (`202 {"accepted": true, "control_id"}` or `422 {"accepted": false, "reason"}`), and the durable acknowledgement lands on the stream in order — `annotation.control.received` / `annotation.control.refused` (message bodies are digested, never echoed), plus `annotation.protocol.rebound` for a swap (`previous_protocol_revision_id`, `protocol_revision_id`, `state_carried`) — so every consumer sees what every other consumer asked for. `409 annotation_runner_not_active` answers a sealed or not-yet-started stream.
+
+The annotator → rollout direction is deliberately absent. Findings are advisory evidence for consumers; a harness that wants to act on them must opt in as its own, separately versioned feature, because that puts annotation truth upstream of reward.
+
+The descriptor's `annotation` block carries `control`, `control_schema`, and `websocket` (when the rollout bound the WebSocket transport).
 
 ### Advertisement
 

@@ -26,9 +26,15 @@ from typing import Any, Callable
 
 from ..event_log import RolloutEventLog
 from .contract import (
+    CONTROL_MESSAGE,
+    CONTROL_PROTOCOL_UPDATE,
+    CONTROL_STOP,
     KIND_BOUND,
     KIND_CAPTURE_CLOSED,
     KIND_CLOSED,
+    KIND_CONTROL_RECEIVED,
+    KIND_CONTROL_REFUSED,
+    KIND_PROTOCOL_REBOUND,
     KIND_FINDING,
     KIND_HIGH_WATER,
     KIND_METRIC,
@@ -41,15 +47,20 @@ from .contract import (
     OP_METRIC,
     OP_MODEL_REQUEST,
     OP_RETRACT,
+    Control,
+    ControlError,
     EmissionError,
     ProtocolRevision,
+    normalize_control,
     normalize_emission,
     text_digest,
 )
 from .model import ModelCaller, ModelResult, ModelUnavailable
 from .process import IsolatedProtocolProcess, ProtocolProcessError
 
-ProcessFactory = Callable[[bytes, dict[str, Any]], IsolatedProtocolProcess]
+ProcessFactory = Callable[..., IsolatedProtocolProcess]
+RevisionResolver = Callable[[str], ProtocolRevision | None]
+ModelResolver = Callable[[ProtocolRevision], ModelCaller | None]
 
 
 @dataclass(frozen=True)
@@ -71,6 +82,9 @@ class RunnerSummary:
     model_completed: int = 0
     model_failed: int = 0
     protocol_errors: int = 0
+    controls_received: int = 0
+    controls_refused: int = 0
+    rebinds: int = 0
     outcome: str = "running"
     active_findings: dict[str, dict[str, Any]] = field(default_factory=dict)
     retracted: set[str] = field(default_factory=set)
@@ -85,6 +99,9 @@ class RunnerSummary:
             "model_completed": self.model_completed,
             "model_failed": self.model_failed,
             "protocol_errors": self.protocol_errors,
+            "controls_received": self.controls_received,
+            "controls_refused": self.controls_refused,
+            "rebinds": self.rebinds,
             "outcome": self.outcome,
             "active_findings": len(self.active_findings),
         }
@@ -101,6 +118,8 @@ class LiveAnnotationRunner:
         model: ModelCaller | None = None,
         limits: RunnerLimits | None = None,
         spawn: ProcessFactory | None = None,
+        resolve_revision: RevisionResolver | None = None,
+        model_for: ModelResolver | None = None,
     ) -> None:
         self.rollout_id = rollout_id
         self.source = source
@@ -108,9 +127,17 @@ class LiveAnnotationRunner:
         self.revision = revision
         self.model = model
         self.limits = limits or RunnerLimits()
-        self._spawn = spawn or (lambda code, config: IsolatedProtocolProcess(code, config=config))
+        self._spawn = spawn or (
+            lambda code, config, state=None: IsolatedProtocolProcess(code, config=config, state=state)
+        )
+        self._resolve_revision = resolve_revision or (lambda _revision_id: None)
+        self._model_for = model_for
         self.summary = RunnerSummary()
         self._stop = threading.Event()
+        self._consumer_stop = threading.Event()
+        self._controls: "queue.Queue[tuple[str, Control | dict[str, Any], str | None]]" = queue.Queue()
+        self._control_counter = 0
+        self._control_lock = threading.Lock()
         self._thread = threading.Thread(
             target=self._run, name=f"live-annotation:{rollout_id}", daemon=True
         )
@@ -136,6 +163,39 @@ class LiveAnnotationRunner:
     def join(self, timeout: float | None = None) -> bool:
         self._thread.join(timeout)
         return not self._thread.is_alive()
+
+    # ---------------------------------------------------------------- consumer control
+
+    def control(self, raw: Any) -> dict[str, Any]:
+        """Accept one consumer control message for the runner thread to apply.
+
+        Validation happens here so the sender gets an immediate answer; the
+        durable acknowledgement (`annotation.control.received` / `refused`)
+        is published by the runner thread, in stream order, so every consumer
+        sees the same history. Returns the acknowledgement the sender gets.
+        """
+
+        with self._control_lock:
+            self._control_counter += 1
+            default_id = f"ctl:{self._control_counter}"
+        if self.finished or self.output.closed:
+            return {"accepted": False, "control_id": default_id, "reason": "annotation_stream_sealed"}
+        try:
+            control = normalize_control(raw, default_id=default_id)
+        except ControlError as exc:
+            self._controls.put(("refused", {"raw_op": raw.get("op") if isinstance(raw, dict) else None, "control_id": default_id}, str(exc)))
+            self.source.wake_readers()
+            return {"accepted": False, "control_id": default_id, "reason": str(exc)}
+        if control.op == CONTROL_PROTOCOL_UPDATE:
+            revision = self._resolve_revision(control.payload["protocol_revision_id"])
+            if revision is None:
+                reason = "annotation_protocol_unknown"
+                self._controls.put(("refused", control.public(), reason))
+                self.source.wake_readers()
+                return {"accepted": False, "control_id": control.control_id, "reason": reason}
+        self._controls.put(("control", control, None))
+        self.source.wake_readers()
+        return {"accepted": True, "control_id": control.control_id, "op": control.op, "queued": True}
 
     @property
     def finished(self) -> bool:
@@ -167,6 +227,9 @@ class LiveAnnotationRunner:
         try:
             while alive:
                 progressed = False
+                alive = self._apply_controls()
+                if not alive:
+                    break
                 for envelope in self.source.after(cursor):
                     if envelope.sequence is None:
                         continue
@@ -177,9 +240,14 @@ class LiveAnnotationRunner:
                     if not alive:
                         break
                     self._deliver_results()
+                    alive = self._apply_controls()
+                    if not alive:
+                        break
                 if not alive:
                     break
                 progressed = self._deliver_results() or progressed
+                if self._consumer_stop.is_set():
+                    break
                 if self.source.closed and cursor >= self.source.high_water:
                     break
                 if self._stop.is_set() and cursor >= self.source.high_water:
@@ -189,7 +257,10 @@ class LiveAnnotationRunner:
             if alive:
                 self._drain_pending()
                 self._close_process()
-            self._close_output("completed" if alive else "protocol_failed")
+            outcome = "completed" if alive else "protocol_failed"
+            if alive and self._consumer_stop.is_set():
+                outcome = "stopped_by_consumer"
+            self._close_output(outcome)
         except Exception as exc:  # noqa: BLE001 - the runner must always seal its stream
             self._record_error("runner", f"{type(exc).__name__}:{exc}")
             self._close_output("runner_failed")
@@ -309,6 +380,125 @@ class LiveAnnotationRunner:
         self.summary.retracted.add(finding_id)
         self.output.append(KIND_RETRACTED, payload)
 
+    # ---------------------------------------------------------------- control application
+
+    def _apply_controls(self) -> bool:
+        """Apply queued consumer controls in order. Returns False if the protocol died."""
+
+        while True:
+            try:
+                status, item, reason = self._controls.get_nowait()
+            except queue.Empty:
+                return True
+            source_sequence = self.summary.consumed_high_water
+            if status == "refused":
+                self.summary.controls_refused += 1
+                self.output.append(
+                    KIND_CONTROL_REFUSED,
+                    {**(item if isinstance(item, dict) else {}), "reason": reason, "source_sequence": source_sequence},
+                )
+                continue
+            control = item
+            assert isinstance(control, Control)
+            if control.op == CONTROL_STOP:
+                self.summary.controls_received += 1
+                self.output.append(
+                    KIND_CONTROL_RECEIVED,
+                    {**control.public(), "applied": True, "source_sequence": source_sequence},
+                )
+                self._consumer_stop.set()
+                return True
+            if control.op == CONTROL_MESSAGE:
+                if self._process is None or not self._process.alive:
+                    return False
+                try:
+                    emissions = self._process.on_message(control.payload["message"])
+                except ProtocolProcessError as exc:
+                    self._record_error("on_message", str(exc), source_sequence=source_sequence)
+                    return False
+                self.summary.controls_received += 1
+                self.output.append(
+                    KIND_CONTROL_RECEIVED,
+                    {
+                        **control.public(),
+                        "applied": True,
+                        "handled": bool(self._process.hooks.get("on_message")),
+                        "source_sequence": source_sequence,
+                    },
+                )
+                self._publish(emissions, source_sequence=source_sequence)
+                continue
+            if control.op == CONTROL_PROTOCOL_UPDATE:
+                if not self._rebind(control, source_sequence):
+                    return False
+                continue
+
+    def _rebind(self, control: Control, source_sequence: int) -> bool:
+        """Hot-swap the protocol process to another installed revision.
+
+        The old process is asked for a snapshot first (when the control asks
+        to carry state and the protocol implements it); the new revision boots
+        with that state and must come up before the old one is retired. A
+        revision that cannot boot leaves the current protocol running and is
+        recorded as a refused control, never as a dead stream.
+        """
+
+        revision_id = control.payload["protocol_revision_id"]
+        revision = self._resolve_revision(revision_id)
+        if revision is None or self._process is None:
+            self.summary.controls_refused += 1
+            self.output.append(
+                KIND_CONTROL_REFUSED,
+                {**control.public(), "reason": "annotation_protocol_unknown", "source_sequence": source_sequence},
+            )
+            return True
+        state: dict[str, Any] | None = None
+        if control.payload["carry_state"] and self._process.alive:
+            try:
+                state = self._process.snapshot()
+            except ProtocolProcessError as exc:
+                self._record_error("snapshot", str(exc), source_sequence=source_sequence)
+                return False
+        try:
+            replacement = self._spawn(revision.code, dict(revision.configuration), state)
+        except ProtocolProcessError as exc:
+            self.summary.controls_refused += 1
+            self.output.append(
+                KIND_CONTROL_REFUSED,
+                {**control.public(), "reason": f"protocol_boot_failed:{str(exc)[-300:]}", "source_sequence": source_sequence},
+            )
+            return True
+        previous = self._process
+        previous_revision = self.revision.revision_id
+        self._process = replacement
+        self.revision = revision
+        if self._model_for is not None:
+            self.model = self._model_for(revision)
+        previous.kill()
+        self.summary.controls_received += 1
+        self.summary.rebinds += 1
+        self.output.append(
+            KIND_CONTROL_RECEIVED,
+            {**control.public(), "applied": True, "source_sequence": source_sequence},
+        )
+        self.output.append(
+            KIND_PROTOCOL_REBOUND,
+            {
+                "rollout_id": self.rollout_id,
+                "previous_protocol_revision_id": previous_revision,
+                "protocol_revision_id": revision.revision_id,
+                "protocol_id": replacement.protocol_id or revision.protocol_id,
+                "configuration_digest": revision.configuration_digest,
+                "state_carried": bool(state is not None and replacement.restored),
+                "state_offered": state is not None,
+                "model": self.model.model if self.model is not None else None,
+                "isolation_receipt": replacement.isolation_receipt,
+                "source_sequence": source_sequence,
+                "control_id": control.control_id,
+            },
+        )
+        return True
+
     # ---------------------------------------------------------------- model calls
 
     def _request_model(self, payload: dict[str, Any], source_sequence: int) -> None:
@@ -415,7 +605,7 @@ class LiveAnnotationRunner:
 
     def _record_error(self, stage: str, detail: str, *, source_sequence: int | None = None) -> None:
         self.summary.protocol_errors += 1
-        if stage in {"spawn", "on_event", "on_model_result", "on_close", "runner"}:
+        if stage in {"spawn", "on_event", "on_model_result", "on_message", "snapshot", "on_close", "runner"}:
             self.error = f"{stage}:{detail}"
         if self.output.closed:
             return

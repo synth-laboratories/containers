@@ -398,6 +398,54 @@ paths:
                 additionalProperties: true
         '404':
           description: No protocol was bound to this rollout
+  /rollouts/{rollout_id}/annotations/control:
+    post:
+      operationId: postRolloutAnnotationControl
+      summary: Consumer -> annotator control for a running live annotation protocol
+      description: >-
+        Declared by the rollout stream descriptor as `annotation.control`. Ops:
+        `message` (delivered to the protocol's on_message), `protocol.update`
+        (hot-swap to another installed revision, carrying snapshot state when the
+        protocol supports it), `stop`. The immediate answer is the sender's
+        acknowledgement; the durable acknowledgement is published on the annotation
+        stream as annotation.control.received / annotation.control.refused. The
+        same JSON may be sent on the duplex `annotation.websocket`.
+      parameters:
+        - $ref: '#/components/parameters/RolloutId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [op]
+              properties:
+                schema:
+                  type: string
+                  enum: [synth.live-annotation-control.v1]
+                op:
+                  type: string
+                  enum: [message, protocol.update, stop]
+                control_id:
+                  type: string
+                message:
+                  type: object
+                  additionalProperties: true
+                protocol_revision_id:
+                  type: string
+                carry_state:
+                  type: boolean
+                reason:
+                  type: string
+      responses:
+        '202':
+          description: Accepted and queued for the annotator
+        '422':
+          description: Refused (contract breach, unknown revision, or sealed stream)
+        '404':
+          description: No annotation stream for this rollout
+        '409':
+          description: The annotator is not active for this rollout
   /annotation-protocol:
     get:
       operationId: getAnnotationProtocol

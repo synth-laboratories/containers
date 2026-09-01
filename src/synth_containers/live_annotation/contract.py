@@ -33,6 +33,13 @@ KIND_MODEL_REQUESTED = "annotation.model.requested"
 KIND_MODEL_COMPLETED = "annotation.model.completed"
 KIND_MODEL_FAILED = "annotation.model.failed"
 KIND_PROTOCOL_ERROR = "annotation.protocol.error"
+# Consumer -> annotator control, acknowledged durably on the stream so every
+# consumer sees what every other consumer asked for, in order.
+KIND_CONTROL_RECEIVED = "annotation.control.received"
+KIND_CONTROL_REFUSED = "annotation.control.refused"
+# A mid-rollout protocol hot-swap: new revision, optionally carrying the old
+# protocol's snapshot state.
+KIND_PROTOCOL_REBOUND = "annotation.protocol.rebound"
 KIND_CLOSED = "annotation.closed"
 KIND_HIGH_WATER = "capture.high_water"
 KIND_CAPTURE_CLOSED = "capture.closed"
@@ -46,10 +53,21 @@ STREAM_KINDS: tuple[str, ...] = (
     KIND_MODEL_COMPLETED,
     KIND_MODEL_FAILED,
     KIND_PROTOCOL_ERROR,
+    KIND_CONTROL_RECEIVED,
+    KIND_CONTROL_REFUSED,
+    KIND_PROTOCOL_REBOUND,
     KIND_CLOSED,
     KIND_HIGH_WATER,
     KIND_CAPTURE_CLOSED,
 )
+
+CONTROL_SCHEMA = "synth.live-annotation-control.v1"
+# Control ops a consumer may send to a running annotator.
+CONTROL_PROTOCOL_UPDATE = "protocol.update"
+CONTROL_MESSAGE = "message"
+CONTROL_STOP = "stop"
+CONTROL_OPS = frozenset({CONTROL_PROTOCOL_UPDATE, CONTROL_MESSAGE, CONTROL_STOP})
+_MESSAGE_MAX_BYTES = 16_384
 
 FINDING_STATUS_PROVISIONAL = "provisional"
 
@@ -298,3 +316,68 @@ def normalize_emission(raw: Any, *, source_stream_id: str) -> Emission:
 
 def text_digest(text: str) -> str:
     return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+class ControlError(ValueError):
+    """A consumer control message violated the contract. Returned to the sender and recorded."""
+
+
+@dataclass
+class Control:
+    op: str
+    control_id: str
+    payload: dict[str, Any] = field(default_factory=dict)
+
+    def public(self) -> dict[str, Any]:
+        row = {"op": self.op, "control_id": self.control_id}
+        if self.op == CONTROL_PROTOCOL_UPDATE:
+            row["protocol_revision_id"] = self.payload["protocol_revision_id"]
+            row["carry_state"] = self.payload["carry_state"]
+        elif self.op == CONTROL_STOP:
+            row["reason"] = self.payload.get("reason")
+        elif self.op == CONTROL_MESSAGE:
+            row["message_digest"] = text_digest(canonical_json(self.payload["message"]))
+            row["message_kind"] = self.payload["message"].get("type")
+        return row
+
+
+def normalize_control(raw: Any, *, default_id: str) -> Control:
+    """Validate one consumer control message. Raises ``ControlError``."""
+
+    if not isinstance(raw, dict):
+        raise ControlError("control_must_be_object")
+    schema = raw.get("schema")
+    if schema is not None and schema != CONTROL_SCHEMA:
+        raise ControlError(f"control.schema_unknown:{schema!r}")
+    op = raw.get("op")
+    if op not in CONTROL_OPS:
+        raise ControlError(f"control.op_unknown:{op!r}")
+    control_id = raw.get("control_id")
+    if control_id is None:
+        control_id = default_id
+    if not isinstance(control_id, str) or not control_id.strip() or len(control_id) > _ID_MAX:
+        raise ControlError("control.control_id_invalid")
+    if op == CONTROL_PROTOCOL_UPDATE:
+        revision = raw.get("protocol_revision_id")
+        if not isinstance(revision, str) or not revision.startswith(REVISION_PREFIX):
+            raise ControlError("control.protocol_revision_id_required")
+        carry = raw.get("carry_state", True)
+        if not isinstance(carry, bool):
+            raise ControlError("control.carry_state_must_be_boolean")
+        return Control(op=op, control_id=control_id, payload={"protocol_revision_id": revision, "carry_state": carry})
+    if op == CONTROL_STOP:
+        reason = raw.get("reason")
+        if reason is not None and (not isinstance(reason, str) or len(reason) > _LABEL_MAX):
+            raise ControlError("control.reason_invalid")
+        return Control(op=op, control_id=control_id, payload={"reason": reason})
+    message = raw.get("message")
+    if not isinstance(message, dict) or not message:
+        raise ControlError("control.message_must_be_object")
+    if not isinstance(message.get("type"), str) or not message["type"]:
+        raise ControlError("control.message.type_required")
+    encoded = canonical_json(message)
+    if len(encoded.encode("utf-8")) > _MESSAGE_MAX_BYTES:
+        raise ControlError("control.message_too_large")
+    if contains_secret(message):
+        raise ControlError("control.message_credential_forbidden")
+    return Control(op=op, control_id=control_id, payload={"message": json.loads(encoded)})

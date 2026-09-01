@@ -22,6 +22,7 @@ from typing import Any, Callable
 
 from ..event_log import CONTROL_SUBSCRIBED, RolloutEventLog, poll_payload, validate_rollout_id
 from .contract import (
+    CONTROL_SCHEMA,
     PROTOCOL_SCHEMA,
     STREAM_KINDS,
     STREAM_SCHEMA,
@@ -46,7 +47,14 @@ def annotation_stream_id(stream_id: str) -> str:
 
 
 def annotation_channel(rollout_id: str, *, bound_transport: str) -> dict[str, Any]:
-    """The descriptor fragment a rollout advertises when a protocol is bound to it."""
+    """The descriptor fragment a rollout advertises when a protocol is bound to it.
+
+    ``events`` (poll) is the durable authority and always present; ``stream``
+    (SSE) and ``websocket`` follow the rollout's bound transport. ``control``
+    is the consumer -> annotator direction: hot-swap, message, stop. The
+    WebSocket is duplex: it carries the same envelopes and accepts the same
+    control messages as ``control``.
+    """
 
     validate_rollout_id(rollout_id)
     return {
@@ -56,6 +64,11 @@ def annotation_channel(rollout_id: str, *, bound_transport: str) -> dict[str, An
         "stream": f"/rollouts/{rollout_id}/annotations/stream"
         if bound_transport in {"sse", "websocket"}
         else None,
+        "websocket": f"/rollouts/{rollout_id}/annotations/ws"
+        if bound_transport == "websocket"
+        else None,
+        "control": f"/rollouts/{rollout_id}/annotations/control",
+        "control_schema": CONTROL_SCHEMA,
         "cursor": {"kind": "sequence"},
         "kinds": list(STREAM_KINDS),
         "status": "provisional",
@@ -261,10 +274,29 @@ class LiveAnnotationService:
         key = hashlib.sha256(rollout_id.encode("utf-8")).hexdigest()
         return self.root / "events" / f"{key}.jsonl"
 
-    def _spawn_process(self, code: bytes, configuration: dict[str, Any]) -> IsolatedProtocolProcess:
+    def _spawn_process(
+        self, code: bytes, configuration: dict[str, Any], state: dict[str, Any] | None = None
+    ) -> IsolatedProtocolProcess:
         if self._spawn is not None:
-            return self._spawn(code, configuration)
-        return IsolatedProtocolProcess(code, config=configuration)
+            return self._spawn(code, configuration, state)
+        return IsolatedProtocolProcess(code, config=configuration, state=state)
+
+    def _model_for(self, revision: ProtocolRevision) -> ModelCaller | None:
+        settings = ModelSettings.from_configuration(revision.configuration)
+        return self._model_caller_factory(settings) if settings is not None else None
+
+    def control(self, rollout_id: str, raw: Any) -> dict[str, Any]:
+        """Consumer -> annotator. Answers immediately; the durable ack follows on the stream."""
+
+        runner = self.runners.get(rollout_id)
+        if runner is None:
+            if self.is_bound(rollout_id):
+                return {"error": "annotation_runner_not_active", "status_code": 409, "rollout_id": rollout_id}
+            return {"error": "annotation_stream_not_found", "status_code": 404, "rollout_id": rollout_id}
+        ack = runner.control(raw)
+        ack["rollout_id"] = rollout_id
+        ack["schema"] = CONTROL_SCHEMA
+        return ack
 
     def open_stream(self, rollout_id: str, source_stream_id: str) -> RolloutEventLog:
         """Open (or recover) the annotation stream at prepare time.
@@ -309,7 +341,7 @@ class LiveAnnotationService:
             if output.closed:
                 raise RuntimeError(f"annotation_stream_sealed:{rollout_id}")
             settings = ModelSettings.from_configuration(revision.configuration)
-            model = self._model_caller_factory(settings) if settings is not None else None
+            model = self._model_for(revision)
             limits = self.limits
             if settings is not None:
                 limits = RunnerLimits(
@@ -327,6 +359,8 @@ class LiveAnnotationService:
                 model=model,
                 limits=limits,
                 spawn=self._spawn_process,
+                resolve_revision=self.revisions.get,
+                model_for=self._model_for,
             )
             self.runners[rollout_id] = runner
             runner.start()

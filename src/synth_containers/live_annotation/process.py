@@ -54,15 +54,27 @@ def main() -> int:
     boot = json.loads(sys.stdin.readline())
     if boot.get("op") != "boot":
         raise SystemExit("expected_boot")
+    restored = False
     try:
         protocol, protocol_id = _load(Path(sys.argv[1]), dict(boot.get("config") or {}))
+        state = boot.get("state")
+        restore = getattr(protocol, "restore", None)
+        if isinstance(state, dict) and callable(restore):
+            restore(state)
+            restored = True
     except SystemExit:
         raise
     except Exception:
         sys.stdout.write(json.dumps({"op": "ready", "ok": False, "error": traceback.format_exc()[-2000:]}) + "\n")
         sys.stdout.flush()
         return 1
-    sys.stdout.write(json.dumps({"op": "ready", "ok": True, "protocol_id": protocol_id}) + "\n")
+    hooks = {
+        "on_message": callable(getattr(protocol, "on_message", None)),
+        "snapshot": callable(getattr(protocol, "snapshot", None)),
+        "restore": callable(getattr(protocol, "restore", None)),
+        "on_model_result": callable(getattr(protocol, "on_model_result", None)),
+    }
+    sys.stdout.write(json.dumps({"op": "ready", "ok": True, "protocol_id": protocol_id, "restored": restored, "hooks": hooks}) + "\n")
     sys.stdout.flush()
     for line in sys.stdin:
         req = json.loads(line)
@@ -77,6 +89,15 @@ def main() -> int:
                 return 0
             if op == "event":
                 out = _emissions(protocol.on_event(dict(req.get("event") or {})))
+            elif op == "message":
+                hook = getattr(protocol, "on_message", None)
+                out = _emissions(hook(dict(req.get("message") or {}))) if callable(hook) else []
+            elif op == "snapshot":
+                hook = getattr(protocol, "snapshot", None)
+                state = hook() if callable(hook) else None
+                sys.stdout.write(json.dumps({"id": rid, "ok": True, "state": state if isinstance(state, dict) else None}, default=str) + "\n")
+                sys.stdout.flush()
+                continue
             elif op == "model_result":
                 hook = getattr(protocol, "on_model_result", None)
                 out = (
@@ -105,7 +126,13 @@ class ProtocolProcessError(RuntimeError):
 class IsolatedProtocolProcess:
     """Spawn a child Python over JSONL. One instance per rollout; never shared."""
 
-    def __init__(self, code: bytes, *, config: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        code: bytes,
+        *,
+        config: dict[str, Any] | None = None,
+        state: dict[str, Any] | None = None,
+    ) -> None:
         self._sandbox = tempfile.TemporaryDirectory(prefix="synth-annotation-protocol-")
         root = Path(self._sandbox.name)
         protocol = root / "protocol.py"
@@ -137,7 +164,9 @@ class IsolatedProtocolProcess:
         self._lock = threading.Lock()
         self._request_id = 0
         self._closed = False
-        self._stdin.write(json.dumps({"op": "boot", "config": dict(config or {})}) + "\n")
+        self._stdin.write(
+            json.dumps({"op": "boot", "config": dict(config or {}), "state": state}, default=str) + "\n"
+        )
         self._stdin.flush()
         ready_line = self._stdout.readline()
         if not ready_line:
@@ -152,6 +181,8 @@ class IsolatedProtocolProcess:
             self._cleanup()
             raise ProtocolProcessError(f"protocol_not_ready:{error[-500:]}")
         self.protocol_id = str(ready.get("protocol_id") or "")
+        self.restored = bool(ready.get("restored"))
+        self.hooks = {key: bool(value) for key, value in dict(ready.get("hooks") or {}).items()}
         self.isolation_receipt = {
             "contract": "process_event_emission.v1",
             "platform": sys.platform,
@@ -203,6 +234,32 @@ class IsolatedProtocolProcess:
         return self._call(
             {"op": "model_result", "request_id": request_id, "result": result, "error": error}
         )
+
+    def on_message(self, message: dict[str, Any]) -> list[Any]:
+        """A consumer message. Protocols without ``on_message`` ignore it."""
+
+        return self._call({"op": "message", "message": message})
+
+    def snapshot(self) -> dict[str, Any] | None:
+        """The protocol's carry-over state for a hot-swap, or None if it has none."""
+
+        with self._lock:
+            if self._closed or self._proc.poll() is not None:
+                raise ProtocolProcessError("protocol_process_dead")
+            self._request_id += 1
+            try:
+                self._stdin.write(json.dumps({"id": self._request_id, "op": "snapshot"}) + "\n")
+                self._stdin.flush()
+                line = self._stdout.readline()
+            except (BrokenPipeError, OSError) as exc:
+                raise ProtocolProcessError(f"protocol_process_pipe:{exc}") from exc
+        if not line:
+            raise ProtocolProcessError(f"protocol_process_exited:rc={self._proc.poll()}")
+        response = json.loads(line)
+        if response.get("ok") is not True:
+            raise ProtocolProcessError(str(response.get("error") or "protocol_snapshot_failed"))
+        state = response.get("state")
+        return state if isinstance(state, dict) else None
 
     def close(self) -> list[Any]:
         """Send close, collect the final flush, reap the child. Idempotent."""
