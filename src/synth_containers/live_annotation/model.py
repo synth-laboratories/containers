@@ -1,10 +1,11 @@
-"""Parent-side model calls on behalf of a sandboxed protocol.
+"""Container-side model calls on behalf of a sandboxed protocol.
 
 The protocol process has no network and no credentials. It asks for a
-judgment by emitting ``model_request``; the runner executes it here with the
-container's provider configuration, under per-rollout ceilings, and hands the
-parsed result back. Keys are read from the environment at call time and are
-never persisted or echoed.
+judgment by emitting ``model_request``; the container platform executes it
+here, under per-rollout ceilings, and hands the parsed result back. Standalone
+containers may read a key from their environment. Workshop-managed containers
+instead call a capability-scoped Workshop proxy with a public sentinel, so the
+provider key never enters the container or its persisted protocol revision.
 """
 
 from __future__ import annotations
@@ -73,6 +74,7 @@ class ModelSettings:
     model: str
     base_url: str = "https://api.openai.com/v1"
     api_key_env: str = "OPENAI_API_KEY"
+    credential_mode: str = "environment"
     max_calls: int = 20
     max_output_tokens: int = 800
     timeout_seconds: float = 120.0
@@ -94,10 +96,14 @@ class ModelSettings:
         model = str(block.get("model") or block.get("name") or "").strip()
         if not model:
             return None
+        credential_mode = str(block.get("credential_mode") or cls.credential_mode).strip()
+        if credential_mode not in {"environment", "workshop_proxy"}:
+            raise ValueError(f"unsupported model credential_mode: {credential_mode}")
         return cls(
             model=model,
             base_url=str(block.get("base_url") or cls.base_url).rstrip("/"),
             api_key_env=str(block.get("api_key_env") or cls.api_key_env),
+            credential_mode=credential_mode,
             max_calls=max(0, int(block.get("max_calls") or cls.max_calls)),
             max_output_tokens=max(16, int(block.get("max_output_tokens") or cls.max_output_tokens)),
             timeout_seconds=float(block.get("timeout_seconds") or cls.timeout_seconds),
@@ -106,11 +112,17 @@ class ModelSettings:
         )
 
     def public(self) -> dict[str, Any]:
-        """What may be persisted: never the key or the env var name."""
+        """Non-sensitive state for the protocol endpoint.
+
+        A Workshop proxy URL embeds the run capability, so it is authorization
+        material even though it contains no provider key. Never echo it.
+        """
 
         return {
             "model": self.model,
-            "base_url": self.base_url,
+            "base_url": self.base_url if self.credential_mode == "environment" else None,
+            "credential_mode": self.credential_mode,
+            "execution_locality": "container",
             "max_calls": self.max_calls,
             "max_output_tokens": self.max_output_tokens,
             "timeout_seconds": self.timeout_seconds,
@@ -134,7 +146,11 @@ class OpenAICompatibleCaller:
         schema: dict[str, Any] | None,
         max_output_tokens: int,
     ) -> ModelResult:
-        api_key = os.environ.get(self.settings.api_key_env, "").strip()
+        api_key = (
+            "workshop-proxy"
+            if self.settings.credential_mode == "workshop_proxy"
+            else os.environ.get(self.settings.api_key_env, "").strip()
+        )
         if not api_key:
             raise ModelUnavailable("api_key_unavailable")
         payload: dict[str, Any] = {

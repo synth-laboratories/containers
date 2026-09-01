@@ -181,6 +181,14 @@ class LiveAnnotationService:
                 "status_code": 422,
                 "detail": "PUT /annotation-protocol accepts identity and configuration, never credentials",
             }
+        try:
+            ModelSettings.from_configuration(configuration)
+        except (TypeError, ValueError) as exc:
+            return {
+                "error": "protocol_model_configuration_invalid",
+                "status_code": 422,
+                "detail": str(exc)[:300],
+            }
         source_revision = body.get("source_revision")
         source_revision = str(source_revision) if source_revision is not None else None
         revision_id, code_sha256, configuration_digest = protocol_revision_id(

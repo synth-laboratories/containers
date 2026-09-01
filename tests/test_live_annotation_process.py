@@ -124,3 +124,60 @@ def test_model_settings_and_lenient_json() -> None:
     assert parse_json_object('Thinking... then: {"progress": "stalled", "x": [1]} done') == {"progress": "stalled", "x": [1]}
     assert parse_json_object("no json here") is None
     assert parse_json_object("[1, 2]") is None
+
+
+def test_workshop_proxy_model_call_uses_public_sentinel_without_environment_key(monkeypatch) -> None:
+    import json
+
+    from synth_containers.live_annotation.model import ModelSettings, OpenAICompatibleCaller
+
+    settings = ModelSettings.from_configuration(
+        {
+            "model": {
+                "model": "z-ai/glm-5.3-flash",
+                "base_url": "http://host.docker.internal:18110/cap/wcap_test/v1/providers/openrouter",
+                "credential_mode": "workshop_proxy",
+            }
+        }
+    )
+    assert settings is not None
+    captured = {}
+
+    class Response:
+        headers = {"x-request-id": "proxy-request-1"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self):
+            return json.dumps(
+                {
+                    "model": settings.model,
+                    "choices": [{"message": {"content": '{"ok": true}'}}],
+                    "usage": {"prompt_tokens": 4, "completion_tokens": 3, "total_tokens": 7},
+                }
+            ).encode("utf-8")
+
+    def urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["authorization"] = request.get_header("Authorization")
+        captured["timeout"] = timeout
+        return Response()
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+    result = OpenAICompatibleCaller(settings)(
+        instructions="Return JSON.",
+        context="Judge this step.",
+        schema={"type": "object"},
+        max_output_tokens=64,
+    )
+
+    assert captured["url"].endswith("/cap/wcap_test/v1/providers/openrouter/chat/completions")
+    assert captured["authorization"] == "Bearer workshop-proxy"
+    assert result.parsed == {"ok": True}
+    assert settings.public()["execution_locality"] == "container"
+    assert settings.public()["base_url"] is None
