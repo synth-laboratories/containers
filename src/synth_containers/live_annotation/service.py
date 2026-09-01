@@ -266,6 +266,29 @@ class LiveAnnotationService:
             return self._spawn(code, configuration)
         return IsolatedProtocolProcess(code, config=configuration)
 
+    def open_stream(self, rollout_id: str, source_stream_id: str) -> RolloutEventLog:
+        """Open (or recover) the annotation stream at prepare time.
+
+        A viewer subscribes to the declared channel *before* the rollout
+        starts, exactly as it does for the rollout stream, so the durable log
+        and its ``stream.subscribed`` control record must exist as soon as the
+        rollout is prepared with a protocol pin. Idempotent.
+        """
+
+        with self._lock:
+            existing = self.logs.get(rollout_id)
+            if existing is not None:
+                return existing
+            output = RolloutEventLog.recover(
+                rollout_id=rollout_id,
+                stream_id=annotation_stream_id(source_stream_id),
+                journal_path=self._journal_path(rollout_id),
+            )
+            if not output.closed and not any(item.control for item in output.after(0)):
+                output.append_control(CONTROL_SUBSCRIBED, output.subscribed_payload())
+            self.logs[rollout_id] = output
+            return output
+
     def attach(
         self,
         *,
@@ -273,7 +296,7 @@ class LiveAnnotationService:
         source: RolloutEventLog,
         revision_id: str,
     ) -> LiveAnnotationRunner:
-        """Open the annotation stream for ``rollout_id`` and start tailing ``source``."""
+        """Start tailing ``source`` into the rollout's annotation stream."""
 
         revision = self.revisions.get(revision_id)
         if revision is None:
@@ -282,17 +305,9 @@ class LiveAnnotationService:
             existing = self.runners.get(rollout_id)
             if existing is not None and not existing.finished:
                 return existing
-            journal = self._journal_path(rollout_id)
-            output = RolloutEventLog.recover(
-                rollout_id=rollout_id,
-                stream_id=annotation_stream_id(source.stream_id),
-                journal_path=journal,
-            )
+            output = self.open_stream(rollout_id, source.stream_id)
             if output.closed:
                 raise RuntimeError(f"annotation_stream_sealed:{rollout_id}")
-            if not any(item.control for item in output.after(0)):
-                output.append_control(CONTROL_SUBSCRIBED, output.subscribed_payload())
-            self.logs[rollout_id] = output
             settings = ModelSettings.from_configuration(revision.configuration)
             model = self._model_caller_factory(settings) if settings is not None else None
             limits = self.limits

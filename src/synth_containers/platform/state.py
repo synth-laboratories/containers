@@ -783,6 +783,10 @@ class CompatPlatform:
                     request.annotation_protocol_revision_id if request is not None else None
                 ),
             )
+        if request is not None and request.annotation_protocol_revision_id:
+            # Subscribe-before-start holds for the annotation channel too: the
+            # declared stream exists, durably, from the moment it is declared.
+            self.live_annotation.open_stream(rollout_id, stream_id)
         return self.stream_descriptor_for(rollout_id)
 
     def occupy_or_busy(self) -> dict[str, Any] | None:
@@ -1070,6 +1074,8 @@ class CompatPlatform:
         self.pins[rollout_id] = pin
         self.active_leases += 1
         log = self.logs[rollout_id]
+        if pin.annotation_protocol_revision_id:
+            self.live_annotation.open_stream(rollout_id, log.stream_id)
         if not any(item.kind == "trace.opened" for item in log.after(0)):
             # Immutable, secret-free lane identity belongs in the durable trace.
             # In particular, Workshop must be able to distinguish two harnesses
