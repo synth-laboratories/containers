@@ -294,6 +294,8 @@ class MiniSweAgent:
             "model": self.model,
             "messages": list(self._messages),
             "max_tokens": self.max_tokens,
+            "temperature": self.temperature,
+            "seed": self.sampling_seed + self.calls,
         }
         if self.base_url.startswith("https://tinker.thinkingmachines.dev/"):
             # Tinker separates reasoning by default. mini-SWE needs the complete
