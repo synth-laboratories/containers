@@ -2545,9 +2545,11 @@ class CispoHandshakeAdapter:
     which also means an edit to the port's shape shows up as a failing
     ``isinstance`` check in this module's tests rather than an import error.
 
-    ``cispo_bind_policy`` here serves the unpaid ``probe`` binding kind only.
-    A real sampler binding reaches a provider and belongs to whoever owns that
-    path; asking this adapter for one is a typed refusal, not a silent stub.
+    ``cispo_bind_policy`` dispatches on the requested kind: the unpaid ``probe``
+    kind is served by ``cispo_probe``, a real sampler binding by
+    ``cispo_policy``, and any other kind is a typed refusal rather than a silent
+    stub. Neither module is imported at module scope, so this one still stands
+    on its own.
     """
 
     def __init__(
@@ -2658,29 +2660,61 @@ class CispoHandshakeAdapter:
 
     # -- policy binding ------------------------------------------------ #
 
+    @property
+    def policies(self) -> Any:
+        """The sampler-binding half, kept for the life of the run.
+
+        Created on first use so a build that only ever probes never constructs
+        it, and settable so a container can supply its own reachability probe
+        and registry without this class growing a second constructor argument.
+        """
+
+        adapter = getattr(self, "_policies", None)
+        if adapter is None:
+            from .cispo_policy import CispoPolicyAdapter
+
+            adapter = CispoPolicyAdapter(self.facts)
+            self._policies = adapter
+        return adapter
+
+    @policies.setter
+    def policies(self, adapter: Any) -> None:
+        self._policies = adapter
+
     def cispo_bind_policy(self, request: Mapping[str, Any]) -> dict[str, Any]:
-        """Bind the unpaid ``probe`` kind. Any other kind is a typed refusal."""
+        """Bind one policy. ``probe`` is unpaid; a sampler kind reaches a provider."""
 
         from .cispo_probe import PROBE_POLICY_KIND, CispoProbeAdapter, ProbeError
 
         kind = str(request.get("kind") or request.get("policy_kind") or "")
         agreement = self.admit_attempt(request)
-        if kind != PROBE_POLICY_KIND:
-            raise ProbeError(
-                f"this adapter binds only the {PROBE_POLICY_KIND!r} policy kind; "
-                f"{kind!r} reaches a provider and is bound elsewhere"
-            )
-        return CispoProbeAdapter(self.facts).bind(agreement, request)
+        if kind == PROBE_POLICY_KIND:
+            return CispoProbeAdapter(self.facts).bind(agreement, request)
+        from .cispo_policy import SAMPLER_POLICY_KINDS
+
+        if kind in SAMPLER_POLICY_KINDS:
+            return self.policies.bind(agreement, request)
+        raise ProbeError(
+            f"this adapter binds {PROBE_POLICY_KIND!r} and "
+            f"{sorted(SAMPLER_POLICY_KINDS)}; {kind!r} is none of them"
+        )
 
     def cispo_bind_policy_set(self, request: Mapping[str, Any]) -> dict[str, Any]:
         """Bind every instance of a joint episode, or none of them."""
 
-        from .cispo_probe import ProbeError
+        from .cispo_probe import PROBE_POLICY_KIND, ProbeError
 
         bindings = request.get("bindings") or ()
         if not isinstance(bindings, Sequence) or isinstance(bindings, (str, bytes)):
             raise MalformedRequirementDocument("policy set bindings must be a list")
+        kinds = {str(request.get("kind") or request.get("policy_kind") or "")} | {
+            str(item.get("kind") or item.get("policy_kind") or "")
+            for item in bindings
+            if isinstance(item, Mapping)
+        }
         agreement = self.admit_attempt(request)
+        if kinds - {"", PROBE_POLICY_KIND}:
+            return self.policies.bind_set(agreement, request)
         resolved: list[dict[str, Any]] = []
         for item in bindings:
             if not isinstance(item, Mapping):

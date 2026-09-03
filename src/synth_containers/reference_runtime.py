@@ -595,6 +595,29 @@ class ReferenceManagedRuntime:
         )
         self._executions: dict[str, ExecutionRecord] = {}
         self._checkpoints: dict[str, CheckpointDescriptor] = {}
+        self._cispo_target: Any | None = None
+
+    # -- CISPO ---------------------------------------------------------------
+    #
+    # A deployment installs a CISPO target; this runtime holds it and answers
+    # the three discovery hooks ``cispo_contract`` looks for. Nothing is
+    # declared until something is installed, so an uninstalled build advertises
+    # no CISPO contract and its routes answer the typed 501 they already did.
+
+    def install_cispo_target(self, target: Any) -> Any:
+        """Install the object that serves this runtime's CISPO surface."""
+
+        self._cispo_target = target
+        return target
+
+    def cispo_declaration(self) -> Any:
+        return None if self._cispo_target is None else self._cispo_target.declaration
+
+    def cispo_admission(self) -> Any:
+        return None if self._cispo_target is None else self._cispo_target.admission
+
+    def cispo_rollouts(self) -> Any:
+        return None if self._cispo_target is None else self._cispo_target.rollouts
 
     @classmethod
     def counter_default(cls, *, target: int = 3) -> "ReferenceManagedRuntime":
