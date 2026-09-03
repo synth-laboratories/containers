@@ -1136,7 +1136,7 @@ def test_the_adapter_serves_discovery_and_the_handshake_from_one_set_of_facts() 
     adapter = CispoHandshakeAdapter(facts(), clock=lambda: NOW)
     assert adapter.cispo_health()["capability_hash"] == facts().capability_hash
     assert adapter.cispo_taskset()["splits"] == ["train", "val"]
-    rows = adapter.cispo_taskset_tasks({"task_ids": ["task-1", "task-0"]})["tasks"]
+    rows = adapter.cispo_taskset_tasks({"task_ids": ["task-1", "task-0"]})["rows"]
     assert [row["task_id"] for row in rows] == ["task-1", "task-0"]
     assert adapter.cispo_topology("topo-1")["topology_id"] == "topo-1"
     payload = adapter.cispo_handshake(request_payload())

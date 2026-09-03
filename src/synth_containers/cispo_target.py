@@ -86,6 +86,7 @@ from .cispo_evidence import (
     SealedEvidenceV1,
 )
 from .cispo_handshake import (
+    canonical_digest,
     CispoHandshakeAdapter,
     RuntimeFacts,
     TaskRow,
@@ -492,6 +493,81 @@ class DeterministicSampler:
 # --------------------------------------------------------------------------- #
 
 
+
+@dataclass(frozen=True, slots=True)
+class ProbeAttemptBinding:
+    """A bound probe, shaped like a sampler binding for the attempt machine.
+
+    It carries no origin and no credential because a probe reaches no provider.
+    What it does carry is everything the attempt machine reads off a binding, so
+    a probe attempt is as traceable as a paid one and the machine needs no
+    branch for the unpaid kind.
+    """
+
+    binding_id: str
+    payload: Mapping[str, Any]
+
+    @property
+    def _behavior(self) -> Mapping[str, Any]:
+        return self.payload.get("behavior") or {}
+
+    @property
+    def probe(self) -> bool:
+        return True
+
+    @property
+    def trainable(self) -> bool:
+        return False
+
+    @property
+    def origin(self) -> None:
+        return None
+
+    @property
+    def behavior_identity(self) -> str:
+        return self.behavior_fingerprint
+
+    @property
+    def behavior_fingerprint(self) -> str:
+        return str(self.payload.get("behavior_fingerprint") or self.binding_id)
+
+    def behavior_binding(self) -> Mapping[str, Any]:
+        """A method, not a property: the sampler binding spells it that way."""
+
+        return self._behavior
+
+    @property
+    def renderer_profile(self) -> Any:
+        return self.payload.get("renderer_profile")
+
+    @property
+    def policy_revision(self) -> int:
+        return int(self._behavior.get("policy_revision") or 0)
+
+    @property
+    def wire_api(self) -> str:
+        return str(self._behavior.get("wire_api") or "chat_completions")
+
+    @property
+    def sampling_transport(self) -> str:
+        return str(self._behavior.get("sampling_transport") or "message_in_capture_out")
+
+    @property
+    def agent_instance_id(self) -> str | None:
+        value = self.payload.get("agent_instance_id")
+        return None if value is None else str(value)
+
+    @property
+    def team_id(self) -> str | None:
+        value = self.payload.get("team_id")
+        return None if value is None else str(value)
+
+    @property
+    def parameter_group_id(self) -> str | None:
+        value = self.payload.get("parameter_group_id")
+        return None if value is None else str(value)
+
+
 @dataclass(frozen=True, slots=True)
 class AttemptPlan:
     """What one accepted attempt is: a task, a seed, and one bound policy."""
@@ -518,6 +594,41 @@ class AttemptResult:
     passed: bool
     steps: int
     snapshot: dict[str, Any] = field(default_factory=dict)
+
+
+class ProbePolicySession:
+    """Drives a probe attempt through the same episode a paid one walks.
+
+    A probe has no origin and no credential, so there is nothing to bind a
+    request to a provider with. Everything else is the same call the paid
+    session makes, which is what makes the probe worth running at all.
+    """
+
+    def __init__(self, binding: Any, *, transport: Any) -> None:
+        self._binding = binding
+        self._transport = transport
+
+    def request(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        return {
+            "probe": True,
+            "synthetic": True,
+            "policy_revision": self._binding.policy_revision,
+            "wire_api": self._binding.wire_api,
+            **{k: v for k, v in payload.items() if k != "messages"},
+        }
+
+    def call(self, payload: Mapping[str, Any]) -> tuple[Any, Mapping[str, Any]]:
+        # The transport still insists on an Authorization header, because a
+        # real one always carries the session credential. A probe has none, so
+        # it presents its own binding id: the header is present and provably
+        # not a provider key.
+        response = self._transport.post(
+            f"probe://{self._binding.binding_id}/v1/chat/completions",
+            headers={"Authorization": f"Probe {self._binding.binding_id}"},
+            body=dict(payload),
+        )
+        return None, response
+
 
 
 class CounterAttemptRuntime:
@@ -623,15 +734,22 @@ class CounterAttemptRuntime:
             self._cancelled[attempt.rollout_id] = str(reason)
 
     # -- the episode ------------------------------------------------------ #
-
     def _run_episode(self, plan: AttemptPlan, log: RolloutEventLog) -> AttemptResult:
         binding = plan.binding
         origin = binding.origin
-        if origin is None:  # pragma: no cover - a trainable binding always has one
+        probe = bool(getattr(binding, "probe", False))
+        if origin is None and not probe:
             raise CispoTargetError(
                 f"attempt {plan.rollout_id!r} is bound to a policy with no sampler origin"
             )
-        session = BoundPolicySession(binding, transport=self._transport)
+        # A probe reaches no provider, so it has no origin to reach one through.
+        # It still walks this same episode, against the deterministic sampler,
+        # which is the point: the unpaid path must exercise the paid one.
+        session = (
+            ProbePolicySession(binding, transport=self._transport)
+            if probe
+            else BoundPolicySession(binding, transport=self._transport)
+        )
         env = self._runtime_factory()
         actions = _legal_actions(env)
         observation = env.reset(seed=plan.seed)
@@ -829,10 +947,23 @@ class CispoTargetRolloutPort(CispoRolloutAdapter):
 
     def cispo_submit_rollout(self, request: Mapping[str, Any]) -> dict[str, Any]:
         plan = self._target.admit_attempt(request)
-        payload = super().cispo_submit_rollout(request)
+        # Admission is what mints the rollout id when the executor did not name
+        # one, so the lifecycle has to be told the id admission settled on
+        # rather than re-reading a field that may not be there.
+        submission = dict(request)
+        submission["rollout_id"] = plan.rollout_id
+        if not submission.get("horizon"):
+            # The container declared the horizon; an executor that does not
+            # restate it in every submission is not thereby asking for none.
+            submission["horizon"] = self._target.declared_horizon_payload()
+        payload = super().cispo_submit_rollout(submission)
         if not payload.get("duplicate"):
             record = self._lifecycle.start(plan.rollout_id)
             payload["state"] = record.state.value
+        # Never overwrite the id the lifecycle returned: on a retry it is the
+        # original attempt's, and reporting this admission's would turn a
+        # deduplicated resubmission into a second logical attempt.
+        payload.setdefault("rollout_id", plan.rollout_id)
         payload["config_id"] = plan.binding.binding_id
         payload["agent_instance_id"] = plan.binding.agent_instance_id
         payload["team_id"] = plan.binding.team_id
@@ -1027,6 +1158,20 @@ class CispoReferenceTarget:
     def sampler(self) -> SamplerTransport:
         return self._sampler
 
+    def declared_horizon_payload(self) -> dict[str, Any]:
+        """The horizon this container advertises, in submission shape."""
+
+        horizon = self._admission.facts.horizon
+        return {
+            "horizon_kind": horizon.horizon_kind,
+            "value": float(horizon.value),
+            "seconds_per_unit": (
+                None if horizon.seconds_per_unit is None else float(horizon.seconds_per_unit)
+            ),
+            "time_dilation": float(horizon.time_dilation),
+            "grace_seconds": float(horizon.grace_seconds),
+        }
+
     @property
     def policy_registry(self) -> Any:
         return self._admission.policies.registry
@@ -1045,7 +1190,17 @@ class CispoReferenceTarget:
         agreement = self._admission.admit_attempt(request)
         rollout_id = str(request.get("rollout_id") or "").strip()
         if not rollout_id:
-            raise CispoTargetError("a submission names no rollout_id")
+            # The container mints the rollout id, because the executor cannot
+            # know it before the attempt is accepted — the origin it submits is
+            # bound first. Deriving it from the idempotency key keeps a retry
+            # after a lost response resolving to the same logical attempt.
+            key = str(request.get("idempotency_key") or "").strip()
+            if not key:
+                raise CispoTargetError(
+                    "a submission names neither a rollout_id nor an idempotency_key, "
+                    "so a retry could not be told from a second attempt"
+                )
+            rollout_id = f"rollout_{canonical_digest({'key': key}, length=20)}"
         task_id = str(
             request.get("task_id")
             or (request.get("task") or {}).get("task_id")
@@ -1066,7 +1221,11 @@ class CispoReferenceTarget:
                 f"attempt {rollout_id!r} names no bound policy config; an unbound attempt "
                 "has nothing to collect behavior logprobs from"
             )
-        binding = self.policy_registry.admit(rollout_id, config_id)
+        probe = self._admission.probe_bindings.get(config_id)
+        if probe is not None:
+            binding = ProbeAttemptBinding(config_id, probe)
+        else:
+            binding = self.policy_registry.admit(rollout_id, config_id)
 
         correlation = dict(request.get("correlation") or {})
         seed = correlation.get("seed", request.get("seed"))

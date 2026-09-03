@@ -2599,11 +2599,19 @@ class CispoHandshakeAdapter:
         }
 
     def cispo_taskset_tasks(self, request: Mapping[str, Any]) -> dict[str, Any]:
-        """One duplicate-free row per requested id. A missing id is a refusal."""
+        """One duplicate-free row per requested id. A missing id is a refusal.
 
-        raw = request.get("task_ids") or ()
+        The shipped client spells the field ``ids``; the handshake document
+        spells the same idea ``task_ids``. Both are read here, because a
+        container that answers only its own preferred spelling silently
+        resolves nothing and the run fails several layers away.
+        """
+
+        raw = request.get("ids")
+        if raw is None:
+            raw = request.get("task_ids") or ()
         if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
-            raise MalformedRequirementDocument("task_ids must be a list")
+            raise MalformedRequirementDocument("task ids must be a list")
         wanted = tuple(dict.fromkeys(str(item) for item in raw))
         discovery = self.facts.discovery
         missing = tuple(task_id for task_id in wanted if discovery.row(task_id) is None)
@@ -2615,7 +2623,10 @@ class CispoHandshakeAdapter:
         return {
             "taskset_id": discovery.taskset_id,
             "taskset_version": discovery.taskset_version,
-            "tasks": [
+            # The shipped client reads "rows"; so do the reference fakes. A
+            # container that answers with its own preferred spelling resolves
+            # nothing and fails several layers away.
+            "rows": [
                 {
                     "task_id": row.task_id,
                     "content_digest": row.content_digest,
@@ -2681,6 +2692,16 @@ class CispoHandshakeAdapter:
     def policies(self, adapter: Any) -> None:
         self._policies = adapter
 
+    @property
+    def probe_bindings(self) -> dict[str, dict[str, Any]]:
+        """Probe bindings this adapter has issued, by binding id."""
+
+        held = getattr(self, "_probe_bindings", None)
+        if held is None:
+            held = {}
+            self._probe_bindings = held
+        return held
+
     def cispo_bind_policy(self, request: Mapping[str, Any]) -> dict[str, Any]:
         """Bind one policy. ``probe`` is unpaid; a sampler kind reaches a provider."""
 
@@ -2689,7 +2710,15 @@ class CispoHandshakeAdapter:
         kind = str(request.get("kind") or request.get("policy_kind") or "")
         agreement = self.admit_attempt(request)
         if kind == PROBE_POLICY_KIND:
-            return CispoProbeAdapter(self.facts).bind(agreement, request)
+            payload = CispoProbeAdapter(self.facts).bind(agreement, request)
+            # A probe attempt is submitted against its binding like any other,
+            # so the binding has to be findable afterwards. The sampler
+            # registry cannot hold it — a probe has no sampler origin — so the
+            # adapter remembers its own.
+            binding_id = str(payload.get("config_id") or "")
+            if binding_id:
+                self.probe_bindings[binding_id] = dict(payload)
+            return payload
         from .cispo_policy import SAMPLER_POLICY_KINDS
 
         if kind in SAMPLER_POLICY_KINDS:

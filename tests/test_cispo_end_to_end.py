@@ -134,8 +134,8 @@ def run() -> Run:
     # 4. discovery -- the taskset and the topology the container declares.
     state.responses["taskset"] = client.get(ROUTES["taskset_route"]).json()
     task_id = target.facts.discovery.rows[0].task_id
-    state.responses["tasks"] = client.post(
-        ROUTES["taskset_tasks_route"], json={"task_ids": [task_id]}
+    state.responses["rows"] = client.post(
+        ROUTES["taskset_tasks_route"], json={"ids": [task_id]}
     ).json()
     state.responses["topology"] = client.get(
         ROUTES["topology_route"].format(topology_id=target.facts.topology.topology_id)
@@ -262,7 +262,7 @@ def test_discovery_resolves_the_task_the_agreement_then_names(run: Run) -> None:
     taskset = run.json("taskset")
     assert taskset["deterministic_lookup"] is True
     assert taskset["duplicate_free"] is True
-    (row,) = run.json("tasks")["tasks"]
+    (row,) = run.json("rows")["rows"]
     assert row["content_digest"].startswith("sha256:")
     assert run.json("topology")["topology_id"] == run.json("capabilities")["topology_ref"]
     resolution = run.json("handshake")["taskset_resolution"]

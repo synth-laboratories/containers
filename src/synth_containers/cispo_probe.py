@@ -208,8 +208,22 @@ class ProbeBehavior(JsonDataclassMixin):
             length=32,
         )
 
+    @property
+    def binding_id(self) -> str:
+        """A probe binding is still a binding, and a binding has an id.
+
+        The executor correlates an attempt to what it bound by this id, and it
+        makes no exception for the unpaid kind — a probe that returns none
+        cannot be submitted against.
+        """
+
+        return f"probe_{self.value[:16]}"
+
     def to_payload(self) -> dict[str, Any]:
         return {
+            "config_id": self.binding_id,
+            "binding_id": self.binding_id,
+            "kind": PROBE_POLICY_KIND,
             "renderer_profile": self.renderer_profile.to_payload(),
             "model_family": self.model_family,
             "model_id": self.model_id,
@@ -677,8 +691,18 @@ class ProbeBinding(JsonDataclassMixin):
     quiescence_accepted: bool
     max_prompt_tokens: int = 0
 
+    @property
+    def binding_id(self) -> str:
+        return f"probe_{self.behavior.value[:16]}"
+
     def to_payload(self) -> dict[str, Any]:
         return {
+            # A probe binding is still a binding, and the executor correlates
+            # an attempt to what it bound by this id. The unpaid kind gets no
+            # exception: a binding that returns no id cannot be submitted
+            # against, and the run fails a layer away from the cause.
+            "config_id": self.binding_id,
+            "binding_id": self.binding_id,
             "policy_kind": self.policy_kind,
             "kind": self.policy_kind,
             "probe": True,

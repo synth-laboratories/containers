@@ -258,7 +258,7 @@ def test_discovery_rows_come_from_the_runtimes_own_catalog() -> None:
     assert all(row.topology_ref == target.declaration.topology.topology_id for row in rows)
     # Discovery, not decoration: the taskset route answers with the same rows.
     served = target.admission.cispo_taskset_tasks({"task_ids": sorted(catalog_ids)})
-    assert {row["task_id"] for row in served["tasks"]} == catalog_ids
+    assert {row["task_id"] for row in served["rows"]} == catalog_ids
 
 
 def test_the_hash_the_handshake_echoes_is_the_document_that_is_served() -> None:

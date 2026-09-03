@@ -57,7 +57,7 @@ class _DeclaringRuntime(ReferenceManagedRuntime):
         return {"taskset_id": "taskset-small"}
 
     def taskset_tasks(self, request: dict[str, Any]) -> dict[str, Any]:
-        return {"tasks": [], "echo": dict(request)}
+        return {"rows": [], "echo": dict(request)}
 
 
 def _declaring_client() -> TestClient:
