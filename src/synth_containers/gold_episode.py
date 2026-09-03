@@ -100,6 +100,7 @@ def run_episode(
         [Any, Planner, StepResult, list[float | None]], dict[str, Any]
     ]
     | None = None,
+    max_calls: int | None = None,
 ) -> dict[str, Any]:
     log.append("env.episode.opened", {"seed": seed, "max_steps": max_steps})
     result = world.reset(seed, max_steps=max_steps)
@@ -141,7 +142,11 @@ def run_episode(
     # boundary is already terminal.
     if checkpoint_callback is not None:
         scheduled_checkpoints.append(checkpoint_callback(world, planner, result, list(signals)))
+    stopped_on: str | None = None
     while not result.done:
+        if max_calls is not None and int(planner.usage().get("calls") or 0) >= max_calls:
+            stopped_on = "max_calls"
+            break
         if emit_policy_spans:
             log.append(
                 "span.policy.opened",
@@ -186,10 +191,17 @@ def run_episode(
             scheduled_checkpoints.append(
                 checkpoint_callback(world, planner, result, list(signals))
             )
+    terminal_status = "completed" if result.done else "truncated"
     if session_open:
         log.append("policy.session.closed", {"calls": planner.usage().get("calls")})
-    log.append("env.episode.closed", {"status": "completed", "steps": result.env_steps})
-    log.append("status", {"status": "completed", "steps": result.env_steps})
+    log.append(
+        "env.episode.closed",
+        {"status": terminal_status, "steps": result.env_steps, "reason": stopped_on},
+    )
+    log.append(
+        "status",
+        {"status": terminal_status, "steps": result.env_steps, "reason": stopped_on},
+    )
     evidence_high_water = log.high_water
     log.append("capture.high_water", {"high_water": evidence_high_water})
     log.append("capture.closed", {"high_water": evidence_high_water})
@@ -202,4 +214,6 @@ def run_episode(
         "steps": result.env_steps,
         "frames": frames,
         "scheduled_checkpoints": scheduled_checkpoints,
+        "status": terminal_status,
+        "stopped_on": stopped_on,
     }

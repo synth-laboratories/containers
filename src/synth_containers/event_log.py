@@ -126,10 +126,33 @@ class RolloutEventLog:
     _high_water: int = 0
     _items: list[LogEnvelope] = field(default_factory=list)
     _lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
+    _changed: threading.Condition = field(default_factory=threading.Condition, repr=False)
 
     @property
     def high_water(self) -> int:
         return self._high_water
+
+    def _notify(self) -> None:
+        with self._changed:
+            self._changed.notify_all()
+
+    def wake_readers(self) -> None:
+        """Wake blocked ``wait_for_change`` callers without appending anything."""
+
+        self._notify()
+
+    def wait_for_change(self, after: int, timeout: float | None = None) -> bool:
+        """Block until a sequence above ``after`` exists, the log closes, or ``timeout`` elapses.
+
+        In-process tails (the live annotation runner) use this instead of a
+        sleep loop. Returns True when there is something new to read.
+        """
+
+        with self._changed:
+            if self._high_water > after or self.closed:
+                return True
+            self._changed.wait(timeout)
+            return self._high_water > after or self.closed
 
     def append_control(self, kind: str, payload: dict[str, Any]) -> LogEnvelope:
         with self._lock:
@@ -146,7 +169,8 @@ class RolloutEventLog:
             )
             self._persist({"record": "envelope", "envelope": envelope.to_dict()})
             self._items.append(envelope)
-            return envelope
+        self._notify()
+        return envelope
 
     def append(self, kind: str, payload: dict[str, Any]) -> LogEnvelope:
         with self._lock:
@@ -165,7 +189,8 @@ class RolloutEventLog:
             self._persist({"record": "envelope", "envelope": envelope.to_dict()})
             self._high_water = next_sequence
             self._items.append(envelope)
-            return envelope
+        self._notify()
+        return envelope
 
     def mark_closed(self) -> None:
         with self._lock:
@@ -173,6 +198,7 @@ class RolloutEventLog:
                 return
             self._persist({"record": "closed", "high_water": self._high_water})
             self.closed = True
+        self._notify()
 
     def subscribed_payload(self) -> dict[str, Any]:
         return {

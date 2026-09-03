@@ -20,6 +20,7 @@ from ..event_log import (
     stream_descriptor,
     validate_rollout_id,
 )
+from ..live_annotation.service import LiveAnnotationService, annotation_channel
 from .affordances import bind_recipe
 from .http_requests import CreateRolloutRequest, ISOLATED_POLICY_HARNESS, NANOHORIZON_HARNESS
 from .policy_process import DEFAULT_HEURISTIC, IsolatedPolicyProcess
@@ -128,6 +129,8 @@ class RolloutPin:
     engine_generation: int
     policy_revision_id: str | None
     seed: int | None
+    max_steps: int | None = None
+    max_calls: int | None = None
     child_rollout_id: str | None = None
     child_resource_ref: dict[str, Any] | None = None
     usage: dict[str, Any] | None = None
@@ -145,6 +148,8 @@ class RolloutPin:
     checkpoint_schedule: dict[str, Any] | None = None
     resume_from_checkpoint_id: str | None = None
     scheduled_checkpoints: list[dict[str, Any]] = field(default_factory=list)
+    # Observe-only live annotation protocol bound to this rollout, if any.
+    annotation_protocol_revision_id: str | None = None
 
 
 class CompatPlatform:
@@ -192,6 +197,7 @@ class CompatPlatform:
         self.start_session_calls = 0
         self.policy_code: bytes | None = None
         self.policy_process: IsolatedPolicyProcess | None = None
+        self.live_annotation = LiveAnnotationService(self.storage_root)
         self._state_lock = threading.RLock()
         self._seed_default_policies()
         self._recover_checkpoints()
@@ -313,6 +319,8 @@ class CompatPlatform:
                 "engine_generation": pin.engine_generation,
                 "policy_revision_id": pin.policy_revision_id,
                 "seed": pin.seed,
+                "max_steps": pin.max_steps,
+                "max_calls": pin.max_calls,
                 "child_rollout_id": pin.child_rollout_id,
                 "child_resource_ref": pin.child_resource_ref,
                 "usage": pin.usage,
@@ -328,6 +336,7 @@ class CompatPlatform:
                 "checkpoint_schedule": pin.checkpoint_schedule,
                 "resume_from_checkpoint_id": pin.resume_from_checkpoint_id,
                 "scheduled_checkpoints": pin.scheduled_checkpoints,
+                "annotation_protocol_revision_id": pin.annotation_protocol_revision_id,
             },
         }
         self._atomic_json(self._manifest_path(pin.rollout_id), manifest)
@@ -394,6 +403,8 @@ class CompatPlatform:
                 engine_generation=int(raw_pin["engine_generation"]),
                 policy_revision_id=raw_pin.get("policy_revision_id"),
                 seed=raw_pin.get("seed"),
+                max_steps=raw_pin.get("max_steps"),
+                max_calls=raw_pin.get("max_calls"),
                 child_rollout_id=raw_pin.get("child_rollout_id"),
                 child_resource_ref=raw_pin.get("child_resource_ref"),
                 usage=raw_pin.get("usage"),
@@ -411,6 +422,7 @@ class CompatPlatform:
                 checkpoint_schedule=raw_pin.get("checkpoint_schedule"),
                 resume_from_checkpoint_id=raw_pin.get("resume_from_checkpoint_id"),
                 scheduled_checkpoints=list(raw_pin.get("scheduled_checkpoints") or []),
+                annotation_protocol_revision_id=raw_pin.get("annotation_protocol_revision_id"),
             )
             self.logs[rollout_id] = log
             self.stream_bindings[rollout_id] = (str(binding[0]), str(binding[1]))
@@ -668,9 +680,15 @@ class CompatPlatform:
                     "rollouts.poll": True,
                     "reward.get": True,
                     "trace_v5.capture": True,
+                    # Observe-only live annotation: a digest-pinned protocol
+                    # tails the rollout stream and publishes provisional
+                    # findings on a sibling stream declared by the descriptor.
+                    "annotation.live": True,
+                    "annotation.protocol.put": True,
                 },
                 "policy_refs": policy_refs,
             },
+            "live_annotation": self.live_annotation.advertisement(),
         }
         if contract := self._gepa_v2_contract():
             payload["optimizer_contracts"] = {"gepa": contract}
@@ -767,13 +785,15 @@ class CompatPlatform:
                     else self.current_policy_revision_id
                 ),
                 seed=seed,
+                annotation_protocol_revision_id=(
+                    request.annotation_protocol_revision_id if request is not None else None
+                ),
             )
-        return stream_descriptor(
-            rollout_id=rollout_id,
-            stream_id=stream_id,
-            bound_transport=transport,
-            retention=retention or self.spec.retention,
-        )
+        if request is not None and request.annotation_protocol_revision_id:
+            # Subscribe-before-start holds for the annotation channel too: the
+            # declared stream exists, durably, from the moment it is declared.
+            self.live_annotation.open_stream(rollout_id, stream_id)
+        return self.stream_descriptor_for(rollout_id)
 
     def occupy_or_busy(self) -> dict[str, Any] | None:
         if self.active_leases >= self.spec.scale_leases:
@@ -868,6 +888,8 @@ class CompatPlatform:
                 and bound_retention == requested_retention
                 and existing_pin.resume_from_checkpoint_id
                 == request.resume_from_checkpoint_id
+                and existing_pin.annotation_protocol_revision_id
+                == request.annotation_protocol_revision_id
             )
             if not same_identity:
                 return {
@@ -996,6 +1018,15 @@ class CompatPlatform:
                     },
                 }
 
+        if request.annotation_protocol_revision_id:
+            if self.live_annotation.revision_for(request.annotation_protocol_revision_id) is None:
+                return {
+                    "error": "annotation_protocol_unknown",
+                    "status_code": 404,
+                    "annotation_protocol_revision_id": request.annotation_protocol_revision_id,
+                    "detail": "the requested live annotation protocol revision is not installed",
+                }
+
         if self.spec.admission is not None:
             refusal = self.spec.admission(self, request)
             if isinstance(refusal, dict) and refusal:
@@ -1038,16 +1069,21 @@ class CompatPlatform:
             engine_generation=self.engine_generation,
             policy_revision_id=request.policy_revision_id,
             seed=seed_i,
+            max_steps=request.max_steps,
+            max_calls=request.max_calls,
             usage=None,
             omit_reward=request.omit_reward,
             outcome=request.outcome,
             reward_kind=self.spec.reward_kind,
             checkpoint_schedule=request.checkpoint_schedule,
             resume_from_checkpoint_id=request.resume_from_checkpoint_id,
+            annotation_protocol_revision_id=request.annotation_protocol_revision_id,
         )
         self.pins[rollout_id] = pin
         self.active_leases += 1
         log = self.logs[rollout_id]
+        if pin.annotation_protocol_revision_id:
+            self.live_annotation.open_stream(rollout_id, log.stream_id)
         if not any(item.kind == "trace.opened" for item in log.after(0)):
             # Immutable, secret-free lane identity belongs in the durable trace.
             # In particular, Workshop must be able to distinguish two harnesses
@@ -1133,12 +1169,21 @@ class CompatPlatform:
             rollout_id,
             ("poll", self.spec.retention),
         )
-        return stream_descriptor(
+        descriptor = stream_descriptor(
             rollout_id=rollout_id,
             stream_id=log.stream_id,
             bound_transport=transport,
             retention=retention,
         )
+        pin = self.pins.get(rollout_id)
+        # The annotation stream is a declared sibling channel, never a guessed
+        # route. Absent means no protocol is bound to this rollout.
+        descriptor["annotation"] = (
+            annotation_channel(rollout_id, bound_transport=transport)
+            if pin is not None and pin.annotation_protocol_revision_id
+            else None
+        )
+        return descriptor
 
     def transport_is_bound(self, rollout_id: str, transport: str) -> bool:
         binding = self.stream_bindings.get(rollout_id)
@@ -1179,6 +1224,7 @@ class CompatPlatform:
             "truncated": pin.status == "truncated",
             "resume_from_checkpoint_id": pin.resume_from_checkpoint_id,
             "scheduled_checkpoints": pin.scheduled_checkpoints,
+            "annotation_protocol_revision_id": pin.annotation_protocol_revision_id,
             "trace": self._sealed_trace_reference(pin.rollout_id),
         }
 
@@ -1292,7 +1338,21 @@ class CompatPlatform:
 
     def _simulate(self, pin: RolloutPin, log: RolloutEventLog) -> None:
         pin.env_generation += 1
-        runtime_for(self.spec).simulate(self, pin, log)
+        # The observer attaches before the first semantic event and tails the
+        # same durable log a remote consumer would. It has no handle on the
+        # runtime, the world, or the policy; detach only tells it the source
+        # will not grow further when the runtime returned without sealing.
+        if pin.annotation_protocol_revision_id:
+            self.live_annotation.attach(
+                rollout_id=pin.rollout_id,
+                source=log,
+                revision_id=pin.annotation_protocol_revision_id,
+            )
+        try:
+            runtime_for(self.spec).simulate(self, pin, log)
+        finally:
+            if pin.annotation_protocol_revision_id:
+                self.live_annotation.detach(pin.rollout_id)
         # Persist terminal scoring as part of the producer transaction instead
         # of requiring a separate caller-authored POST after the run closes.
         # Gold/external environments already hold their authoritative signals,
