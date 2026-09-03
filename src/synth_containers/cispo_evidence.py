@@ -427,6 +427,13 @@ class InferenceCallV1(JsonDataclassMixin):
             "policy_set_revision_id": self.policy_set_revision_id,
             "effect_tick_start": self.effect_tick_start,
             "effect_tick_end": self.effect_tick_end,
+            # Foreign authorship is declared, never implied. A judge, verifier or
+            # opponent call that crossed the wire carrying only ``trainable:
+            # false`` would say that it may not be trained on without saying
+            # why, and the reader would have to guess the reason from a zero
+            # mask. ``TrainableSegmentV1`` already emits this; the per-call
+            # record dropping it meant authorship stopped at the container.
+            "author_kind": self.author_kind,
             "wire_request": dict(self.wire_request),
             "wire_response": dict(self.wire_response),
             "usage": dict(self.usage),

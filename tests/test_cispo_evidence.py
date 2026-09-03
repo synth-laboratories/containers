@@ -298,8 +298,19 @@ def test_a_judge_span_is_untrainable_with_its_author_declared() -> None:
     assert judged.trainable_tokens == 0
     assert judged.trainable is False
     assert judged.role_id == "judge"
-    # The declaration survives the wire.
+    # The declaration survives the wire, on the segment *and* on the call. A
+    # per-call record that crossed carrying only ``trainable: false`` would say
+    # the tokens may not be trained on without saying why, and the reader would
+    # be left inferring foreign authorship from a zero mask.
     assert judged.to_dict()["author_kind"] == "judge"
+    rows = {row["call_id"]: row for row in evidence.to_dict()["calls"]}
+    assert [rows[call_id]["author_kind"] for call_id in judged.call_ids] == ["judge"]
+    assert all(
+        rows[call_id]["author_kind"] == "policy"
+        for episode in evidence.episodes
+        for segment in episode.segments
+        for call_id in segment.call_ids
+    )
 
 
 def test_an_opponents_spans_are_recorded_but_never_trainable() -> None:
@@ -566,6 +577,7 @@ def test_evidence_passes_the_optimizer_validators() -> None:
                 "wire_request",
                 "wire_response",
                 "token_capture_provenance",
+                "author_kind",
             }
             if row["trainable"]:
                 assert row["token_capture_provenance"] == "engine_meta"
@@ -587,6 +599,9 @@ def test_evidence_passes_the_optimizer_validators() -> None:
 
     # The real contract, fed exactly what this container puts on the wire.
     calls = [_optimizer_call(records, row) for row in payload["calls"]]
+    # Authorship crossed the wire and was read back as itself, rather than
+    # defaulting to "policy" on the far side.
+    assert sorted({call.author_kind for call in calls}) == ["judge", "policy"]
     trainable = [call for call in calls if call.trainable]
     for call in trainable:
         call.validate_for_training()
@@ -633,6 +648,7 @@ def _optimizer_call(records: Any, row: dict[str, Any]) -> Any:
         content_mask=tuple(row["content_mask"]),
         renderer_profile_fingerprint=row["renderer_profile_fingerprint"],
         trainable=row["trainable"],
+        author_kind=row["author_kind"],
         branch_id=row["branch_id"],
         parent_branch_id=row["parent_branch_id"],
         compaction=(

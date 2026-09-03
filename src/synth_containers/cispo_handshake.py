@@ -2751,15 +2751,25 @@ class CispoHandshakeAdapter:
             merged = {
                 "handshake_id": agreement.handshake_id,
                 "agreement_digest": agreement.agreement_digest,
+                # The kind is declared once for the set, and each binding is
+                # bound one at a time. Without carrying it down, every item
+                # arrives naming no kind at all and the binder refuses a
+                # roster that was perfectly well formed.
+                "kind": str(request.get("kind") or request.get("policy_kind") or "")
+                or PROBE_POLICY_KIND,
                 **item,
             }
             resolved.append(self.cispo_bind_policy(merged))
         if not resolved:
             raise ProbeError("a policy set with no binding would start a half-bound episode")
+        set_id = canonical_digest([agreement.agreement_digest, resolved], length=20)
         return {
-            "policy_set_revision": canonical_digest(
-                [agreement.agreement_digest, resolved], length=20
-            ),
+            "policy_set_revision": set_id,
+            # A set binding is still a binding, and the executor correlates an
+            # attempt to what it bound by this id. A roster that returns none
+            # cannot be submitted against.
+            "config_id": f"probe_set_{set_id}",
+            "policy_set_id": f"probe_set_{set_id}",
             "handshake_id": agreement.handshake_id,
             "agreement_digest": agreement.agreement_digest,
             "bindings": resolved,

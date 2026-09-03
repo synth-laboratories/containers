@@ -385,9 +385,16 @@ def test_submission_starts_an_episode_rather_than_only_accepting_one() -> None:
     assert submitted["task_content_digest"] == verdict["taskset_resolution"][0][
         "content_digest"
     ]
-    # The state route is cheap: it reads, it does not finalize.
-    assert target.rollouts.cispo_rollout_state("rollout_1")["state"] == "running"
+    # The state route is cheap: it reads the runtime's own progress, and it
+    # settles nothing. The episode ran inside the submission, so what it reports
+    # is that there is nothing left to wait for -- not that the attempt reached
+    # a terminal result, which only finalize decides.
+    state = target.rollouts.cispo_rollout_state("rollout_1")
+    assert state["state"] == "awaiting_score"
+    assert state["terminal"] is None
     assert target.attempts.result("rollout_1").steps == 2
+    # Finalize still runs from there, and it is what attests the horizon.
+    assert target.rollouts.cispo_finalize_rollout("rollout_1")["state"] == "completed"
 
 
 def test_a_resubmitted_key_yields_the_same_attempt_and_no_second_episode() -> None:

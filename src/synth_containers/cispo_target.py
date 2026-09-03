@@ -81,8 +81,13 @@ from .cispo_contract import (
     cispo_declared_routes,
 )
 from .cispo_evidence import (
+    assert_wire_not_flattened,
+    BehaviorBindingV1,
     CispoEvidenceBuilder,
+    EvidenceError,
     InferenceCallV1,
+    RendererProfileV1,
+    SamplingProfileV1,
     SealedEvidenceV1,
 )
 from .cispo_handshake import (
@@ -94,11 +99,17 @@ from .cispo_handshake import (
 )
 from .cispo_policy import (
     CispoPolicyAdapter,
+    ModelCallRecordV1,
     SamplerBinding,
     SamplerOriginV1,
     SamplerReachability,
     SamplerTransport,
     BoundPolicySession,
+)
+from .cispo_probe import (
+    PROBE_POLICY_KIND,
+    PROBE_ROLLOUT_PREFIX,
+    PROBE_TOKEN_CAPTURE_PROVENANCE,
 )
 from .cispo_reward import CispoRewardAuthority
 from .cispo_rollout import (
@@ -498,10 +509,22 @@ class DeterministicSampler:
 class ProbeAttemptBinding:
     """A bound probe, shaped like a sampler binding for the attempt machine.
 
-    It carries no origin and no credential because a probe reaches no provider.
-    What it does carry is everything the attempt machine reads off a binding, so
-    a probe attempt is as traceable as a paid one and the machine needs no
-    branch for the unpaid kind.
+    The attempt machine reads exactly three things off a binding: the behavior
+    identity its evidence is stamped with, the topology slot its calls are
+    attributed to, and whether that evidence may be trained on. A probe answers
+    all three, so the machine needs no branch for the unpaid kind.
+
+    What a probe cannot answer is *where a provider is*, and ``origin`` stays
+    ``None`` on purpose rather than being filled with a plausible-looking
+    :class:`~synth_containers.cispo_policy.SamplerOriginV1`. A synthetic origin
+    would have to carry an absolute http(s) URL and a wrapped credential --
+    a reachable endpoint and a secret, neither of which exists -- and every
+    path that dispatches (``BoundPolicySession.call``, ``shape_wire_request``,
+    ``inference_target``) would then happily use them. ``origin is None`` is the
+    one-bit structural fact that a probe reaches no provider and spends nothing;
+    the per-attempt call identity a paid attempt happens to read off its origin
+    is minted by :class:`ProbePolicySession` instead, which is the place the
+    episode actually reads it from.
     """
 
     binding_id: str
@@ -510,6 +533,12 @@ class ProbeAttemptBinding:
     @property
     def _behavior(self) -> Mapping[str, Any]:
         return self.payload.get("behavior") or {}
+
+    # -- what kind of binding this is ------------------------------------- #
+
+    @property
+    def policy_kind(self) -> str:
+        return str(self.payload.get("policy_kind") or self.payload.get("kind") or "probe")
 
     @property
     def probe(self) -> bool:
@@ -521,24 +550,57 @@ class ProbeAttemptBinding:
 
     @property
     def origin(self) -> None:
+        """No origin, and not an oversight: see the class docstring."""
+
         return None
 
     @property
-    def behavior_identity(self) -> str:
-        return self.behavior_fingerprint
+    def dispatchable(self) -> bool:
+        """A probe is always dispatchable, because it dispatches nowhere.
+
+        The paid binding gates on whether its sampler answered at bind time. A
+        probe has no sampler to have answered, so there is nothing to gate on
+        and nothing that could be unreachable.
+        """
+
+        return True
+
+    # -- behavior identity ------------------------------------------------ #
 
     @property
-    def behavior_fingerprint(self) -> str:
-        return str(self.payload.get("behavior_fingerprint") or self.binding_id)
+    def renderer_profile(self) -> RendererProfileV1:
+        """The renderer the probe's tokens are attributed to, as a typed profile.
 
-    def behavior_binding(self) -> Mapping[str, Any]:
-        """A method, not a property: the sampler binding spells it that way."""
+        The bind response carries it as a payload because that is what crossed
+        the wire; the attempt machine reads ``.stop_token_ids`` and
+        ``.fingerprint`` off it, so it is rebuilt here rather than handed on as
+        a mapping that would fail on the first attribute.
+        """
 
-        return self._behavior
+        raw = dict(
+            self._behavior.get("renderer_profile")
+            or self.payload.get("renderer_profile")
+            or {}
+        )
+        return RendererProfileV1(
+            profile_id=str(raw.get("profile_id") or ""),
+            package=str(raw.get("package") or ""),
+            package_version=str(raw.get("package_version") or ""),
+            config_digest=str(raw.get("config_digest") or ""),
+            tokenizer_id=str(raw.get("tokenizer_id") or ""),
+            tokenizer_digest=str(raw.get("tokenizer_digest") or ""),
+            stop_token_ids=tuple(int(item) for item in (raw.get("stop_token_ids") or ())),
+            modalities=tuple(str(item) for item in (raw.get("modalities") or ("text",))),
+            add_generation_prompt=bool(raw.get("add_generation_prompt", True)),
+        )
 
     @property
-    def renderer_profile(self) -> Any:
-        return self.payload.get("renderer_profile")
+    def model_family(self) -> str:
+        return str(self._behavior.get("model_family") or "")
+
+    @property
+    def model_id(self) -> str:
+        return str(self._behavior.get("model_id") or "")
 
     @property
     def policy_revision(self) -> int:
@@ -551,6 +613,64 @@ class ProbeAttemptBinding:
     @property
     def sampling_transport(self) -> str:
         return str(self._behavior.get("sampling_transport") or "message_in_capture_out")
+
+    @property
+    def sampling(self) -> SamplingProfileV1:
+        raw = dict(self._behavior.get("sampling") or {})
+        max_tokens = raw.get("max_tokens")
+        seed = raw.get("seed")
+        return SamplingProfileV1(
+            temperature=float(raw.get("temperature", 1.0)),
+            top_p=float(raw.get("top_p", 1.0)),
+            max_tokens=None if max_tokens is None else int(max_tokens),
+            seed=None if seed is None else int(seed),
+        )
+
+    def behavior_binding(self) -> BehaviorBindingV1:
+        """A method, not a property: the sampler binding spells it that way."""
+
+        return BehaviorBindingV1(
+            renderer_profile=self.renderer_profile,
+            model_family=self.model_family,
+            model_id=self.model_id,
+            policy_revision=self.policy_revision,
+            wire_api=self.wire_api,
+            sampling_transport=self.sampling_transport,
+            sampling=self.sampling,
+        )
+
+    @property
+    def behavior_fingerprint(self) -> str:
+        """The fingerprint the container published when it issued this binding.
+
+        Taken from the payload rather than recomputed: what the evidence is
+        stamped with has to be the value the executor was told, or the two
+        halves disagree about which behavior produced the tokens.
+        """
+
+        return str(
+            self.payload.get("behavior_fingerprint")
+            or self.behavior_binding().fingerprint
+        )
+
+    @property
+    def behavior_identity(self) -> str:
+        """The same pin ``SamplerBinding`` computes, over the same fields."""
+
+        return canonical_digest(
+            {
+                "policy_revision": int(self.policy_revision),
+                "behavior_fingerprint": self.behavior_fingerprint,
+                "model_family": self.model_family,
+                "model_id": self.model_id,
+                "wire_api": self.wire_api,
+                "sampling_transport": self.sampling_transport,
+                "renderer_fingerprint": self.renderer_profile.fingerprint,
+            },
+            length=32,
+        )
+
+    # -- topology slot ---------------------------------------------------- #
 
     @property
     def agent_instance_id(self) -> str | None:
@@ -570,12 +690,18 @@ class ProbeAttemptBinding:
 
 @dataclass(frozen=True, slots=True)
 class AttemptPlan:
-    """What one accepted attempt is: a task, a seed, and one bound policy."""
+    """What one accepted attempt is: a task, a seed, and one bound policy.
+
+    ``binding`` is either kind. The attempt machine reads the same questions off
+    both -- behavior identity, topology slot, whether the evidence may be
+    trained on -- and a probe answers all of them, which is what lets the unpaid
+    attempt walk the paid attempt's path with no branch of its own.
+    """
 
     rollout_id: str
     task_id: str
     seed: int
-    binding: SamplerBinding
+    binding: SamplerBinding | ProbeAttemptBinding
     handshake_id: str
     agreement_digest: str
     task_digest: str
@@ -599,36 +725,94 @@ class AttemptResult:
 class ProbePolicySession:
     """Drives a probe attempt through the same episode a paid one walks.
 
-    A probe has no origin and no credential, so there is nothing to bind a
-    request to a provider with. Everything else is the same call the paid
-    session makes, which is what makes the probe worth running at all.
+    The paid session reads the per-attempt call identity off the binding's
+    sampler origin. A probe has no origin -- that absence is exactly what makes
+    it unable to spend -- so this session mints the identity itself, from the
+    attempt it is running, and hands back a :class:`ModelCallRecordV1` of the
+    same type the paid session hands back. The episode therefore reads
+    ``record.proxy_request_id`` either way and needs no branch.
+
+    The wire objects it persists are the ones :mod:`cispo_probe` already
+    declares for a probe call: marked synthetic, naming no provider. They are
+    deliberately not the body that went to the deterministic sampler -- a probe
+    that persisted an ordinary-looking request and response would be evidence a
+    reader could mistake for the real thing, which is the one thing probe
+    evidence may never be.
     """
 
-    def __init__(self, binding: Any, *, transport: Any) -> None:
+    def __init__(self, binding: Any, *, rollout_id: str, transport: Any) -> None:
         self._binding = binding
+        self._rollout_id = str(rollout_id)
         self._transport = transport
+        self._calls: list[ModelCallRecordV1] = []
+        self._lock = threading.Lock()
+
+    @property
+    def binding(self) -> Any:
+        return self._binding
+
+    @property
+    def calls(self) -> tuple[ModelCallRecordV1, ...]:
+        return tuple(self._calls)
+
+    @property
+    def endpoint(self) -> str:
+        """A ``probe://`` endpoint: an address no http client could dial."""
+
+        return f"probe://{self._binding.binding_id}/v1/chat/completions"
 
     def request(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        del payload
         return {
-            "probe": True,
             "synthetic": True,
-            "policy_revision": self._binding.policy_revision,
+            "provider": None,
+            "probe": True,
+            "policy_kind": PROBE_POLICY_KIND,
             "wire_api": self._binding.wire_api,
-            **{k: v for k, v in payload.items() if k != "messages"},
         }
 
-    def call(self, payload: Mapping[str, Any]) -> tuple[Any, Mapping[str, Any]]:
-        # The transport still insists on an Authorization header, because a
-        # real one always carries the session credential. A probe has none, so
-        # it presents its own binding id: the header is present and provably
-        # not a provider key.
+    def call(self, payload: Mapping[str, Any]) -> tuple[ModelCallRecordV1, Mapping[str, Any]]:
+        # The transport still insists on an Authorization header, because a real
+        # one always carries the session credential. A probe has none, so it
+        # presents its own binding id: the header is present and provably not a
+        # provider key.
         response = self._transport.post(
-            f"probe://{self._binding.binding_id}/v1/chat/completions",
+            self.endpoint,
             headers={"Authorization": f"Probe {self._binding.binding_id}"},
-            body=dict(payload),
+            body={"model": self._binding.model_id, **dict(payload)},
         )
-        return None, response
-
+        if not isinstance(response, Mapping):
+            raise CispoTargetError("the probe sampler returned a non-object response")
+        marked = {
+            **dict(response),
+            "synthetic": True,
+            "provider": None,
+            "probe": True,
+            "paid": False,
+        }
+        with self._lock:
+            index = len(self._calls)
+            record = ModelCallRecordV1(
+                call_index=index,
+                binding_id=self._binding.binding_id,
+                # No proxy was reached, so there is no provider-issued id to
+                # carry. The identity is still per attempt and per turn, and it
+                # is spelled the way ``cispo_probe`` spells it, so a probe id
+                # can never be read as a provider request id.
+                proxy_request_id=f"{self._rollout_id}:proxy-{index + 1}",
+                policy_revision=int(self._binding.policy_revision),
+                behavior_fingerprint=self._binding.behavior_fingerprint,
+                behavior_identity=self._binding.behavior_identity,
+                agent_instance_id=self._binding.agent_instance_id,
+                trainable=False,
+                wire_api=self._binding.wire_api,
+                sampling_transport=self._binding.sampling_transport,
+                endpoint=self.endpoint,
+                request_digest=canonical_digest(self.request(payload), length=32),
+                response_digest=canonical_digest(marked, length=32),
+            )
+            self._calls.append(record)
+        return record, marked
 
 
 class CounterAttemptRuntime:
@@ -746,7 +930,9 @@ class CounterAttemptRuntime:
         # It still walks this same episode, against the deterministic sampler,
         # which is the point: the unpaid path must exercise the paid one.
         session = (
-            ProbePolicySession(binding, transport=self._transport)
+            ProbePolicySession(
+                binding, rollout_id=plan.rollout_id, transport=self._transport
+            )
             if probe
             else BoundPolicySession(binding, transport=self._transport)
         )
@@ -761,6 +947,10 @@ class CounterAttemptRuntime:
             seed=plan.seed,
             group_id=plan.group_id,
             sample_index=plan.sample_index,
+            # The builder is what stamps ``probe_synthetic`` on the episode. It
+            # has to be told once, here, rather than have each mark applied by
+            # hand further down where one could be forgotten.
+            probe=probe,
         )
         system = (
             "You act in a counting environment. Answer with exactly one legal action name."
@@ -768,6 +958,7 @@ class CounterAttemptRuntime:
         messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
         rendered: list[int] = list(render_tokens(system))
         steps = 0
+        terminal_reason = "horizon"
         while steps < self._max_steps and not bool(observation.channels.get("done")):
             user = _observation_prompt(observation, actions)
             messages.append({"role": "user", "content": user})
@@ -789,7 +980,10 @@ class CounterAttemptRuntime:
                 policy_revision=int(binding.policy_revision),
                 wire_api=binding.wire_api,
                 sampling_transport=binding.sampling_transport,
-                token_capture_provenance="engine_meta",
+                token_capture_provenance=(
+                    PROBE_TOKEN_CAPTURE_PROVENANCE if probe else "engine_meta"
+                ),
+                trainable=not probe,
                 prompt_token_ids=prompt_tokens,
                 generation_token_ids=generation,
                 generation_logprobs=logprobs,
@@ -810,6 +1004,14 @@ class CounterAttemptRuntime:
                 usage={
                     "prompt_tokens": len(prompt_tokens),
                     "completion_tokens": len(generation),
+                    # A probe reached no provider, so the usage record says the
+                    # request count is zero and nothing was billed, rather than
+                    # leaving token counts to read like a bill.
+                    **(
+                        {"provider_requests": 0, "billed": False}
+                        if probe
+                        else {"provider_requests": 1}
+                    ),
                 },
                 created_at=utc_now(),
             )
@@ -817,7 +1019,26 @@ class CounterAttemptRuntime:
 
             messages.append({"role": "assistant", "content": action})
             rendered.extend(generation)
-            observation = env.step(action, actor_id=self._instance_id)
+            try:
+                observation = env.step(action, actor_id=self._instance_id)
+            except ValueError as exc:
+                # A real policy says whatever it likes; a deterministic stand-in
+                # only ever says something legal, which is why this path was
+                # never walked. An unusable action ends the episode with a
+                # terminal status and the return the environment actually gave.
+                # It is not a transport failure, and it is not a zero the
+                # environment never awarded.
+                log.append(
+                    "rollout.attempt.illegal_action",
+                    {
+                        "rollout_id": plan.rollout_id,
+                        "step_index": steps + 1,
+                        "action": action[:200],
+                        "reason": str(exc)[:200],
+                    },
+                )
+                terminal_reason = "illegal_action"
+                break
             steps += 1
             log.append(
                 "rollout.attempt.step",
@@ -843,8 +1064,14 @@ class CounterAttemptRuntime:
             },
         )
         # The container refuses its own invalid evidence here rather than letting
-        # a reward describe it later.
-        evidence.validate()
+        # a reward describe it later. For a probe the same gate is run in the
+        # other direction: ``validate`` is the training gate, and probe evidence
+        # that *passed* it would be evidence a trainer could not tell from the
+        # real thing.
+        if probe:
+            _assert_probe_evidence_refused(evidence)
+        else:
+            evidence.validate()
         outcome = env.outcome()
         state = env.read_state()
         return AttemptResult(
@@ -858,7 +1085,60 @@ class CounterAttemptRuntime:
                 "state_id": state.state_id,
                 "values": dict(state.values),
                 "steps": steps,
+                "terminal_reason": terminal_reason,
             },
+        )
+
+
+def _assert_probe_evidence_refused(evidence: SealedEvidenceV1) -> None:
+    """A probe's evidence must be refused for training, by its own fields.
+
+    Mirrors :func:`synth_containers.cispo_probe.assert_probe_distinguishable`
+    for evidence that came out of the attempt machine rather than out of the
+    probe's own canned generator: the marks are the same marks, and the
+    container refuses to seal an attempt that is missing one rather than
+    putting a record on the wire that a reader could mistake for real.
+    """
+
+    if not evidence.rollout_id.startswith(PROBE_ROLLOUT_PREFIX):
+        raise CispoTargetError(
+            f"probe attempt {evidence.rollout_id!r} does not use the "
+            f"{PROBE_ROLLOUT_PREFIX!r} id namespace"
+        )
+    if not evidence.episodes:
+        raise CispoTargetError(f"probe attempt {evidence.rollout_id} produced no episode")
+    for call in evidence.calls:
+        assert_wire_not_flattened(call)
+        if call.token_capture_provenance != PROBE_TOKEN_CAPTURE_PROVENANCE:
+            raise CispoTargetError(
+                f"probe call {call.call_id} declares provenance "
+                f"{call.token_capture_provenance!r}, not "
+                f"{PROBE_TOKEN_CAPTURE_PROVENANCE!r}"
+            )
+        if call.trainable:
+            raise CispoTargetError(f"probe call {call.call_id} is marked trainable")
+        if not call.wire_response.get("synthetic"):
+            raise CispoTargetError(
+                f"probe call {call.call_id} persists a wire object that does not "
+                "declare itself synthetic"
+            )
+        try:
+            call.validate_for_training()
+        except EvidenceError:
+            continue
+        raise CispoTargetError(
+            f"probe call {call.call_id} passes the training gate; probe evidence "
+            "would be indistinguishable from real evidence"
+        )
+    for episode in evidence.episodes:
+        if not episode.probe:
+            raise CispoTargetError(f"probe episode {episode.rollout_id} is not marked probe")
+        try:
+            episode.validate()
+        except EvidenceError:
+            continue
+        raise CispoTargetError(
+            f"probe episode {episode.rollout_id} passes the training gate"
         )
 
 
@@ -899,12 +1179,21 @@ def _read_completion(response: Mapping[str, Any]) -> tuple[str, tuple[int, ...],
     text = str(message.get("content") or "").strip()
     if not text:
         raise CispoTargetError("sampler response carries no generated text")
-    token_ids = tuple(
-        int(item) for item in ((response.get("token_ids") or {}).get("completion") or ())
-    )
-    logprobs = tuple(
-        float(item) for item in ((response.get("logprobs") or {}).get("completion") or ())
-    )
+    # A shipped sampler gateway returns its capture under `synth_capture`; this
+    # container's own stand-in returns the nested `token_ids`/`logprobs` shape.
+    # Both are read, because the capture belongs to whoever sampled and this
+    # container only relays it.
+    capture = response.get("synth_capture")
+    if isinstance(capture, Mapping):
+        token_ids = tuple(int(item) for item in (capture.get("generation_token_ids") or ()))
+        logprobs = tuple(float(item) for item in (capture.get("generation_logprobs") or ()))
+    else:
+        token_ids = tuple(
+            int(item) for item in ((response.get("token_ids") or {}).get("completion") or ())
+        )
+        logprobs = tuple(
+            float(item) for item in ((response.get("logprobs") or {}).get("completion") or ())
+        )
     if not token_ids:
         raise CispoTargetError(
             "sampler response carries no generation token ids; there is nothing to train on"
@@ -971,6 +1260,59 @@ class CispoTargetRolloutPort(CispoRolloutAdapter):
         payload["task_content_digest"] = plan.task_digest
         return payload
 
+    def cispo_terminate_rollout(
+        self, rollout_id: str, request: Mapping[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """Terminate, and seal the receipt that leaves the done boundary.
+
+        The lifecycle knows the terminal result; only the target knows the
+        attempt's identity and what it sealed. The executor reads a ``receipt``
+        here -- identity plus digests -- and a terminal state that names no
+        attempt is not one it can record, so the two are answered together.
+        """
+
+        payload = super().cispo_terminate_rollout(rollout_id, request)
+        payload["receipt"] = self._receipt(rollout_id, payload.get("terminal") or {})
+        return payload
+
+    def _receipt(self, rollout_id: str, terminal: Mapping[str, Any]) -> dict[str, Any]:
+        plan = self._target.attempts.plan(rollout_id)
+        binding = plan.binding
+        try:
+            evidence: SealedEvidenceV1 | None = self._target.attempts.evidence(rollout_id)
+        except CispoTargetError:
+            # Terminated before it sealed anything. Absent is not zero: the
+            # digests stay empty rather than being filled with a plausible one.
+            evidence = None
+        origin = getattr(binding, "origin", None)
+        if evidence is not None and evidence.calls:
+            proxy_request_id = evidence.calls[0].proxy_request_id
+        elif origin is not None:
+            proxy_request_id = origin.proxy_request_id
+        else:
+            proxy_request_id = f"{rollout_id}:proxy"
+        return {
+            "rollout_id": rollout_id,
+            "proxy_request_id": proxy_request_id,
+            "group_id": plan.group_id,
+            "sample_index": int(plan.sample_index),
+            "policy_revision": int(binding.policy_revision),
+            "behavior_fingerprint": binding.behavior_fingerprint,
+            "terminal_status": str(terminal.get("terminal_status") or ""),
+            "trace_digest": "" if evidence is None else evidence.trace_digest,
+            "evidence_digest": "" if evidence is None else evidence.evidence_digest,
+            "handshake_id": plan.handshake_id,
+            "agreement_digest": plan.agreement_digest,
+            "agent_instance_id": binding.agent_instance_id,
+            "team_id": binding.team_id,
+            "probe": bool(getattr(binding, "probe", False)),
+            "metadata": {
+                "task_id": plan.task_id,
+                "task_content_digest": plan.task_digest,
+                "reason": str(terminal.get("reason") or ""),
+            },
+        }
+
     def cispo_reward(self, request: Mapping[str, Any]) -> dict[str, Any]:
         for name in ("measure", "measures"):
             if request.get(name) is not None:
@@ -999,6 +1341,11 @@ class CispoTargetRolloutPort(CispoRolloutAdapter):
             "passed": result.passed,
             "policy_revision": int(plan.binding.policy_revision),
             "behavior_identity": plan.binding.behavior_identity,
+            # The reward record says it scored a synthetic episode at zero
+            # provider spend. It is one of the structural probe marks, so it is
+            # stamped by the reward authority rather than left to a reader to
+            # infer from the rollout id.
+            "probe": bool(getattr(plan.binding, "probe", False)),
         }
         return super().cispo_reward(merged)
 
@@ -1188,6 +1535,19 @@ class CispoReferenceTarget:
         """
 
         agreement = self._admission.admit_attempt(request)
+        config_id = str(
+            request.get("config_id") or request.get("policy_config_id") or ""
+        ).strip()
+        if not config_id:
+            raise CispoTargetError(
+                "a submission names no bound policy config; an unbound attempt has "
+                "nothing to collect behavior logprobs from"
+            )
+        # Which binding this is decides which id namespace the attempt lives in,
+        # so it is resolved before the id is minted rather than after.
+        probe_payload = self._admission.probe_bindings.get(config_id)
+        prefix = PROBE_ROLLOUT_PREFIX if probe_payload is not None else "rollout_"
+
         rollout_id = str(request.get("rollout_id") or "").strip()
         if not rollout_id:
             # The container mints the rollout id, because the executor cannot
@@ -1200,7 +1560,18 @@ class CispoReferenceTarget:
                     "a submission names neither a rollout_id nor an idempotency_key, "
                     "so a retry could not be told from a second attempt"
                 )
-            rollout_id = f"rollout_{canonical_digest({'key': key}, length=20)}"
+            rollout_id = f"{prefix}{canonical_digest({'key': key}, length=20)}"
+        elif (probe_payload is not None) != rollout_id.startswith(PROBE_ROLLOUT_PREFIX):
+            # Probe attempts occupy their own id namespace so a probe id can
+            # never collide with -- or be read as -- a real rollout id. An
+            # executor that names one across the line is refused rather than
+            # quietly given an id that lies about what it is.
+            raise CispoTargetError(
+                f"attempt {rollout_id!r} is bound to "
+                f"{'a probe' if probe_payload is not None else 'a paid policy'} but its "
+                f"id is {'outside' if probe_payload is not None else 'inside'} the "
+                f"{PROBE_ROLLOUT_PREFIX!r} namespace"
+            )
         task_id = str(
             request.get("task_id")
             or (request.get("task") or {}).get("task_id")
@@ -1213,17 +1584,8 @@ class CispoReferenceTarget:
             )
         digest = agreement.task_digest(task_id)
 
-        config_id = str(
-            request.get("config_id") or request.get("policy_config_id") or ""
-        ).strip()
-        if not config_id:
-            raise CispoTargetError(
-                f"attempt {rollout_id!r} names no bound policy config; an unbound attempt "
-                "has nothing to collect behavior logprobs from"
-            )
-        probe = self._admission.probe_bindings.get(config_id)
-        if probe is not None:
-            binding = ProbeAttemptBinding(config_id, probe)
+        if probe_payload is not None:
+            binding = ProbeAttemptBinding(config_id, probe_payload)
         else:
             binding = self.policy_registry.admit(rollout_id, config_id)
 

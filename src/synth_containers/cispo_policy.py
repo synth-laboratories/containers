@@ -894,8 +894,20 @@ def bind_sampler_policy(
     ready = True if origin is None else bool(probe.reachable(origin))
 
     parameter_group_id: str | None = None
-    if instance is not None and trainable:
-        parameter_group_id = facts.topology.parameter_groups.get(instance.policy_type_id)
+    if trainable:
+        bound_instance = instance
+        if bound_instance is None:
+            # A solo binding names no instance, but the container still knows
+            # which parameter group its tokens belong to when exactly one
+            # instance is trainable. Leaving it unset means the evidence hands
+            # the reader an unattributed span, and a reader that has to guess a
+            # parameter group guesses one the topology never declared.
+            trainees = tuple(item for item in facts.topology.agent_instances if item.trainable)
+            bound_instance = trainees[0] if len(trainees) == 1 else None
+        if bound_instance is not None:
+            parameter_group_id = facts.topology.parameter_groups.get(
+                bound_instance.policy_type_id
+            )
 
     binding_id = "pc_" + canonical_digest(
         {

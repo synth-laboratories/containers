@@ -690,10 +690,25 @@ class ProbeBinding(JsonDataclassMixin):
     settlement_window_seconds: float
     quiescence_accepted: bool
     max_prompt_tokens: int = 0
+    #: The behavior fingerprint the caller pinned, when it declared one.
+    #:
+    #: The behavior a probe proves the evidence path for is the *executor's* --
+    #: it is the model the run will go on to train -- and the container cannot
+    #: derive it, because the model family and id that go into it are the
+    #: executor's configuration. So the caller may declare it, exactly as a
+    #: sampler binding declares it on its origin and ``bind_sampler_policy``
+    #: adopts it. A binding that declares none keeps the container's own value,
+    #: which is honest for a container-authored probe and wrong only when a
+    #: second party is going to check the stamp.
+    pinned_behavior_fingerprint: str = ""
+
+    @property
+    def behavior_fingerprint(self) -> str:
+        return self.pinned_behavior_fingerprint or self.behavior.value
 
     @property
     def binding_id(self) -> str:
-        return f"probe_{self.behavior.value[:16]}"
+        return f"probe_{self.behavior_fingerprint[:16]}"
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -711,7 +726,7 @@ class ProbeBinding(JsonDataclassMixin):
             "agreement_digest": self.agreement_digest,
             "behavior": self.behavior.to_payload(),
             "renderer_profile": self.behavior.renderer_profile.to_payload(),
-            "behavior_fingerprint": self.behavior.value,
+            "behavior_fingerprint": self.behavior_fingerprint,
             "evaluation_plan_id": self.evaluation_plan_id,
             "reward_channels": list(self.reward_channels),
             "quiescence_accepted": self.quiescence_accepted,
@@ -730,6 +745,7 @@ def bind_probe_policy(
     policy_revision: int = 0,
     team_id: str | None = None,
     sampling: ProbeSamplingProfile | None = None,
+    behavior_fingerprint: str = "",
 ) -> ProbeBinding:
     """Bind the ``probe`` policy kind, or refuse.
 
@@ -767,6 +783,7 @@ def bind_probe_policy(
         horizon_value=float(facts.horizon.value),
         settlement_window_seconds=float(agreement.obligations.settlement_window_seconds),
         quiescence_accepted=agreement.quiescence_accepted,
+        pinned_behavior_fingerprint=str(behavior_fingerprint or "").strip(),
     )
 
 
@@ -938,7 +955,7 @@ class ProbeSession:
                 rollout_id=self.rollout_id,
                 group_id=self.group_id,
                 sample_index=self.sample_index,
-                behavior_fingerprint=self.binding.behavior.value,
+                behavior_fingerprint=self.binding.behavior_fingerprint,
                 policy_revision=self.binding.behavior.policy_revision,
                 wire_api=self.binding.behavior.wire_api,
                 sampling_transport=self.binding.behavior.sampling_transport,
@@ -978,7 +995,7 @@ class ProbeSession:
             task_id=self.task_id,
             seed=self.seed,
             policy_revision=self.binding.behavior.policy_revision,
-            behavior_fingerprint=self.binding.behavior.value,
+            behavior_fingerprint=self.binding.behavior_fingerprint,
             segments=(
                 ProbeSegment(
                     token_ids=tuple(token_ids),
@@ -1135,6 +1152,7 @@ class CispoProbeAdapter:
             model_id=str(body.get("model_id") or ""),
             policy_revision=int(body.get("policy_revision") or 0),
             team_id=body.get("team_id"),
+            behavior_fingerprint=str(body.get("behavior_fingerprint") or ""),
         )
         return binding.to_payload()
 

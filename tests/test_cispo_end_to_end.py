@@ -32,11 +32,20 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from types import SimpleNamespace
+
 from synth_containers.cispo_contract import (
     CISPO_OPTIMIZER_CONTRACT_VERSION,
     cispo_declared_routes,
 )
-from synth_containers.cispo_probe import REQUIRED_PROBE_OPERATIONS, run_probe
+from synth_containers.cispo_evidence import EvidenceError
+from synth_containers.cispo_target import CispoTargetError
+from synth_containers.cispo_probe import (
+    PROBE_ROLLOUT_PREFIX,
+    PROBE_TOKEN_CAPTURE_PROVENANCE,
+    REQUIRED_PROBE_OPERATIONS,
+    run_probe,
+)
 from synth_containers.http_adapter import create_reference_app
 
 from tests.test_cispo_target import (
@@ -319,7 +328,11 @@ def test_a_lost_response_resubmitted_resolves_to_the_same_attempt(run: Run) -> N
 
 
 def test_polling_is_cheap_and_the_cursor_resumes(run: Run) -> None:
-    assert run.json("state")["state"] == "running"
+    # The episode ran inside the submission, so polling reports that there is
+    # nothing left to wait for. It is not a terminal result: finalize decides
+    # that, and it has not been called yet at this point in the sequence.
+    assert run.json("state")["state"] == "awaiting_score"
+    assert run.json("state")["terminal"] is None
     assert run.json("state")["overdue"] is False
     events = run.json("events")
     kinds = [row["kind"] for row in events["events"]]
@@ -514,3 +527,356 @@ def test_a_second_container_reaches_the_same_agreement_digest() -> None:
     assert first["capability_hash"] == second["capability_hash"]
     assert first["taskset_resolution"] == second["taskset_resolution"]
     assert first["obligations"] == second["obligations"]
+
+
+# --------------------------------------------------------------------------- #
+# A probe through the target's own attempt machine
+# --------------------------------------------------------------------------- #
+#
+# ``cispo_probe`` builds a probe attempt out of canned generations and its own
+# ``ProbeSession``. That proves the probe *shape*, and nothing about the path
+# the executor actually takes at startup, which is to bind a probe and submit an
+# attempt against it over the declared routes -- through ``admit_attempt``,
+# ``CounterAttemptRuntime._run_episode``, the evidence builder, the lifecycle
+# and the reward authority, exactly as a paid attempt goes. That path had never
+# been walked, and the whole point of running a probe is that it walks the paid
+# one.
+#
+# So this section drives both kinds against one container and compares them.
+
+
+class ProbeRun:
+    """One container, one agreement, and two attempts: one unpaid, one paid."""
+
+    def __init__(self) -> None:
+        self.runtime, self.target = installed(target_count=2)
+        self.client = TestClient(create_reference_app(self.runtime))
+        self.responses: dict[str, Any] = {}
+        self.probe_rollout_id = ""
+        self.paid_rollout_id = ""
+
+    def json(self, name: str) -> Any:
+        return self.responses[name]
+
+
+def _drive(client: TestClient, rollout_id: str, handshake: dict[str, Any]) -> dict[str, Any]:
+    """State, finalize, trace, reward, artifacts, terminate -- once, in order."""
+
+    answers: dict[str, Any] = {}
+    answers["state"] = client.get(
+        ROUTES["rollout_state_route"].format(rollout_id=rollout_id)
+    ).json()
+    answers["events"] = client.get(
+        ROUTES["rollout_events_route"].format(rollout_id=rollout_id)
+    ).json()
+    answers["finalize"] = client.post(
+        ROUTES["rollout_finalize_route"].format(rollout_id=rollout_id), json={}
+    ).json()
+    trace = client.get(ROUTES["trace_route"].format(rollout_id=rollout_id)).json()
+    answers["trace"] = trace
+    answers["reward"] = client.get(
+        ROUTES["reward_route"],
+        params={"rollout_id": rollout_id, "trace_digest": trace["trace_digest"]},
+    ).json()
+    answers["artifacts"] = client.get(
+        ROUTES["artifacts_route"].format(rollout_id=rollout_id)
+    ).json()
+    answers["terminate"] = client.post(
+        ROUTES["rollout_terminate_route"].format(rollout_id=rollout_id),
+        json={"reason": "executor_done", "handshake_id": handshake["handshake_id"]},
+    ).json()
+    return answers
+
+
+@pytest.fixture(scope="module")
+def probe_run() -> ProbeRun:
+    """Bind a probe and a paid policy, submit one attempt against each, drive both.
+
+    Module-scoped for the same reason ``run`` is: the two attempts are compared
+    against each other, and re-running the sequence per test would compare an
+    attempt against a container that had not run the other one.
+    """
+
+    state = ProbeRun()
+    client, target = state.client, state.target
+    handshake = client.post(
+        ROUTES["handshake_route"], json=handshake_request(target)
+    ).json()
+    assert handshake["accepted"], handshake["rejected_mandatory_clauses"]
+    state.responses["handshake"] = handshake
+    task_id = handshake["taskset_resolution"][0]["task_id"]
+
+    # The probe binding. ``behavior_fingerprint`` is the executor's, pinned here
+    # the way a sampler binding pins the one on its origin: the behavior a probe
+    # proves the evidence path for is the model the run will go on to train, and
+    # the container cannot derive it.
+    probe_binding = client.post(
+        ROUTES["policy_bind_route"],
+        json={
+            "handshake_id": handshake["handshake_id"],
+            "agreement_digest": handshake["agreement_digest"],
+            "kind": "probe",
+            "model_family": "family",
+            "model_id": "family/model",
+            "behavior_fingerprint": "bf-probe-7",
+        },
+    ).json()
+    state.responses["probe_binding"] = probe_binding
+
+    paid_binding = client.post(
+        ROUTES["policy_bind_route"], json=bind_request(handshake)
+    ).json()
+    state.responses["paid_binding"] = paid_binding
+
+    # No rollout id: the container mints one, and which namespace it mints into
+    # is part of what makes probe evidence unmistakable.
+    probe_submission = submit_request(
+        handshake,
+        probe_binding["config_id"],
+        idempotency_key="probe-k-1",
+        task_id=task_id,
+    )
+    probe_submission.pop("rollout_id")
+    accepted = client.post(ROUTES["rollout_route"], json=probe_submission)
+    assert accepted.status_code == 202, accepted.text
+    state.responses["probe_submit"] = accepted.json()
+    state.probe_rollout_id = accepted.json()["rollout_id"]
+
+    paid = client.post(
+        ROUTES["rollout_route"],
+        json=submit_request(
+            handshake,
+            paid_binding["config_id"],
+            rollout_id="rollout_probe_peer",
+            idempotency_key="paid-k-1",
+            task_id=task_id,
+        ),
+    )
+    assert paid.status_code == 202, paid.text
+    state.paid_rollout_id = paid.json()["rollout_id"]
+
+    state.responses["probe"] = _drive(client, state.probe_rollout_id, handshake)
+    state.responses["paid"] = _drive(client, state.paid_rollout_id, handshake)
+    return state
+
+
+def test_a_probe_binding_is_submittable_and_reaches_no_provider(probe_run: ProbeRun) -> None:
+    """The binding an executor submits against, and what it promises not to do."""
+
+    binding = probe_run.json("probe_binding")
+    assert binding["config_id"] == binding["binding_id"]
+    assert binding["probe"] is True
+    assert binding["trainable"] is False
+    # A probe has no origin and no credential, and that absence is the thing
+    # that makes it unable to spend. It is not an omission to be filled in.
+    assert binding["sampler_origin"] is None
+    assert binding["credential"] is None
+    assert binding["provider_requests_expected"] == 0
+    # The fingerprint the caller pinned is the one the binding carries.
+    assert binding["behavior_fingerprint"] == "bf-probe-7"
+    assert binding["config_id"].startswith("probe_")
+
+
+def test_a_probe_attempt_walks_the_same_episode_a_paid_attempt_walks(
+    probe_run: ProbeRun,
+) -> None:
+    """Same environment, same renderer, same turns, same tokens.
+
+    This is the whole reason for running a probe: if the unpaid attempt took a
+    shorter or different path, it would prove nothing about the paid one.
+    """
+
+    probe = probe_run.json("probe")["trace"]
+    paid = probe_run.json("paid")["trace"]
+    assert len(probe["calls"]) == len(paid["calls"]) > 1
+    for unpaid_call, paid_call in zip(probe["calls"], paid["calls"], strict=True):
+        assert unpaid_call["prompt_token_ids"] == paid_call["prompt_token_ids"]
+        assert unpaid_call["generation_token_ids"] == paid_call["generation_token_ids"]
+        assert unpaid_call["generation_logprobs"] == paid_call["generation_logprobs"]
+        assert unpaid_call["stop_token_ids"] == paid_call["stop_token_ids"]
+        assert (
+            unpaid_call["renderer_profile_fingerprint"]
+            == paid_call["renderer_profile_fingerprint"]
+        )
+        assert unpaid_call["author_kind"] == paid_call["author_kind"] == "policy"
+    # And the same lifecycle, down to the terminal result and the horizon.
+    assert probe_run.json("probe")["finalize"]["terminal"]["kind"] == "episode"
+    assert (
+        probe_run.json("probe")["finalize"]["quiescence"]["quiesced"]
+        is probe_run.json("paid")["finalize"]["quiescence"]["quiesced"]
+    )
+    assert probe_run.json("probe")["artifacts"]["artifacts"][0]["role"] == "trace"
+
+
+def test_a_probe_attempt_carries_a_per_turn_identity_of_its_own(
+    probe_run: ProbeRun,
+) -> None:
+    """A probe has no origin to read a proxy request id off, and still has one.
+
+    The paid session takes the per-attempt id from the sampler origin. A probe
+    reaches no provider, so the identity is minted by the session that drove it
+    -- per attempt and per turn -- rather than by fabricating an origin whose
+    URL and credential would both be claims about a provider that was not there.
+    """
+
+    calls = probe_run.json("probe")["trace"]["calls"]
+    ids = [call["proxy_request_id"] for call in calls]
+    assert len(set(ids)) == len(ids)
+    for index, value in enumerate(ids, start=1):
+        assert value == f"{probe_run.probe_rollout_id}:proxy-{index}"
+    # The paid attempt's calls share the one id its origin named.
+    paid_ids = {call["proxy_request_id"] for call in probe_run.json("paid")["trace"]["calls"]}
+    assert paid_ids == {"prid-1"}
+
+
+def test_probe_evidence_is_refused_for_training_by_its_own_fields(
+    probe_run: ProbeRun,
+) -> None:
+    """Every structural mark ``cispo_probe.PROBE_MARKERS`` names, on this path too."""
+
+    rollout_id = probe_run.probe_rollout_id
+    assert rollout_id.startswith(PROBE_ROLLOUT_PREFIX)
+    trace = probe_run.json("probe")["trace"]
+    for call in trace["calls"]:
+        assert call["token_capture_provenance"] == PROBE_TOKEN_CAPTURE_PROVENANCE
+        assert call["trainable"] is False
+        assert call["wire_request"]["synthetic"] is True
+        assert call["wire_request"]["provider"] is None
+        assert call["wire_response"]["synthetic"] is True
+        assert call["wire_response"]["provider"] is None
+        assert call["usage"]["provider_requests"] == 0
+        assert call["usage"]["billed"] is False
+    assert [episode["probe"] for episode in trace["episodes"]] == [True]
+    assert probe_run.json("probe")["reward"]["metadata"]["probe"] is True
+    # The paid attempt is the control: the same fields say the opposite.
+    paid = probe_run.json("paid")["trace"]
+    for call in paid["calls"]:
+        assert call["token_capture_provenance"] == "engine_meta"
+        assert call["trainable"] is True
+    assert [episode["probe"] for episode in paid["episodes"]] == [False]
+    assert probe_run.json("paid")["reward"]["metadata"]["probe"] is False
+
+
+def test_the_container_refuses_to_train_on_the_probe_it_just_sealed(
+    probe_run: ProbeRun,
+) -> None:
+    """The training gate, run against the evidence the attempt machine produced.
+
+    A probe that *passed* this gate would be evidence a trainer could not tell
+    from the real thing, so the refusal is the assertion.
+    """
+
+    evidence = probe_run.target.attempts.evidence(probe_run.probe_rollout_id)
+    with pytest.raises(EvidenceError):
+        evidence.validate()
+    for call in evidence.calls:
+        with pytest.raises(EvidenceError):
+            call.validate_for_training()
+    # The paid attempt's evidence passes the same gate untouched.
+    probe_run.target.attempts.evidence(probe_run.paid_rollout_id).validate()
+
+
+def test_the_terminate_receipt_says_which_kind_of_attempt_it_settled(
+    probe_run: ProbeRun,
+) -> None:
+    """Identity plus digests, and whether anything was bought."""
+
+    probe_receipt = probe_run.json("probe")["terminate"]["receipt"]
+    paid_receipt = probe_run.json("paid")["terminate"]["receipt"]
+    assert probe_receipt["probe"] is True
+    assert paid_receipt["probe"] is False
+    for receipt, rollout_id in (
+        (probe_receipt, probe_run.probe_rollout_id),
+        (paid_receipt, probe_run.paid_rollout_id),
+    ):
+        assert receipt["rollout_id"] == rollout_id
+        assert receipt["terminal_status"] == "completed"
+        assert receipt["proxy_request_id"]
+        assert receipt["behavior_fingerprint"]
+        assert receipt["trace_digest"].startswith("sha256:")
+    assert probe_receipt["behavior_fingerprint"] == "bf-probe-7"
+
+
+def test_a_probe_may_not_be_submitted_outside_its_own_id_namespace(
+    probe_run: ProbeRun,
+) -> None:
+    """A probe id that could collide with a real rollout id is refused, not fixed.
+
+    Asserted at the port rather than over HTTP: the adapter types only its 501,
+    so every other refusal reaches a client as a bare 500 and the reason is only
+    readable here.
+    """
+
+    handshake = probe_run.json("handshake")
+    binding = probe_run.json("probe_binding")
+    with pytest.raises(CispoTargetError, match=PROBE_ROLLOUT_PREFIX):
+        probe_run.target.rollouts.cispo_submit_rollout(
+            submit_request(
+                handshake,
+                binding["config_id"],
+                rollout_id="rollout_pretending_to_be_paid",
+                idempotency_key="probe-k-2",
+            )
+        )
+    # And the converse: a paid binding may not claim the probe namespace.
+    with pytest.raises(CispoTargetError, match=PROBE_ROLLOUT_PREFIX):
+        probe_run.target.rollouts.cispo_submit_rollout(
+            submit_request(
+                handshake,
+                probe_run.json("paid_binding")["config_id"],
+                rollout_id="probe_pretending_to_be_unpaid",
+                idempotency_key="paid-k-2",
+            )
+        )
+
+
+def test_the_probe_this_container_ran_passes_the_optimizers_probe_validators(
+    probe_run: ProbeRun,
+) -> None:
+    """The unpaid attempt, checked by the party that requires it to be unpaid."""
+
+    trace = probe_run.json("probe")["trace"]
+    if OPTIMIZER_PROBE is None or OPTIMIZER_RECORDS is None:
+        # Mirrored: the same refusal, stated against the emitted payload.
+        for call in trace["calls"]:
+            assert call["token_capture_provenance"] not in {"engine_meta"}
+            assert call["trainable"] is False
+        return
+    calls = [
+        OPTIMIZER_RECORDS.InferenceCall(
+            call_id=row["call_id"],
+            proxy_request_id=row["proxy_request_id"],
+            rollout_id=row["rollout_id"],
+            group_id=row["group_id"],
+            sample_index=row["sample_index"],
+            behavior_fingerprint=row["behavior_fingerprint"],
+            policy_revision=row["policy_revision"],
+            wire_api=row["wire_api"],
+            sampling_transport=row["sampling_transport"],
+            token_capture_provenance=row["token_capture_provenance"],
+            prompt_token_ids=tuple(row["prompt_token_ids"]),
+            generation_token_ids=tuple(row["generation_token_ids"]),
+            generation_logprobs=tuple(row["generation_logprobs"]),
+            sampled_mask=tuple(row["sampled_mask"]),
+            finish_reason=row["finish_reason"],
+            stop_token_ids=tuple(row["stop_token_ids"]),
+            renderer_profile_fingerprint=row["renderer_profile_fingerprint"],
+            trainable=row["trainable"],
+            author_kind=row["author_kind"],
+            branch_id=row["branch_id"],
+            agent_instance_id=row["agent_instance_id"],
+            team_id=row["team_id"],
+            wire_request=dict(row["wire_request"]),
+            wire_response=dict(row["wire_response"]),
+            usage=dict(row["usage"]),
+            created_at=row["created_at"],
+        )
+        for row in trace["calls"]
+    ]
+    # The optimizer's own conformance check: probe evidence that could be
+    # mistaken for real evidence fails here rather than one training step later.
+    OPTIMIZER_PROBE.assert_probe_not_trainable(
+        SimpleNamespace(calls=tuple(calls), rollout_id=probe_run.probe_rollout_id)
+    )
+    for previous, following in zip(calls, calls[1:], strict=False):
+        OPTIMIZER_RECORDS.assert_strict_prefix(previous, following)

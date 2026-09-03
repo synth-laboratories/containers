@@ -80,6 +80,7 @@ EVENT_LEASE_RENEWED = "rollout.lease.renewed"
 EVENT_PROCESS_REGISTERED = "rollout.background_process.registered"
 EVENT_PROCESS_QUIESCED = "rollout.background_process.quiesced"
 EVENT_QUIESCENCE = "rollout.quiescence.attested"
+EVENT_AWAITING_SCORE = "rollout.attempt.awaiting_score"
 EVENT_FINALIZED = "rollout.attempt.finalized"
 EVENT_TERMINAL = "rollout.attempt.terminal"
 
@@ -276,6 +277,16 @@ class LeaseGrantV1(JsonDataclassMixin):
 class AttemptState(StrEnum):
     ACCEPTED = "accepted"
     RUNNING = "running"
+    #: The episode has stopped producing and the horizon has not been attested.
+    #:
+    #: Not a terminal state and not a scoring state: it is the answer to the one
+    #: question a polling client asks, "is there anything left to wait for". An
+    #: attempt that had no such answer could only ever report ``running``, and a
+    #: client polling it would either spin forever or finalize an episode that
+    #: was still going. Distinct from ``CispoRewardAuthority``'s deferred
+    #: ``awaiting_score``, which is about a measure that is not yet *readable*
+    #: after the horizon was attested and is capability-gated on its own.
+    AWAITING_SCORE = "awaiting_score"
     FINALIZING = "finalizing"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -622,6 +633,34 @@ class CispoRolloutLifecycle:
         self._runtime.start(record, self.log(rollout_id))
         return record
 
+    def observe(self, rollout_id: str) -> AttemptRecordV1:
+        """Read whether the episode is still producing. Settles nothing.
+
+        This is what a polling client is actually asking, and it is deliberately
+        weaker than :meth:`poll`: an attempt whose episode has stopped moves to
+        ``awaiting_score``, which is not terminal, so the horizon is still
+        attested by ``finalize`` and by nothing else. Reading state may not
+        decide an attempt's one terminal result.
+        """
+
+        record = self.attempt(rollout_id)
+        if record.state is not AttemptState.RUNNING:
+            return record
+        status = self._runtime.poll(record, self.log(rollout_id))
+        if status != "completed":
+            return record
+        with self._lock:
+            record = self.attempt(rollout_id)
+            if record.state is not AttemptState.RUNNING:
+                return record
+            record = replace(record, state=AttemptState.AWAITING_SCORE)
+            self._attempts[rollout_id] = record
+            self._logs[rollout_id].append(
+                EVENT_AWAITING_SCORE,
+                {"rollout_id": rollout_id, "at": self.offset()},
+            )
+        return record
+
     def poll(self, rollout_id: str) -> AttemptRecordV1:
         """Ask the runtime whether the attempt has reached a terminal status."""
 
@@ -955,7 +994,9 @@ class CispoRolloutAdapter:
     def cispo_rollout_state(self, rollout_id: str) -> dict[str, Any]:
         """Cheap enough to poll: it computes no reward and seals no trace."""
 
-        attempt = self._lifecycle.attempt(rollout_id)
+        # Reading the runtime's own progress is what makes this route answerable:
+        # it computes no reward, seals no trace, and settles no terminal result.
+        attempt = self._lifecycle.observe(rollout_id)
         now = self._lifecycle.offset()
         return {
             "rollout_id": attempt.rollout_id,
@@ -1065,6 +1106,11 @@ class CispoRolloutAdapter:
         payload = evidence.to_dict()
         payload["trace_digest"] = evidence.trace_digest
         payload["document"] = evidence.document.to_dict()
+        # The trace is sealed by construction -- ``SealedEvidenceV1`` is what the
+        # evidence source returns -- and a reader that cannot see the seal has to
+        # guess whether the evidence is complete. Say it.
+        payload["sealed"] = True
+        payload["inline"] = True
         return payload
 
     def cispo_rollout_artifacts(self, rollout_id: str) -> dict[str, Any]:
