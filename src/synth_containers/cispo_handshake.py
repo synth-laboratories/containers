@@ -387,6 +387,7 @@ class TaskRow(JsonDataclassMixin):
     content_digest: str
     topology_ref: str
     task_family: str = ""
+    seed: int | None = None
 
     def __post_init__(self) -> None:
         if not self.task_id.strip():
@@ -2635,6 +2636,7 @@ class CispoHandshakeAdapter:
                     "content_digest": row.content_digest,
                     "topology_ref": row.topology_ref,
                     "task_family": row.task_family,
+                    **({"seed": row.seed} if row.seed is not None else {}),
                 }
                 for row in (discovery.row(task_id) for task_id in wanted)
                 if row is not None
