@@ -81,7 +81,13 @@ MODEL_CALL_SCHEMA_VERSION = "cispo.policy_model_call.v1"
 #: provider and belongs to the module that mints canned generations.
 TRAINABLE_POLICY_KIND = "trainable"
 PINNED_POLICY_KIND = "pinned"
-SAMPLER_POLICY_KINDS: frozenset[str] = frozenset({TRAINABLE_POLICY_KIND, PINNED_POLICY_KIND})
+# A roster probe still has to exercise the real multi-agent episode over the
+# executor's loopback sampler origin.  Unlike the single-policy synthetic
+# probe it is origin-backed, but its tokens remain explicitly non-trainable.
+PROBE_POLICY_KIND = "probe"
+SAMPLER_POLICY_KINDS: frozenset[str] = frozenset(
+    {TRAINABLE_POLICY_KIND, PINNED_POLICY_KIND, PROBE_POLICY_KIND}
+)
 
 WIRE_APIS: frozenset[str] = frozenset({"chat_completions", "responses"})
 SAMPLING_TRANSPORTS: frozenset[str] = frozenset(
@@ -286,14 +292,16 @@ class SamplerOriginV1(JsonDataclassMixin):
 
     def __post_init__(self) -> None:
         parts = urlsplit(self.base_url)
-        if parts.scheme not in {"http", "https"} or not parts.netloc:
+        probe_origin = parts.scheme == "probe" and parts.netloc == "local"
+        if (parts.scheme not in {"http", "https"} and not probe_origin) or not parts.netloc:
             raise GlobalSamplerOrigin(
-                f"sampler origin {self.base_url!r} is not an absolute http(s) URL"
+                f"sampler origin {self.base_url!r} is neither an absolute http(s) URL "
+                "nor the reserved probe://local origin"
             )
         if not str(self.proxy_request_id or "").strip():
             raise GlobalSamplerOrigin("sampler origin names no per-attempt request id")
         segments = tuple(item for item in parts.path.split("/") if item)
-        if self.proxy_request_id not in segments:
+        if not probe_origin and self.proxy_request_id not in segments:
             raise GlobalSamplerOrigin(
                 f"sampler origin path {parts.path!r} does not carry the per-attempt id "
                 f"{self.proxy_request_id!r}; a global origin lets one attempt's "
@@ -330,6 +338,10 @@ class SamplerOriginV1(JsonDataclassMixin):
             sampling_transport=str(payload.get("sampling_transport") or ""),
             expires_at=str(payload.get("expires_at") or ""),
         )
+
+    @property
+    def is_probe(self) -> bool:
+        return urlsplit(self.base_url).scheme == "probe"
 
     @property
     def api_family(self) -> InferenceApiFamily:
@@ -839,7 +851,11 @@ def bind_sampler_policy(
     pinned_revision = int(body["policy_revision"])
     pinned_fingerprint = str(body.get("behavior_fingerprint") or "").strip()
 
-    trainable = bool(instance.trainable) if instance is not None else kind != PINNED_POLICY_KIND
+    trainable = (
+        False
+        if kind == PROBE_POLICY_KIND
+        else (bool(instance.trainable) if instance is not None else kind != PINNED_POLICY_KIND)
+    )
     pinned_identity = str(
         body.get("pinned_identity")
         or body.get("policy_ref")
@@ -856,6 +872,11 @@ def bind_sampler_policy(
     origin: SamplerOriginV1 | None = None
     if origin_payload is not None:
         origin = SamplerOriginV1.from_payload(origin_payload)
+        if origin.is_probe and kind != PROBE_POLICY_KIND:
+            raise GlobalSamplerOrigin(
+                "the reserved probe://local origin may only bind the non-trainable "
+                "probe policy kind"
+            )
         if origin.policy_revision != pinned_revision:
             raise RevisionPinMismatch(
                 f"sampler origin serves revision {origin.policy_revision} but the "
@@ -1274,6 +1295,7 @@ __all__ = [
     "FORBIDDEN_CREDENTIAL_FIELDS",
     "MODEL_CALL_SCHEMA_VERSION",
     "PINNED_POLICY_KIND",
+    "PROBE_POLICY_KIND",
     "POLICY_BINDING_SCHEMA_VERSION",
     "POLICY_SET_SCHEMA_VERSION",
     "SAMPLER_POLICY_KINDS",

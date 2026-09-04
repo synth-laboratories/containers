@@ -176,6 +176,36 @@ def test_the_binding_carries_the_executors_own_origin_fields() -> None:
         )
 
 
+def test_an_origin_backed_probe_binding_is_dispatchable_but_not_trainable() -> None:
+    """A joint probe exercises the roster without admitting its tokens to training."""
+
+    runtime, _, agreement = admitted()
+    binding = bind_sampler_policy(
+        runtime,
+        agreement,
+        binding_request(
+            kind=PROBE_POLICY_KIND,
+            sampler_origin=origin_payload(base_url="probe://local"),
+        ),
+        reachability=Reachable(True),
+    )
+    assert binding.policy_kind == PROBE_POLICY_KIND
+    assert binding.origin is not None
+    assert binding.dispatchable is True
+    assert binding.trainable is False
+
+
+def test_the_reserved_probe_origin_cannot_bind_a_trainable_policy() -> None:
+    runtime, _, agreement = admitted()
+    with pytest.raises(GlobalSamplerOrigin, match="may only bind"):
+        bind_sampler_policy(
+            runtime,
+            agreement,
+            binding_request(sampler_origin=origin_payload(base_url="probe://local")),
+            reachability=Reachable(True),
+        )
+
+
 def test_the_binding_hands_the_package_its_own_inference_target() -> None:
     """The existing policy machinery takes this object; no translation layer."""
 

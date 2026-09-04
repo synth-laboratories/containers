@@ -336,6 +336,7 @@ class RendererProfileFacts(JsonDataclassMixin):
     stop_token_ids: tuple[int, ...]
     modalities: tuple[str, ...] = ("text",)
     add_generation_prompt: bool = True
+    canary_digest: str = ""
 
     def __post_init__(self) -> None:
         if not self.profile_id.strip():
@@ -354,6 +355,7 @@ class RendererProfileFacts(JsonDataclassMixin):
             "stop_token_ids": list(self.stop_token_ids),
             "modalities": list(self.modalities),
             "add_generation_prompt": self.add_generation_prompt,
+            "canary_digest": self.canary_digest,
         }
 
     @property
@@ -801,6 +803,7 @@ class RuntimeFacts(JsonDataclassMixin):
                     str(item) for item in renderer_raw.get("modalities") or ("text",)
                 ),
                 add_generation_prompt=bool(renderer_raw.get("add_generation_prompt", True)),
+                canary_digest=str(renderer_raw.get("canary_digest") or ""),
             ),
             discovery=DiscoveryFacts(
                 taskset_id=str(discovery_raw.get("taskset_id") or ""),
@@ -2742,6 +2745,20 @@ class CispoHandshakeAdapter:
             if isinstance(item, Mapping)
         }
         agreement = self.admit_attempt(request)
+        # A joint probe carries one loopback sampler origin per seat.  It must
+        # be registered as a real policy set so roster admission can resolve
+        # it; the individual bindings are marked non-trainable by
+        # ``bind_sampler_policy``.  The older synthetic path remains correct
+        # for origin-less probes.
+        if kinds <= {"", PROBE_POLICY_KIND} and bindings and all(
+            isinstance(item, Mapping) and item.get("sampler_origin") is not None
+            for item in bindings
+        ):
+            payload = self.policies.bind_set(agreement, request)
+            policy_set_id = str(payload.get("policy_set_id") or payload.get("config_id") or "")
+            if policy_set_id:
+                self.probe_bindings[policy_set_id] = dict(payload)
+            return payload
         if kinds - {"", PROBE_POLICY_KIND}:
             return self.policies.bind_set(agreement, request)
         resolved: list[dict[str, Any]] = []

@@ -245,6 +245,7 @@ class RendererProfileDeclaration(JsonDataclassMixin):
     stop_token_ids: tuple[int, ...]
     modalities: tuple[str, ...] = ("text",)
     add_generation_prompt: bool = True
+    canary_digest: str = ""
 
     def __post_init__(self) -> None:
         for name in (
@@ -273,6 +274,7 @@ class RendererProfileDeclaration(JsonDataclassMixin):
             "stop_token_ids": [int(item) for item in self.stop_token_ids],
             "modalities": [str(item) for item in self.modalities],
             "add_generation_prompt": bool(self.add_generation_prompt),
+            "canary_digest": str(self.canary_digest),
         }
 
 
