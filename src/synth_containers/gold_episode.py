@@ -7,12 +7,15 @@ thing this loop knows about a game is what the world hands back in a
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 from typing import Any, Protocol
 
 from .event_log import RolloutEventLog
 
 from .gold_http import StepResult
+
+PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
 
 class Planner(Protocol):
@@ -21,6 +24,51 @@ class Planner(Protocol):
     def usage(self) -> dict[str, Any]: ...
 
     def metadata(self) -> dict[str, Any]: ...
+
+
+def _persist_frame(
+    log: RolloutEventLog,
+    step: int,
+    payload: bytes,
+    *,
+    name: str | None = None,
+) -> str | None:
+    """Store a PNG. Named extras need ``persist_frame(..., name=)``; otherwise skip."""
+    persist = getattr(log, "persist_frame", None)
+    if not callable(persist):
+        return None
+    if name is None:
+        return persist(step, payload)
+    try:
+        if "name" not in inspect.signature(persist).parameters:
+            return None
+    except (TypeError, ValueError):
+        return None
+    return persist(step, payload, name=name)
+
+
+def _emit_extra_view_frames(log: RolloutEventLog, result: StepResult) -> None:
+    """Persist other-hero PNGs when the log API already accepts a frame name."""
+    view_frames = getattr(result, "view_frames", None) or {}
+    if not isinstance(view_frames, dict):
+        return
+    for viewer, payload in view_frames.items():
+        if not isinstance(payload, (bytes, bytearray)) or not payload.startswith(PNG_MAGIC):
+            continue
+        durable_url = _persist_frame(
+            log, result.env_steps, bytes(payload), name=str(viewer)
+        )
+        if durable_url is None:
+            continue
+        log.append(
+            "frame",
+            {
+                "step": result.env_steps,
+                "url": durable_url,
+                "format": "png",
+                "viewer": str(viewer),
+            },
+        )
 
 
 def _emit_obs(log: RolloutEventLog, result: StepResult, *, seed: int) -> str | None:
@@ -56,7 +104,17 @@ def _emit_obs(log: RolloutEventLog, result: StepResult, *, seed: int) -> str | N
             "artifact.available",
             {"kind": "frame", "digest": result.frame_digest, "url": durable_url},
         )
+    _emit_extra_view_frames(log, result)
     return durable_url
+
+
+def _planner_observation(result: StepResult) -> dict[str, Any]:
+    """Shallow copy for the planner: ego PNG only, never the omniscient map."""
+    observation = dict(result.observation)
+    payload = result.frame_bytes
+    if isinstance(payload, (bytes, bytearray)) and payload.startswith(PNG_MAGIC):
+        observation["_frame_png"] = bytes(payload)
+    return observation
 
 
 def _relay_native(world: Any, log: RolloutEventLog) -> None:
@@ -71,9 +129,6 @@ def _relay_native(world: Any, log: RolloutEventLog) -> None:
             continue
         payload = {key: value for key, value in event.items() if key != "kind"}
         log.append(kind, payload)
-
-
-PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
 
 def _frame_record(result: StepResult, durable_url: str | None) -> dict[str, Any]:
@@ -97,7 +152,7 @@ def run_episode(
     emit_policy_spans: bool = True,
     resume_checkpoint: dict[str, Any] | None = None,
     checkpoint_callback: Callable[
-        [Any, Planner, StepResult, list[float | None]], dict[str, Any]
+        [Any, Planner, StepResult, list[float | None]], dict[str, Any] | None
     ]
     | None = None,
     max_calls: int | None = None,
@@ -141,9 +196,13 @@ def run_episode(
     # branch even when one model plan spans the entire episode and the next
     # boundary is already terminal.
     if checkpoint_callback is not None:
-        scheduled_checkpoints.append(checkpoint_callback(world, planner, result, list(signals)))
+        captured = checkpoint_callback(world, planner, result, list(signals))
+        if captured is not None:
+            scheduled_checkpoints.append(captured)
     stopped_on: str | None = None
+    unadvanced_plans = 0
     while not result.done:
+        before_step = result.env_steps
         if max_calls is not None and int(planner.usage().get("calls") or 0) >= max_calls:
             stopped_on = "max_calls"
             break
@@ -157,7 +216,7 @@ def run_episode(
             if emit_policy_spans and isinstance(payload, dict) and payload:
                 log.append("span.policy.data", payload)
 
-        plan = planner.plan(result.observation, on_delta=on_delta)
+        plan = planner.plan(_planner_observation(result), on_delta=on_delta)
         if emit_policy_spans:
             trace_data = getattr(planner, "trace_data", None)
             if callable(trace_data):
@@ -171,11 +230,21 @@ def run_episode(
         for action in plan:
             if result.done:
                 break
-            log.append("span.step.opened", {"action": action, "step": result.env_steps})
+            valid = list(result.valid_actions)
+            if valid and action not in valid:
+                if emit_policy_spans:
+                    log.append(
+                        "span.policy.stale_plan",
+                        {"skipped": action, "valid_head": valid[:12]},
+                    )
+                break
+            native_agent = result.observation.get("agent_id")
+            actor_fields = {"agent_id": native_agent} if isinstance(native_agent, str) and native_agent else {}
+            log.append("span.step.opened", {"action": action, "step": result.env_steps, **actor_fields})
             result = world.step(action)
             actions.append(action)
             _relay_native(world, log)
-            log.append("action", {"step": result.env_steps, "action": action})
+            log.append("action", {"step": result.env_steps, "action": action, **actor_fields})
             value: float | None = result.reward
             if omit_reward and result.env_steps == 2:
                 value = None
@@ -186,12 +255,18 @@ def run_episode(
             )
             durable_url = _emit_obs(log, result, seed=seed)
             frames.append(_frame_record(result, durable_url))
-            log.append("span.step.closed", {"action": action, "step": result.env_steps})
+            log.append("span.step.closed", {"action": action, "step": result.env_steps, **actor_fields})
+        unadvanced_plans = unadvanced_plans + 1 if result.env_steps == before_step else 0
+        if unadvanced_plans >= 8:
+            stopped_on = "policy_no_progress"
+            log.append("policy.no_progress", {"plans":unadvanced_plans,"step":result.env_steps})
+            break
         if checkpoint_callback is not None:
-            scheduled_checkpoints.append(
-                checkpoint_callback(world, planner, result, list(signals))
-            )
-    terminal_status = "completed" if result.done else "truncated"
+            captured = checkpoint_callback(world, planner, result, list(signals))
+            if captured is not None:
+                scheduled_checkpoints.append(captured)
+    terminal_status = ("failed" if stopped_on == "policy_no_progress"
+                       else "completed" if result.done else "truncated")
     if session_open:
         log.append("policy.session.closed", {"calls": planner.usage().get("calls")})
     log.append(

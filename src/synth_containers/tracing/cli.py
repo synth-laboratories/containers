@@ -74,6 +74,11 @@ def main(argv: list[str] | None = None) -> int:
     validate_parser = subparsers.add_parser("validate", help="run invariants over a bundle")
     validate_parser.add_argument("bundle", type=Path)
 
+    research = subparsers.add_parser("research-query", help="run a host-resolved job/trace query without inference")
+    research.add_argument("--request", type=Path, required=True)
+    research.add_argument("--cache", type=Path, required=True)
+    research.add_argument("--output", type=Path, required=True)
+
     project = subparsers.add_parser("project", help="write a projection of a sealed trace")
     project.add_argument("bundle", type=Path)
     project.add_argument(
@@ -330,6 +335,13 @@ def main(argv: list[str] | None = None) -> int:
             pass
         finally:
             service.stop()
+        return 0
+
+    if args.command == "research-query":
+        from .research import run_request
+        result = run_request(json.loads(args.request.read_text()), args.cache)
+        args.output.write_text(readable_json(result), encoding="utf-8")
+        print(readable_json({"snapshotId": result.get("snapshotId"), "resultCount": result.get("resultCount")}))
         return 0
 
     if args.command == "inspect-input":

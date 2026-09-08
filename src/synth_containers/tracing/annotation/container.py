@@ -407,7 +407,7 @@ def install_from_env(app: Any, *, storage_root: Path | None) -> ContainerAnnotat
             runners["codex_app_server"] = CodexAppServerRunner(default_effort=os.environ.get("SYNTH_ANNOTATION_DEFAULT_EFFORT") or "medium", usd_per_million_tokens=usd, proxy_enforces_reservation=proxy, price_table=price_table)
         if os.environ.get("SYNTH_ANNOTATION_JESTERKY", "").strip().lower() in {"on", "1", "true", "yes"}:
             command = tuple(item for item in os.environ.get("SYNTH_ANNOTATION_JESTERKY_COMMAND", "jesterky").split() if item)
-            runners["jesterky"] = JesterkyRunner(command=command or ("jesterky",), actor=os.environ.get("SYNTH_ANNOTATION_JESTERKY_ACTOR") or "codex", default_effort=os.environ.get("SYNTH_ANNOTATION_DEFAULT_EFFORT") or "medium", usd_per_million_tokens=usd, proxy_enforces_reservation=proxy, price_table=price_table)
+            runners["jesterky"] = JesterkyRunner(command=command or ("jesterky",), actor=os.environ.get("SYNTH_ANNOTATION_JESTERKY_ACTOR") or "codex", default_model=os.environ.get("SYNTH_ANNOTATION_JESTERKY_MODEL") or "gpt-5.6-luna", default_effort=os.environ.get("SYNTH_ANNOTATION_JESTERKY_EFFORT") or "low", usd_per_million_tokens=usd, proxy_enforces_reservation=proxy, price_table=price_table)
         if not runners:
             runners = None
     try:

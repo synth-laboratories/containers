@@ -166,6 +166,8 @@ class DockerBackend(Protocol):
 
     def exists(self, name: str) -> bool: ...
 
+    def is_running(self, name: str) -> bool: ...
+
 
 @dataclass(frozen=True, slots=True)
 class SubprocessDocker:
@@ -256,6 +258,12 @@ class SubprocessDocker:
     def exists(self, name: str) -> bool:
         completed = self._run(["inspect", "--format", "{{.Id}}", name], check=False)
         return completed.returncode == 0 and bool(completed.stdout.strip())
+
+    def is_running(self, name: str) -> bool:
+        completed = self._run(
+            ["inspect", "--format", "{{.State.Running}}", name], check=False
+        )
+        return completed.returncode == 0 and completed.stdout.strip().lower() == "true"
 
 
 # --------------------------------------------------------------------- run record
@@ -408,6 +416,15 @@ def build_image(
     return docker.build(spec, tag=f"{spec.image_name}:local")
 
 
+def _tagged_reference(image_name: str) -> bool:
+    """True when `image_name` already carries a `:tag`.
+
+    A registry host may carry a port (`registry:5000/name`), which is a colon
+    that is not a tag; only a colon in the final path segment is one.
+    """
+    return ":" in image_name.rsplit("/", 1)[-1]
+
+
 def _merged_env(spec: ImageSpec, env: Mapping[str, str] | None) -> dict[str, str]:
     merged = dict(spec.extra_env)
     if env:
@@ -487,7 +504,10 @@ def _run_args(
         else:
             payload.setdefault("DOCKER_HOST", os.environ["DOCKER_HOST"])
         if spec.workspace_host_root:
-            host_root = workspace_host_dir(spec.id)
+            # Multiple instances of one nested image share the host daemon.
+            # Scope their bind roots by published port so identical rollout
+            # IDs cannot race over another instance's workspace.
+            host_root = workspace_host_dir(f"{spec.id}-{host_port}")
             host_root.mkdir(parents=True, exist_ok=True)
             args.extend(["-v", f"{host_root}:{spec.workspace_mount}"])
             # Nested ``-v`` paths are interpreted by the HOST daemon. The platform
@@ -497,15 +517,28 @@ def _run_args(
         payload["SYNTH_NESTED"] = NESTED_HOST_DOCKER
     for source, target, read_only in spec.volumes:
         resolved = str(Path(os.path.expandvars(source)).expanduser())
-        if "$" in resolved:
+        if (
+            "$" in resolved
+            and not read_only
+            and str(target).rstrip("/") == "/var/lib/synth/storage"
+        ):
+            storage_id = "harbor-deepswe" if "HARBOR_DEEPSWE_STORAGE" in source else spec.id
+            fallback = Path.home() / ".synth-containers" / "storage" / storage_id
+            fallback.mkdir(parents=True, exist_ok=True)
+            resolved = str(fallback)
+        elif "$" in resolved:
             # An unexpanded variable would otherwise be taken as a relative path
             # and created as an empty directory by the daemon.
             raise LaunchError(f"container_image_volume_source_unset:{spec.id}:{source}")
         # Docker creates a missing bind source as an empty directory, which is
         # how a credential mount turns into a silently unauthenticated image.
-        # A declared volume must already exist.
+        # A declared volume must already exist. Annotation storage is the
+        # exception: an empty host dir is the durable projection, not a secret.
         if not Path(resolved).exists():
-            raise LaunchError(f"container_image_volume_source_missing:{spec.id}:{resolved}")
+            if not read_only and str(target).rstrip("/") == "/var/lib/synth/storage":
+                Path(resolved).mkdir(parents=True, exist_ok=True)
+            else:
+                raise LaunchError(f"container_image_volume_source_missing:{spec.id}:{resolved}")
         args.extend(["-v", f"{resolved}:{target}:ro" if read_only else f"{resolved}:{target}"])
     for key, value in sorted(payload.items()):
         args.extend(["-e", f"{key}={value}"])
@@ -515,17 +548,24 @@ def _run_args(
 # ----------------------------------------------------------------------- up/down
 
 
-def _assert_serves_this_image(spec: ImageSpec, payload: object, *, url: str) -> None:
+def _assert_serves_this_image(
+    spec: ImageSpec,
+    payload: object,
+    *,
+    url: str,
+    env: Mapping[str, str] | None = None,
+) -> None:
     """Refuse a URL that answers with a different platform than we just started.
 
     Publishing a container port does not guarantee the host address reaches it:
     a process that already holds the port keeps answering, and `docker run`
     reports success anyway. `up` would then hand back a URL serving somebody
     else's environment, and a rollout would be attributed to the wrong image.
-    The platform states its target on `/health`, so compare it.
+    The platform states its target on `/health`, so compare it against the
+    merged runtime env (CLI `--env` overlays catalog `extra_env`).
     """
 
-    expected = str(spec.extra_env.get("SYNTH_CONTAINER_TARGET") or "").strip()
+    expected = str((env or spec.extra_env).get("SYNTH_CONTAINER_TARGET") or "").strip()
     if not expected:
         return
     served = ""
@@ -569,8 +609,10 @@ def up_image(
     existing = read_run_record(spec.id, host_port)
     if existing is not None:
         if not replace:
-            if docker.exists(existing.container_name):
+            if docker.is_running(existing.container_name):
                 raise LaunchError(f"container_image_already_up:{spec.id}:{host_port}")
+            if docker.exists(existing.container_name):
+                docker.stop(existing.container_name)
             delete_run_record(spec.id, host_port)
         else:
             down_image(spec.id, port=host_port, catalog=catalog, backend=docker)
@@ -602,7 +644,7 @@ def up_image(
             raise LaunchError(f"container_image_exited:{spec.id}")
         try:
             payload = handle.health(timeout_seconds=2.0)
-            _assert_serves_this_image(spec, payload, url=url)
+            _assert_serves_this_image(spec, payload, url=url, env=merged)
             record = RunRecord(
                 id=spec.id,
                 port=host_port,
@@ -614,7 +656,7 @@ def up_image(
                 digest=digest,
                 nested=spec.nested,
                 workspace_host_root=(
-                    str(workspace_host_dir(spec.id))
+                    str(workspace_host_dir(f"{spec.id}-{host_port}"))
                     if spec.is_nested and spec.workspace_host_root
                     else None
                 ),
@@ -859,6 +901,12 @@ def _spec_from_row(catalog_root: Path, raw: Mapping[str, Any]) -> ImageSpec:
     image_name = str(overlay.get("image_name") or f"evals-{image_id}").strip()
     if not image_name or image_name.endswith(":latest"):
         raise LaunchError(f"container_image_name_invalid:{image_id}")
+    # `image_name` is a repository, and every build site appends its own tag.
+    # A tag baked in here silently produced `evals-harbor-deepswe:local:local`,
+    # an invalid reference that made `synth-containers build` unusable for that
+    # image. Say so instead of concatenating.
+    if _tagged_reference(image_name):
+        raise LaunchError(f"container_image_name_tagged:{image_id}:{image_name}")
     extra = overlay.get("extra_env") or {}
     if not isinstance(extra, dict):
         raise LaunchError(f"container_image_extra_env_invalid:{image_id}")

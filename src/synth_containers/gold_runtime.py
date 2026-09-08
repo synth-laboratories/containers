@@ -21,6 +21,11 @@ from typing import Any
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from .checkpoint_schedule import (
+    apply_checkpoint_keep_last,
+    checkpoint_is_due,
+    parse_checkpoint_schedule,
+)
 from .event_log import RolloutEventLog
 from .gold_episode import PNG_MAGIC, run_episode
 from .gold_http import GoldHttpWorld
@@ -43,6 +48,7 @@ class GoldRuntime:
     engine: str = "gold"
     max_steps_env: str = "SYNTH_GOLD_MAX_STEPS"
     frame_path: str = "/rollouts/{rollout_id}/frames/{env_steps}.png"
+    view_frame_path: str = ""
 
     def simulate(self, platform: CompatPlatform, pin: RolloutPin, log: RolloutEventLog) -> None:
         max_steps = self._max_steps(platform, pin)
@@ -79,27 +85,35 @@ class GoldRuntime:
 
         checkpoint_callback = None
         if pin.checkpoint_schedule is not None:
-            mode = str(pin.checkpoint_schedule.get("mode") or "").strip()
-            if mode != "per_policy_call":
-                raise RuntimeError(f"unsupported_checkpoint_schedule:{mode or 'missing'}")
-            prefix = str(pin.checkpoint_schedule.get("checkpoint_id_prefix") or "").strip()
-            if not prefix:
-                raise RuntimeError("checkpoint_schedule requires checkpoint_id_prefix")
+            schedule = parse_checkpoint_schedule(pin.checkpoint_schedule)
+            prefix = schedule.checkpoint_id_prefix
+            last_captured_env_steps: int | None = None
 
             def checkpoint_callback(
                 current_world: Any,
                 current_planner: Any,
                 result: Any,
                 signals: list[float | None],
-            ) -> dict[str, Any]:
+            ) -> dict[str, Any] | None:
+                nonlocal last_captured_env_steps
+                calls = int(current_planner.usage().get("calls") or 0)
+                env_steps = int(result.env_steps)
+                if not checkpoint_is_due(
+                    schedule,
+                    calls=calls,
+                    env_steps=env_steps,
+                    last_captured_env_steps=last_captured_env_steps,
+                ):
+                    return None
                 capture = getattr(current_world, "checkpoint", None)
                 policy_capture = getattr(current_planner, "checkpoint_state", None)
                 if not callable(capture) or not callable(policy_capture):
                     raise RuntimeError("runtime does not implement true checkpoint capture")
                 environment = capture()
-                checkpoint_id = f"{prefix}_{int(current_planner.usage().get('calls') or 0):04d}"
+                checkpoint_id = f"{prefix}_{calls:04d}"
                 reward = sum(float(value) for value in signals if isinstance(value, (int, float)))
                 achievements = _achievement_labels(result.observation)
+                restore_eligible = not bool(result.done)
                 platform.record_checkpoint(
                     {
                         "checkpoint_id": checkpoint_id,
@@ -109,23 +123,28 @@ class GoldRuntime:
                         "policy_ref": {
                             key: value for key, value in pin.policy_ref.items() if key != "code"
                         },
-                        "policy_llm_call_index": int(
-                            current_planner.usage().get("calls") or 0
-                        ),
-                        "step": int(result.env_steps),
+                        "policy_llm_call_index": calls,
+                        "step": env_steps,
                         "reward": reward,
                         "achievements": achievements,
                         "environment_checkpoint_id": environment["checkpoint_id"],
                         "environment_blob": environment["blob"],
                         "policy_state": policy_capture(),
                         "parent_checkpoint_id": pin.resume_from_checkpoint_id,
+                        "restore_eligible": restore_eligible,
                     }
+                )
+                last_captured_env_steps = env_steps
+                apply_checkpoint_keep_last(
+                    platform,
+                    schedule,
+                    retain_checkpoint_id=pin.resume_from_checkpoint_id,
                 )
                 descriptor = {
                     "checkpoint_id": checkpoint_id,
                     "rollout_id": pin.rollout_id,
-                    "policy_llm_call_index": int(current_planner.usage().get("calls") or 0),
-                    "step": int(result.env_steps),
+                    "policy_llm_call_index": calls,
+                    "step": env_steps,
                     "reward": reward,
                     "achievements": achievements,
                     "parent_checkpoint_id": pin.resume_from_checkpoint_id,
@@ -133,8 +152,8 @@ class GoldRuntime:
                     # valid terminal evidence, but it is not a state from
                     # which GoEx can continue. Never advertise terminal
                     # snapshots as resumable branches.
-                    "restore_eligible": not bool(result.done),
-                    "branchable": not bool(result.done),
+                    "restore_eligible": restore_eligible,
+                    "branchable": restore_eligible,
                     "checkpoint_semantics": "true_environment_snapshot",
                     "resume_blockers": ["terminal_environment"] if result.done else [],
                 }
@@ -174,7 +193,11 @@ class GoldRuntime:
                 if not log.closed:
                     log.append(
                         "span.policy.closed",
-                        {"status": "failed", "error_type": type(exc).__name__},
+                        {
+                            "status": "failed",
+                            "error_type": type(exc).__name__,
+                            "error": str(exc)[:400],
+                        },
                     )
                     log.append(
                         "policy.session.closed",
@@ -187,6 +210,7 @@ class GoldRuntime:
                             "status": "failed",
                             "reason": "policy_error",
                             "error_type": type(exc).__name__,
+                            "error": str(exc)[:400],
                         },
                     )
                     evidence_high_water = log.high_water
@@ -198,8 +222,13 @@ class GoldRuntime:
                 pin.usage = dict(planner.usage())
                 return
         finally:
-            if closer is not None:
-                closer()
+            try:
+                if closer is not None:
+                    closer()
+            finally:
+                # The gold engine retains each rollout until DELETE. Always
+                # release it, including policy errors and cancellation paths.
+                world.close()
         platform.step_calls += int(outcome["steps"])
         pin.reward_signals = list(outcome["reward_signals"])
         pin.status = str(outcome.get("status") or "completed")
@@ -231,13 +260,15 @@ class GoldRuntime:
         ref = platform.spec.environment_ref
         if ref != self.environment_ref:
             raise ValueError(f"unknown_environment:{ref}")
+        native = platform.spec.live_frames == "native"
         return GoldHttpWorld(
             max_steps=max_steps,
             task_payload=self.task_payload,
             url_env=self.url_env,
             engine=self.engine,
-            require_frames=platform.spec.live_frames == "native",
-            frame_path=self.frame_path if platform.spec.live_frames == "native" else "",
+            require_frames=native,
+            frame_path=self.frame_path if native else "",
+            view_frame_path=self.view_frame_path if native else "",
         )
 
     def _nanohorizon_planner(self, platform: CompatPlatform, pin: RolloutPin) -> Any:

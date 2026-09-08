@@ -89,6 +89,7 @@ class RunContext:
     instructions_digest: str
     source_annotations: tuple[AnnotationV1, ...] = ()
     cancel_requested: Callable[[], bool] = lambda: False
+    shard_cache_dir: Path | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -277,7 +278,9 @@ class AnnotationService:
             source_trace_digest=document.content_digest,
             annotator_id=entry.annotator_id,
             annotator_digest=entry.definition.content_digest,
-            model=model if model is not None else entry.definition.model,
+            # Preserve whether the caller supplied a model. Each runner resolves
+            # its own default; Jesterky analysis is independent of eval models.
+            model=model,
             reasoning_effort=reasoning_effort,
             runner_kind=runner_kind,
             mode=_inferred_mode(entry, mode),
@@ -789,6 +792,7 @@ class AnnotationService:
             instructions_digest=instructions_digest,
             source_annotations=source_annotations,
             cancel_requested=cancel_flag.exists,
+            shard_cache_dir=workspace_dir.parent.parent.parent / "jesterky_shards",
         )
         try:
             outcome = runner.run(context)

@@ -7,23 +7,63 @@ Sampler is ``POST {base_url}/v1/sample`` with thinking and tools.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import importlib.util
 import json
+import os
+import random
 import re
 import sys
 import tempfile
+import threading
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
+
+from .workshop_proxy import public_proxy_bearer
 
 from ..gold_episode import _emit_obs, _frame_record
 from ..gold_http import StepResult
+from ..gen_ai import copy_observation, request_observation as gen_ai_request_observation
 
 PROTOCOL = "nanohorizon.policy.v1"
 HARNESS = "nanohorizon"
 TOOL_NAME = "craftax_interact"
+# Conservative OpenRouter public list (Aug 2026). Used only when a completion
+# omits billed ``usage.cost``. Slightly above the $0.037/$0.170 spot so the
+# GEPA $ cap is a ceiling, not an underestimate.
+_OSS120B_INPUT_USD_PER_M = 0.04
+_OSS120B_OUTPUT_USD_PER_M = 0.18
+
+
+def billed_or_estimated_cost_usd(
+    usage: dict[str, Any],
+    *,
+    prompt_tokens: int,
+    completion_tokens: int,
+    model: str,
+) -> tuple[float | None, str]:
+    """Prefer OpenRouter billed ``usage.cost``; else pin gpt-oss-120b list price."""
+
+    raw = usage.get("cost")
+    if raw is None:
+        raw = usage.get("cost_usd")
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool) and float(raw) >= 0.0:
+        return float(raw), "openrouter_usage_cost"
+    if prompt_tokens <= 0 and completion_tokens <= 0:
+        return None, "missing"
+    name = str(model or "").lower()
+    if "gpt-oss-120b" in name:
+        cost = (
+            prompt_tokens * _OSS120B_INPUT_USD_PER_M
+            + completion_tokens * _OSS120B_OUTPUT_USD_PER_M
+        ) / 1_000_000.0
+        return cost, "openrouter_list_price_gpt_oss_120b_2026-08"
+    return None, "unpriced"
 TOOL_CALL_BLOCK = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
 FUNCTION_BLOCK = re.compile(
     r"<function=(?P<name>[^\s>]+)>(?P<body>.*?)</function>", re.DOTALL
@@ -93,26 +133,230 @@ def load_policy_class(code: bytes) -> type:
     return policy_cls
 
 
-def _json_request(url: str, payload: dict[str, Any], *, timeout: float) -> dict[str, Any]:
-    body = json.dumps(payload).encode("utf-8")
-    request = urllib.request.Request(
-        url,
-        data=body,
-        headers={"Accept": "application/json", "Content-Type": "application/json"},
-        method="POST",
-    )
+class _RequestPace:
+    """Process-wide spacing so parallel rollouts share one OpenRouter budget."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._next_ok = 0.0
+        self._cool_until = 0.0
+
+    def wait(self, min_interval: float) -> None:
+        while True:
+            with self._lock:
+                now = time.monotonic()
+                delay = max(0.0, max(self._next_ok, self._cool_until) - now)
+                if delay <= 0:
+                    gap = max(0.0, float(min_interval))
+                    self._next_ok = now + gap
+                    return
+            time.sleep(min(delay, 1.0))
+
+    def cool(self, seconds: float) -> None:
+        wait = max(0.0, float(seconds))
+        if wait <= 0:
+            return
+        with self._lock:
+            until = time.monotonic() + wait
+            if until > self._cool_until:
+                self._cool_until = until
+
+
+_PACE = _RequestPace()
+_RETRY_HTTP = {408, 409, 429, 500, 502, 503, 529}
+
+
+class NanoHorizonSamplerFailure(RuntimeError):
+    """A terminal provider response that cannot produce a policy action."""
+
+    def __init__(self, code: str, *, completion: dict[str, Any]) -> None:
+        super().__init__(code)
+        self.code = code
+        self.retryable = False
+        self.completion = copy.deepcopy(completion)
+
+
+def _retry_after_seconds(exc: urllib.error.HTTPError, detail: str) -> float | None:
+    raw = ""
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
-            raw = response.read()
-            headers = {key.lower(): value for key, value in response.headers.items()}
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", "replace")[:400]
-        raise RuntimeError(f"sampler_http_{exc.code}:{detail}") from exc
-    parsed = json.loads(raw.decode("utf-8") or "{}")
-    if not isinstance(parsed, dict):
-        raise RuntimeError("sampler_response_not_object")
-    parsed["_headers"] = headers
-    return parsed
+        raw = str(exc.headers.get("Retry-After") or "").strip()
+    except Exception:  # noqa: BLE001
+        raw = ""
+    if raw:
+        try:
+            return max(0.0, float(raw))
+        except ValueError:
+            pass
+    try:
+        payload = json.loads(detail)
+    except json.JSONDecodeError:
+        payload = None
+    if isinstance(payload, dict):
+        error = payload.get("error") if isinstance(payload.get("error"), dict) else payload
+        for key in ("retry_after", "retryAfter"):
+            value = error.get(key) if isinstance(error, dict) else None
+            if value is not None:
+                try:
+                    return max(0.0, float(value))
+                except (TypeError, ValueError):
+                    pass
+    return None
+
+
+def _backoff_seconds(attempt: int, *, base: float, cap: float, retry_after: float | None) -> float:
+    if retry_after is not None:
+        wait = retry_after
+    else:
+        wait = min(cap, base * (2**attempt))
+    jitter = random.uniform(0.0, min(1.0, wait * 0.25) if wait else 0.25)
+    return min(cap, wait + jitter)
+
+
+def _json_request(
+    url: str,
+    payload: dict[str, Any],
+    *,
+    timeout: float,
+    headers: dict[str, str] | None = None,
+    retries: int = 0,
+    min_interval: float = 0.0,
+    retry_max_wait: float = 90.0,
+) -> dict[str, Any]:
+    body = json.dumps(payload).encode("utf-8")
+    request_headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        # Groq (Cloudflare 1010) bans Python-urllib's default User-Agent.
+        "User-Agent": "NanoHorizon/0.1",
+        **(headers or {}),
+    }
+    last_error: Exception | None = None
+    max_wait = max(1.0, float(retry_max_wait))
+    for attempt in range(max(0, retries) + 1):
+        _PACE.wait(min_interval)
+        request = urllib.request.Request(
+            url,
+            data=body,
+            headers=request_headers,
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
+                raw = response.read()
+                response_headers = {
+                    key.lower(): value for key, value in response.headers.items()
+                }
+            parsed = json.loads(raw.decode("utf-8") or "{}")
+            if not isinstance(parsed, dict):
+                raise RuntimeError("sampler_response_not_object")
+            parsed["_headers"] = response_headers
+            return parsed
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", "replace")[:400]
+            last_error = RuntimeError(f"sampler_http_{exc.code}:{detail}")
+            groq_tool_miss = exc.code == 400 and "tool_use_failed" in detail
+            retryable = exc.code in _RETRY_HTTP or groq_tool_miss
+            max_attempts = retries if exc.code in _RETRY_HTTP else min(retries, 3)
+            if not retryable or attempt >= max_attempts:
+                raise last_error from exc
+            retry_after = _retry_after_seconds(exc, detail)
+            base = 8.0 if exc.code == 429 else 1.0
+            wait = _backoff_seconds(
+                attempt, base=base, cap=max_wait, retry_after=retry_after
+            )
+            _PACE.cool(wait)
+            print(
+                f"nanohorizon sampler http {exc.code}; backing off {wait:.1f}s "
+                f"(attempt {attempt + 1}/{retries + 1})",
+                file=sys.stderr,
+                flush=True,
+            )
+            continue
+        except urllib.error.URLError as exc:
+            last_error = RuntimeError(f"sampler_connect:{exc.reason}")
+            if attempt >= retries:
+                raise last_error from exc
+            wait = _backoff_seconds(attempt, base=1.0, cap=min(20.0, max_wait), retry_after=None)
+            _PACE.cool(wait)
+            print(
+                f"nanohorizon sampler connect error; backing off {wait:.1f}s "
+                f"(attempt {attempt + 1}/{retries + 1})",
+                file=sys.stderr,
+                flush=True,
+            )
+            continue
+    raise last_error or RuntimeError("sampler_http_failed")
+
+
+def resolve_sampler_api(config: dict[str, Any]) -> str:
+    raw = str(config.get("api") or config.get("api_family") or "").strip().lower()
+    if raw in {"responses"}:
+        return "responses"
+    return "chat_completions"
+
+
+def is_local_compat(url: str) -> bool:
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    # Workshop's scoped provider proxy is container-reachable through
+    # host.docker.internal, but the sampler behind it is still a remote
+    # provider. Treating that route as a local model incorrectly adds local
+    # decoding knobs and suppresses provider reasoning controls.
+    if "/cap/wcap_" in parsed.path:
+        return False
+    return host in {"127.0.0.1", "localhost", "host.docker.internal"}
+
+
+def chat_completions_url(base_url: str) -> str:
+    base = str(base_url or "").rstrip("/")
+    if not base:
+        raise RuntimeError("nanohorizon sampler config requires base_url")
+    if base.endswith("/chat/completions"):
+        return base
+    # OpenAI-compatible gateways may scope the base beneath /v1 (for example
+    # /v1/providers/<provider>).  In that case /v1 is already present and must
+    # not be appended a second time.
+    path = urlparse(base).path.rstrip("/")
+    if path.endswith("/v1") or "/v1/providers/" in f"{path}/":
+        return f"{base}/chat/completions"
+    return f"{base}/v1/chat/completions"
+
+
+def _text_field(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts: list[str] = []
+        for item in value:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text") or item.get("content")
+                if text:
+                    parts.append(str(text))
+        return "".join(parts)
+    return str(value)
+
+
+def _message_from_chat(message: dict[str, Any]) -> dict[str, Any]:
+    content = _text_field(message.get("content"))
+    reasoning = _text_field(
+        message.get("reasoning") or message.get("reasoning_content")
+    )
+    calls = _wire_tool_calls(message.get("tool_calls"))
+    if calls:
+        row: dict[str, Any] = {"role": "assistant", "tool_calls": calls}
+        if content:
+            row["content"] = content
+    elif content:
+        row = _message_from_sample(content)
+    else:
+        row = {"role": "assistant", "content": content or None}
+    if reasoning and "reasoning_content" not in row:
+        row["reasoning_content"] = reasoning
+    return row
 
 
 def _wire_tool_calls(calls: object) -> list[dict[str, Any]]:
@@ -141,7 +385,9 @@ def _wire_tool_calls(calls: object) -> list[dict[str, Any]]:
     return wired
 
 
-def _wire_message(message: dict[str, Any]) -> dict[str, Any]:
+def _wire_message(
+    message: dict[str, Any], *, replay_reasoning: bool = True
+) -> dict[str, Any]:
     role = str(message.get("role") or "user")
     row: dict[str, Any] = {"role": role}
     content = message.get("content")
@@ -156,6 +402,12 @@ def _wire_message(message: dict[str, Any]) -> dict[str, Any]:
         row["tool_call_id"] = str(message.get("tool_call_id") or "")
         if message.get("name"):
             row["name"] = message["name"]
+    # Groq rejects reasoning_content / reasoning on *input* assistant
+    # messages (HTTP 400). Keep them in traces; do not replay them.
+    if replay_reasoning:
+        reasoning = message.get("reasoning_content") or message.get("reasoning")
+        if reasoning:
+            row["reasoning_content"] = _text_field(reasoning)
     return row
 
 
@@ -186,21 +438,14 @@ def _message_from_sample(text: str) -> dict[str, Any]:
     return {"role": "assistant", "content": thinking, "tool_calls": [call]}
 
 
-def _normalize_base(url: str) -> str:
-    base = str(url or "").rstrip("/")
-    if not base:
-        raise RuntimeError("nanohorizon sampler config requires base_url")
-    if base.endswith("/v1"):
-        base = base[: -len("/v1")]
-    return base.rstrip("/")
-
-
 class HttpSampler:
-    """Duck-typed complete / summarize over synth-mlx-rl ``/v1/sample``."""
+    """OpenAI-compatible chat completions. MLX serve and OpenRouter share this."""
 
     def __init__(self, config: dict[str, Any]) -> None:
-        self.base_url = _normalize_base(str(config.get("base_url") or ""))
+        self.api = resolve_sampler_api(config)
         self.model = str(config.get("model") or "Qwen/Qwen3.5-0.8B")
+        if self.model.startswith("openrouter/"):
+            self.model = self.model[len("openrouter/") :]
         self.enable_thinking = bool(config.get("enable_thinking", True))
         self.thinking_budget = int(config.get("thinking_budget") or 256)
         self.answer_max_tokens = int(config.get("answer_max_tokens") or 128)
@@ -219,8 +464,112 @@ class HttpSampler:
         top_k = config.get("top_k")
         self.top_p = float(0.95 if top_p is None else top_p)
         self.top_k = int(20 if top_k is None else top_k)
-        self.timeout = float(config.get("timeout_seconds") or 120.0)
+        self.chat_url = chat_completions_url(str(config.get("base_url") or ""))
+        self.capability_proxy = "/cap/wcap_" in urlparse(self.chat_url).path
+        # Modal / SGLang OpenAI-compatible student: same wire as MLX, not a paid teacher.
+        self.local = is_local_compat(self.chat_url) or bool(
+            config.get("openai_compatible_local")
+        )
+        self.timeout = float(
+            config.get("timeout_seconds") or (120.0 if self.local else 180.0)
+        )
         self.snapshot = str(config.get("policy_snapshot_id") or "").strip() or None
+        self.api_key_env = str(config.get("api_key_env") or "").strip()
+        if not self.api_key_env and not self.local and not self.capability_proxy:
+            self.api_key_env = "OPENROUTER_API_KEY"
+        self.effort = str(
+            config.get("reasoning_effort") or config.get("effort") or "medium"
+        )
+        self.min_interval = float(config.get("min_request_interval") or 0.0)
+        if not self.local and self.min_interval <= 0:
+            self.min_interval = 2.0
+        self.retries = int(
+            config.get("sampler_retries")
+            if config.get("sampler_retries") is not None
+            else (16 if not self.local else 0)
+        )
+        self.retry_max_wait = float(config.get("retry_max_wait") or (90.0 if not self.local else 20.0))
+
+    def _auth_headers(self) -> dict[str, str]:
+        proxy_bearer = public_proxy_bearer(self.chat_url)
+        if proxy_bearer:
+            return {"Authorization": f"Bearer {proxy_bearer}"}
+        if not self.api_key_env:
+            return {}
+        key = os.environ.get(self.api_key_env, "").strip()
+        if not key:
+            if self.local:
+                return {}
+            raise RuntimeError(f"paid sampler requires {self.api_key_env}")
+        headers = {"Authorization": f"Bearer {key}"}
+        if "openrouter.ai" in self.chat_url:
+            headers["HTTP-Referer"] = "https://usesynth.ai"
+            headers["X-Title"] = "NanoHorizon"
+        return headers
+
+    def wire_payload(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        tools: list[dict[str, Any]] | None = None,
+        seed: int = 0,
+        max_tokens: int | None = None,
+        enable_thinking: bool | None = None,
+    ) -> dict[str, Any]:
+        thinking = self.enable_thinking if enable_thinking is None else bool(enable_thinking)
+        replay_reasoning = "groq.com" not in self.chat_url
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": [
+                _wire_message(row, replay_reasoning=replay_reasoning) for row in messages
+            ],
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+            "max_tokens": int(
+                self.thinking_budget + self.answer_max_tokens
+                if max_tokens is None
+                else max_tokens
+            ),
+        }
+        if tools:
+            payload["tools"] = tools
+            # NanoHorizon's policy contract requires exactly one
+            # craftax_interact call. Letting the provider choose `auto` can
+            # spend the entire completion budget on reasoning and return no
+            # action, leaving a nominally completed rollout at step zero.
+            payload["tool_choice"] = "required"
+        if self.local:
+            payload["enable_thinking"] = thinking
+            payload["top_k"] = self.top_k
+            payload["seed"] = int(seed)
+            payload["stop"] = ["</tool_call>"]
+            if self.snapshot:
+                payload["policy_snapshot_id"] = self.snapshot
+        elif "groq.com" in self.chat_url:
+            payload["reasoning_effort"] = self.effort or "low" if thinking else "none"
+        else:
+            # Remote gateways may enable model-default reasoning when this
+            # field is omitted. That can consume the complete output budget
+            # before a required tool call is emitted. Seal both states on the
+            # wire: configured effort when enabled, explicit `none` when off.
+            payload["reasoning"] = {
+                "effort": self.effort if thinking else "none"
+            }
+        return payload
+
+    def request_observation(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        body = payload if payload is not None else self.wire_payload([])
+        extras: dict[str, Any] = {
+            "enableThinking": bool(
+                body.get("enable_thinking")
+                if "enable_thinking" in body
+                else self.enable_thinking
+            ),
+            "thinkingBudget": self.thinking_budget,
+        }
+        if not self.local and self.effort:
+            extras["effort"] = self.effort
+        return gen_ai_request_observation(body, extras=extras)
 
     def complete(
         self,
@@ -229,60 +578,101 @@ class HttpSampler:
         tools: list[dict[str, Any]] | None = None,
         seed: int = 0,
     ) -> dict[str, Any]:
-        max_tokens = self.thinking_budget + self.answer_max_tokens
-        payload: dict[str, Any] = {
-            "messages": [_wire_message(row) for row in messages],
-            "num_samples": 1,
-            "max_tokens": max_tokens,
-            "temperature": self.temperature,
-            "top_p": self.top_p,
-            "top_k": self.top_k,
-            "enable_thinking": self.enable_thinking,
-            "seed": int(seed),
-            "record_rollout_logprobs": True,
-            "api_family": "chat_completions",
-            "stop": ["</tool_call>"],
-        }
-        if tools:
-            payload["tools"] = tools
-        if self.snapshot:
-            payload["policy_snapshot_id"] = self.snapshot
-        body = _json_request(f"{self.base_url}/v1/sample", payload, timeout=self.timeout)
-        samples = body.get("samples") or []
-        sample = samples[0] if samples and isinstance(samples[0], dict) else {}
-        proxy = str(
-            sample.get("proxy_request_id")
-            or (body.get("_headers") or {}).get("x-proxy-request-id")
-            or ""
+        payload = self.wire_payload(messages, tools=tools, seed=seed)
+        body = _json_request(
+            self.chat_url,
+            payload,
+            timeout=self.timeout,
+            headers=self._auth_headers(),
+            retries=self.retries,
+            min_interval=self.min_interval,
+            retry_max_wait=self.retry_max_wait,
         )
-        text = str(sample.get("text") or "")
-        return {
-            "text": text,
-            "message": _message_from_sample(text),
-            "proxy_request_id": proxy,
-            "prompt_tokens": len(sample.get("prompt_token_ids") or []),
-            "completion_tokens": len(sample.get("completion_token_ids") or []),
-            "prompt_token_ids": list(sample.get("prompt_token_ids") or []),
-            "completion_token_ids": list(sample.get("completion_token_ids") or []),
+        choice = (body.get("choices") or [{}])[0]
+        message = choice.get("message") if isinstance(choice, dict) else {}
+        if not isinstance(message, dict):
+            message = {}
+        wired = _message_from_chat(message)
+        if not wired.get("tool_calls") and wired.get("content"):
+            wired = _message_from_sample(_text_field(wired.get("content")))
+            if message.get("reasoning") or message.get("reasoning_content"):
+                wired["reasoning_content"] = _text_field(
+                    message.get("reasoning") or message.get("reasoning_content")
+                )
+        reasoning_details = message.get("reasoning_details")
+        if isinstance(reasoning_details, list):
+            wired["reasoning_details"] = copy.deepcopy(reasoning_details)
+        usage = body.get("usage") if isinstance(body.get("usage"), dict) else {}
+        usage = copy.deepcopy(usage)
+        completion_details = (
+            usage.get("completion_tokens_details")
+            if isinstance(usage.get("completion_tokens_details"), dict)
+            else {}
+        )
+        headers = body.get("_headers") if isinstance(body.get("_headers"), dict) else {}
+        completion = {
+            "text": _text_field(wired.get("content")),
+            "message": wired,
+            "finish_reason": str(choice.get("finish_reason") or ""),
+            "proxy_request_id": str(
+                headers.get("x-proxy-request-id")
+                or headers.get("x-request-id")
+                or headers.get("x-openrouter-id")
+                or ""
+            ),
+            "prompt_tokens": int(usage.get("prompt_tokens") or 0),
+            "completion_tokens": int(usage.get("completion_tokens") or 0),
+            "reasoning_tokens": int(
+                completion_details.get("reasoning_tokens")
+                or usage.get("reasoning_tokens")
+                or 0
+            ),
+            "usage": usage,
+            **self.request_observation(payload),
         }
+        tool_calls = wired.get("tool_calls")
+        calls = tool_calls if isinstance(tool_calls, list) else []
+        exactly_one_action = (
+            len(calls) == 1
+            and isinstance(calls[0], dict)
+            and isinstance(calls[0].get("function"), dict)
+            and calls[0]["function"].get("name") == TOOL_NAME
+        )
+        if not exactly_one_action:
+            code = "expected_exactly_one_craftax_interact_tool_call"
+            if not calls and completion["finish_reason"] == "length":
+                code = "reasoning_budget_exhausted_before_tool"
+            raise NanoHorizonSamplerFailure(code, completion=completion)
+        return completion
 
     def summarize(self, messages: list[dict[str, Any]], max_tokens: int) -> str:
-        payload: dict[str, Any] = {
-            "messages": [_wire_message(row) for row in messages],
-            "num_samples": 1,
-            "max_tokens": int(max_tokens),
-            # Same hazard as the action call: a looping summary silently
-            # corrupts the compacted state every later turn is planned from.
-            "temperature": self.temperature,
-            "enable_thinking": False,
-            "record_rollout_logprobs": False,
-        }
-        if self.snapshot:
-            payload["policy_snapshot_id"] = self.snapshot
-        body = _json_request(f"{self.base_url}/v1/sample", payload, timeout=self.timeout)
-        samples = body.get("samples") or []
-        sample = samples[0] if samples and isinstance(samples[0], dict) else {}
-        return str(sample.get("text") or "").strip()
+        payload = self.wire_payload(
+            messages,
+            max_tokens=int(max_tokens),
+            enable_thinking=False,
+        )
+        if self.local:
+            payload["enable_thinking"] = False
+            payload.pop("stop", None)
+        else:
+            payload.pop("reasoning", None)
+            payload.pop("reasoning_effort", None)
+        body = _json_request(
+            self.chat_url,
+            payload,
+            timeout=self.timeout,
+            headers=self._auth_headers(),
+            retries=self.retries,
+            min_interval=self.min_interval,
+            retry_max_wait=self.retry_max_wait,
+        )
+        choice = (body.get("choices") or [{}])[0]
+        message = choice.get("message") if isinstance(choice, dict) else {}
+        if not isinstance(message, dict):
+            return ""
+        return _text_field(
+            message.get("content") or message.get("reasoning") or ""
+        ).strip()
 
 
 class NanoHorizonPlanner:
@@ -290,17 +680,29 @@ class NanoHorizonPlanner:
 
     def __init__(self, *, config_id: str, config: dict[str, Any], code: bytes) -> None:
         self.config_id = config_id
-        self.config = dict(config)
+        policy_cls = load_policy_class(code)
+        defaults = getattr(sys.modules[policy_cls.__module__], "SAMPLER", {}) or {}
+        if not isinstance(defaults, dict):
+            defaults = {}
+        self.config = {**defaults, **dict(config)}
+        # Mirrors the policy-side knob: "full" snapshots every prompt (what the
+        # keep-thinking SFT packers need), "delta" records only what each turn
+        # appended. See _trace_messages below.
+        self.journal_mode = str(self.config.get("journal_mode") or "full")
+        self._journalled = 0
         self.sampler = HttpSampler(self.config)
-        self.policy = load_policy_class(code)(**self.config)
+        self.policy = policy_cls(**self.config)
         self._calls = 0
         self._last_events: list[dict[str, Any]] = []
         self._last_trace: dict[str, Any] = {}
+        self._call_gen_ai: list[dict[str, Any]] = []
         self._usage = {
             "prompt_tokens": 0,
             "completion_tokens": 0,
             "total_tokens": 0,
             "calls": 0,
+            "cost_usd": None,
+            "cost_source": None,
         }
 
     def metadata(self) -> dict[str, Any]:
@@ -309,8 +711,10 @@ class NanoHorizonPlanner:
             "kind": "nanohorizon_react",
             "config": self.config_id,
             "model": self.sampler.model,
+            "api": self.sampler.api,
             "enable_thinking": self.sampler.enable_thinking,
             "graded": True,
+            **self.sampler.request_observation(),
         }
 
     def usage(self) -> dict[str, Any]:
@@ -318,6 +722,56 @@ class NanoHorizonPlanner:
 
     def trace_data(self) -> dict[str, Any]:
         return dict(self._last_trace)
+
+
+    def _trace_messages(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
+        """What a sampler span records about the prompt it sent.
+
+        This is the container's own copy, independent of the policy journal, and
+        it has the same quadratic shape: one deep copy of the entire growing
+        conversation per call. Fixing only the policy side moved total gold RSS
+        by ~15% because this recorder was still running -- there were two
+        independent quadratic snapshots, not one.
+
+        ``full`` keeps the whole prompt, which trace consumers such as
+        ``submissions/fbc/scan_traces.py`` require. ``delta`` records just the
+        messages this turn added plus the prefix length, so the same content is
+        reconstructible by prefix-sum at O(n) instead of O(n^2).
+        """
+
+        # Read defensively: this runs on the sampler hot path and planners are
+        # also built by stubs and tests that never run __init__. An instance
+        # without the attribute must fall back to the safe, lossless default
+        # rather than raise mid-rollout.
+        if getattr(self, "journal_mode", "full") != "delta":
+            return {"messages": copy.deepcopy(messages)}
+        start = min(getattr(self, "_journalled", 0), len(messages))
+        self._journalled = len(messages)
+        return {
+            "messages_mode": "delta",
+            "messages_delta": copy.deepcopy(messages[start:]),
+            "history_len": len(messages),
+        }
+
+    def _reserve_provider_call(self) -> int:
+        """Consume one slot without allowing an eleventh provider request."""
+
+        maximum = max(0, int(self.config.get("max_calls", 10)))
+        if self._calls >= maximum:
+            raise NanoHorizonSamplerFailure(
+                "provider_call_limit_reached",
+                completion={
+                    "text": "",
+                    "message": {"role": "assistant", "content": ""},
+                    "finish_reason": "length",
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "usage": {},
+                },
+            )
+        self._calls += 1
+        self._usage["calls"] = self._calls
+        return self._calls
 
     def plan(self, observation: dict[str, Any], on_delta: Any = None) -> list[str]:
         del observation, on_delta
@@ -333,6 +787,7 @@ class NanoHorizonPlanner:
         omit_reward: bool = False,
     ) -> dict[str, Any]:
         log.append("env.episode.opened", {"seed": seed, "max_steps": max_steps})
+        self._call_gen_ai = []
         result: StepResult = world.reset(seed, max_steps=max_steps)
         events = world.drain_native_events()
         for event in events:
@@ -375,43 +830,166 @@ class NanoHorizonPlanner:
             return list(self._last_events)
 
         def sample(messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
-            completion = self.sampler.complete(messages, **kwargs)
-            self._calls += 1
-            self._usage["prompt_tokens"] = int(self._usage["prompt_tokens"] or 0) + int(
-                completion.get("prompt_tokens") or 0
-            )
-            self._usage["completion_tokens"] = int(self._usage["completion_tokens"] or 0) + int(
-                completion.get("completion_tokens") or 0
-            )
+            call_number = self._reserve_provider_call()
+            log.append("span.policy.opened", {"harness": HARNESS, "call": call_number})
+            failure: NanoHorizonSamplerFailure | None = None
+            try:
+                completion = self.sampler.complete(messages, **kwargs)
+            except NanoHorizonSamplerFailure as exc:
+                completion = exc.completion
+                failure = exc
+            prompt_tokens = int(completion.get("prompt_tokens") or 0)
+            completion_tokens = int(completion.get("completion_tokens") or 0)
+            self._usage["prompt_tokens"] = int(self._usage["prompt_tokens"] or 0) + prompt_tokens
+            self._usage["completion_tokens"] = int(self._usage["completion_tokens"] or 0) + completion_tokens
             self._usage["total_tokens"] = int(self._usage["prompt_tokens"] or 0) + int(
                 self._usage["completion_tokens"] or 0
             )
             self._usage["calls"] = self._calls
+            usage = completion.get("usage") if isinstance(completion.get("usage"), dict) else {}
+            cost, source = billed_or_estimated_cost_usd(
+                usage,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                model=self.sampler.model,
+            )
+            if cost is not None:
+                current = self._usage.get("cost_usd")
+                self._usage["cost_usd"] = float(cost) + (
+                    float(current) if isinstance(current, (int, float)) else 0.0
+                )
+                self._usage["cost_source"] = source
             self._last_trace = {
+                "phase": "sample",
+                "turn_kind": "policy",
+                "trainable": True,
+                **self._trace_messages(messages),
+                "tools": copy.deepcopy(list(kwargs.get("tools") or [])),
+                "assistant": copy.deepcopy(completion.get("message") or {}),
                 "proxy_request_id": completion.get("proxy_request_id"),
+                "finish_reason": completion.get("finish_reason"),
                 "prompt_tokens": completion.get("prompt_tokens"),
+                "completion_tokens": completion.get("completion_tokens"),
+                "reasoning_tokens": completion.get("reasoning_tokens"),
+                "usage": copy.deepcopy(completion.get("usage") or {}),
                 "text": completion.get("text"),
+                **{
+                    key: value
+                    for key, value in completion.items()
+                    if key == "modelParameters" or str(key).startswith("gen_ai.")
+                },
             }
-            log.append("span.policy.opened", {"harness": HARNESS, "call": self._calls})
+            if failure is not None:
+                self._last_trace.update(
+                    {
+                        "error": failure.code,
+                        "error_retryable": failure.retryable,
+                    }
+                )
+            self._call_gen_ai.append(copy_observation(self._last_trace))
             log.append("span.policy.data", dict(self._last_trace))
+            if failure is not None:
+                raise failure
             return completion
 
-        outcome = self.policy.run_episode(
-            opening={**result.observation, **({"done": True} if result.done else {})},
-            step=step_policy,
-            drain=drain,
-            sample=sample,
-            summarize=self.sampler.summarize,
-            is_done=lambda readout: bool(
-                (readout.get("private") or {}).get("terminated")
-                or (readout.get("private") or {}).get("truncated")
-                or readout.get("done")
-            ),
-            max_steps=max_steps,
-        )
+        def summarize(messages: list[dict[str, Any]], max_tokens: int) -> str:
+            call_number = self._reserve_provider_call()
+            log.append(
+                "agent.context_compacting",
+                {"call": call_number, "max_tokens": max_tokens},
+            )
+            compact_payload = self.sampler.wire_payload(
+                messages,
+                max_tokens=int(max_tokens),
+                enable_thinking=False,
+            )
+            if self.sampler.local:
+                compact_payload.pop("stop", None)
+            else:
+                compact_payload.pop("reasoning", None)
+                compact_payload.pop("reasoning_effort", None)
+            text = self.sampler.summarize(messages, max_tokens)
+            log.append(
+                "span.policy.data",
+                {
+                    "phase": "compaction",
+                    "turn_kind": "summary",
+                    "trainable": False,
+                    "messages": copy.deepcopy(messages),
+                    "assistant": {"role": "assistant", "content": text},
+                    **self.sampler.request_observation(compact_payload),
+                },
+            )
+            return text
+
+        try:
+            outcome = self.policy.run_episode(
+                opening={**result.observation, **({"done": True} if result.done else {})},
+                step=step_policy,
+                drain=drain,
+                sample=sample,
+                summarize=summarize,
+                is_done=lambda readout: bool(
+                    (readout.get("private") or {}).get("terminated")
+                    or (readout.get("private") or {}).get("truncated")
+                    or readout.get("done")
+                ),
+                max_steps=max_steps,
+            )
+        except (NanoHorizonSamplerFailure, RuntimeError) as exc:
+            code = getattr(exc, "code", None)
+            if not isinstance(code, str) or not code:
+                code = str(exc).split(":", 1)[0]
+            has_env = any(isinstance(value, (int, float)) for value in signals)
+            keep_env = False
+            if isinstance(exc, NanoHorizonSamplerFailure):
+                keep_env = exc.code == "provider_call_limit_reached" or (
+                    exc.code
+                    in {
+                        "expected_exactly_one_craftax_interact_tool_call",
+                        "reasoning_budget_exhausted_before_tool",
+                    }
+                    and has_env
+                )
+            elif str(exc).startswith("sampler_http_") and has_env:
+                keep_env = True
+            if not keep_env:
+                raise
+            # Official kit eval keeps env reward on llm_error after the model
+            # has already stepped. GEPA gold must do the same or every later
+            # malformed tool call / Groq tool_use_failed zeros a live trajectory.
+            reward = sum(value for value in signals if isinstance(value, (int, float)))
+            log.append(
+                "episode_truncated",
+                {
+                    "reason": (
+                        "provider_call_limit"
+                        if code == "provider_call_limit_reached"
+                        else code
+                    ),
+                    "calls": self._calls,
+                    "steps": result.env_steps,
+                },
+            )
+            outcome = {
+                "journal": [],
+                "proxy_request_ids": [],
+                "achievements": [],
+                "reward": reward,
+            }
         for row in outcome.get("journal") or []:
             kind = str(row.get("kind") or "policy.event")
             payload = row.get("payload") if isinstance(row.get("payload"), dict) else row
+            if kind == "span.policy.data" and isinstance(payload, dict):
+                payload = dict(payload)
+                stamped = copy_observation(payload)
+                if not stamped:
+                    idx = payload.get("call_index")
+                    if isinstance(idx, int) and 0 <= idx < len(self._call_gen_ai):
+                        stamped = self._call_gen_ai[idx]
+                    elif self._call_gen_ai:
+                        stamped = self._call_gen_ai[-1]
+                    payload.update(stamped)
             log.append(kind, payload)
         log.append("span.policy.plan", {"actions": executed, "length": len(executed)})
         log.append("span.policy.closed", {"length": len(executed)})

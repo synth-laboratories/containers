@@ -129,6 +129,7 @@ class RolloutPin:
     engine_generation: int
     policy_revision_id: str | None
     seed: int | None
+    environment_version: str | None = None
     max_steps: int | None = None
     max_calls: int | None = None
     child_rollout_id: str | None = None
@@ -281,6 +282,13 @@ class CompatPlatform:
         self.checkpoints[checkpoint_id] = durable
         return durable
 
+    def drop_checkpoint(self, checkpoint_id: str) -> None:
+        """Forget a checkpoint. Idempotent if the id or file is already gone."""
+
+        self.checkpoints.pop(checkpoint_id, None)
+        path = self._checkpoint_path(checkpoint_id)
+        path.unlink(missing_ok=True)
+
     @staticmethod
     def _receipt_digest(value: dict[str, Any]) -> str:
         blob = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
@@ -319,6 +327,7 @@ class CompatPlatform:
                 "engine_generation": pin.engine_generation,
                 "policy_revision_id": pin.policy_revision_id,
                 "seed": pin.seed,
+                "environment_version": pin.environment_version,
                 "max_steps": pin.max_steps,
                 "max_calls": pin.max_calls,
                 "child_rollout_id": pin.child_rollout_id,
@@ -403,6 +412,7 @@ class CompatPlatform:
                 engine_generation=int(raw_pin["engine_generation"]),
                 policy_revision_id=raw_pin.get("policy_revision_id"),
                 seed=raw_pin.get("seed"),
+                environment_version=raw_pin.get("environment_version"),
                 max_steps=raw_pin.get("max_steps"),
                 max_calls=raw_pin.get("max_calls"),
                 child_rollout_id=raw_pin.get("child_rollout_id"),
@@ -756,6 +766,7 @@ class CompatPlatform:
             raise RuntimeError(f"event_log_sealed:{rollout_id}")
         log.append_control(CONTROL_SUBSCRIBED, log.subscribed_payload())
         self.logs[rollout_id] = log
+        self._release_stale_logs()
         self.stream_bindings[rollout_id] = (transport, retention or self.spec.retention)
         if rollout_id not in self.pins:
             task_instance_id = request.task_instance_id if request is not None else None
@@ -767,6 +778,7 @@ class CompatPlatform:
                     (request.world_ref if request is not None else None) or self.spec.world_ref
                 ),
                 environment_ref=self.spec.environment_ref,
+                environment_version=self.spec.environment_version,
                 policy_ref={
                     "harness": policy_ref.harness if policy_ref is not None else None,
                     "config": policy_ref.config if policy_ref is not None else None,
@@ -938,7 +950,19 @@ class CompatPlatform:
                 "status_code": 422,
                 "detail": "POST /rollouts requires policy_ref.harness; the platform does not pick a recipe",
             }
-        if harness == ISOLATED_POLICY_HARNESS and config_id:
+        # An advertised empty seed names the already installed code policy; it
+        # does not request configuration binding. Accept that exact immutable
+        # declaration, while continuing to refuse arbitrary isolated configs.
+        declared_isolated_seed = any(
+            seed.config_id == config_id
+            and seed.harness == ISOLATED_POLICY_HARNESS
+            and not seed.config
+            and (registered := self.policy_configs.get(seed.config_id)) is not None
+            and registered.harness == seed.harness
+            and not registered.config
+            for seed in self.spec.policy_seeds
+        )
+        if harness == ISOLATED_POLICY_HARNESS and config_id and not declared_isolated_seed:
             return {
                 "error": "bind_refused",
                 "status_code": 403,
@@ -1062,6 +1086,7 @@ class CompatPlatform:
             rollout_id=rollout_id,
             world_ref=str(request.world_ref or self.spec.world_ref),
             environment_ref=self.spec.environment_ref,
+            environment_version=self.spec.environment_version,
             policy_ref={"harness": harness, "config": config_id, "code": policy_ref.code},
             evaluation_plan_ref=str(request.evaluation_plan_ref or self.spec.evaluation_plan_ref),
             task_instance_id=task_instance_id,
@@ -1216,6 +1241,14 @@ class CompatPlatform:
             # record as well as on the dedicated reward route.
             "reward": reward.get("reward") if reward is not None else None,
             "reward_status": reward.get("status") if reward is not None else None,
+            "research_context": {"schemaVersion": "synth.eval-research-context.v1",
+                                 "environmentVersion": pin.environment_version},
+            # Same pin fields the completed-rollout.v1 manifest already
+            # persists. Omitting them here made annotation receipts look
+            # unscored: they copied `reward_signals` from GET /rollouts, which
+            # never carried the field.
+            "reward_signals": list(pin.reward_signals),
+            "native_script_reward": pin.native_script_reward,
             "child_rollout_id": pin.child_rollout_id,
             "child_resource_ref": pin.child_resource_ref,
             "engine_generation": pin.engine_generation,
@@ -1262,6 +1295,8 @@ class CompatPlatform:
                     "bundle_byte_size": bundle.byte_size,
                 }
             )
+        if rollout_id in self.trace_bundle_errors:
+            reference["bundle_error"] = self.trace_bundle_errors[rollout_id]
         return reference
 
     def trace_bundle_archive(self, rollout_id: str) -> Path | None:
@@ -1311,6 +1346,11 @@ class CompatPlatform:
                     "policy_ref": pin.policy_ref,
                     "evaluation_plan_ref": pin.evaluation_plan_ref,
                     "task_instance_id": pin.task_instance_id,
+                    "environment_version": pin.environment_version,
+                    "terminal_reward": {
+                        "value": self._reward_nodes(pin)[0],
+                        "status": self._reward_nodes(pin)[2],
+                    } if self.spec.reward_definition is not None else None,
                 },
                 status=pin.status,
             )
@@ -1892,6 +1932,35 @@ class CompatPlatform:
             product *= item
         return {"status": "scored", "reward": product}
 
+    # How many closed rollout logs stay resident. Their envelopes are already
+    # fsynced to the journal and `RolloutEventLog.recover` replays them failing
+    # closed, so anything evicted is one transparent disk read away.
+    HOT_CLOSED_LOGS = 8
+
+    def _release_stale_logs(self) -> None:
+        """Bound resident memory to the most recent closed rollouts.
+
+        `self.logs` was never evicted -- no pop, clear, del or prune anywhere --
+        so gold's memory tracked *total rollouts processed* rather than
+        concurrent ones. RSS sat above 2 GiB after the producing runs had been
+        killed, and a wide run exhausted the 25 GB Docker VM and was SIGKILLed
+        (exit 137). Capping resident closed logs makes the footprint a function
+        of concurrency, which is what the width formula assumes.
+        """
+
+        closed = [rid for rid, log in self.logs.items() if log.closed and not log._released]
+        cold = closed[: max(0, len(closed) - self.HOT_CLOSED_LOGS)]
+        for rollout_id in cold:
+            # Compact rather than release: errors and terminal records stay
+            # answerable without a disk read, which is what anyone retaining an
+            # old rollout log actually wants. The bulk -- per-step frames,
+            # actions, entity transitions -- becomes a counted summary.
+            self.logs[rollout_id].compact()
+        # Anything older than twice the hot window is unlikely to be read at
+        # all, so drop even the kept envelopes. Disk remains authoritative.
+        for rollout_id in closed[: max(0, len(closed) - 2 * self.HOT_CLOSED_LOGS)]:
+            self.logs[rollout_id].release()
+
     def events_payload(
         self,
         rollout_id: str,
@@ -1906,7 +1975,12 @@ class CompatPlatform:
             payload = poll_payload(log, after=after, limit=limit, kinds=kinds, subject_id=rollout_id)
         except ValueError:
             return {"error": "invalid_page_limit", "status_code": 422}
-        for row in payload["events"]:
-            if "Authorization" in json.dumps(row) or "DIGBENCH_API_TOKEN" in json.dumps(row):
-                raise RuntimeError("token_leaked_into_log")
+        # No credential scan here. `_persist` already runs `assert_no_secrets`
+        # on every appended envelope, which matches secret *patterns* and
+        # credential-bearing *field names* -- strictly stronger than the
+        # substring check that used to live on this path. That check cost two
+        # full `json.dumps` per event per call, and `events_payload` is invoked
+        # with limit=10_000 at the end of every rollout, so a 50-call episode
+        # paid tens of thousands of redundant serializations of multi-KB
+        # payloads for a weaker guarantee already provided at write time.
         return payload
