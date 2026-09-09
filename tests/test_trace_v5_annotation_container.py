@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
+import threading
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,7 +13,8 @@ from fastapi.testclient import TestClient
 from synth_containers.platform import create_compat_app
 from synth_containers.tracing.annotation import AnnotationJobState, ThroughputLimits
 from synth_containers.tracing.annotation.builtin import ENVIRONMENT_STEP_STATUS_ID, TOOL_CALL_INTEGRITY_ID
-from synth_containers.tracing.annotation.container import install_from_env, mount_annotation
+from synth_containers.tracing.annotation.container import ContainerTraceSource, install_from_env, mount_annotation
+from synth_containers.tracing.store.bundle import LocalTraceBundle
 
 BODY = {
     "rollout_id": "annot_echo_1",
@@ -18,6 +22,35 @@ BODY = {
     "policy_ref": {"harness": "gym_loop", "config": "echo"},
     "telemetry": {"enabled": True, "transport": "sse", "retention": "run"},
 }
+
+
+def test_concurrent_cold_trace_sources_share_extraction(tmp_path: Path, monkeypatch) -> None:
+    client = TestClient(create_compat_app("openenv_echo", storage_root=tmp_path))
+    _rollout(client, "concurrent_annotation")
+    original = LocalTraceBundle.extract_archive
+    extraction_calls = []
+
+    def slow_extract(*args, **kwargs):
+        extraction_calls.append(args[0])
+        time.sleep(0.1)  # Hold the first extraction while other readers arrive.
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(LocalTraceBundle, "extract_archive", slow_extract)
+    barrier = threading.Barrier(8)
+
+    def read_source(_):
+        source = ContainerTraceSource(tmp_path)
+        barrier.wait(timeout=10)
+        refs = source.refs()
+        assert len(refs) == 1
+        document = source.loader()(refs[0]["id"], refs[0]["digest"])
+        assert document is not None and document.content_digest == refs[0]["digest"]
+        return refs
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(read_source, range(8)))
+    assert all(result == results[0] for result in results)
+    assert len(extraction_calls) == 1
 
 
 def _rollout(client: TestClient, rollout_id: str) -> dict:
