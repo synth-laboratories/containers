@@ -1089,8 +1089,15 @@ class SynthTunnelRelayAgent:
             },
             expected_generation=request.connection_generation,
         )
+        # read() blocks until it has the full request size or the stream ends,
+        # so an SSE origin writing a few bytes every few hundred ms produced one
+        # chunk at the very end: the agent, not the relay, was what stopped
+        # streaming from streaming. read1() returns whatever has arrived.
+        # Measured on a 6-event SSE origin: read() gave 1 chunk at 1.51s,
+        # read1() gave 6 chunks at 0.00, 0.30, 0.60, 0.91, 1.22, 1.52.
+        read_available = getattr(response, "read1", None) or response.read
         while True:
-            chunk = response.read(65536)
+            chunk = read_available(65536)
             if not chunk:
                 break
             self._send_frame(
