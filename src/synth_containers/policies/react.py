@@ -20,6 +20,8 @@ import urllib.request
 from collections.abc import Callable
 from typing import Any
 
+from .workshop_proxy import public_proxy_bearer
+
 
 DeltaCallback = Callable[[dict[str, Any]], None]
 
@@ -363,7 +365,9 @@ class OpenRouterReAct:
         observation: dict[str, Any],
         on_delta: DeltaCallback | None = None,
     ) -> list[str]:
-        api_key = os.environ.get(self.api_key_env, "").strip()
+        api_key = os.environ.get(self.api_key_env, "").strip() or public_proxy_bearer(
+            self.base_url
+        )
         if not api_key:
             raise RuntimeError(f"paid policy requires {self.api_key_env}")
         valid = [str(action) for action in observation.get("valid_actions") or []]

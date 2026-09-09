@@ -10,6 +10,43 @@ import json
 
 from synth_containers.policies.react import OpenRouterReAct
 
+
+def test_openrouter_react_uses_public_bearer_for_workshop_capability_proxy(
+    monkeypatch,
+) -> None:
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self) -> bytes:
+            return json.dumps(
+                {
+                    "choices": [{"message": {"content": '{"actions":["do"]}'}}],
+                    "usage": {},
+                }
+            ).encode()
+
+    observed: dict[str, str] = {}
+
+    def fake_urlopen(request, **_kwargs):
+        observed["authorization"] = request.get_header("Authorization")
+        return Response()
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    policy = OpenRouterReAct(
+        config_id="glm",
+        config={
+            "api_key_env": "OPENAI_API_KEY",
+            "base_url": "http://host.docker.internal:9988/cap/wcap_test/v1/providers/openrouter",
+        },
+    )
+    assert policy.plan({"valid_actions": ["do"], "observation_text": "obs"}) == ["do"]
+    assert observed["authorization"] == "Bearer workshop-proxy"
+
 def test_openrouter_react_normalizes_craftax_direction_aliases() -> None:
     actions = OpenRouterReAct._parse_actions(
         '{"actions":["North","east","do"]}',
