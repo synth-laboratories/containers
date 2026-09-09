@@ -5,6 +5,7 @@
 * Prepare unpublished `0.4.3`, combining production API/metadata/journal contracts with the v0.10 runtime, CISPO, annotations, tunnel streaming and trace artifact fixes.
 * Preserve immutable published `0.4.2`; consumers must re-pin only after the replacement package passes release gates.
 * Scan in-memory event logs for credentials before publication; retain inspection-server cleanup on exceptional exit.
+* Raise runtime Starlette/IDNA and development cryptography/urllib3 security floors; update FastAPI compatibly and replace vulnerable locked versions identified by all 12 current Dependabot alerts.
 
 ## 2026-09-09
 

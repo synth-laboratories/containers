@@ -330,6 +330,28 @@ def test_isolated_codex_home_never_copies_host_config(tmp_path: Path, monkeypatc
     assert "[mcp_servers]" in minimal_codex_config(model=None, reasoning_effort=None)
 
 
+def test_process_group_cleanup_escalates_when_liveness_probe_is_denied(monkeypatch) -> None:
+    import os
+    import signal
+    from types import SimpleNamespace
+
+    from synth_containers.tracing.annotation.codex_app_server import _kill_process_group
+
+    calls = []
+
+    def killpg(pgid, sig):
+        calls.append((pgid, sig))
+        if sig == 0:
+            raise PermissionError("group became inaccessible")
+        if sig == signal.SIGKILL:
+            raise ProcessLookupError("group already reaped")
+
+    monkeypatch.setattr(os, "killpg", killpg)
+    process = SimpleNamespace(pid=12345, wait=lambda **kwargs: None)
+    _kill_process_group(process)
+    assert calls == [(12345, signal.SIGTERM), (12345, 0), (12345, signal.SIGKILL)]
+
+
 def test_stdio_transport_close_kills_the_whole_process_group(tmp_path) -> None:
     import os
     import sys

@@ -110,6 +110,11 @@ def _kill_process_group(process: subprocess.Popen[bytes], *, wrapper_exited: boo
                 os.killpg(pgid, 0)
             except ProcessLookupError:
                 return
+            except PermissionError:
+                # A group probe can race with macOS reaping/reparenting after
+                # TERM. Do not mistake an inaccessible group for a confirmed
+                # exit, and do not abort cleanup: still attempt SIGKILL.
+                break
             time.sleep(0.05)
 
 
