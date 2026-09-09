@@ -11,7 +11,14 @@ from typing import Any
 import pytest
 
 from synth_containers.policies import build_planner
-from synth_containers.policies.mini_swe import MiniSweAgent, _extract_command
+from synth_containers.policies.mini_swe import (
+    MiniSweAgent,
+    _command_rejection,
+    _detach_trailing_background_command,
+    _extract_harmony_command,
+    _extract_command,
+    _strip_harmony_controls,
+)
 
 
 class Fake:
@@ -204,6 +211,54 @@ def test_the_step_budget_bounds_the_loop(monkeypatch, workspace) -> None:
         server.shutdown()
     assert agent.usage()["calls"] == 3
     assert agent.trace_data()["finished"] is False
+
+
+def test_parse_recovery_does_not_consume_command_budget(monkeypatch, workspace) -> None:
+    state = Fake([
+        "```bash\nnotes: experiment\ndebug: true\n```",
+        "```bash\nprintf fixed > result.txt\n```",
+        "```bash\necho MINI_SWE_DONE\n```",
+    ])
+    server, base_url = _serve(state)
+    monkeypatch.setenv("MINI_SWE_TEST_KEY", "sk-test")
+    agent = _agent(base_url, workspace, max_steps=1)
+    try:
+        agent.plan({"observation_text": "t", "valid_actions": ["done"], "workspace": str(workspace)})
+    finally:
+        server.shutdown()
+    assert (workspace / "result.txt").read_text() == "fixed"
+    assert agent.usage()["commands"] == 1
+    assert agent.trace_data()["recovery_turns"] == 1
+
+
+@pytest.mark.parametrize(
+    "command,reason",
+    [
+        ("notes: experiment\ndebug: true", "looks_like_yaml"),
+        ("MIGPWLVALINEKPWAIALARFFMGLYKYWC", "looks_like_raw_data"),
+        ("The issue is that the variable is wrong.", "looks_like_prose"),
+        ("python3 solve.py", None),
+    ],
+)
+def test_obvious_non_commands_are_rejected(command: str, reason: str | None) -> None:
+    assert _command_rejection(command) == reason
+
+
+def test_trailing_background_command_detaches_capture_streams() -> None:
+    transformed = _detach_trailing_background_command("uvicorn api.app:app --port 8000 &")
+    assert transformed.endswith("</dev/null >/tmp/mini-swe-background.log 2>&1 &")
+    assert _detach_trailing_background_command("echo a && echo b") == "echo a && echo b"
+
+
+def test_gpt_oss_harmony_container_exec_is_extracted_before_echoed_examples() -> None:
+    content = (
+        '<|channel|>analysis<|message|>Inspect first.'
+        '<|start|>assistant<|channel|>commentary to=container.exec code'
+        '<|message|>{"cmd":["bash","-lc","ls -R /app"]}<|call|>'
+        '```bash\necho MINI_SWE_DONE\n```'
+    )
+    assert _extract_harmony_command(content) == "ls -R /app"
+    assert "<|" not in _strip_harmony_controls(content)
 
 
 @pytest.mark.parametrize(
