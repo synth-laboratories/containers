@@ -78,18 +78,10 @@ jobs:
           enable-cache: true
           python-version: "3.11"
 
-      # A package must not reach PyPI having never run its own suite. Eight
-      # failures predate this step (two after-bind-surface, four
-      # container-compat-conformance, two task-catalog); they are named here
-      # rather than hidden by a bare `|| true`, and the step fails on a ninth.
+      # Run every test, including compatibility and task-catalog contracts.
       - name: Run the test suite
         run: |
-          uv run --group dev pytest tests -q \
-            --deselect tests/test_after_bind_surface.py::test_health_names_runtime_family \
-            --deselect tests/test_after_bind_surface.py::test_info_classifies_families_and_advertises_policy_refs \
-            --deselect tests/test_container_compat_conformance.py \
-            --deselect tests/test_task_catalog.py::test_prepare_start_and_terminal_keep_one_instance_identity \
-            --deselect tests/test_task_catalog.py::test_terminal_catalog_instance_recovers_without_secrets
+          uv run --locked --group dev pytest tests -q
 
       - name: Build wheel and source distribution
         run: uv build

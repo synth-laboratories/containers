@@ -69,6 +69,8 @@ def test_info_classifies_families_and_advertises_policy_refs() -> None:
             "rollouts.poll": True,
             "reward.get": True,
             "trace_v5.capture": True,
+            "annotation.live": True,
+            "annotation.protocol.put": True,
         },
         "policy_refs": harbor["policy_refs"],
     }
@@ -98,6 +100,7 @@ def test_health_names_runtime_family(monkeypatch) -> None:
         "instance_id": "docker:abc123",
         "image_digest": "sha256:" + "a" * 64,
         "producer_source_revision": "git:deadbeef",
+        "environment_version": None,
     }
 
     info = TestClient(create_compat_app("harbor_public")).get("/info").json()

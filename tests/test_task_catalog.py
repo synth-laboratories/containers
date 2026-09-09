@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+import pytest
 
 from synth_containers.platform import create_compat_app
 
@@ -60,9 +61,11 @@ def test_materialized_seed_instances_survive_container_restart(tmp_path) -> None
     ]
 
 
-def test_prepare_start_and_terminal_keep_one_instance_identity() -> None:
+@pytest.mark.parametrize("omit_reward", [False, True])
+def test_prepare_start_and_terminal_keep_one_instance_identity(omit_reward: bool) -> None:
     client = TestClient(create_compat_app("openenv_echo"))
     body = _body("catalog_identity")
+    body["omit_reward"] = omit_reward
     prepared = client.post(
         "/rollouts/prepare",
         json={
@@ -92,10 +95,12 @@ def test_prepare_start_and_terminal_keep_one_instance_identity() -> None:
     assert [row["id"] for row in terminal] == [body["task_instance_id"]]
     assert terminal[0]["status"] == "completed"
     assert terminal[0]["terminal"] is True
-    assert terminal[0]["reward"] is None
+    assert terminal[0]["reward"] == (None if omit_reward else 1.0)
+    assert client.get("/reward", params={"rollout_id": body["rollout_id"]}).json()["reward"] == terminal[0]["reward"]
 
 
-def test_terminal_catalog_instance_recovers_without_secrets(tmp_path) -> None:
+@pytest.mark.parametrize("omit_reward", [False, True])
+def test_terminal_catalog_instance_recovers_without_secrets(tmp_path, omit_reward: bool) -> None:
     first_app = create_compat_app("openenv_echo", storage_root=tmp_path)
     first = TestClient(first_app)
     first_app.state.platform.policy_configs["echo"].config.update(
@@ -106,6 +111,7 @@ def test_terminal_catalog_instance_recovers_without_secrets(tmp_path) -> None:
         }
     )
     body = _body("catalog_recovery")
+    body["omit_reward"] = omit_reward
     body["policy_ref"] = {
         "harness": "gym_loop",
         "config": "echo",
@@ -118,6 +124,6 @@ def test_terminal_catalog_instance_recovers_without_secrets(tmp_path) -> None:
     catalog = reopened.get("/task_catalog").json()
     assert [row["id"] for row in catalog["instances"]] == [body["task_instance_id"]]
     assert [row["rollout_id"] for row in catalog["instances"]] == [body["rollout_id"]]
-    assert catalog["instances"][0]["reward"] is None
+    assert catalog["instances"][0]["reward"] == (None if omit_reward else 1.0)
     serialized = str(catalog)
     assert "MUST_NOT_APPEAR" not in serialized

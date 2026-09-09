@@ -512,7 +512,9 @@ class Runner:
                     self.suite.fail("C1-07", f"absent={absent} defects={defects}")
 
     def _c2(self, meta: dict[str, Any]) -> None:
-        started = self._start(task_instance_id="seed:2")
+        # Observe absence before terminal scoring. A synchronous start now
+        # persists authoritative scoring before returning to the caller.
+        started = self._start(submission_mode="async", task_instance_id="seed:2")
         rid = _json(started)["rollout_id"]
         absent = self.client.get("/reward", params={"rollout_id": rid})
         body = _json(absent)
@@ -520,6 +522,11 @@ class Runner:
             self.suite.ok("C2-01")
         else:
             self.suite.fail("C2-01", f"{absent.status_code} {body}")
+
+        completed = self.client.post(f"/rollouts/{rid}/complete")
+        if completed.status_code != 200:
+            self.suite.fail("C2-02", f"completion failed: {completed.status_code}")
+            return
 
         live = self._start(submission_mode="async", task_instance_id="seed:3")
         live_id = _json(live)["rollout_id"]

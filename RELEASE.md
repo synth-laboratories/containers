@@ -5,7 +5,7 @@ packages in this monorepo.
 
 ## Build
 
-Run from `packages/synth-containers/`:
+Run from the repository root:
 
 ```bash
 uv run --group dev pytest tests
@@ -15,10 +15,12 @@ uv build
 uv run --group dev twine check dist/*
 ```
 
-`ruff check`, `uv build` and `twine check` are clean. `pytest tests` has eight
-known failures — two `test_after_bind_surface` cases, the four
-`test_container_compat_conformance` targets, and two `test_task_catalog` cases —
-which predate this gate being declared. `ty check src` reports 173 diagnostics,
+The eight historical metadata/reward failures have been reconciled with the
+current contracts. Missing rewards are still asserted before completion;
+terminal and recovered catalogs now test both scored and omitted rewards.
+The publish workflow runs the entire suite without deselections. Full-suite
+verification remains mandatory, including timing-sensitive annotation tests.
+`ty check src` previously reported 173 diagnostics,
 mostly `invalid-argument-type` and `unresolved-attribute`; annotating that
 surface is separate work. Neither is a licence to add more.
 
@@ -59,5 +61,7 @@ After confirming the version and inspecting the generated artifacts:
 uv publish dist/*
 ```
 
-Publish automation is intentionally TBD until the repository-level packaging
-pipeline is chosen.
+The `publish-pypi.yml` workflow validates official version tags, tests and builds
+the package, then publishes through the protected `pypi-release` environment
+using PyPI trusted publishing. Never create a public version tag before all
+release gates pass. Candidate `0.4.2` is not yet published.
