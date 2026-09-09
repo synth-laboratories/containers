@@ -83,6 +83,14 @@ def image_main(
         app = create_compat_app(spec, storage_root=args.storage_root or None)
         if extend_app is not None:
             extend_app(app)
+        # Optional post-rollout annotation stage over sealed bundles (env-gated, fail-soft).
+        from .tracing.annotation.container import install_from_env
+
+        platform = getattr(getattr(app, "state", None), "platform", None)
+        install_from_env(
+            app,
+            storage_root=getattr(platform, "storage_root", None) or (args.storage_root or None),
+        )
         return app
 
     return run_stack(

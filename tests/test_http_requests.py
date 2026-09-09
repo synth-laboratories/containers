@@ -26,6 +26,8 @@ def test_parse_create_rollout_accepts_auto_and_defaults_slot() -> None:
         {
             "telemetry": {"enabled": True, "transport": "auto"},
             "policy_ref": {"harness": "react", "config": "luna_med"},
+            "max_steps": 40,
+            "max_calls": 8,
         }
     )
     assert req.telemetry.transport == "auto"
@@ -37,6 +39,20 @@ def test_parse_create_rollout_accepts_auto_and_defaults_slot() -> None:
     assert "retention" in payload["telemetry"]
     assert payload["policy_ref"]["harness"] == "react"
     assert payload["policy_ref"]["config"] == "luna_med"
+    assert payload["max_steps"] == 40
+    assert payload["max_calls"] == 8
+
+
+@pytest.mark.parametrize("field", ["max_steps", "max_calls"])
+@pytest.mark.parametrize("value", [0, -1, True, 1.5, "8"])
+def test_parse_create_rollout_rejects_invalid_execution_ceiling(field: str, value: object) -> None:
+    with pytest.raises(RequestParseError, match=field):
+        parse_create_rollout(
+            {
+                "policy_ref": {"harness": "react", "config": "luna_med"},
+                field: value,
+            }
+        )
 
 
 def test_parse_create_rollout_refuses_silent_policy_pin() -> None:

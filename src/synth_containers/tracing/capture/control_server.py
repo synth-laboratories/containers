@@ -203,6 +203,11 @@ class DetachedCaptureSupervisor:
         payload = body.get("payload")
         if not event_type or not isinstance(payload, Mapping):
             raise CaptureControlError(400, "invalid_event", "event_type and object payload are required")
+        declared_artifacts = body.get("artifact_ids") or ()
+        if not isinstance(declared_artifacts, (list, tuple)) or not all(
+            isinstance(item, str) for item in declared_artifacts
+        ):
+            raise CaptureControlError(400, "invalid_event", "artifact_ids must be a list of strings")
         with self._lock:
             supervisor, state = self._open(capture_id)
             encoded_size = len(canonical_bytes(body))
@@ -215,6 +220,7 @@ class DetachedCaptureSupervisor:
                 occurred_at=(str(body["occurred_at"]) if body.get("occurred_at") else None),
                 caused_by=tuple(str(item) for item in (body.get("caused_by") or ())),
                 structural=(dict(body["structural"]) if isinstance(body.get("structural"), Mapping) else None),
+                artifact_ids=tuple(declared_artifacts),
             )
             state["event_count"] = int(state.get("event_count") or 0) + 1
             state["reserved_bytes"] = int(state.get("reserved_bytes") or 0) + encoded_size + 4096

@@ -12,6 +12,7 @@ per-game constant, so one planner serves Craftax, Rogue, and DungeonGrid alike.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -19,6 +20,11 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 from typing import Any
+
+from .workshop_proxy import public_proxy_bearer
+
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+_OMITTED_FRAME = "[prior observation frame omitted]"
 
 
 DeltaCallback = Callable[[dict[str, Any]], None]
@@ -247,7 +253,16 @@ class OpenRouterReAct:
         self.reasoning_effort = str(config.get("effort") or "medium")
         self.base_url = str(config.get("base_url") or "https://openrouter.ai/api/v1").rstrip("/")
         self.api_key_env = str(config.get("api_key_env") or "OPENROUTER_API_KEY")
-        self.max_tokens = min(max(int(config.get("max_tokens") or 768), 64), 2048)
+        self.max_tokens = min(max(int(config.get("max_tokens") or 768), 64), 16384)
+        # Class defaults stay 5/20 so Craftax lanes that omit these keys do not
+        # move. DungeonGrid sets plan_min=1 so the tool cannot force a 5-action
+        # dump that the engine will reject as insufficient_ap.
+        raw_min = config.get("plan_min")
+        raw_max = config.get("plan_max")
+        plan_min = int(raw_min) if raw_min is not None else type(self).plan_min
+        plan_max = int(raw_max) if raw_max is not None else type(self).plan_max
+        self.plan_min = min(max(plan_min, 1), 20)
+        self.plan_max = min(max(plan_max, self.plan_min), 20)
         self.parse_retries = min(max(int(config.get("parse_retries") or 0), 0), 2)
         self.compact_every = min(max(int(config.get("compact_every") or 16), 1), 64)
         # A turn count only predicts context length when every turn is the same
@@ -272,6 +287,13 @@ class OpenRouterReAct:
         if observation_role not in {"user", "tool"}:
             raise RuntimeError(f"unsupported observation_role: {observation_role!r}")
         self.observation_role = observation_role
+        observation_mode = str(config.get("observation_mode") or "text").strip().lower()
+        if observation_mode not in {"text", "image", "both"}:
+            raise RuntimeError(f"unsupported observation_mode: {observation_mode!r}")
+        self.observation_mode = observation_mode
+        raw_keep = config.get("keep_recent_frames")
+        keep_recent = int(raw_keep) if raw_keep is not None else 2
+        self.keep_recent_frames = min(max(keep_recent, 1), 16)
         self._pending_tool_call_id: str | None = None
         self.calls = 0
         self._compact_count = 0
@@ -309,6 +331,8 @@ class OpenRouterReAct:
             "compact_every": self.compact_every,
             "compact_at_tokens": self.compact_at_tokens,
             "observation_role": self.observation_role,
+            "observation_mode": self.observation_mode,
+            "keep_recent_frames": self.keep_recent_frames,
             "token_trace": "derived",
             "graded": True,
         }
@@ -363,29 +387,16 @@ class OpenRouterReAct:
         observation: dict[str, Any],
         on_delta: DeltaCallback | None = None,
     ) -> list[str]:
-        api_key = os.environ.get(self.api_key_env, "").strip()
+        api_key = os.environ.get(self.api_key_env, "").strip() or public_proxy_bearer(
+            self.base_url
+        )
         if not api_key:
             raise RuntimeError(f"paid policy requires {self.api_key_env}")
         valid = [str(action) for action in observation.get("valid_actions") or []]
         if not valid:
             raise RuntimeError("observation omitted valid_actions")
         self._maybe_compact(on_delta)
-        prompt_text = self._observation_prompt(observation, valid)
-        if self.observation_role == "tool" and self._pending_tool_call_id:
-            # Answer the call the model actually made. Only reachable when the
-            # previous turn produced tool_calls; the JSON-content fallback has
-            # no call to answer and stays a user turn.
-            self._messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": self._pending_tool_call_id,
-                    "name": "choose_actions",
-                    "content": prompt_text,
-                }
-            )
-        else:
-            self._messages.append({"role": "user", "content": prompt_text})
-        self._pending_tool_call_id = None
+        self._append_observation(observation, valid)
         prior_attempts: list[dict[str, Any]] = []
         assistant = ""
         reasoning = ""
@@ -415,6 +426,7 @@ class OpenRouterReAct:
                 prior_attempts.append(
                     {
                         "assistant": assistant,
+                        "generation_id": body.get("id"),
                         "reasoning": reasoning,
                         "tool_arguments": tool_arguments,
                         "parse_error": str(exc) or exc.__class__.__name__,
@@ -458,6 +470,7 @@ class OpenRouterReAct:
             "call": self.calls,
             "model": self.model,
             "provider": "openrouter",
+            "generation_id": body.get("id"),
             "assistant": assistant,
             "reasoning": reasoning,
             "tool_arguments": tool_arguments,
@@ -482,6 +495,7 @@ class OpenRouterReAct:
         }
         if prior_attempts:
             self._last_trace["prior_attempts"] = prior_attempts
+        self._prune_old_frames()
         return actions
 
     def _observation_prompt(self, observation: dict[str, Any], valid: list[str]) -> str:
@@ -494,6 +508,78 @@ class OpenRouterReAct:
             f"{observation_text}\n\nvalid_actions={json.dumps(valid)}\n"
             'Return JSON only: {"actions":["do","right"]}'
         )
+
+    def _image_mode_prompt(self, valid: list[str]) -> str:
+        bound = min(self.plan_max, len(valid))
+        return (
+            f"{self.objective} "
+            f"Choose {self.plan_min}-{bound} sequential actions from the exact legal list. "
+            "The attached image is the active ego view.\n\n"
+            f"valid_actions={json.dumps(valid)}\n"
+            'Return JSON only: {"actions":["do","right"]}'
+        )
+
+    def _append_observation(self, observation: dict[str, Any], valid: list[str]) -> None:
+        png = _observation_png(observation)
+        if self.observation_mode == "image" and png is None:
+            raise RuntimeError("observation_png_missing")
+        prompt_text = (
+            self._image_mode_prompt(valid)
+            if self.observation_mode == "image"
+            else self._observation_prompt(observation, valid)
+        )
+        attach_image = self.observation_mode in {"image", "both"} and png is not None
+        if attach_image:
+            assert png is not None
+            user_content: Any = _multimodal_user_content(prompt_text, png)
+        else:
+            user_content = prompt_text
+        if self.observation_role == "tool" and self._pending_tool_call_id:
+            # Answer the call the model actually made. Only reachable when the
+            # previous turn produced tool_calls; the JSON-content fallback has
+            # no call to answer and stays a user turn. Tool content stays a
+            # string: providers often require string tool results.
+            self._messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": self._pending_tool_call_id,
+                    "name": "choose_actions",
+                    "content": prompt_text,
+                }
+            )
+            if attach_image:
+                assert png is not None
+                self._messages.append(
+                    {
+                        "role": "user",
+                        "content": _multimodal_user_content(
+                            "Active ego observation frame.", png
+                        ),
+                    }
+                )
+        else:
+            self._messages.append({"role": "user", "content": user_content})
+        self._pending_tool_call_id = None
+        self._prune_old_frames()
+
+    def _prune_old_frames(self) -> None:
+        """Drop image_url parts older than keep_recent_frames. Keep legal-action text."""
+        if self.observation_mode == "text":
+            return
+        image_turns: list[int] = []
+        for index, message in enumerate(self._messages):
+            if message.get("role") != "user":
+                continue
+            if _content_has_image_url(message.get("content")):
+                image_turns.append(index)
+        if len(image_turns) <= self.keep_recent_frames:
+            return
+        for index in image_turns[: -self.keep_recent_frames]:
+            message = self._messages[index]
+            self._messages[index] = {
+                **message,
+                "content": _omit_image_url_parts(message.get("content")),
+            }
 
     def _compaction_reason(self) -> str | None:
         """Why this turn should compact, or None."""
@@ -679,6 +765,7 @@ class OpenRouterReAct:
         reasoning = ""
         tool_arguments = ""
         usage: dict[str, Any] = {}
+        generation_id: str | None = None
         for block in raw.split("\n\n"):
             data_lines = [
                 line[5:].strip() if line.startswith("data:") else line[5:].lstrip()
@@ -696,6 +783,8 @@ class OpenRouterReAct:
                 continue
             if not isinstance(chunk, dict):
                 continue
+            if isinstance(chunk.get("id"), str) and chunk["id"]:
+                generation_id = chunk["id"]
             if isinstance(chunk.get("usage"), dict):
                 usage = chunk["usage"]
             choice = (chunk.get("choices") or [{}])[0]
@@ -719,6 +808,7 @@ class OpenRouterReAct:
                 tool_arguments += tool_piece
                 self._emit_delta(on_delta, "tool", tool_piece)
         return {
+            "id": generation_id,
             "choices": [
                 {
                     "message": {
@@ -818,8 +908,7 @@ class OpenRouterReAct:
             return "\n".join(parts)
         return ""
 
-    @staticmethod
-    def _parse_actions(raw: str, valid: list[str]) -> list[str]:
+    def _parse_actions(self, raw: str, valid: list[str]) -> list[str]:
         try:
             value = json.loads(raw)
         except json.JSONDecodeError:
@@ -836,10 +925,48 @@ class OpenRouterReAct:
             aliases.get(str(action).strip().lower(), str(action).strip().lower())
             for action in requested or []
         ]
-        actions = [action for action in normalized if action in valid][: OpenRouterReAct.plan_max]
+        actions = [action for action in normalized if action in valid][: self.plan_max]
         if not actions:
             raise RuntimeError("policy returned no valid actions")
         return actions
+
+
+def _observation_png(observation: dict[str, Any]) -> bytes | None:
+    payload = observation.get("_frame_png")
+    if isinstance(payload, (bytes, bytearray)) and payload.startswith(_PNG_MAGIC):
+        return bytes(payload)
+    return None
+
+
+def _multimodal_user_content(text: str, png: bytes) -> list[dict[str, Any]]:
+    encoded = base64.b64encode(png).decode("ascii")
+    return [
+        {"type": "text", "text": text},
+        {
+            "type": "image_url",
+            "image_url": {"url": f"data:image/png;base64,{encoded}"},
+        },
+    ]
+
+
+def _content_has_image_url(content: Any) -> bool:
+    if not isinstance(content, list):
+        return False
+    return any(
+        isinstance(part, dict) and part.get("type") == "image_url" for part in content
+    )
+
+
+def _omit_image_url_parts(content: Any) -> Any:
+    if not isinstance(content, list):
+        return content
+    replaced: list[Any] = []
+    for part in content:
+        if isinstance(part, dict) and part.get("type") == "image_url":
+            replaced.append({"type": "text", "text": _OMITTED_FRAME})
+        else:
+            replaced.append(part)
+    return replaced
 
 
 def _first_tool_call(message: dict[str, Any]) -> dict[str, Any] | None:

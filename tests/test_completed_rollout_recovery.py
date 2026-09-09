@@ -101,3 +101,25 @@ def test_reopen_fails_closed_when_reward_receipt_is_tampered(tmp_path) -> None:
     reward_path.write_text(json.dumps(wrapper), encoding="utf-8")
     with pytest.raises(ValueError, match="reward_receipt_digest"):
         create_compat_app("openenv_echo", storage_root=tmp_path)
+
+
+def test_failed_rollout_reason_survives_reopening(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    import synth_containers.platform.state as state
+
+    def fail(platform, pin, log):
+        pin.status = "failed"
+        pin.terminal = True
+        pin.terminal_reason = "policy_no_progress"
+        log.append("status", {"status": "failed", "reason": pin.terminal_reason})
+        log.mark_closed()
+
+    monkeypatch.setattr(state, "runtime_for", lambda spec: SimpleNamespace(simulate=fail))
+    first = TestClient(create_compat_app("openenv_echo", storage_root=tmp_path))
+    response = first.post("/rollouts", json=BODY)
+    assert response.status_code == 200, response.text
+    assert response.json()["reason"] == "policy_no_progress"
+    reopened = TestClient(create_compat_app("openenv_echo", storage_root=tmp_path))
+    result = reopened.get(f"/rollouts/{BODY['rollout_id']}").json()
+    assert result["status"] == "failed"
+    assert result["reason"] == "policy_no_progress"

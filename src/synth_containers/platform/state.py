@@ -9,7 +9,6 @@ import tempfile
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -17,6 +16,7 @@ from typing import Any
 from ..event_log import (
     CONTROL_SUBSCRIBED,
     RolloutEventLog,
+    poll_payload,
     stream_descriptor,
     validate_rollout_id,
 )
@@ -26,6 +26,7 @@ from ..metadata import (
     compose_metadata_payload,
     runtime_provenance_from_environment,
 )
+from ..live_annotation.service import LiveAnnotationService, annotation_channel
 from .affordances import bind_recipe
 from .http_requests import CreateRolloutRequest, ISOLATED_POLICY_HARNESS, NANOHORIZON_HARNESS
 from .policy_process import DEFAULT_HEURISTIC, IsolatedPolicyProcess
@@ -39,7 +40,10 @@ from .targets import (
     TargetRuntimeKind,
     TargetSpec,
     TaskInstanceStatus,
+    advertised_reward_authority,
+    advertised_reward_calculator,
 )
+from .reward import reward_api_catalog
 from .trace_bundle import (
     HarborTraceBundleRef,
     inspect_harbor_trace_bundle,
@@ -47,109 +51,16 @@ from .trace_bundle import (
 )
 
 
-def _digest(payload: Any) -> str:
-    blob = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
-
-
-def _checkpoint_digest(payload: Any) -> str:
-    """Return the full content address used for durable checkpoint evidence."""
-    blob = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
-    return "sha256:" + hashlib.sha256(blob.encode("utf-8")).hexdigest()
-
-
-def _seed_from_task_instance_id(task_instance_id: str | None) -> int:
-    """Parse seed from `seed:N` or a trailing `:N`. Absent → 0. No integer suffix → 0.
-
-    A suffix that contains digits but is not an integer raises; do not coerce to 0.
-    """
-    if task_instance_id is None or task_instance_id == "":
-        return 0
-    if ":" not in task_instance_id:
-        return 0
-    suffix = task_instance_id.rsplit(":", 1)[-1]
-    if suffix == "" or not any(ch.isdigit() for ch in suffix):
-        return 0
-    try:
-        return int(suffix)
-    except ValueError as exc:
-        raise ValueError(
-            f"task_instance_id seed suffix is not an integer: {task_instance_id!r}"
-        ) from exc
-
-
-@dataclass
-class PolicyConfig:
-    config_id: str
-    harness: str
-    config: dict[str, Any]
-    code: bytes | None = None
-    revision: int = 1
-
-
-@dataclass
-class PolicyRevision:
-    revision_id: str
-    digest: str
-    harness: str
-    config_id: str | None
-    code: bytes | None
-    isolation_receipt: dict[str, Any]
-    namespace: str
-    name: str
-    configuration_digest: str
-    model_digest: str
-    source_revision: str | None
-    installed_at: str
-
-
-@dataclass
-class RewardNode:
-    node_id: str
-    kind: str  # gate | aggregate | env_reward | script
-    authority: str
-    status: str
-    value: float | None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "node_id": self.node_id,
-            "kind": self.kind,
-            "authority": self.authority,
-            "status": self.status,
-            "value": self.value,
-        }
-
-
-@dataclass
-class RolloutPin:
-    rollout_id: str
-    world_ref: str
-    environment_ref: str
-    policy_ref: dict[str, Any]
-    evaluation_plan_ref: str
-    task_instance_id: str
-    stream_id: str
-    engine_generation: int
-    policy_revision_id: str | None
-    seed: int | None
-    child_rollout_id: str | None = None
-    child_resource_ref: dict[str, Any] | None = None
-    usage: dict[str, Any] | None = None
-    terminal: bool = False
-    status: str = "prepared"
-    started: bool = False
-    reward_signals: list[float | None] = field(default_factory=list)
-    native_script_reward: float | None = None
-    hillclimb_nodes: tuple[RewardNode, ...] | None = None
-    env_generation: int = 1
-    omit_reward: bool = False
-    outcome: str | None = None
-    session_dropped: bool = False
-    reward_kind: str = "env_sum"
-    checkpoint_schedule: dict[str, Any] | None = None
-    resume_from_checkpoint_id: str | None = None
-    scheduled_checkpoints: list[dict[str, Any]] = field(default_factory=list)
+from .state_records import (
+    PolicyConfig as PolicyConfig,
+    PolicyRevision as PolicyRevision,
+    RewardNode as RewardNode,
+    RolloutPin as RolloutPin,
+    _digest as _digest,
+    _checkpoint_digest as _checkpoint_digest,
+    _seed_from_task_instance_id as _seed_from_task_instance_id,
+    _atomic_json as _atomic_json,
+)
 
 
 class CompatPlatform:
@@ -197,6 +108,7 @@ class CompatPlatform:
         self.start_session_calls = 0
         self.policy_code: bytes | None = None
         self.policy_process: IsolatedPolicyProcess | None = None
+        self.live_annotation = LiveAnnotationService(self.storage_root)
         self._state_lock = threading.RLock()
         self._seed_default_policies()
         self._recover_checkpoints()
@@ -280,27 +192,19 @@ class CompatPlatform:
         self.checkpoints[checkpoint_id] = durable
         return durable
 
+    def drop_checkpoint(self, checkpoint_id: str) -> None:
+        """Forget a checkpoint. Idempotent if the id or file is already gone."""
+
+        self.checkpoints.pop(checkpoint_id, None)
+        path = self._checkpoint_path(checkpoint_id)
+        path.unlink(missing_ok=True)
+
     @staticmethod
     def _receipt_digest(value: dict[str, Any]) -> str:
         blob = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
         return "sha256:" + hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
-    @staticmethod
-    def _atomic_json(path: Path, value: dict[str, Any]) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-        encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
-        with temporary.open("w", encoding="utf-8") as handle:
-            handle.write(encoded)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-        directory_fd = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
+    _atomic_json = staticmethod(_atomic_json)
 
     def _persist_completed_rollout(self, pin: RolloutPin) -> None:
         manifest = {
@@ -318,10 +222,14 @@ class CompatPlatform:
                 "engine_generation": pin.engine_generation,
                 "policy_revision_id": pin.policy_revision_id,
                 "seed": pin.seed,
+                "environment_version": pin.environment_version,
+                "max_steps": pin.max_steps,
+                "max_calls": pin.max_calls,
                 "child_rollout_id": pin.child_rollout_id,
                 "child_resource_ref": pin.child_resource_ref,
                 "usage": pin.usage,
                 "status": pin.status,
+                "terminal_reason": pin.terminal_reason,
                 "reward_signals": pin.reward_signals,
                 "native_script_reward": pin.native_script_reward,
                 "hillclimb_nodes": [node.to_dict() for node in (pin.hillclimb_nodes or ())],
@@ -333,6 +241,7 @@ class CompatPlatform:
                 "checkpoint_schedule": pin.checkpoint_schedule,
                 "resume_from_checkpoint_id": pin.resume_from_checkpoint_id,
                 "scheduled_checkpoints": pin.scheduled_checkpoints,
+                "annotation_protocol_revision_id": pin.annotation_protocol_revision_id,
             },
         }
         self._atomic_json(self._manifest_path(pin.rollout_id), manifest)
@@ -399,11 +308,15 @@ class CompatPlatform:
                 engine_generation=int(raw_pin["engine_generation"]),
                 policy_revision_id=raw_pin.get("policy_revision_id"),
                 seed=raw_pin.get("seed"),
+                environment_version=raw_pin.get("environment_version"),
+                max_steps=raw_pin.get("max_steps"),
+                max_calls=raw_pin.get("max_calls"),
                 child_rollout_id=raw_pin.get("child_rollout_id"),
                 child_resource_ref=raw_pin.get("child_resource_ref"),
                 usage=raw_pin.get("usage"),
                 terminal=True,
                 status=str(raw_pin["status"]),
+                terminal_reason=raw_pin.get("terminal_reason"),
                 started=True,
                 reward_signals=list(raw_pin.get("reward_signals") or []),
                 native_script_reward=raw_pin.get("native_script_reward"),
@@ -416,6 +329,7 @@ class CompatPlatform:
                 checkpoint_schedule=raw_pin.get("checkpoint_schedule"),
                 resume_from_checkpoint_id=raw_pin.get("resume_from_checkpoint_id"),
                 scheduled_checkpoints=list(raw_pin.get("scheduled_checkpoints") or []),
+                annotation_protocol_revision_id=raw_pin.get("annotation_protocol_revision_id"),
             )
             self.logs[rollout_id] = log
             self.stream_bindings[rollout_id] = (str(binding[0]), str(binding[1]))
@@ -641,9 +555,8 @@ class CompatPlatform:
             "active_leases": self.active_leases,
             "retention": self.spec.retention,
             "logical_service_ids": services,
-            "reward_authority": (
-                "trusted_scorer" if self.spec.reward_kind == "script" else "environment"
-            ),
+            "reward_authority": advertised_reward_authority(self.spec),
+            "reward_calculator": advertised_reward_calculator(self.spec).value,
             "live_reward": self.spec.live_reward,
             "live_frames": self.spec.live_frames,
             "true_checkpoint": self.spec.true_checkpoint,
@@ -654,6 +567,12 @@ class CompatPlatform:
             "target_id": self.spec.target_id,
             "runtime_family": self.spec.runtime_family.value,
             "max_episode_steps": self.spec.max_episode_steps,
+            "reward_api": reward_api_catalog(
+                calculator=advertised_reward_calculator(self.spec),
+                authority=advertised_reward_authority(self.spec),
+                aggregation=str(self.spec.reward_kind),
+                live=bool(self.spec.live_reward),
+            ),
             # This facade owns the complete prepare → start → reconcile →
             # reward workflow and seals its durable event log on terminal
             # rollout.  Advertise that contract explicitly so Workshop can
@@ -668,9 +587,15 @@ class CompatPlatform:
                     "rollouts.poll": True,
                     "reward.get": True,
                     "trace_v5.capture": True,
+                    # Observe-only live annotation: a digest-pinned protocol
+                    # tails the rollout stream and publishes provisional
+                    # findings on a sibling stream declared by the descriptor.
+                    "annotation.live": True,
+                    "annotation.protocol.put": True,
                 },
                 "policy_refs": policy_refs,
             },
+            "live_annotation": self.live_annotation.advertisement(),
         }
         optimizer_contracts = None
         if contract := self._gepa_v2_contract():
@@ -749,6 +674,7 @@ class CompatPlatform:
             raise RuntimeError(f"event_log_sealed:{rollout_id}")
         log.append_control(CONTROL_SUBSCRIBED, log.subscribed_payload())
         self.logs[rollout_id] = log
+        self._release_stale_logs()
         self.stream_bindings[rollout_id] = (transport, retention or self.spec.retention)
         if rollout_id not in self.pins:
             task_instance_id = request.task_instance_id if request is not None else None
@@ -760,6 +686,7 @@ class CompatPlatform:
                     (request.world_ref if request is not None else None) or self.spec.world_ref
                 ),
                 environment_ref=self.spec.environment_ref,
+                environment_version=self.spec.environment_version,
                 policy_ref={
                     "harness": policy_ref.harness if policy_ref is not None else None,
                     "config": policy_ref.config if policy_ref is not None else None,
@@ -783,13 +710,15 @@ class CompatPlatform:
                     else self.current_policy_revision_id
                 ),
                 seed=seed,
+                annotation_protocol_revision_id=(
+                    request.annotation_protocol_revision_id if request is not None else None
+                ),
             )
-        return stream_descriptor(
-            rollout_id=rollout_id,
-            stream_id=stream_id,
-            bound_transport=transport,
-            retention=retention or self.spec.retention,
-        )
+        if request is not None and request.annotation_protocol_revision_id:
+            # Subscribe-before-start holds for the annotation channel too: the
+            # declared stream exists, durably, from the moment it is declared.
+            self.live_annotation.open_stream(rollout_id, stream_id)
+        return self.stream_descriptor_for(rollout_id)
 
     def occupy_or_busy(self) -> dict[str, Any] | None:
         if self.active_leases >= self.spec.scale_leases:
@@ -885,6 +814,8 @@ class CompatPlatform:
                 and bound_retention == requested_retention
                 and existing_pin.resume_from_checkpoint_id
                 == request.resume_from_checkpoint_id
+                and existing_pin.annotation_protocol_revision_id
+                == request.annotation_protocol_revision_id
             )
             if not same_identity:
                 return {
@@ -933,7 +864,19 @@ class CompatPlatform:
                 "status_code": 422,
                 "detail": "POST /rollouts requires policy_ref.harness; the platform does not pick a recipe",
             }
-        if harness == ISOLATED_POLICY_HARNESS and config_id:
+        # An advertised empty seed names the already installed code policy; it
+        # does not request configuration binding. Accept that exact immutable
+        # declaration, while continuing to refuse arbitrary isolated configs.
+        declared_isolated_seed = any(
+            seed.config_id == config_id
+            and seed.harness == ISOLATED_POLICY_HARNESS
+            and not seed.config
+            and (registered := self.policy_configs.get(seed.config_id)) is not None
+            and registered.harness == seed.harness
+            and not registered.config
+            for seed in self.spec.policy_seeds
+        )
+        if harness == ISOLATED_POLICY_HARNESS and config_id and not declared_isolated_seed:
             return {
                 "error": "bind_refused",
                 "status_code": 403,
@@ -1002,6 +945,16 @@ class CompatPlatform:
             # a category error, and it 409s every rollout for any caller that
             # binds config per episode. config_id is already validated above
             # against self.policy_configs (404 unknown_policy_config).
+
+        if request.annotation_protocol_revision_id:
+            if self.live_annotation.revision_for(request.annotation_protocol_revision_id) is None:
+                return {
+                    "error": "annotation_protocol_unknown",
+                    "status_code": 404,
+                    "annotation_protocol_revision_id": request.annotation_protocol_revision_id,
+                    "detail": "the requested live annotation protocol revision is not installed",
+                }
+
         if self.spec.admission is not None:
             refusal = self.spec.admission(self, request)
             if isinstance(refusal, dict) and refusal:
@@ -1037,6 +990,7 @@ class CompatPlatform:
             rollout_id=rollout_id,
             world_ref=str(request.world_ref or self.spec.world_ref),
             environment_ref=self.spec.environment_ref,
+            environment_version=self.spec.environment_version,
             policy_ref={"harness": harness, "config": config_id, "code": policy_ref.code},
             evaluation_plan_ref=str(request.evaluation_plan_ref or self.spec.evaluation_plan_ref),
             task_instance_id=task_instance_id,
@@ -1044,16 +998,21 @@ class CompatPlatform:
             engine_generation=self.engine_generation,
             policy_revision_id=request.policy_revision_id,
             seed=seed_i,
+            max_steps=request.max_steps,
+            max_calls=request.max_calls,
             usage=None,
             omit_reward=request.omit_reward,
             outcome=request.outcome,
             reward_kind=self.spec.reward_kind,
             checkpoint_schedule=request.checkpoint_schedule,
             resume_from_checkpoint_id=request.resume_from_checkpoint_id,
+            annotation_protocol_revision_id=request.annotation_protocol_revision_id,
         )
         self.pins[rollout_id] = pin
         self.active_leases += 1
         log = self.logs[rollout_id]
+        if pin.annotation_protocol_revision_id:
+            self.live_annotation.open_stream(rollout_id, log.stream_id)
         if not any(item.kind == "trace.opened" for item in log.after(0)):
             # Immutable, secret-free lane identity belongs in the durable trace.
             # In particular, Workshop must be able to distinguish two harnesses
@@ -1140,12 +1099,21 @@ class CompatPlatform:
             rollout_id,
             ("poll", self.spec.retention),
         )
-        return stream_descriptor(
+        descriptor = stream_descriptor(
             rollout_id=rollout_id,
             stream_id=log.stream_id,
             bound_transport=transport,
             retention=retention,
         )
+        pin = self.pins.get(rollout_id)
+        # The annotation stream is a declared sibling channel, never a guessed
+        # route. Absent means no protocol is bound to this rollout.
+        descriptor["annotation"] = (
+            annotation_channel(rollout_id, bound_transport=transport)
+            if pin is not None and pin.annotation_protocol_revision_id
+            else None
+        )
+        return descriptor
 
     def transport_is_bound(self, rollout_id: str, transport: str) -> bool:
         binding = self.stream_bindings.get(rollout_id)
@@ -1170,7 +1138,7 @@ class CompatPlatform:
             "terminated",
             "stopped",
         }
-        reason = terminal.get("reason")
+        reason = terminal.get("reason") or pin.terminal_reason
         detail = terminal.get("detail") or terminal.get("error")
         if failed_terminal:
             reason = reason or "producer_failure"
@@ -1194,6 +1162,14 @@ class CompatPlatform:
             "steps": terminal.get("steps"),
             "reason": reason,
             "detail": detail,
+            "research_context": {"schemaVersion": "synth.eval-research-context.v1",
+                                 "environmentVersion": pin.environment_version},
+            # Same pin fields the completed-rollout.v1 manifest already
+            # persists. Omitting them here made annotation receipts look
+            # unscored: they copied `reward_signals` from GET /rollouts, which
+            # never carried the field.
+            "reward_signals": list(pin.reward_signals),
+            "native_script_reward": pin.native_script_reward,
             "child_rollout_id": pin.child_rollout_id,
             "child_resource_ref": pin.child_resource_ref,
             "engine_generation": pin.engine_generation,
@@ -1202,6 +1178,7 @@ class CompatPlatform:
             "truncated": pin.status == "truncated",
             "resume_from_checkpoint_id": pin.resume_from_checkpoint_id,
             "scheduled_checkpoints": pin.scheduled_checkpoints,
+            "annotation_protocol_revision_id": pin.annotation_protocol_revision_id,
             "trace": self._sealed_trace_reference(pin.rollout_id),
         }
 
@@ -1241,6 +1218,8 @@ class CompatPlatform:
                     "bundle_byte_size": bundle.byte_size,
                 }
             )
+        if rollout_id in self.trace_bundle_errors:
+            reference["bundle_error"] = self.trace_bundle_errors[rollout_id]
         return reference
 
     def trace_bundle_archive(self, rollout_id: str) -> Path | None:
@@ -1291,6 +1270,11 @@ class CompatPlatform:
                     "policy_ref": pin.policy_ref,
                     "evaluation_plan_ref": pin.evaluation_plan_ref,
                     "task_instance_id": pin.task_instance_id,
+                    "environment_version": pin.environment_version,
+                    "terminal_reward": {
+                        "value": self._reward_nodes(pin)[0],
+                        "status": self._reward_nodes(pin)[2],
+                    } if self.spec.reward_definition is not None else None,
                 },
                 status=pin.status,
                 producer_commit=runtime_provenance.producer_source_revision,
@@ -1320,14 +1304,29 @@ class CompatPlatform:
 
     def _simulate(self, pin: RolloutPin, log: RolloutEventLog) -> None:
         pin.env_generation += 1
-        runtime_for(self.spec).simulate(self, pin, log)
-        # Persist a terminal reward receipt as soon as its authority has
-        # finished, instead of requiring a separate caller-authored POST after
-        # the run closes. Harbor supplies a native verifier; ENV_SUM targets
-        # already hold authoritative environment signals. This preserves null
-        # for missing evidence while making an authoritative 0.0 discoverable.
+        # The observer attaches before the first semantic event and tails the
+        # same durable log a remote consumer would. It has no handle on the
+        # runtime, the world, or the policy; detach only tells it the source
+        # will not grow further when the runtime returned without sealing.
+        if pin.annotation_protocol_revision_id:
+            self.live_annotation.attach(
+                rollout_id=pin.rollout_id,
+                source=log,
+                revision_id=pin.annotation_protocol_revision_id,
+            )
+        try:
+            runtime_for(self.spec).simulate(self, pin, log)
+        finally:
+            if pin.annotation_protocol_revision_id:
+                self.live_annotation.detach(pin.rollout_id)
+        # Persist terminal scoring as part of the producer transaction instead
+        # of requiring a separate caller-authored POST after the run closes.
+        # Gold/external environments already hold their authoritative signals,
+        # just as Harbor holds its verifier result; reward.get must therefore
+        # be complete for every successfully terminal runtime.
         if pin.terminal and (
-            self.spec.runtime_family == TargetRuntimeKind.HARBOR
+            pin.status == "completed"
+            or self.spec.runtime_family == TargetRuntimeKind.HARBOR
             or self.spec.reward_kind == RewardKind.ENV_SUM
         ):
             self.compute_reward(
@@ -1794,13 +1793,16 @@ class CompatPlatform:
             gate_value = gates[0].value if gates else None
             return float(gate_value) if gate_value is not None else None, nodes, "scored", None
         kind = pin.reward_kind
-        if kind == "env_sum":
+        if kind in {"env_sum", "verifier"}:
+            authority = "verifier" if kind == "verifier" else "environment"
+            node_kind = "verifier_reward" if kind == "verifier" else "env_reward"
+            node_id = "verifier" if kind == "verifier" else "env_sum"
             if any(item is None for item in pin.reward_signals):
                 return None, [
                     {
-                        "node_id": "env_sum",
-                        "kind": "env_reward",
-                        "authority": "environment",
+                        "node_id": node_id,
+                        "kind": node_kind,
+                        "authority": authority,
                         "status": "skipped",
                         "value": None,
                     }
@@ -1810,9 +1812,9 @@ class CompatPlatform:
             )
             return total, [
                 {
-                    "node_id": "env_sum",
-                    "kind": "env_reward",
-                    "authority": "environment",
+                    "node_id": node_id,
+                    "kind": node_kind,
+                    "authority": authority,
                     "status": "scored",
                     "value": total,
                 }
@@ -1860,51 +1862,67 @@ class CompatPlatform:
             product *= item
         return {"status": "scored", "reward": product}
 
+    # How many closed rollout logs stay resident. Their envelopes are already
+    # fsynced to the journal and `RolloutEventLog.recover` replays them failing
+    # closed, so anything evicted is one transparent disk read away.
+    HOT_CLOSED_LOGS = 8
+
+    def _release_stale_logs(self) -> None:
+        """Bound resident memory to the most recent closed rollouts.
+
+        `self.logs` was never evicted -- no pop, clear, del or prune anywhere --
+        so gold's memory tracked *total rollouts processed* rather than
+        concurrent ones. RSS sat above 2 GiB after the producing runs had been
+        killed, and a wide run exhausted the 25 GB Docker VM and was SIGKILLed
+        (exit 137). Capping resident closed logs makes the footprint a function
+        of concurrency, which is what the width formula assumes.
+        """
+
+        closed = [rid for rid, log in self.logs.items() if log.closed and not log._released]
+        cold = closed[: max(0, len(closed) - self.HOT_CLOSED_LOGS)]
+        for rollout_id in cold:
+            # Compact rather than release: errors and terminal records stay
+            # answerable without a disk read, which is what anyone retaining an
+            # old rollout log actually wants. The bulk -- per-step frames,
+            # actions, entity transitions -- becomes a counted summary.
+            self.logs[rollout_id].compact()
+        # Anything older than twice the hot window is unlikely to be read at
+        # all, so drop even the kept envelopes. Disk remains authoritative.
+        for rollout_id in closed[: max(0, len(closed) - 2 * self.HOT_CLOSED_LOGS)]:
+            self.logs[rollout_id].release()
+
     def events_payload(
         self,
         rollout_id: str,
         after: int,
         limit: int = 1000,
+        kinds: list[str] | tuple[str, ...] | None = None,
         *,
         ack: int | None = None,
     ) -> dict[str, Any]:
         log = self.logs.get(rollout_id)
         if log is None:
             return {"error": "unknown_rollout", "status_code": 404}
-        if isinstance(limit, bool) or limit < 1 or limit > 10_000:
+        try:
+            payload = poll_payload(log, after=after, limit=limit, kinds=kinds, subject_id=rollout_id)
+        except ValueError:
             return {"error": "invalid_page_limit", "status_code": 422}
         if ack is not None:
             try:
                 log.record_ack(ack)
             except ValueError:
                 return {"error": "invalid_ack", "status_code": 422}
-        available = log.after(after)
-        controls = [item for item in available if item.sequence is None]
-        evidence = [item for item in available if item.sequence is not None]
-        page = [*controls, *evidence[:limit]]
-        envelopes = [item.to_dict() for item in page]
-        for row in envelopes:
-            row["rollout_id"] = rollout_id
-            if "Authorization" in json.dumps(row) or "DIGBENCH_API_TOKEN" in json.dumps(row):
-                raise RuntimeError("token_leaked_into_log")
-        return {
-            "rollout_id": rollout_id,
-            "stream_id": log.stream_id,
-            "cursor": {
-                "kind": "sequence",
-                "after": after,
-                "high_water": log.high_water,
-                "closed": log.closed,
-                "next": max(
-                    [after, *(item.sequence for item in page if item.sequence is not None)]
-                ),
-                "has_more": len(evidence) > limit,
-                "chain_head": log.chain_head,
-                "acked": log.last_acked,
-            },
-            "retention": self._journal_retention(log),
-            "events": envelopes,
-        }
+        payload["cursor"].update(chain_head=log.chain_head, acked=log.last_acked)
+        payload["retention"] = self._journal_retention(log)
+        # No credential scan here. `_persist` already runs `assert_no_secrets`
+        # on every appended envelope, which matches secret *patterns* and
+        # credential-bearing *field names* -- strictly stronger than the
+        # substring check that used to live on this path. That check cost two
+        # full `json.dumps` per event per call, and `events_payload` is invoked
+        # with limit=10_000 at the end of every rollout, so a 50-call episode
+        # paid tens of thousands of redundant serializations of multi-KB
+        # payloads for a weaker guarantee already provided at write time.
+        return payload
 
     def _retention_ttl_seconds(self) -> int:
         raw = (self.runtime_config or {}).get("journal_retention_ttl_seconds")

@@ -97,6 +97,7 @@ def visual_from_sealed(
 
     if not document.content_digest:
         raise ValueError("sealed visual projection requires a sealed trace")
+    message_by_id = {item.message_id: item for item in document.messages}
     actor_by_id = {item.actor_id: item for item in document.actors}
     artifact_by_id = {item.artifact_id: item for item in document.artifacts}
     active_session_ids = {
@@ -218,9 +219,11 @@ def visual_from_sealed(
                     **span.detail,
                     "ended_at": span.ended_at,
                     "input_message_ids": list(span.input_message_ids),
+                    "input_messages": [message_by_id[mid].to_dict() for mid in span.input_message_ids if mid in message_by_id],
+                    "output_messages": [message_by_id[mid].to_dict() for mid in span.output_message_ids if mid in message_by_id],
                     "output_message_ids": list(span.output_message_ids),
                     "artifact_ids": list(span.artifact_ids),
-                    "usage": span.usage.to_dict() if span.usage is not None else None,
+                    "usage": span.usage.to_dict() if span.usage is not None else span.detail.get("usage"),
                 },
             )
         )
@@ -263,7 +266,7 @@ def visual_from_sealed(
         usage=document.usage.to_dict(),
         summary=summary,
         losses=(
-            (f"visibility_filtered_sessions:{omitted_actor_count}",) if omitted_actor_count else ()
+            tuple(document.completeness.reasons) + ((f"visibility_filtered_sessions:{omitted_actor_count}",) if omitted_actor_count else ())
         ),
     ).sealed()
 
@@ -418,11 +421,22 @@ def _append_evidence_items(
                 visibility=str(annotation.visibility),
                 detail={
                     "labels": list(annotation.labels),
+                    "rationale": annotation.rationale,
+                    "payload": annotation.payload,
+                    "author_kind": str(annotation.author_kind),
+                    "producer": annotation.producer.to_dict(),
+                    "evidence": [selector.to_dict() for selector in annotation.evidence],
+                    "target": annotation.target.to_dict(),
+                    "supersedes_id": annotation.supersedes_id,
                     "confidence": annotation.confidence,
                     "review_state": str(annotation.review_state or ""),
+                    "grounding": str(annotation.grounding),
+                    "inspection": annotation.inspection.to_dict() if annotation.inspection else None,
+                    "revision": annotation.revision,
                 },
             )
         )
+    reward_definitions = {definition.content_digest: definition for definition in evidence.reward_definitions}
     for reward in evidence.reward_records:
         items.append(
             _evidence_item(
@@ -435,6 +449,9 @@ def _append_evidence_items(
                 digest=reward.content_digest,
                 detail={
                     "value": reward.value,
+                    "units": reward_definitions[reward.reward_digest].units if reward.reward_digest in reward_definitions else None,
+                    "provenance": reward.provenance,
+                    "evidence": [selector.to_dict() for selector in reward.evidence],
                     "actor_id": reward.actor_id,
                     "session_id": reward.session_id,
                     "components": reward.components,

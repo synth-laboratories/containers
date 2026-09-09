@@ -136,12 +136,13 @@ def test_failed_persist_never_advances_or_publishes(tmp_path: Path, monkeypatch:
     assert log.after(0) == []
 
 
-def test_secret_is_refused_before_journal_or_publication(tmp_path: Path) -> None:
+@pytest.mark.parametrize("durable", [False, True])
+def test_secret_is_refused_before_journal_or_publication(tmp_path: Path, durable: bool) -> None:
     journal = tmp_path / "events.jsonl"
     log = RolloutEventLog(
         rollout_id="redacted",
         stream_id="stream:redacted",
-        journal_path=journal,
+        journal_path=journal if durable else None,
     )
     with pytest.raises(RedactionError):
         log.append("tools", {"Authorization": "Bearer should-not-persist"})

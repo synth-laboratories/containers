@@ -6,12 +6,53 @@ so its tests live with the harness rather than with one image.
 
 from __future__ import annotations
 
+import base64
 import json
+
+import pytest
 
 from synth_containers.policies.react import OpenRouterReAct
 
+
+def test_openrouter_react_uses_public_bearer_for_workshop_capability_proxy(
+    monkeypatch,
+) -> None:
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self) -> bytes:
+            return json.dumps(
+                {
+                    "choices": [{"message": {"content": '{"actions":["do"]}'}}],
+                    "usage": {},
+                }
+            ).encode()
+
+    observed: dict[str, str] = {}
+
+    def fake_urlopen(request, **_kwargs):
+        observed["authorization"] = request.get_header("Authorization")
+        return Response()
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    policy = OpenRouterReAct(
+        config_id="glm",
+        config={
+            "api_key_env": "OPENAI_API_KEY",
+            "base_url": "http://host.docker.internal:9988/cap/wcap_test/v1/providers/openrouter",
+        },
+    )
+    assert policy.plan({"valid_actions": ["do"], "observation_text": "obs"}) == ["do"]
+    assert observed["authorization"] == "Bearer workshop-proxy"
+
 def test_openrouter_react_normalizes_craftax_direction_aliases() -> None:
-    actions = OpenRouterReAct._parse_actions(
+    policy = OpenRouterReAct(config_id="alias_test", config={})
+    actions = policy._parse_actions(
         '{"actions":["North","east","do"]}',
         ["up", "right", "do"],
     )
@@ -376,3 +417,120 @@ def test_openrouter_react_token_budget_survives_a_checkpoint(monkeypatch) -> Non
     legacy.pop("last_prompt_tokens")
     resumed.restore_checkpoint_state(legacy)
     assert resumed._last_prompt_tokens == 0
+
+
+PNG_1X1 = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+    "0000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082"
+)
+
+
+def _image_url_parts(messages: list[dict]) -> list[dict]:
+    parts: list[dict] = []
+    for message in messages:
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "image_url":
+                parts.append(part)
+    return parts
+
+
+def test_openrouter_react_default_observation_stays_text_string(monkeypatch) -> None:
+    captured: list[dict] = []
+
+    def fake_urlopen(request, timeout=None):
+        captured.append(json.loads(request.data.decode()))
+        return _json_response(_tool_body(["do"]))
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-only")
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    policy = OpenRouterReAct(config_id="luna_med", config={})
+    assert policy.metadata()["observation_mode"] == "text"
+    assert policy.metadata()["keep_recent_frames"] == 2
+    policy.plan({"valid_actions": ["do"], "observation_text": "obs"})
+    assert isinstance(captured[0]["messages"][1]["content"], str)
+    assert isinstance(policy._messages[1]["content"], str)
+
+
+def test_openrouter_react_both_mode_attaches_png_data_url(monkeypatch) -> None:
+    captured: list[dict] = []
+
+    def fake_urlopen(request, timeout=None):
+        captured.append(json.loads(request.data.decode()))
+        return _json_response(_tool_body(["do"]))
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-only")
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    policy = OpenRouterReAct(
+        config_id="luna_med", config={"observation_mode": "both"}
+    )
+    policy.plan(
+        {
+            "valid_actions": ["do"],
+            "observation_text": "obs",
+            "_frame_png": PNG_1X1,
+        }
+    )
+    content = captured[0]["messages"][-1]["content"]
+    assert isinstance(content, list)
+    types = [part.get("type") for part in content]
+    assert types == ["text", "image_url"]
+    assert "valid_actions" in content[0]["text"]
+    url = content[1]["image_url"]["url"]
+    assert url.startswith("data:image/png;base64,")
+    encoded = url.split(",", 1)[1]
+    assert base64.b64decode(encoded) == PNG_1X1
+    last_user = next(
+        message for message in reversed(policy._messages) if message["role"] == "user"
+    )
+    assert last_user["content"] == content
+
+
+def test_openrouter_react_image_mode_without_png_fails_closed(monkeypatch) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-only")
+    policy = OpenRouterReAct(
+        config_id="luna_med", config={"observation_mode": "image"}
+    )
+    with pytest.raises(RuntimeError, match="observation_png_missing"):
+        policy.plan({"valid_actions": ["do"], "observation_text": "obs"})
+
+
+def test_openrouter_react_keeps_only_recent_frames(monkeypatch) -> None:
+    def fake_urlopen(request, timeout=None):
+        return _json_response(_tool_body(["do"]))
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-only")
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    policy = OpenRouterReAct(
+        config_id="luna_med",
+        config={"observation_mode": "both", "keep_recent_frames": 2},
+    )
+    observation = {
+        "valid_actions": ["do"],
+        "observation_text": "obs",
+        "_frame_png": PNG_1X1,
+    }
+    for index in range(3):
+        policy.plan({**observation, "observation_text": f"obs-{index}"})
+    assert len(_image_url_parts(policy._messages)) == 2
+    omitted = 0
+    for message in policy._messages:
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        texts = [
+            part.get("text") or ""
+            for part in content
+            if isinstance(part, dict) and part.get("type") == "text"
+        ]
+        if any(text == "[prior observation frame omitted]" for text in texts):
+            omitted += 1
+            assert any("valid_actions" in text for text in texts)
+    assert omitted == 1
+
+
+def test_openrouter_react_rejects_unknown_observation_mode() -> None:
+    with pytest.raises(RuntimeError, match="unsupported observation_mode"):
+        OpenRouterReAct(config_id="luna_med", config={"observation_mode": "pixels"})

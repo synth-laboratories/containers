@@ -245,6 +245,40 @@ def test_reference_prepare_binding_mismatch_refuses_before_rollout(tmp_path: Pat
     assert invalid.status_code == 422
 
 
+def test_reference_prepare_pins_seed_task_and_policy_identity(tmp_path: Path) -> None:
+    client = TestClient(
+        create_reference_app(
+            ReferenceManagedRuntime.counter_default(target=1),
+            storage_root=tmp_path,
+        )
+    )
+    payload = {
+        "rollout_id": "reference-identity",
+        "seed": 780060,
+        "task_instance_id": "seed:780060",
+        "policy_ref": {"harness": "nanohorizon", "config": "glm-5.3-flash"},
+        "policy_revision_id": "polrev_baseline",
+        "telemetry": {"enabled": True, "transport": "poll", "retention": "run"},
+    }
+    prepared = client.post("/rollouts/prepare", json=payload)
+    assert prepared.status_code == 200, prepared.text
+    assert prepared.json()["seed"] == 780060
+    assert prepared.json()["task_instance_id"] == "seed:780060"
+    assert prepared.json()["policy_revision_id"] == "polrev_baseline"
+    assert prepared.json()["policy_ref"] == payload["policy_ref"]
+
+    replayed = client.post("/rollouts/prepare", json=payload)
+    assert replayed.status_code == 200, replayed.text
+    assert replayed.json()["replayed"] is True
+
+    conflict = client.post(
+        "/rollouts/prepare",
+        json={**payload, "policy_revision_id": "polrev_other"},
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["error"] == "rollout_prepare_identity_conflict"
+
+
 def test_reference_prepare_ack_precedes_first_semantic_event(tmp_path: Path) -> None:
     client = TestClient(
         create_reference_app(

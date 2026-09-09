@@ -22,6 +22,14 @@ class RewardKind(StrEnum):
     ENV_SUM = "env_sum"
     SCRIPT = "script"
     ENV_STATUS = "env_status"
+    VERIFIER = "verifier"
+
+
+class RewardCalculatorFamily(StrEnum):
+    """How the sealed reward is produced. Orthogonal to env_sum/script aggregation."""
+
+    CODE = "code"
+    VERIFIER = "verifier"
 
 
 class TaskInstanceStatus(StrEnum):
@@ -92,6 +100,29 @@ class TargetSpec:
     # platform then derives a conservative identity from the target refs.
     task_id: str | None = None
     task_family: str | None = None
+    reward_calculator: RewardCalculatorFamily | None = None
+    reward_authority_name: str | None = None
+    # Explicit producer semantics for the terminal scalar; absent means unknown.
+    reward_definition: dict[str, Any] | None = None
+    environment_version: str | None = None
+
+
+def advertised_reward_calculator(spec: TargetSpec) -> RewardCalculatorFamily:
+    if spec.reward_calculator is not None:
+        return spec.reward_calculator
+    if spec.reward_kind == RewardKind.VERIFIER:
+        return RewardCalculatorFamily.VERIFIER
+    return RewardCalculatorFamily.CODE
+
+
+def advertised_reward_authority(spec: TargetSpec) -> str:
+    if spec.reward_authority_name:
+        return spec.reward_authority_name
+    if spec.reward_kind == RewardKind.SCRIPT:
+        return "trusted_scorer"
+    if spec.reward_kind == RewardKind.VERIFIER:
+        return "verifier"
+    return "environment"
 
 
 def _env(items: dict[str, str]) -> AffordanceMap:
@@ -239,7 +270,7 @@ OPENENV_ECHO = TargetSpec(
     blocking_trial="unsupported",
     mcp_bind="unused",
     reconnect="unsupported",
-    event_kinds=("trace.opened", "observation", "action", "reward_signal", "status"),
+    event_kinds=("trace.opened", "observation", "action", "reward.calculation.opened", "reward_signal", "reward.calculation.closed", "status"),
     affordances=_env(
         {
             "step": "native",
