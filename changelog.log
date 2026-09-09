@@ -3,6 +3,8 @@
 ## 2026-09-09
 
 * Prepared stable `0.4.2`; not yet published.
+* Fixed Python 3.11 attempt serialization and scheduler startup/recovery races.
+* Release CI now enforces lint and rejects new signatures beyond documented type debt.
 * Restored the complete publish test gate, including missing/scored reward recovery.
 * `0.4.2.dev20260909`: made the declared `ruff check src` gate pass; the eleven
   `harbor_environment` re-exports missing from `__all__` were a public-surface

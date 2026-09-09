@@ -1,0 +1,173 @@
+src/synth_containers/annotations.py: error[invalid-argument-type] Argument to bound method `Mapping.get` is incorrect: Expected `Never`, found `Literal["annotations"]`
+src/synth_containers/annotations.py: error[invalid-argument-type] Argument to bound method `Mapping.get` is incorrect: Expected `Never`, found `Literal["rollout_id"]`
+src/synth_containers/annotations.py: error[invalid-argument-type] Argument to bound method `Mapping.get` is incorrect: Expected `Never`, found `Literal["status"]`
+src/synth_containers/annotations.py: error[invalid-argument-type] Argument to bound method `Mapping.get` is incorrect: Expected `Never`, found `Literal["trace_correlation_id"]`
+src/synth_containers/annotations.py: error[invalid-argument-type] Argument to constructor `float.__new__` is incorrect: Expected `str | Buffer | SupportsFloat | SupportsIndex`, found `int | float | None`
+src/synth_containers/annotations.py: error[invalid-argument-type] Method `__getitem__` of type `Overload[(index: int, /) -> RolloutAnnotation, (index: slice[int | None, int | None, int | None], /) -> Sequence[RolloutAnnotation]]` cannot be called with key of type `Literal["trace_correlation_id"]` on object of type `Sequence[RolloutAnnotation]`
+src/synth_containers/annotations.py: error[invalid-argument-type] Method `__getitem__` of type `bound method Top[Mapping[Unknown, object]].__getitem__(key: Never, /) -> object` cannot be called with key of type `Literal["trace_correlation_id"]` on object of type `Top[Mapping[Unknown, object]]`
+src/synth_containers/annotations.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/annotations.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/annotations.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/annotations.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/annotations.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/cispo_policy.py: error[unresolved-attribute] Object of type `Self@authorization` has no attribute `_value`
+src/synth_containers/cispo_target.py: error[invalid-argument-type] Argument to `BoundPolicySession.__init__` is incorrect: Expected `SamplerBinding`, found `SamplerBinding | ProbeAttemptBinding`
+src/synth_containers/classify_runtime.py: error[invalid-assignment] Object of type `None` is not assignable to `Mapping[str, Any]`
+src/synth_containers/compat/openenv.py: error[invalid-argument-type] Argument is incorrect: Expected `list[str]`, found `list[ExecutionProfile]`
+src/synth_containers/event_log.py: error[invalid-argument-type] Argument to bound method `RolloutEventLog.recover` is incorrect: Expected `Path`, found `Path | None`
+src/synth_containers/gold_http.py: error[invalid-argument-type] Argument expression after ** must be a mapping type: Found `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/gold_http.py: error[invalid-argument-type] Argument to bound method `GoldHttpWorld._request_view_frames` is incorrect: Expected `dict[str, Any]`, found `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/gold_http.py: error[invalid-argument-type] Argument to bound method `GoldHttpWorld._request_view_frames` is incorrect: Expected `dict[str, Any]`, found `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/gold_http.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/gold_http.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/gold_http.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/gold_http.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/gold_http.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/gold_http.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/gold_http.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/gold_http.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/gold_http.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/gold_http.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/gold_http.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/gold_http.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/gold_http.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/gold_http.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/gold_http.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/gold_http.py: error[unsupported-operator] Operator `+` is not supported between objects of type `str | None` and `str`
+src/synth_containers/gold_http.py: error[unsupported-operator] Operator `+` is not supported between objects of type `str | None` and `str`
+src/synth_containers/launch.py: error[invalid-argument-type] Argument to `ContainerHandle.__init__` is incorrect: Expected `(() -> None) | None`, found `() -> bool`
+src/synth_containers/launch.py: error[invalid-argument-type] Argument to bound method `Mapping.get` is incorrect: Expected `Never`, found `Literal["target"]`
+src/synth_containers/live_annotation/contract.py: error[invalid-assignment] Invalid subscript assignment with key of type `Literal["reason"]` and value of type `Any | None` on object of type `dict[str, str]`
+src/synth_containers/live_annotation/runner.py: error[invalid-argument-type] Argument to bound method `RolloutEventLog.append` is incorrect: Expected `dict[str, Any]`, found `dict[object, object]`
+src/synth_containers/live_annotation/service.py: error[too-many-positional-arguments] Too many positional arguments: expected 2, got 3
+src/synth_containers/platform/app.py: error[invalid-return-type] Return type does not match returned value: expected `dict[str, Any]`, found `JSONResponse`
+src/synth_containers/platform/state.py: error[invalid-argument-type] Argument to bound method `CompatPlatform._rollout_response` is incorrect: Expected `RolloutPin`, found `RolloutPin | None`
+src/synth_containers/platform/state.py: error[invalid-argument-type] Argument to bound method `CompatPlatform._simulate_or_fail` is incorrect: Expected `RolloutEventLog`, found `RolloutEventLog | None`
+src/synth_containers/platform/state.py: error[invalid-argument-type] Argument to bound method `CompatPlatform._simulate_or_fail` is incorrect: Expected `RolloutPin`, found `RolloutPin | None`
+src/synth_containers/platform/trace_bundle.py: error[invalid-argument-type] Argument to function `_first_string` is incorrect: Expected `dict[str, Any]`, found `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/platform/trace_bundle.py: error[invalid-argument-type] Argument to function `_first_string` is incorrect: Expected `dict[str, Any]`, found `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/platform/trace_bundle.py: error[invalid-argument-type] Argument to function `_first_string` is incorrect: Expected `dict[str, Any]`, found `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/platform/trace_bundle.py: error[invalid-argument-type] Argument to function `_first_string` is incorrect: Expected `dict[str, Any]`, found `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/platform/trace_bundle.py: error[invalid-argument-type] Argument to function `_first_string` is incorrect: Expected `dict[str, Any]`, found `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/platform/trace_bundle.py: error[invalid-argument-type] Argument to function `_first_string` is incorrect: Expected `dict[str, Any]`, found `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/platform/trace_bundle.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/platform/trace_bundle.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/policies/mini_swe.py: error[unresolved-import] Cannot resolve imported module `renderers`
+src/synth_containers/policies/mini_swe.py: error[unresolved-import] Cannot resolve imported module `tinker`
+src/synth_containers/policies/nanohorizon.py: error[invalid-argument-type] Argument to bound method `dict.get` is incorrect: Expected `Never`, found `Literal["content"]`
+src/synth_containers/policies/nanohorizon.py: error[invalid-argument-type] Argument to bound method `dict.get` is incorrect: Expected `Never`, found `Literal["function"]`
+src/synth_containers/policies/nanohorizon.py: error[invalid-argument-type] Argument to bound method `dict.get` is incorrect: Expected `Never`, found `Literal["function"]`
+src/synth_containers/policies/nanohorizon.py: error[invalid-argument-type] Argument to bound method `dict.get` is incorrect: Expected `Never`, found `Literal["id"]`
+src/synth_containers/policies/nanohorizon.py: error[invalid-argument-type] Argument to bound method `dict.get` is incorrect: Expected `Never`, found `Literal["text"]`
+src/synth_containers/policies/nanohorizon.py: error[invalid-argument-type] Argument to constructor `int.__new__` is incorrect: Expected `str | Buffer | SupportsInt | SupportsIndex | SupportsTrunc`, found `Any | None | Literal[16, 0]`
+src/synth_containers/policies/nanohorizon.py: error[invalid-argument-type] Argument to function `billed_or_estimated_cost_usd` is incorrect: Expected `dict[str, Any]`, found `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/policies/nanohorizon.py: error[invalid-assignment] Invalid subscript assignment with key of type `Literal["cost_source"]` and value of type `str` on object of type `dict[str, int | None]`
+src/synth_containers/policies/nanohorizon.py: error[invalid-assignment] Invalid subscript assignment with key of type `Literal["cost_usd"]` and value of type `int | float` on object of type `dict[str, int | None]`
+src/synth_containers/policies/nanohorizon.py: error[not-iterable] Object of type `(Any & ~AlwaysFalsy) | list[Unknown] | (int & ~AlwaysFalsy) | (float & ~AlwaysFalsy)` may not be iterable
+src/synth_containers/policies/nanohorizon.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/policies/nanohorizon.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/policies/nanohorizon.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/policies/nanohorizon.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/policies/nanohorizon.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/policies/nanohorizon.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/policies/nanohorizon.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/policies/nanohorizon.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/policies/nanohorizon.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/policies/react.py: error[invalid-assignment] Object of type `Any | None | dict[str, Any]` is not assignable to `dict[str, Any]`
+src/synth_containers/policies/react.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | dict[Unknown, Unknown] | None`
+src/synth_containers/policies/react.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | dict[Unknown, Unknown] | None`
+src/synth_containers/policies/react.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | dict[Unknown, Unknown] | None`
+src/synth_containers/policies/react.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | dict[Unknown, Unknown] | None`
+src/synth_containers/policies/react.py: error[unresolved-import] Cannot resolve imported module `tinker`
+src/synth_containers/policies/react.py: error[unresolved-import] Cannot resolve imported module `transformers`
+src/synth_containers/tracing/adapters/atif.py: error[invalid-argument-type] Argument to bound method `Mapping.get` is incorrect: Expected `Never`, found `Literal["arguments"]`
+src/synth_containers/tracing/adapters/atif.py: error[invalid-argument-type] Argument to bound method `Mapping.get` is incorrect: Expected `Never`, found `Literal["function_name"]`
+src/synth_containers/tracing/adapters/atif.py: error[invalid-argument-type] Argument to bound method `Mapping.get` is incorrect: Expected `Never`, found `Literal["llm_call_count"]`
+src/synth_containers/tracing/adapters/atif.py: error[invalid-argument-type] Argument to bound method `Mapping.get` is incorrect: Expected `Never`, found `Literal["message"]`
+src/synth_containers/tracing/adapters/atif.py: error[invalid-argument-type] Argument to bound method `Mapping.get` is incorrect: Expected `Never`, found `Literal["metrics"]`
+src/synth_containers/tracing/adapters/atif.py: error[invalid-argument-type] Argument to bound method `Mapping.get` is incorrect: Expected `Never`, found `Literal["model_name", "reasoning_effort", "reasoning_content", "tool_calls", "metrics"]`
+src/synth_containers/tracing/adapters/atif.py: error[invalid-argument-type] Argument to bound method `Mapping.get` is incorrect: Expected `Never`, found `Literal["observation"]`
+src/synth_containers/tracing/adapters/atif.py: error[invalid-argument-type] Argument to bound method `Mapping.get` is incorrect: Expected `Never`, found `Literal["reasoning_content"]`
+src/synth_containers/tracing/adapters/atif.py: error[invalid-argument-type] Argument to bound method `Mapping.get` is incorrect: Expected `Never`, found `Literal["schema_version"]`
+src/synth_containers/tracing/adapters/atif.py: error[invalid-argument-type] Argument to bound method `Mapping.get` is incorrect: Expected `Never`, found `Literal["source"]`
+src/synth_containers/tracing/adapters/atif.py: error[invalid-argument-type] Argument to bound method `Mapping.get` is incorrect: Expected `Never`, found `Literal["step_id"]`
+src/synth_containers/tracing/adapters/atif.py: error[invalid-argument-type] Argument to bound method `Mapping.get` is incorrect: Expected `Never`, found `Literal["step_id"]`
+src/synth_containers/tracing/adapters/atif.py: error[invalid-argument-type] Argument to bound method `Mapping.get` is incorrect: Expected `Never`, found `Literal["timestamp"]`
+src/synth_containers/tracing/adapters/atif.py: error[invalid-argument-type] Argument to bound method `Mapping.get` is incorrect: Expected `Never`, found `Literal["tool_call_id"]`
+src/synth_containers/tracing/adapters/atif.py: error[invalid-argument-type] Argument to bound method `Mapping.get` is incorrect: Expected `Never`, found `Literal["tool_calls"]`
+src/synth_containers/tracing/adapters/atif.py: error[invalid-argument-type] Argument to bound method `Mapping.get` is incorrect: Expected `Never`, found `Literal["trajectory_id"]`
+src/synth_containers/tracing/adapters/atif.py: error[invalid-argument-type] Argument to function `_validate_trajectory` is incorrect: Expected `Mapping[str, Any]`, found `Top[Mapping[Unknown, object]]`
+src/synth_containers/tracing/adapters/atif.py: error[invalid-assignment] Invalid subscript assignment with key of type `Literal["synth_coordination"]` and value of type `dict[str, Any]` on object of type `dict[str, str | None | list[str]]`
+src/synth_containers/tracing/adapters/atif.py: error[unresolved-attribute] Attribute `model` is not defined on `None` in union `ActorV5 | None`
+src/synth_containers/tracing/adapters/chat_container.py: error[invalid-argument-type] Argument to function `add` is incorrect: Expected `str`, found `Unknown | None | str`
+src/synth_containers/tracing/adapters/craftax_container.py: error[not-subscriptable] Cannot subscript object of type `None` with no `__getitem__` method
+src/synth_containers/tracing/adapters/craftax_container.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/tracing/adapters/craftax_container.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/tracing/annotation/api.py: warning[deprecated] The function `on_event` is deprecated: 
+src/synth_containers/tracing/annotation/api.py: warning[deprecated] The function `on_event` is deprecated: 
+src/synth_containers/tracing/annotation/codex_app_server.py: error[too-many-positional-arguments] Too many positional arguments: expected 1, got 3
+src/synth_containers/tracing/annotation/codex_app_server.py: error[unresolved-attribute] Attribute `cost` is not defined on `None` in union `PriceTable | None`
+src/synth_containers/tracing/annotation/codex_app_server.py: error[unresolved-attribute] Object of type `Iterator[tuple[str, dict[str, Any]]]` has no attribute `send`
+src/synth_containers/tracing/annotation/container.py: error[invalid-assignment] Object of type `SignedReservationBroker` is not assignable to `PaidComputeBroker | None`
+src/synth_containers/tracing/annotation/jesterky_tools.py: error[invalid-method-override] Invalid override of method `log_message`: Definition is incompatible with `BaseHTTPRequestHandler.log_message`
+src/synth_containers/tracing/annotation/model_api.py: error[unresolved-attribute] Attribute `cost` is not defined on `None` in union `PriceTable | None`
+src/synth_containers/tracing/annotation/service.py: error[call-non-callable] Object of type `object` is not callable
+src/synth_containers/tracing/annotation/service.py: error[call-non-callable] Object of type `object` is not callable
+src/synth_containers/tracing/annotation/trace_index.py: error[unresolved-attribute] Object of type `Self@_table` has no attribute `_by_id`
+src/synth_containers/tracing/annotation/validation.py: error[invalid-argument-type] Argument to constructor `float.__new__` is incorrect: Expected `str | Buffer | SupportsFloat | SupportsIndex`, found `Any | None`
+src/synth_containers/tracing/annotation/workspace.py: error[invalid-argument-type] Argument is incorrect: Expected `tuple[dict[str, Any], ...]`, found `tuple[str | int | float | ... omitted 3 union elements, ...]`
+src/synth_containers/tracing/canonical.py: error[invalid-argument-type] Argument to function `replace` is incorrect: Argument type `RecordT@seal_record` does not satisfy upper bound `DataclassInstance` of type variable `_DataclassT`
+src/synth_containers/tracing/capture/collector_server.py: error[invalid-method-override] Invalid override of method `log_message`: Definition is incompatible with `BaseHTTPRequestHandler.log_message`
+src/synth_containers/tracing/capture/mitmproxy_addon.py: error[unresolved-import] Cannot resolve imported module `mitmproxy`
+src/synth_containers/tracing/capture/proxy.py: error[invalid-argument-type] Argument to bound method `CaptureProxy.handle_models` is incorrect: Expected `Mapping[str, str]`, found `Message[str, str]`
+src/synth_containers/tracing/capture/proxy.py: error[invalid-argument-type] Argument to bound method `CaptureProxy.handle_provider_request` is incorrect: Expected `Mapping[str, str]`, found `Message[str, str]`
+src/synth_containers/tracing/capture/proxy.py: error[invalid-argument-type] Argument to bound method `CaptureProxy.passthrough_unsupported` is incorrect: Expected `Mapping[str, str]`, found `Message[str, str]`
+src/synth_containers/tracing/capture/proxy.py: error[invalid-method-override] Invalid override of method `log_message`: Definition is incompatible with `BaseHTTPRequestHandler.log_message`
+src/synth_containers/tracing/capture/runner.py: error[unresolved-attribute] Attribute `coverage` is not defined on `None` in union `SealedCapture | None`
+src/synth_containers/tracing/capture/runner.py: error[unresolved-attribute] Attribute `coverage` is not defined on `None` in union `SealedCapture | None`
+src/synth_containers/tracing/capture/supervisor.py: error[unresolved-attribute] Attribute `api_key` is not defined on `None` in union `ProviderEndpointConfig | None`
+src/synth_containers/tracing/capture/supervisor.py: error[unresolved-attribute] Attribute `api_key` is not defined on `None` in union `ProviderEndpointConfig | None`
+src/synth_containers/tracing/capture/supervisor.py: error[unresolved-attribute] Attribute `auth_kind` is not defined on `None` in union `ProviderEndpointConfig | None`
+src/synth_containers/tracing/capture/supervisor.py: error[unresolved-attribute] Attribute `auth_scheme` is not defined on `None` in union `ProviderEndpointConfig | None`
+src/synth_containers/tracing/capture/supervisor.py: error[unresolved-attribute] Attribute `upstream_url` is not defined on `None` in union `ProviderEndpointConfig | None`
+src/synth_containers/tracing/capture/websocket.py: error[index-out-of-bounds] Index 0 is out of bounds for tuple `tuple[()]` with length 0
+src/synth_containers/tracing/capture/websocket.py: error[invalid-argument-type] Argument to bound method `Mapping.get` is incorrect: Expected `Never`, found `Literal["usage"]`
+src/synth_containers/tracing/capture/websocket.py: error[invalid-argument-type] Argument to bound method `Mapping.get` is incorrect: Expected `Never`, found `Literal["usage"]`
+src/synth_containers/tracing/inspection.py: error[invalid-argument-type] Argument is incorrect: Expected `str | None`, found `Any | bool`
+src/synth_containers/tracing/inspection.py: error[invalid-argument-type] Argument is incorrect: Expected `str | None`, found `Any | bool`
+src/synth_containers/tracing/inspection.py: error[invalid-argument-type] Argument is incorrect: Expected `str | None`, found `Any | bool`
+src/synth_containers/tracing/inspection.py: error[invalid-argument-type] Argument is incorrect: Expected `str | None`, found `Any | bool`
+src/synth_containers/tracing/inspection.py: error[invalid-argument-type] Argument is incorrect: Expected `str | None`, found `Any | bool`
+src/synth_containers/tracing/inspection.py: error[invalid-argument-type] Argument is incorrect: Expected `str | None`, found `Any | bool`
+src/synth_containers/tracing/inspection.py: error[invalid-argument-type] Argument is incorrect: Expected `str | None`, found `Any | bool`
+src/synth_containers/tracing/inspection.py: error[invalid-argument-type] Argument is incorrect: Expected `str | None`, found `Any | bool`
+src/synth_containers/tracing/inspection.py: error[invalid-argument-type] Argument is incorrect: Expected `str | None`, found `Any | bool`
+src/synth_containers/tracing/inspection.py: error[invalid-argument-type] Argument is incorrect: Expected `str | None`, found `Any | bool`
+src/synth_containers/tracing/inspection.py: error[invalid-argument-type] Argument is incorrect: Expected `str | None`, found `Any | bool`
+src/synth_containers/tracing/inspection.py: error[invalid-argument-type] Argument is incorrect: Expected `str | None`, found `Any | bool`
+src/synth_containers/tracing/inspection.py: error[invalid-argument-type] Argument is incorrect: Expected `str | None`, found `Any | bool`
+src/synth_containers/tracing/inspection.py: error[invalid-argument-type] Argument is incorrect: Expected `str | None`, found `Any | bool`
+src/synth_containers/tracing/inspection.py: error[invalid-argument-type] Argument is incorrect: Expected `str | None`, found `Any | bool`
+src/synth_containers/tracing/inspection.py: error[invalid-argument-type] Argument is incorrect: Expected `str | None`, found `Any | bool`
+src/synth_containers/tracing/inspection.py: error[invalid-argument-type] Argument is incorrect: Expected `str | None`, found `Any | bool`
+src/synth_containers/tracing/inspection.py: error[invalid-argument-type] Argument is incorrect: Expected `str | None`, found `Any | bool`
+src/synth_containers/tracing/inspection.py: error[invalid-argument-type] Argument is incorrect: Expected `str | None`, found `Any | bool`
+src/synth_containers/tracing/inspection.py: error[invalid-argument-type] Argument is incorrect: Expected `str`, found `Any | bool`
+src/synth_containers/tracing/inspection.py: error[invalid-argument-type] Argument is incorrect: Expected `str`, found `Any | bool`
+src/synth_containers/tracing/inspection.py: error[invalid-argument-type] Argument is incorrect: Expected `str`, found `Any | bool`
+src/synth_containers/tracing/models/selectors.py: error[invalid-argument-type] Argument to function `_finish_resolution` is incorrect: Expected `str`, found `Any | None | str`
+src/synth_containers/tracing/models/selectors.py: error[unresolved-attribute] Attribute `text` is not defined on `BranchV5`, `ActorV5`, `SessionV5`, `SpanV5`, `EventV5`, `ArtifactRefV5`, `ActorGroupV1`, `InteractionEdgeV1`, `ContextEpochV1`, `JointTurnV1` in union `BranchV5 | ActorV5 | SessionV5 | ... omitted 8 union elements`
+src/synth_containers/tracing/native_evaluation.py: error[unresolved-attribute] Attribute `bundle_id` is not defined on `None` in union `TraceEvidenceBundleV5 | None`
+src/synth_containers/tracing/native_evaluation.py: error[unresolved-attribute] Attribute `content_digest` is not defined on `None` in union `TraceEvidenceBundleV5 | None`
+src/synth_containers/tracing/projections/v4.py: error[invalid-argument-type] Argument is incorrect: Expected `Literal["system", "user", "assistant", "tool"]`, found `str`
+src/synth_containers/tracing/research.py: error[invalid-argument-type] Argument to bound method `ResearchIndex.rows` is incorrect: Expected `str`, found `Unknown | None`
+src/synth_containers/tracing/research.py: error[unsupported-operator] Operator `-` is not supported between two objects of type `Unknown | None`
+src/synth_containers/tracing/streaming/lifecycle.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/tracing/streaming/lifecycle.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/tracing/streaming/lifecycle.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/tracing/streaming/lifecycle.py: error[unresolved-attribute] Attribute `get` is not defined on `None` in union `Any | None | dict[Unknown, Unknown]`
+src/synth_containers/tracing/validation/validator.py: error[invalid-argument-type] Method `__getitem__` of type `bound method dict[JudgmentStatus, set[str]].__getitem__(key: JudgmentStatus, /) -> set[str]` cannot be called with key of type `str` on object of type `dict[JudgmentStatus, set[str]]`
+src/synth_containers/tracing/validation/validator.py: error[invalid-argument-type] Method `__getitem__` of type `bound method dict[Visibility, int].__getitem__(key: Visibility, /) -> int` cannot be called with key of type `str` on object of type `dict[Visibility, int]`
+src/synth_containers/tracing/validation/validator.py: error[invalid-argument-type] Method `__getitem__` of type `bound method dict[Visibility, int].__getitem__(key: Visibility, /) -> int` cannot be called with key of type `str` on object of type `dict[Visibility, int]`
+src/synth_containers/tunnels/relay.py: error[invalid-argument-type] Argument to bound method `SynthTunnelRelayAgent._send_response` is incorrect: Expected `Mapping[str, Any]`, found `Message[str, str]`
+src/synth_containers/tunnels/relay.py: error[invalid-method-override] Invalid override of method `redirect_request`: Definition is incompatible with `HTTPRedirectHandler.redirect_request`

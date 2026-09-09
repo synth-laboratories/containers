@@ -85,6 +85,11 @@ jobs:
           enable-cache: true
           python-version: "3.11"
 
+      - name: Lint source and reject new type debt
+        run: |
+          uv run --locked --group dev ruff check src
+          python3 scripts/check-type-debt.py
+
       # Run every test, including compatibility and task-catalog contracts.
       - name: Run the test suite
         run: |
