@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from ..canonical import canonical_bytes, bytes_digest, record_id, utc_now
+from ..canonical import canonical_bytes, bytes_digest, record_id
 from ..models.actors import ActorKind, ActorV5, CoverageState, SessionCoverageV5, SessionV5
 from ..models.completeness import CaptureStatus, TraceCompletenessV5, TraceLifecycleV5, TraceStatus
 from ..models.document import TraceCaptureSummaryV5, TraceDocumentV5

@@ -29,7 +29,6 @@ from .runtime import runtime_for
 from .seal import seal_rollout_log, validate_rollout_seal
 from .targets import (
     PolicyInstallStatus,
-    TargetRuntimeKind,
     TargetSpec,
     TaskInstanceStatus,
     advertised_reward_authority,

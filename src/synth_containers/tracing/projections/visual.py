@@ -279,7 +279,6 @@ def _append_coordination_items(
     graph = document.coordination
     if graph is None:
         return
-    message_by_id = {item.message_id: item for item in document.messages}
     actor_by_id = {item.actor_id: item for item in document.actors}
     if _visible("private", visibility_ceiling):
         for group in graph.actor_groups:

@@ -8,11 +8,19 @@ packages in this monorepo.
 Run from `packages/synth-containers/`:
 
 ```bash
+uv run --group dev pytest tests
 uv run --group dev ruff check src
 uv run --group dev ty check src
 uv build
 uv run --group dev twine check dist/*
 ```
+
+`ruff check`, `uv build` and `twine check` are clean. `pytest tests` has eight
+known failures — two `test_after_bind_surface` cases, the four
+`test_container_compat_conformance` targets, and two `test_task_catalog` cases —
+which predate this gate being declared. `ty check src` reports 173 diagnostics,
+mostly `invalid-argument-type` and `unresolved-attribute`; annotating that
+surface is separate work. Neither is a licence to add more.
 
 ## Register a local development build
 

@@ -376,7 +376,8 @@ class JesterkyRunner:
             argv.extend(["--effort", str(effort)])
         events.append({"at": utc_now(), "kind": "jesterky_cli", "argv": argv[1:], "actor": self.actor, "model": model})
         env = {**os.environ, **self.extra_env}
-        if tools_url: env["JESTERKY_TRACE_TOOLS_URL"] = tools_url
+        if tools_url:
+            env["JESTERKY_TRACE_TOOLS_URL"] = tools_url
         env.setdefault("JESTERKY_STATE_ROOT", str(workspace / "jesterky-state"))
         if str(model or '').startswith('openrouter/'):
             version = subprocess.check_output([*self.command, '--version'], text=True, timeout=10).strip()
@@ -413,21 +414,28 @@ class JesterkyRunner:
                        "total": len(jobs), "pending": [j["shard_id"] for j in jobs if j["shard_id"] not in completed_shards]}
             temp = receipts_path.with_suffix(f".{context.job.job_id}.tmp")
             with temp.open("w") as handle:
-                json.dump(receipt, handle, sort_keys=True); handle.flush(); os.fsync(handle.fileno())
+                json.dump(receipt, handle, sort_keys=True)
+                handle.flush()
+                os.fsync(handle.fileno())
             temp.replace(receipts_path)
             return receipt
 
         def retain_journal():
-            if not journal_path.is_file(): return
+            if not journal_path.is_file():
+                return
             records = []
             for line in journal_path.read_text().splitlines():
-                try: event = json.loads(line)
-                except json.JSONDecodeError: continue  # a killed writer may leave an incomplete final row
-                if event.get("addr", {}).get("run_id") != f"ann-{context.job.job_id}": continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue  # a killed writer may leave an incomplete final row
+                if event.get("addr", {}).get("run_id") != f"ann-{context.job.job_id}":
+                    continue
                 kind = event.get("kind")
                 if kind == {"kind": "actor_invoked"}:
                     records.append({"addr": event["addr"], "outputs": event.get("payload", {}).get("outputs")})
-            if records: retain_records(records)
+            if records:
+                retain_records(records)
 
         try:
             process = subprocess.Popen(argv, cwd=workspace, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
