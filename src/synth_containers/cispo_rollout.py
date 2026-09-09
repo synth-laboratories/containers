@@ -381,7 +381,9 @@ class AttemptRecordV1(JsonDataclassMixin):
     schema_version: str = ATTEMPT_SCHEMA_VERSION
 
     def to_dict(self) -> dict[str, Any]:
-        payload = super().to_dict()
+        # slots=True replaces the class on Python 3.11; zero-argument super()
+        # retains the original class cell and raises TypeError on this path.
+        payload = JsonDataclassMixin.to_dict(self)
         # ``jsonable`` walks the dataclass; the correlation must leave exactly as
         # it arrived rather than as this module's storage shape.
         payload["correlation"] = self.correlation.to_dict()

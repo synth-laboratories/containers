@@ -41,6 +41,24 @@ from synth_containers.tracing.models.standards import (
 )
 
 
+def test_start_completes_recovery_before_background_dispatch(tmp_path: Path, monkeypatch) -> None:
+    service, _ = _service(tmp_path, CountingRunner())
+    original = service.recover_interrupted
+    recovery_threads = []
+
+    def recover():
+        recovery_threads.append(threading.current_thread())
+        return original()
+
+    monkeypatch.setattr(service, "recover_interrupted", recover)
+    scheduler = AnnotationScheduler(service)
+    try:
+        scheduler.start()
+        assert recovery_threads == [threading.current_thread()]
+    finally:
+        scheduler.stop()
+
+
 class CountingRunner:
     """Deterministic-class runner that records peak concurrency and sleeps a little."""
 

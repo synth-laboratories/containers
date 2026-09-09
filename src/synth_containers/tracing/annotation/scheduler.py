@@ -242,8 +242,6 @@ class AnnotationScheduler:
         return started
 
     def _loop(self) -> None:
-        self.service.recover_interrupted()
-        self.enqueue_prepared()
         while not self._stop.is_set():
             self.dispatch_once()
             now = time.monotonic()
@@ -258,10 +256,17 @@ class AnnotationScheduler:
                 self._lock.wait(self.limits.poll_seconds)
 
     def start(self) -> "AnnotationScheduler":
-        if self._dispatcher is None:
-            self._stop.clear()
-            self._dispatcher = threading.Thread(target=self._loop, name="annotation-scheduler", daemon=True)
-            self._dispatcher.start()
+        with self._lock:
+            if self._dispatcher is None:
+                # Recovery must finish before start() returns: drain() may
+                # immediately dispatch jobs on the caller's thread. Background
+                # recovery used to misclassify those live jobs as disconnected.
+                if not self._running:
+                    self.service.recover_interrupted()
+                self.enqueue_prepared()
+                self._stop.clear()
+                self._dispatcher = threading.Thread(target=self._loop, name="annotation-scheduler", daemon=True)
+                self._dispatcher.start()
         return self
 
     def stop(self, *, timeout: float = 60.0) -> None:
