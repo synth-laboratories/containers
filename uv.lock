@@ -786,7 +786,7 @@ wheels = [
 
 [[package]]
 name = "synth-containers"
-version = "0.4.2.dev20260908"
+version = "0.4.2.dev20260909"
 source = { editable = "." }
 dependencies = [
     { name = "certifi" },

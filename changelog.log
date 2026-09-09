@@ -1,5 +1,14 @@
 # synth-containers changelog
 
+## 2026-09-09
+
+* `0.4.2.dev20260909`: made the declared `ruff check src` gate pass; the eleven
+  `harbor_environment` re-exports missing from `__all__` were a public-surface
+  bug, not a style nit.
+* Added `pytest` to the dev dependencies and to the documented release gate. The
+  package had no test runner in any declared dependency.
+* Regenerated `uv.lock`, which still named `0.4.2.dev20260903`.
+
 ## 2026-08-13
 
 * Added a no-argument command that registers immutable local development builds for Workshop.
