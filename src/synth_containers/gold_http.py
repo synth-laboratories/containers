@@ -24,6 +24,7 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
+from urllib.parse import parse_qs, urlparse
 
 if TYPE_CHECKING:
     import httpx
@@ -46,6 +47,16 @@ PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 ACTION_KEY = "action"
 
 
+def _is_omniscient_render(url: str) -> bool:
+    """True for ``/render.png`` with no ``viewer`` — never persist that as a hero frame."""
+
+    parsed = urlparse(url)
+    if not parsed.path.endswith("/render.png"):
+        return False
+    viewers = [value for value in parse_qs(parsed.query).get("viewer", []) if value.strip()]
+    return not viewers
+
+
 @dataclass
 class StepResult:
     observation: dict[str, Any]
@@ -57,6 +68,10 @@ class StepResult:
     env_steps: int
     frame_url: str | None = None
     frame_bytes: bytes | None = None
+    # Per-hero ego PNGs keyed by agent id (e.g. agent_0). gold_episode.py should
+    # persist these with persist_frame(step, payload, name=agent_id); this
+    # adapter only fetches them. Never includes omniscient render.png.
+    view_frames: dict[str, bytes] = field(default_factory=dict)
 
 
 class GoldFrameMissing(RuntimeError):
@@ -216,7 +231,10 @@ class GoldHttpWorld:
     engine: str = "gold"
     require_frames: bool = False
     frame_path: str = "/rollouts/{rollout_id}/frames/{env_steps}.png"
+    view_frame_path: str = ""
     request_timeout_seconds: float = 60.0
+    # Merged into POST /rollouts (e.g. DungeonGrid carried ``party``).
+    reset_extras: dict[str, Any] = field(default_factory=dict)
     rollout_id: str | None = field(default=None, init=False)
     previous_total_reward: float = field(default=0.0, init=False)
     _native_digests: list[str] = field(default_factory=list, init=False)
@@ -236,14 +254,17 @@ class GoldHttpWorld:
         # replacement, not accumulation.
         self.close()
         self.max_steps = int(max_steps or self.max_steps)
+        body: dict[str, Any] = {
+            "task": self.task_payload(int(seed), self.max_steps),
+            "seed": int(seed),
+            "telemetry": {"enabled": True},
+        }
+        if self.reset_extras:
+            body.update(self.reset_extras)
         payload = self._request(
             "POST",
             "/rollouts",
-            {
-                "task": self.task_payload(int(seed), self.max_steps),
-                "seed": int(seed),
-                "telemetry": {"enabled": True},
-            },
+            body,
         )
         self.rollout_id = str(payload.get("rollout_id") or "")
         if not self.rollout_id:
@@ -271,7 +292,10 @@ class GoldHttpWorld:
         rollout_id = self.rollout_id
         if rollout_id is None:
             return
-        self._request("DELETE", f"/rollouts/{rollout_id}")
+        # Engines may reap a terminal rollout before the platform's finally
+        # block runs.  A missing session is already the desired postcondition;
+        # retain fail-closed handling for every other HTTP or transport error.
+        self._request("DELETE", f"/rollouts/{rollout_id}", allow_not_found=True)
         self.rollout_id = None
         self.previous_total_reward = 0.0
         self._native_digests = []
@@ -283,6 +307,11 @@ class GoldHttpWorld:
             "POST", f"/rollouts/{self.rollout_id}/step", {ACTION_KEY: action}
         )
         return self._result(payload)
+
+    def readout(self) -> dict[str, Any]:
+        if self.rollout_id is None:
+            raise RuntimeError(f"{self.engine} gold readout before reset")
+        return self._request("GET", f"/rollouts/{self.rollout_id}/readout")
 
     def checkpoint(self) -> dict[str, Any]:
         if self.rollout_id is None:
@@ -377,6 +406,9 @@ class GoldHttpWorld:
                 rollout_id=self.rollout_id, env_steps=env_steps
             )
             frame_bytes = self._request_frame(frame_url)
+        view_frames: dict[str, bytes] = {}
+        if self.view_frame_path and self.rollout_id is not None:
+            view_frames = self._request_view_frames(public, private, env_steps)
         return StepResult(
             observation=enriched,
             reward=reward,
@@ -387,26 +419,63 @@ class GoldHttpWorld:
             env_steps=env_steps,
             frame_url=frame_url,
             frame_bytes=frame_bytes,
+            view_frames=view_frames,
         )
 
-    def _request_frame(self, url: str) -> bytes | None:
+    def _hero_ids(self, public: dict[str, Any], private: dict[str, Any]) -> list[str]:
+        turn_order = public.get("turn_order")
+        if isinstance(turn_order, list):
+            return [str(item).strip() for item in turn_order if str(item).strip()]
+        views = private.get("views")
+        if isinstance(views, dict):
+            heroes = views.get("heroes")
+            if isinstance(heroes, dict):
+                return [str(key).strip() for key in heroes if str(key).strip()]
+        return []
+
+    def _request_view_frames(
+        self, public: dict[str, Any], private: dict[str, Any], env_steps: int
+    ) -> dict[str, bytes]:
+        """Best-effort per-hero ego PNGs. A missing viewer never fails the step."""
+
+        frames: dict[str, bytes] = {}
+        for agent_id in self._hero_ids(public, private):
+            url = self.base_url + self.view_frame_path.format(
+                rollout_id=self.rollout_id, env_steps=env_steps, agent_id=agent_id
+            )
+            if _is_omniscient_render(url):
+                continue
+            payload = self._request_frame(url, required=False)
+            if payload is not None:
+                frames[agent_id] = payload
+        return frames
+
+    def _request_frame(self, url: str, *, required: bool | None = None) -> bytes | None:
         """Copy the transient gold frame into the relay before the next step."""
 
+        must = self.require_frames if required is None else required
         try:
             response = engine_client().get(url, headers={"Accept": "image/png"}, timeout=10.0)
             response.raise_for_status()
             payload = response.content
         except Exception as exc:  # noqa: BLE001
-            if self.require_frames:
+            if must:
                 raise GoldFrameMissing(f"{self.engine} gold frame missing at {url}") from exc
             return None
         if payload.startswith(PNG_MAGIC):
             return payload
-        if self.require_frames:
+        if must:
             raise GoldFrameMissing(f"{self.engine} gold frame at {url} is not a PNG")
         return None
 
-    def _request(self, method: str, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _request(
+        self,
+        method: str,
+        path: str,
+        body: dict[str, Any] | None = None,
+        *,
+        allow_not_found: bool = False,
+    ) -> dict[str, Any]:
         encoded = None if body is None else json.dumps(body).encode("utf-8")
         headers = {"Accept": "application/json"}
         if encoded is not None:
@@ -426,6 +495,10 @@ class GoldHttpWorld:
             # here as one message. Keep that contract.
             response.raise_for_status()
             payload = json.loads(response.content.decode("utf-8"))
+        except httpx.HTTPStatusError as exc:
+            if allow_not_found and exc.response.status_code == 404:
+                return {}
+            raise RuntimeError(f"{self.engine} gold unreachable at {self.base_url}{path}") from exc
         except httpx.HTTPError as exc:
             raise RuntimeError(f"{self.engine} gold unreachable at {self.base_url}{path}") from exc
         if not isinstance(payload, dict):

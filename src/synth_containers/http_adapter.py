@@ -227,6 +227,7 @@ def create_reference_app(
     app = FastAPI(title=title)
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
     telemetry_by_rollout: dict[str, dict[str, Any]] = {}
+    prepared_identity_by_rollout: dict[str, dict[str, Any]] = {}
     event_logs: dict[str, RolloutEventLog] = {}
     start_requests: dict[str, dict[str, Any]] = {}
     start_responses: dict[str, dict[str, Any]] = {}
@@ -450,6 +451,23 @@ def create_reference_app(
         if telemetry is None or not telemetry.enabled:
             raise HTTPException(status_code=400, detail="prepare_requires_telemetry")
         rollout_id = request.rollout_id or f"roll_{uuid.uuid4().hex[:12]}"
+        seed = request.seed
+        if seed is None and request.task_instance_id:
+            prefix, separator, value = request.task_instance_id.partition(":")
+            if separator and prefix == "seed":
+                try:
+                    seed = int(value)
+                except ValueError:
+                    pass
+        task_instance_id = request.task_instance_id
+        if task_instance_id is None and seed is not None:
+            task_instance_id = f"seed:{seed}"
+        requested_identity = {
+            "seed": seed,
+            "task_instance_id": task_instance_id,
+            "policy_ref": dict(request.policy_ref),
+            "policy_revision_id": request.policy_revision_id,
+        }
         if rollout_id in event_logs:
             prepared = telemetry_by_rollout[rollout_id]
             requested_binding = (telemetry.transport, telemetry.retention)
@@ -462,8 +480,20 @@ def create_reference_app(
                     status_code=409,
                     detail=f"rollout_prepare_identity_conflict:{rollout_id}",
                 )
+            prepared_identity = prepared_identity_by_rollout.get(rollout_id)
+            if prepared_identity != requested_identity:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": "rollout_prepare_identity_conflict",
+                        "rollout_id": rollout_id,
+                        "prepared": prepared_identity,
+                        "requested": requested_identity,
+                    },
+                )
             return {
                 "rollout_id": rollout_id,
+                **requested_identity,
                 "stream": stream_descriptor(
                     rollout_id=rollout_id,
                     stream_id=event_logs[rollout_id].stream_id,
@@ -477,6 +507,7 @@ def create_reference_app(
         log = _new_event_log(rollout_id, stream_id)
         event_logs[rollout_id] = log
         telemetry_by_rollout[rollout_id] = telemetry.model_dump(mode="json")
+        prepared_identity_by_rollout[rollout_id] = requested_identity
         log.append_control(CONTROL_SUBSCRIBED, log.subscribed_payload())
         descriptor = stream_descriptor(
             rollout_id=rollout_id,
@@ -484,7 +515,7 @@ def create_reference_app(
             bound_transport=bound,
             retention=telemetry.retention,
         )
-        return {"rollout_id": rollout_id, "stream": descriptor}
+        return {"rollout_id": rollout_id, **requested_identity, "stream": descriptor}
 
     @app.get("/rollouts/{rollout_id}/stream")
     async def rollout_stream(rollout_id: str, request: Request) -> StreamingResponse:

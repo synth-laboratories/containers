@@ -83,6 +83,7 @@ def create_compat_app(
             "instance_id": instance_id or None,
             "image_digest": image_digest or None,
             "producer_source_revision": producer_revision or None,
+            "environment_version": spec.environment_version,
         }
 
     def _sse_event(rollout_id: str, envelope: Any) -> dict[str, Any]:
@@ -339,6 +340,18 @@ def create_compat_app(
     async def frame_asset(rollout_id: str, step: int) -> FileResponse:
         try:
             frame_path = RolloutEventLog.frame_asset_path(platform.storage_root, rollout_id, step)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="frame_not_found") from exc
+        if not frame_path.is_file():
+            raise HTTPException(status_code=404, detail="frame_not_found")
+        return FileResponse(frame_path, media_type="image/png")
+
+    @app.get("/rollouts/{rollout_id}/frames/{step}/{name}.png")
+    async def named_frame_asset(rollout_id: str, step: int, name: str) -> FileResponse:
+        try:
+            frame_path = RolloutEventLog.frame_asset_path(
+                platform.storage_root, rollout_id, step, name
+            )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail="frame_not_found") from exc
         if not frame_path.is_file():

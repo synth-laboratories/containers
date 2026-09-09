@@ -26,7 +26,7 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -247,14 +247,25 @@ def run_stack(
         _teardown()
         return 0
 
-    _block_until_signal(handle, started)
+    _block_until_signal(handle, started, children)
     handle.down()
     _teardown()
     return 0
 
 
-def _block_until_signal(handle: "Any", started: Sequence[StartedChild]) -> None:
-    """Wait for SIGTERM/SIGINT, or for any child to die (fail closed)."""
+def _block_until_signal(
+    handle: "Any",
+    started: list[StartedChild],
+    children: Sequence[ChildProcess],
+) -> None:
+    """Wait for shutdown while keeping the evidence facade alive.
+
+    A baked engine can exit after its final session is deleted. Taking PID 1
+    down with it also destroys the facade that owns terminal journals, rewards,
+    and trace bundles. Restart the child on its pinned internal port so new
+    work can fail or recover independently while settled evidence remains
+    readable. Repeated crashes still fail closed after a small bounded limit.
+    """
 
     done = threading.Event()
 
@@ -267,11 +278,36 @@ def _block_until_signal(handle: "Any", started: Sequence[StartedChild]) -> None:
         except (ValueError, OSError):
             pass
     del handle
+    restart_limit = max(0, int(os.environ.get("SYNTH_CHILD_RESTART_LIMIT", "3")))
+    restart_counts = [0 for _ in started]
     try:
         while not done.wait(timeout=1.0):
-            dead = [child.name for child in started if not child.alive()]
-            if dead:
-                sys.stderr.write(f"[pid1] child exited, taking the container down: {dead}\n")
-                return
+            for index, child in enumerate(tuple(started)):
+                if child.alive():
+                    continue
+                returncode = child.process.returncode
+                if restart_counts[index] >= restart_limit:
+                    sys.stderr.write(
+                        f"[pid1] child restart limit reached: {child.name} "
+                        f"exit={returncode} attempts={restart_counts[index]}\n"
+                    )
+                    return
+                restart_counts[index] += 1
+                sys.stderr.write(
+                    f"[pid1] child exited; preserving facade and restarting: "
+                    f"{child.name} exit={returncode} "
+                    f"attempt={restart_counts[index]}/{restart_limit}\n"
+                )
+                sys.stderr.flush()
+                try:
+                    pinned = replace(children[index], port=child.port)
+                    started[index] = start_child(pinned)
+                except Exception as exc:
+                    sys.stderr.write(
+                        f"[pid1] child restart failed: {child.name}: {type(exc).__name__}\n"
+                    )
+                    sys.stderr.flush()
+                    if restart_counts[index] >= restart_limit:
+                        return
     except KeyboardInterrupt:
         return

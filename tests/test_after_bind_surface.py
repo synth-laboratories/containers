@@ -60,6 +60,20 @@ def test_info_classifies_families_and_advertises_policy_refs() -> None:
     harbor_pins = {(row["harness"], row["config"]) for row in harbor["policy_refs"]}
     docker_pins = {(row["harness"], row["config"]) for row in docker["policy_refs"]}
     assert harbor_pins == docker_pins == {("harbor_fused", "luna_med"), ("harbor_fused", "sol_med")}
+    assert {key: harbor["capabilities"][key] for key in ("protocol", "operations", "policy_refs")} == {
+        "protocol": "synth.container.live-eval.v1",
+        "operations": {
+            "rollouts.prepare": True,
+            "rollouts.start_prepared": True,
+            "rollouts.get": True,
+            "rollouts.poll": True,
+            "reward.get": True,
+            "trace_v5.capture": True,
+            "annotation.live": True,
+            "annotation.protocol.put": True,
+        },
+        "policy_refs": harbor["policy_refs"],
+    }
 
     assert mock["runtime_family"] == relay["runtime_family"] == "digbench"
     assert mock["live_frames"] == relay["live_frames"] == "unsupported"
@@ -73,11 +87,24 @@ def test_info_classifies_families_and_advertises_policy_refs() -> None:
     }
 
 
-def test_health_names_runtime_family() -> None:
+def test_health_names_runtime_family(monkeypatch) -> None:
+    monkeypatch.setenv("SYNTH_CONTAINER_INSTANCE_ID", "docker:abc123")
+    monkeypatch.setenv("SYNTH_CONTAINER_IMAGE_DIGEST", "sha256:" + "a" * 64)
+    monkeypatch.setenv("SYNTH_CONTAINER_PRODUCER_SOURCE_REVISION", "b" * 40)
     harbor = TestClient(create_compat_app("harbor_public")).get("/health").json()
     assert harbor["runtime_family"] == "harbor"
     assert harbor["environment_ref"] == "env:harbor_sandbox"
     assert harbor["target"] == "harbor_public"
+    assert harbor["runtime_identity"] == {
+        "schema_version": "synth.container-runtime-identity.v1",
+        "instance_id": "docker:abc123",
+        "image_digest": "sha256:" + "a" * 64,
+        "producer_source_revision": "b" * 40,
+        "environment_version": None,
+    }
+
+    info = TestClient(create_compat_app("harbor_public")).get("/info").json()
+    assert info["runtime_identity"] == harbor["runtime_identity"]
 
 
 def test_prepare_get_returns_prepared_before_start() -> None:

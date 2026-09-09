@@ -61,6 +61,9 @@ class TrialImage:
     result_path: str = "logs/verifier/result.json"
     environment: Mapping[str, str] = field(default_factory=dict)
     verify_timeout_seconds: float = 900.0
+    # Verifiers are offline by default. A task whose trusted scorer must query
+    # a host-local service can opt into Docker's ordinary bridge network.
+    verifier_network: str | None = "none"
     allow_unpinned: bool = False
     # Some benchmarks grade in a SEPARATE image that carries hidden tests the
     # agent must never see (DeepSWE builds one FROM the agent image). Empty
@@ -443,6 +446,9 @@ class NestedTrialRuntime:
             if artifact_root.exists():
                 shutil.rmtree(artifact_root)
             artifact_root.mkdir(parents=True)
+            # Harbor graders conventionally write under /logs/verifier but
+            # some TBLite scripts assume that subdirectory already exists.
+            (artifact_root / "verifier").mkdir(parents=True, exist_ok=True)
             mounts[str(workspace.to_host(artifact_root))] = trial.logs_mount
         environment = {
             **dict(trial.environment),
@@ -548,6 +554,7 @@ class NestedTrialRuntime:
             require_pinned=not trial.allow_unpinned,
             timeout_seconds=trial.verify_timeout_seconds,
             allow_nonzero=True,
+            network=trial.verifier_network,
         ).run()
         log.append(
             "nested.verified",
@@ -560,7 +567,7 @@ class NestedTrialRuntime:
                 # isolation the run never had. This describes what was actually
                 # configured for THIS verification, not what was intended.
                 "isolation_mechanism": _isolation_mechanism(trial),
-                "verifier_network": "none",
+                "verifier_network": trial.verifier_network,
                 "workspace_mounted_into_verifier": bool(trial.verify_mounts_workspace),
                 "reward_outside_agent_workspace": bool(trial.logs_mount),
                 # What actually crossed. A receipt that says "not the workspace"
@@ -579,11 +586,12 @@ class NestedTrialRuntime:
             },
         )
         payload = _read_json(artifact_root / trial.result_path)
-        # A verifier that failed did not grade. Reward files live in the
-        # workspace the agent just wrote to, so trusting one written by a run
-        # that exited non-zero means trusting whatever was already on disk --
-        # including a value the agent planted before the grader ever ran.
-        if result.exit_code != 0 and not trial.reward_on_nonzero_exit:
+        # Workspace-local reward files can be planted by the agent, so a
+        # non-zero verifier is ungraded unless the trial opts in. A logs mount
+        # is outside the agent tree and is wiped at the start of this method:
+        # a number written there is the grader's, including a scored zero.
+        trust_written_reward = bool(trial.reward_on_nonzero_exit) or bool(trial.logs_mount)
+        if result.exit_code != 0 and not trust_written_reward:
             return None, {
                 "exit_code": result.exit_code,
                 "reward_status": "verifier_failed",
@@ -598,6 +606,12 @@ class NestedTrialRuntime:
                 reward = float(value)
         if reward is None:
             reward = _read_float(artifact_root / trial.reward_path)
+        if reward is None and result.exit_code != 0:
+            return None, {
+                "exit_code": result.exit_code,
+                "reward_status": "verifier_failed",
+                **payload,
+            }
         return reward, {"exit_code": result.exit_code, **payload}
 
 

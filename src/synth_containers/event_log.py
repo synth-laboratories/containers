@@ -23,6 +23,7 @@ SCHEMA_STREAM_EVENT = "synth.trace-stream-event.v1"
 SCHEMA_EVENT_CHAIN = "synth.rollout.event-chain.v1"
 SCHEMA_ENVELOPE_DIGEST = "synth.envelope-digest.v2"
 _ROLLOUT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_FRAME_NAME = re.compile(r"^[A-Za-z0-9_]+$")
 
 DEFAULT_STREAM_RECONNECT = {
     "min_backoff_s": 1.0,
@@ -37,8 +38,40 @@ def validate_rollout_id(value: str) -> str:
     return value
 
 
+def _validate_frame_name(name: str) -> str:
+    if ".." in name or "/" in name or "\\" in name or not _FRAME_NAME.fullmatch(name):
+        raise ValueError("frame name must be a URL-safe token")
+    return name
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+
+# Event kinds that must survive compaction verbatim. Anything describing how a
+# rollout ended, or why it went wrong, is what someone reads a retained log to
+# find out; the bulk -- per-step frames, actions, entity transitions -- is
+# volume, not signal.
+COMPACTION_KEEP_KINDS = frozenset(
+    {
+        "episode_truncated",
+        "death",
+        "terminal_success",
+        "env.episode.closed",
+        "status",
+        "achievement_unlocked",
+    }
+)
+
+# Payload fields that mark an envelope as carrying a failure, whatever its kind.
+COMPACTION_ERROR_FIELDS = ("error", "failure", "failure_type", "invalid_parse", "sampler_failure")
+
+
+def _is_error_envelope(envelope: "LogEnvelope") -> bool:
+    if envelope.kind in COMPACTION_KEEP_KINDS:
+        return True
+    payload = envelope.payload
+    return any(payload.get(field) for field in COMPACTION_ERROR_FIELDS)
 
 
 @dataclass(slots=True)
@@ -308,6 +341,9 @@ class RolloutEventLog:
             self._changed.wait(timeout)
             return self._high_water > after or self.closed
 
+    _released: bool = False
+    _compacted: bool = False
+
     def append_control(self, kind: str, payload: dict[str, Any]) -> LogEnvelope:
         with self._lock:
             if self.closed:
@@ -346,6 +382,115 @@ class RolloutEventLog:
             self._items.append(envelope)
         self._notify()
         return envelope
+
+    def compact(self) -> dict[str, Any]:
+        """Shrink a closed log in RAM to errors plus a summary of the rest.
+
+        Disk is untouched and authoritative: `_persist` fsynced every envelope,
+        `recover` replays them, and `_rehydrate` restores full fidelity on
+        demand. So this only decides what stays cheap to answer *without* a disk
+        read -- and the questions worth answering cheaply are "how did it end"
+        and "what went wrong", not "what was on frame 212".
+
+        Compacting rather than releasing outright keeps a post-close poll useful
+        (errors survive verbatim) while dropping the volume: on a 50-call
+        episode the kept kinds are a few dozen envelopes against several hundred
+        of per-step chatter.
+        """
+
+        if self._released:
+            return {"compacted": False, "reason": "released"}
+        with self._lock:
+            if not self.closed:
+                return {"compacted": False, "reason": "open"}
+            if self._compacted:
+                return {"compacted": False, "reason": "already"}
+            kept: list[LogEnvelope] = []
+            dropped = 0
+            kinds: dict[str, int] = {}
+            lo = hi = None
+            for item in self._items:
+                if item.control or _is_error_envelope(item):
+                    kept.append(item)
+                    continue
+                dropped += 1
+                kinds[item.kind] = kinds.get(item.kind, 0) + 1
+                if item.sequence is not None:
+                    lo = item.sequence if lo is None else min(lo, item.sequence)
+                    hi = item.sequence if hi is None else max(hi, item.sequence)
+            if not dropped:
+                self._compacted = True
+                return {"compacted": False, "reason": "nothing_to_drop"}
+            summary = {
+                "record": "compacted_summary",
+                "dropped": dropped,
+                "kinds": dict(sorted(kinds.items())),
+                "covers": [lo, hi],
+                "high_water": self._high_water,
+                "note": "full fidelity remains on disk; a read reloads it",
+            }
+            # Deliberately a control record: control envelopes carry no sequence,
+            # so inserting one cannot collide with a real sequence number or open
+            # a gap that `recover` would fail closed on.
+            kept.append(
+                LogEnvelope(
+                    kind="log.compacted",
+                    payload=summary,
+                    sequence=None,
+                    control=True,
+                    ts=_utc_now(),
+                    digest=_digest("log.compacted", None, summary),
+                )
+            )
+            self._items = kept
+            self._compacted = True
+            return {"compacted": True, **summary}
+
+    def release(self) -> None:
+        """Drop the in-RAM envelopes of a closed log; disk stays authoritative.
+
+        Every rollout's full event list used to live in `PlatformState.logs`
+        for the lifetime of the container, with nothing ever evicting it -- no
+        pop, clear, del or prune anywhere. So gold's memory tracked *total
+        rollouts processed*, not concurrent ones, and a long run grew without
+        bound: RSS sat at 2.4 GiB after the producing runs had already been
+        killed. That is what exhausted a 25 GB Docker VM and had the kernel
+        SIGKILL the container mid-run (exit 137, OOMKilled=false because the
+        container had no cgroup limit to trip).
+
+        Releasing is lossless: `_persist` has already fsynced every envelope to
+        the journal, and `recover` replays it failing closed on gaps. A reader
+        arriving after release pays one disk read via `_rehydrate` and sees
+        byte-identical envelopes.
+        """
+
+        with self._lock:
+            if not self.closed or self._released:
+                return
+            self._items = []
+            self._released = True
+
+    def _rehydrate(self) -> None:
+        """Reload a released or compacted log on access; caller must not hold the lock.
+
+        Reads restore full fidelity rather than serving the compacted view,
+        because readers are not all ours: `craftax_gold/gepa.py` builds its
+        rollout response from `events_payload(rollout_id, 0, 10_000)`, and
+        silently handing that a summary would truncate the response instead of
+        failing. Compaction therefore reclaims memory only until something
+        actually asks -- which for old rollouts is usually never.
+        """
+        restored = RolloutEventLog.recover(
+            rollout_id=self.rollout_id,
+            stream_id=self.stream_id,
+            journal_path=self.journal_path,
+        )
+        with self._lock:
+            if not (self._released or self._compacted):
+                return
+            self._items = restored._items
+            self._released = False
+            self._compacted = False
 
     def mark_closed(self) -> None:
         with self._lock:
@@ -437,6 +582,8 @@ class RolloutEventLog:
 
     def after(self, sequence: int) -> list[LogEnvelope]:
         """Semantic events with sequence > `sequence`, plus control records when sequence == 0."""
+        if self._released or self._compacted:
+            self._rehydrate()
         with self._lock:
             out: list[LogEnvelope] = []
             for item in self._items:
@@ -456,19 +603,30 @@ class RolloutEventLog:
         return self.journal_path is not None
 
     @staticmethod
-    def frame_asset_path(storage_root: Path, rollout_id: str, step: int) -> Path:
+    def frame_asset_path(
+        storage_root: Path, rollout_id: str, step: int, name: str | None = None
+    ) -> Path:
         validate_rollout_id(rollout_id)
         if isinstance(step, bool) or not isinstance(step, int) or step < 0:
             raise ValueError("frame step must be a non-negative integer")
+        filename = f"{step}.png"
+        if name is not None:
+            filename = f"{step}.{_validate_frame_name(name)}.png"
         rollout_key = __import__("hashlib").sha256(rollout_id.encode("utf-8")).hexdigest()
-        return storage_root / "frame_assets" / rollout_key / f"{step}.png"
+        return storage_root / "frame_assets" / rollout_key / filename
 
-    def persist_frame(self, step: int, payload: bytes) -> str | None:
-        """Durably store a PNG before its availability event becomes visible."""
+    def persist_frame(self, step: int, payload: bytes, *, name: str | None = None) -> str | None:
+        """Durably store a PNG before its availability event becomes visible.
+
+        ``name`` is a per-hero token (``agent_0``). The primary (active ego)
+        frame keeps ``{step}.png`` / ``/rollouts/{id}/frames/{step}.png``.
+        """
+        if name is not None:
+            _validate_frame_name(name)
         if self.journal_path is None or not payload.startswith(b"\x89PNG\r\n\x1a\n"):
             return None
         storage_root = self.journal_path.parent.parent
-        path = self.frame_asset_path(storage_root, self.rollout_id, step)
+        path = self.frame_asset_path(storage_root, self.rollout_id, step, name)
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
         with temporary.open("wb") as handle:
@@ -481,13 +639,15 @@ class RolloutEventLog:
             os.fsync(directory_fd)
         finally:
             os.close(directory_fd)
-        return f"/rollouts/{self.rollout_id}/frames/{step}.png"
+        if name is None:
+            return f"/rollouts/{self.rollout_id}/frames/{step}.png"
+        return f"/rollouts/{self.rollout_id}/frames/{step}/{name}.png"
 
     def _persist(self, row: dict[str, Any]) -> None:
         """Durably append before making a record visible to poll/SSE/WS consumers."""
+        assert_no_secrets(row, where=f"rollout_event_log:{self.rollout_id}")
         if self.journal_path is None:
             return
-        assert_no_secrets(row, where=f"rollout_event_log:{self.rollout_id}")
         self.journal_path.parent.mkdir(parents=True, exist_ok=True)
         encoded = json.dumps(row, sort_keys=True, separators=(",", ":"), default=str)
         with self.journal_path.open("a", encoding="utf-8") as handle:

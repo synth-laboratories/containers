@@ -157,6 +157,28 @@ def materialize_harbor_trace_bundle(
                 "frame_reference_count": len(event_artifact_ids),
             }
         )
+        definition = spec.reward_definition
+        terminal_reward = redacted_source["pin"].get("terminal_reward") or {}
+        if definition is not None and terminal_reward.get("status") == "scored":
+            from ..tracing.native_evaluation import attach_native_evaluation
+            value = terminal_reward.get("value")
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                raise ValueError("scored terminal reward requires a numeric value")
+            attachment = attach_native_evaluation(bundle.root, payload={
+                "schema_version": "synth.containers.terminal-reward.v1",
+                "authority": f"{spec.task_family or spec.task_id or spec.environment_ref}:environment",
+                "trace_id": document.trace_id,
+                "task_id": spec.task_id or spec.environment_ref,
+                "status": "completed",
+                "evaluated_execution_status": status,
+                "reward": {**definition, "value": value,
+                    "provenance": "Compatibility runtime terminal reward aggregation"},
+            }, source_name="terminal-reward.json")
+            if not attachment["validation_valid"]:
+                raise ValueError("typed terminal reward failed validation")
+            manifest_digest = str(bundle.read_manifest()["content_digest"])
+        else:
+            manifest_digest = manifest.content_digest
         _verify_frame_artifact_bindings(bundle, document.to_dict())
         archive = bundle.archive_bytes()
 
@@ -165,7 +187,7 @@ def materialize_harbor_trace_bundle(
         archive_path=output_path,
         trace_id=document.trace_id,
         trace_digest=document.content_digest,
-        bundle_digest=manifest.content_digest,
+        bundle_digest=manifest_digest,
         archive_digest=bytes_digest(archive),
         byte_size=len(archive),
     )
@@ -266,13 +288,19 @@ def _retain_frame_artifacts(
             raise ValueError("native_frame_sequence_invalid")
         if isinstance(step, bool) or not isinstance(step, int) or step < 0:
             raise ValueError(f"native_frame_step_invalid:sequence={sequence}")
-        expected_url = f"/rollouts/{rollout_id}/frames/{step}.png"
+        viewer = payload.get("viewer")
+        if viewer is not None and not isinstance(viewer, str):
+            raise ValueError(f"native_frame_viewer_invalid:sequence={sequence}")
+        expected_url = (
+            f"/rollouts/{rollout_id}/frames/{step}/{viewer}.png" if viewer is not None
+            else f"/rollouts/{rollout_id}/frames/{step}.png"
+        )
         if payload.get("url") != expected_url:
             raise ValueError(f"native_frame_url_invalid:sequence={sequence}:expected={expected_url}")
         if log.journal_path is None:
             raise ValueError(f"native_frame_artifact_missing:sequence={sequence}:step={step}")
         path = RolloutEventLog.frame_asset_path(
-            log.journal_path.parent.parent, rollout_id, step
+            log.journal_path.parent.parent, rollout_id, step, name=viewer
         )
         if not path.is_file():
             raise ValueError(f"native_frame_artifact_missing:sequence={sequence}:step={step}")
@@ -353,7 +381,7 @@ def _verify_frame_artifact_bindings(
     for event in trace.get("events") or []:
         if not isinstance(event, dict):
             continue
-        detail = event.get("detail") if isinstance(event.get("detail"), dict) else {}
+        detail = event.get("payload") if isinstance(event.get("payload"), dict) else {}
         if event.get("event_type") != "frame" or detail.get("format") != "png":
             continue
         artifact_ids = event.get("artifact_ids") or []
@@ -449,7 +477,7 @@ def _document_from_source(
     rollout_id = str(source["rollout_id"])
     events_source = list(source.get("events") or [])
     trace_id = rollout_id
-    categories = [_event_category(str(item.get("kind") or "")) for item in events_source]
+    categories = [_event_actor_key(item) for item in events_source]
     category_order = tuple(dict.fromkeys(categories or ["orchestrator"]))
     actor_ids = {
         category: record_id("actor", kind="harbor_rollout", scope=(trace_id,), key=category)
@@ -520,15 +548,15 @@ def _document_from_source(
         ActorV5(
             actor_id=actor_ids[category],
             kind=_actor_kind(category),
-            display_name=f"Harbor {category}",
-            role=category,
+            display_name=category.removeprefix("agent:"),
+            role="agent" if category.startswith("agent:") else category,
             harness="harbor",
             model=model if category == "agent" else None,
             provider=provider if category == "agent" else None,
             policy_id=_first_string(policy_ref, "policy_id", "id") if category == "agent" else None,
             task_id=spec.target_id,
             visibility="private",
-            metadata={"source": "durable_event_journal", "target_id": spec.target_id},
+            metadata={"source": "durable_event_journal", "target_id": spec.target_id, **({"native_agent_id": category.removeprefix("agent:")} if category.startswith("agent:") else {})},
         ).sealed()
         for category in category_order
     )
@@ -540,7 +568,7 @@ def _document_from_source(
             ended_at=ended_at,
             started_sequence=1 if events_source else None,
             ended_sequence=len(events_source) if events_source else None,
-            status=SessionStatus.FAILED if _failed(status) else SessionStatus.COMPLETED,
+            status=SessionStatus.INTERRUPTED if status.lower() in {"cancelled", "interrupted", "truncated"} else SessionStatus.FAILED if _failed(status) else SessionStatus.COMPLETED,
             harness="harbor",
             provider=provider if category == "agent" else None,
             coverage=coverage,
@@ -562,8 +590,8 @@ def _document_from_source(
             # semantic affordance the rollout inspector uses for Focus mode
             # and readable event titles.
             event_type=str(item.get("kind") or EventType.APPLICATION),
-            actor_id=actor_ids[_event_category(str(item.get("kind") or ""))],
-            session_id=session_ids[_event_category(str(item.get("kind") or ""))],
+            actor_id=actor_ids[_event_actor_key(item)],
+            session_id=session_ids[_event_actor_key(item)],
             occurred_at=str(item["occurred_at"]),
             order=EventOrderV1(chronological_sequence=int(item["sequence"])),
             payload=_promoted_event_payload(item),
@@ -580,7 +608,7 @@ def _document_from_source(
         ).sealed()
         for item in events_source
     )
-    trace_status = TraceStatus.FAILED if _failed(status) else TraceStatus.COMPLETED
+    trace_status = TraceStatus.INTERRUPTED if status.lower() in {"cancelled", "interrupted", "truncated"} else TraceStatus.FAILED if _failed(status) else TraceStatus.COMPLETED
     document = TraceDocumentV5(
         trace_id=trace_id,
         trace_kind=TraceKind.AGENT_ROLLOUT,
@@ -675,6 +703,18 @@ def _document_from_source(
     return document, binding
 
 
+def _event_actor_key(item: dict[str, Any]) -> str:
+    kind = str(item.get("kind") or "")
+    payload = item.get("payload") or {}
+    # These producer events explicitly name who performed the action. A viewer
+    # on a frame or an actor mentioned in an observation is only a subject.
+    if kind in {"action", "action_applied", "span.step.opened", "span.step.closed"}:
+        actor = payload.get("agent_id") if isinstance(payload, dict) else None
+        if isinstance(actor, str) and actor:
+            return "agent:" + actor
+    return _event_category(kind)
+
+
 def _event_category(kind: str) -> str:
     normalized = kind.lower()
     if "verifier" in normalized or normalized.startswith("reward."):
@@ -706,7 +746,7 @@ def _promoted_event_payload(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def _actor_kind(category: str) -> ActorKind:
-    if category == "agent":
+    if category == "agent" or category.startswith("agent:"):
         return ActorKind.AGENT
     if category == "verifier":
         return ActorKind.VERIFIER

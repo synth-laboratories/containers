@@ -1,7 +1,6 @@
 import io
 import json
 import urllib.error
-
 import pytest
 
 from synth_containers.gold_http import StepResult
@@ -73,7 +72,6 @@ SUBGOAL_TOOLS = [
     *TOOLS,
 ]
 
-
 def test_workshop_capability_proxy_keeps_remote_provider_semantics() -> None:
     sampler = HttpSampler(
         {
@@ -93,7 +91,7 @@ def test_workshop_capability_proxy_keeps_remote_provider_semantics() -> None:
     assert sampler.local is False
     assert sampler.workshop_capability_proxy is True
     assert sampler.api_key_env == ""
-    assert sampler._auth_headers() == {}
+    assert sampler._auth_headers() == {"Authorization": "Bearer workshop-proxy"}
     assert payload["tool_choice"] == "required"
     assert payload["max_tokens"] == 384
     assert payload["reasoning"] == {"effort": "medium"}
@@ -118,7 +116,8 @@ def test_workshop_capability_proxy_never_forwards_explicit_provider_key(
     )
 
     assert sampler.api_key_env == ""
-    assert sampler._auth_headers() == {}
+    # Only the public sentinel is forwarded, never the explicit provider key.
+    assert sampler._auth_headers() == {"Authorization": "Bearer workshop-proxy"}
 
 
 def _http_error(
@@ -334,8 +333,6 @@ def test_qwen_text_lifts_goal_and_action_tool_calls_in_order() -> None:
     assert json.loads(message["tool_calls"][1]["function"]["arguments"]) == {
         "actions": ["left", "do"]
     }
-
-
 def test_reasoning_effort_alias_uses_openrouter_normalized_wire() -> None:
     sampler = HttpSampler(
         {
@@ -354,6 +351,63 @@ def test_reasoning_effort_alias_uses_openrouter_normalized_wire() -> None:
     assert payload["reasoning"] == {"effort": "low"}
 
 
+def test_groq_does_not_replay_assistant_reasoning_content() -> None:
+    sampler = HttpSampler(
+        {
+            "base_url": "https://api.groq.com/openai/v1",
+            "model": "openai/gpt-oss-120b",
+            "openai_compatible_local": False,
+            "effort": "low",
+        }
+    )
+    payload = sampler.wire_payload(
+        [
+            {"role": "user", "content": "Act."},
+            {
+                "role": "assistant",
+                "content": "",
+                "reasoning_content": "I should call the tool.",
+                "tool_calls": [
+                    {
+                        "id": "fc_1",
+                        "type": "function",
+                        "function": {
+                            "name": "craftax_interact",
+                            "arguments": '{"actions":["do"]}',
+                        },
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "fc_1", "content": "ok"},
+        ],
+        tools=TOOLS,
+    )
+    assistant = payload["messages"][1]
+    assert "reasoning_content" not in assistant
+    assert "reasoning" not in assistant
+    assert assistant["tool_calls"][0]["id"] == "fc_1"
+    assert payload["reasoning_effort"] == "low"
+
+
+def test_remote_sampler_explicitly_disables_provider_default_reasoning() -> None:
+    sampler = HttpSampler(
+        {
+            "base_url": (
+                "http://host.docker.internal:17654/cap/wcap_test/"
+                "v1/providers/openrouter"
+            ),
+            "model": "z-ai/glm-5.3-flash",
+            "enable_thinking": False,
+        }
+    )
+
+    payload = sampler.wire_payload(
+        [{"role": "user", "content": "Act."}], tools=TOOLS
+    )
+
+    assert payload["tool_choice"] == "required"
+    assert payload["reasoning"] == {"effort": "none"}
+    assert "enable_thinking" not in payload
 def test_completion_preserves_provider_reasoning_and_usage(monkeypatch) -> None:
     sampler = HttpSampler(
         {
@@ -861,7 +915,6 @@ def test_planner_allows_bounded_policy_recovery_and_counts_each_provider_call(
 
         def mark_closed(self):
             self.closed = True
-
         def persist_frame(self, step, frame_bytes):
             return None
 

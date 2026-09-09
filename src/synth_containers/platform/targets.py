@@ -102,6 +102,9 @@ class TargetSpec:
     task_family: str | None = None
     reward_calculator: RewardCalculatorFamily | None = None
     reward_authority_name: str | None = None
+    # Explicit producer semantics for the terminal scalar; absent means unknown.
+    reward_definition: dict[str, Any] | None = None
+    environment_version: str | None = None
 
 
 def advertised_reward_calculator(spec: TargetSpec) -> RewardCalculatorFamily:

@@ -24,6 +24,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from .workshop_proxy import public_proxy_bearer
+
 from ..gold_episode import _emit_obs, _frame_record
 from ..gold_http import StepResult
 from ..gen_ai import copy_observation, request_observation as gen_ai_request_observation
@@ -34,6 +36,38 @@ TOOL_NAME = "craftax_interact"
 GOAL_TOOL_NAME = "set_goal"
 GOAL_INTERACT_TOOL_NAME = "goal_and_interact"
 UPDATE_GOALS_TOOL_NAME = "update_goals"
+
+# Conservative OpenRouter public list (Aug 2026). Used only when a completion
+# omits billed ``usage.cost``. Slightly above the $0.037/$0.170 spot so the
+# GEPA $ cap is a ceiling, not an underestimate.
+_OSS120B_INPUT_USD_PER_M = 0.04
+_OSS120B_OUTPUT_USD_PER_M = 0.18
+
+
+def billed_or_estimated_cost_usd(
+    usage: dict[str, Any],
+    *,
+    prompt_tokens: int,
+    completion_tokens: int,
+    model: str,
+) -> tuple[float | None, str]:
+    """Prefer OpenRouter billed ``usage.cost``; else pin gpt-oss-120b list price."""
+
+    raw = usage.get("cost")
+    if raw is None:
+        raw = usage.get("cost_usd")
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool) and float(raw) >= 0.0:
+        return float(raw), "openrouter_usage_cost"
+    if prompt_tokens <= 0 and completion_tokens <= 0:
+        return None, "missing"
+    name = str(model or "").lower()
+    if "gpt-oss-120b" in name:
+        cost = (
+            prompt_tokens * _OSS120B_INPUT_USD_PER_M
+            + completion_tokens * _OSS120B_OUTPUT_USD_PER_M
+        ) / 1_000_000.0
+        return cost, "openrouter_list_price_gpt_oss_120b_2026-08"
+    return None, "unpriced"
 TOOL_CALL_BLOCK = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
 FUNCTION_BLOCK = re.compile(
     r"<function=(?P<name>[^\s>]+)>(?P<body>.*?)</function>", re.DOTALL
@@ -322,7 +356,10 @@ def _json_request(
                     completion=_failure_completion("workshop_capability_exhausted"),
                 ) from exc
             last_error = RuntimeError(f"sampler_http_{exc.code}:{detail}")
-            if exc.code not in _RETRY_HTTP or attempt >= retries:
+            groq_tool_miss = exc.code == 400 and "tool_use_failed" in detail
+            retryable = exc.code in _RETRY_HTTP or groq_tool_miss
+            max_attempts = retries if exc.code in _RETRY_HTTP else min(retries, 3)
+            if not retryable or attempt >= max_attempts:
                 raise last_error from exc
             retry_after = _retry_after_seconds(exc, detail)
             base = 8.0 if exc.code == 429 else 1.0
@@ -477,7 +514,9 @@ def _wire_tool_calls(calls: object) -> list[dict[str, Any]]:
     return wired
 
 
-def _wire_message(message: dict[str, Any]) -> dict[str, Any]:
+def _wire_message(
+    message: dict[str, Any], *, replay_reasoning: bool = True
+) -> dict[str, Any]:
     role = str(message.get("role") or "user")
     row: dict[str, Any] = {"role": role}
     content = message.get("content")
@@ -492,9 +531,12 @@ def _wire_message(message: dict[str, Any]) -> dict[str, Any]:
         row["tool_call_id"] = str(message.get("tool_call_id") or "")
         if message.get("name"):
             row["name"] = message["name"]
-    reasoning = message.get("reasoning_content") or message.get("reasoning")
-    if reasoning:
-        row["reasoning_content"] = _text_field(reasoning)
+    # Groq rejects reasoning_content / reasoning on *input* assistant
+    # messages (HTTP 400). Keep them in traces; do not replay them.
+    if replay_reasoning:
+        reasoning = message.get("reasoning_content") or message.get("reasoning")
+        if reasoning:
+            row["reasoning_content"] = _text_field(reasoning)
     return row
 
 
@@ -608,8 +650,9 @@ class HttpSampler:
         self.retry_max_wait = float(config.get("retry_max_wait") or (90.0 if not self.local else 20.0))
 
     def _auth_headers(self) -> dict[str, str]:
-        if self.workshop_capability_proxy:
-            return {}
+        proxy_bearer = public_proxy_bearer(self.chat_url)
+        if proxy_bearer:
+            return {"Authorization": f"Bearer {proxy_bearer}"}
         if not self.api_key_env:
             return {}
         key = os.environ.get(self.api_key_env, "").strip()
@@ -633,7 +676,8 @@ class HttpSampler:
         enable_thinking: bool | None = None,
     ) -> dict[str, Any]:
         thinking = self.enable_thinking if enable_thinking is None else bool(enable_thinking)
-        wired_messages = [_wire_message(row) for row in messages]
+        replay_reasoning = "groq.com" not in self.chat_url
+        wired_messages = [_wire_message(row, replay_reasoning=replay_reasoning) for row in messages]
         if self.local:
             # synth-mlx-rl's strict ChatMessage schema intentionally excludes
             # the non-standard ``reasoning_content`` field. Preserve the
@@ -667,16 +711,16 @@ class HttpSampler:
             payload["stop"] = ["</tool_call>"]
             if self.snapshot:
                 payload["policy_snapshot_id"] = self.snapshot
-        elif thinking:
-            if "groq.com" in self.chat_url:
-                payload["reasoning_effort"] = self.effort or "low"
-            else:
-                # OpenRouter's normalized effort contract works across its
-                # providers. An exact reasoning-token budget is model-specific
-                # and can be translated to a larger minimum allocation by an
-                # effort-only provider, so retain the approved total output
-                # ceiling and request the configured effort instead.
-                payload["reasoning"] = {"effort": self.effort}
+        elif "groq.com" in self.chat_url:
+            payload["reasoning_effort"] = self.effort or "low" if thinking else "none"
+        else:
+            # Remote gateways may enable model-default reasoning when this
+            # field is omitted. That can consume the complete output budget
+            # before a required tool call is emitted. Seal both states on the
+            # wire: configured effort when enabled, explicit `none` when off.
+            payload["reasoning"] = {
+                "effort": self.effort if thinking else "none"
+            }
         return payload
 
     def request_observation(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -836,6 +880,11 @@ class NanoHorizonPlanner:
         if not isinstance(defaults, dict):
             defaults = {}
         self.config = {**defaults, **dict(config)}
+        # Mirrors the policy-side knob: "full" snapshots every prompt (what the
+        # keep-thinking SFT packers need), "delta" records only what each turn
+        # appended. See _trace_messages below.
+        self.journal_mode = str(self.config.get("journal_mode") or "full")
+        self._journalled = 0
         self.sampler = HttpSampler(self.config)
         self.policy = policy_cls(**self.config)
         self.max_provider_calls = max(0, int(self.config.get("max_calls", 10)))
@@ -849,6 +898,8 @@ class NanoHorizonPlanner:
             "completion_tokens": 0,
             "total_tokens": 0,
             "calls": 0,
+            "cost_usd": None,
+            "cost_source": None,
         }
 
     def metadata(self) -> dict[str, Any]:
@@ -868,6 +919,36 @@ class NanoHorizonPlanner:
 
     def trace_data(self) -> dict[str, Any]:
         return dict(self._last_trace)
+
+
+    def _trace_messages(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
+        """What a sampler span records about the prompt it sent.
+
+        This is the container's own copy, independent of the policy journal, and
+        it has the same quadratic shape: one deep copy of the entire growing
+        conversation per call. Fixing only the policy side moved total gold RSS
+        by ~15% because this recorder was still running -- there were two
+        independent quadratic snapshots, not one.
+
+        ``full`` keeps the whole prompt, which trace consumers such as
+        ``submissions/fbc/scan_traces.py`` require. ``delta`` records just the
+        messages this turn added plus the prefix length, so the same content is
+        reconstructible by prefix-sum at O(n) instead of O(n^2).
+        """
+
+        # Read defensively: this runs on the sampler hot path and planners are
+        # also built by stubs and tests that never run __init__. An instance
+        # without the attribute must fall back to the safe, lossless default
+        # rather than raise mid-rollout.
+        if getattr(self, "journal_mode", "full") != "delta":
+            return {"messages": copy.deepcopy(messages)}
+        start = min(getattr(self, "_journalled", 0), len(messages))
+        self._journalled = len(messages)
+        return {
+            "messages_mode": "delta",
+            "messages_delta": copy.deepcopy(messages[start:]),
+            "history_len": len(messages),
+        }
 
     def _reserve_provider_call(self) -> int:
         """Consume one rollout-local slot for every provider generation.
@@ -958,21 +1039,32 @@ class NanoHorizonPlanner:
             except NanoHorizonSamplerFailure as exc:
                 completion = exc.completion
                 failure = exc
-            self._usage["prompt_tokens"] = int(self._usage["prompt_tokens"] or 0) + int(
-                completion.get("prompt_tokens") or 0
-            )
-            self._usage["completion_tokens"] = int(self._usage["completion_tokens"] or 0) + int(
-                completion.get("completion_tokens") or 0
-            )
+            prompt_tokens = int(completion.get("prompt_tokens") or 0)
+            completion_tokens = int(completion.get("completion_tokens") or 0)
+            self._usage["prompt_tokens"] = int(self._usage["prompt_tokens"] or 0) + prompt_tokens
+            self._usage["completion_tokens"] = int(self._usage["completion_tokens"] or 0) + completion_tokens
             self._usage["total_tokens"] = int(self._usage["prompt_tokens"] or 0) + int(
                 self._usage["completion_tokens"] or 0
             )
             self._usage["calls"] = self._calls
+            usage = completion.get("usage") if isinstance(completion.get("usage"), dict) else {}
+            cost, source = billed_or_estimated_cost_usd(
+                usage,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                model=self.sampler.model,
+            )
+            if cost is not None:
+                current = self._usage.get("cost_usd")
+                self._usage["cost_usd"] = float(cost) + (
+                    float(current) if isinstance(current, (int, float)) else 0.0
+                )
+                self._usage["cost_source"] = source
             self._last_trace = {
                 "phase": "sample",
                 "turn_kind": "policy",
                 "trainable": True,
-                "messages": copy.deepcopy(messages),
+                **self._trace_messages(messages),
                 "tools": copy.deepcopy(list(kwargs.get("tools") or [])),
                 "assistant": copy.deepcopy(completion.get("message") or {}),
                 "proxy_request_id": completion.get("proxy_request_id"),
