@@ -1,5 +1,24 @@
 # synth-containers changelog
 
+## 2026-09-09 — consolidation candidate
+
+* Prepare unpublished `0.4.3`, combining production API/metadata/journal contracts with the v0.10 runtime, CISPO, annotations, tunnel streaming and trace artifact fixes.
+* Preserve immutable published `0.4.2`; consumers must re-pin only after the replacement package passes release gates.
+* Scan in-memory event logs for credentials before publication; retain inspection-server cleanup on exceptional exit.
+
+## 2026-09-09
+
+* Published stable `0.4.2` from the original release lane; these bytes remain immutable.
+* Fixed Python 3.11 attempt serialization and scheduler startup/recovery races.
+* Release CI now enforces lint and rejects new signatures beyond documented type debt.
+* Restored the complete publish test gate, including missing/scored reward recovery.
+* `0.4.2.dev20260909`: made the declared `ruff check src` gate pass; the eleven
+  `harbor_environment` re-exports missing from `__all__` were a public-surface
+  bug, not a style nit.
+* Added `pytest` to the dev dependencies and to the documented release gate. The
+  package had no test runner in any declared dependency.
+* Regenerated `uv.lock`, which still named `0.4.2.dev20260903`.
+
 ## 2026-08-21
 
 * Prepared `0.4.1` as the official Containers package for Workshop v0.7.

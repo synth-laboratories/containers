@@ -676,10 +676,10 @@ def _turn_entities(
     session_id: str,
 ) -> tuple[list[MessageNodeV5], list[SpanV5]]:
     turn_events = {
-        int(event.payload.get("turn_index")): event
+        index: event
         for event in document.events
         if str(event.event_type) == "harbor.turn"
-        and isinstance(event.payload.get("turn_index"), int)
+        and isinstance(index := event.payload.get("turn_index"), int)
     }
     messages: list[MessageNodeV5] = []
     spans: list[SpanV5] = []
@@ -727,7 +727,7 @@ def _turn_entities(
             },
         ).sealed()
         messages.append(message)
-        if span_id is not None:
+        if span_id is not None and usage_row is not None:
             prompt_tokens = _int(usage_row.get("prompt_tokens") or usage_row.get("input_tokens"))
             completion_tokens = _int(
                 usage_row.get("completion_tokens") or usage_row.get("output_tokens")

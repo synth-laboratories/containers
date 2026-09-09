@@ -352,6 +352,30 @@ def test_retry_reuses_completed_workers_and_merges_every_output(tmp_path, monkey
     assert len(seen)==2  # completed receipt requires no third invocation
 
 
+def test_inspection_server_closes_and_joins_when_consumer_raises(monkeypatch):
+    from synth_containers.tracing.annotation import jesterky_tools as module
+    calls = []
+
+    class Server:
+        server_port = 12345
+        def __init__(self, *args): pass
+        def serve_forever(self): pass
+        def shutdown(self): calls.append("shutdown")
+        def server_close(self): calls.append("close")
+
+    class Thread:
+        def __init__(self, **kwargs): pass
+        def start(self): calls.append("start")
+        def join(self): calls.append("join")
+
+    monkeypatch.setattr(module, "ThreadingHTTPServer", Server)
+    monkeypatch.setattr(module.threading, "Thread", Thread)
+    with pytest.raises(RuntimeError, match="consumer failed"):
+        with module.serve_inspection_tools(object()):
+            raise RuntimeError("consumer failed")
+    assert calls == ["start", "shutdown", "close", "join"]
+
+
 def test_inspection_mcp_uses_shared_bounded_tools():
     import json, urllib.request
     from synth_containers.tracing.annotation.jesterky_tools import serve_inspection_tools

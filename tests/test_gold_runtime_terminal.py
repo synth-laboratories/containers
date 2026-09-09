@@ -52,6 +52,8 @@ def test_capability_exhaustion_closes_terminal_partial_journal(monkeypatch) -> N
         policy_ref={"harness": "nanohorizon", "config": "test"},
         resume_from_checkpoint_id=None,
         checkpoint_schedule=None,
+        max_steps=None,
+        max_calls=None,
         seed=780005,
         omit_reward=False,
         status="running",

@@ -50,16 +50,22 @@ def import_runebench(run: Path):
     actors.append({'id': 'environment', 'role': 'environment', 'team': ''})
     sessions = {a['id']: ident('session', a['id']) for a in actors}
     ids = {a['id']: ident('actor', a['id']) for a in actors}
-    events = []; messages = []; spans = []; calls = defaultdict(list)
+    events = []
+    messages = []
+    spans = []
+    calls = defaultdict(list)
     previous_message = {}
     for name, line, row in sorted(rows, key=lambda entry: (entry[2].get('payload', {}).get('elapsedMs', 0), entry[0], entry[1])):
-        p = dict(row.get('payload', {})); kind = p.get('kind', row.get('kind', 'event'))
+        p = dict(row.get('payload', {}))
+        kind = p.get('kind', row.get('kind', 'event'))
         native_actor = row.get('actor_id') or 'environment'
         if native_actor not in ids:
             raise ValueError(f'Unknown actor {native_actor}')
-        actor = ids[native_actor]; session = sessions[native_actor]
+        actor = ids[native_actor]
+        session = sessions[native_actor]
         decision = p.get('decisionId') or p.get('action', {}).get('decisionId')
-        ms = p.get('elapsedMs', 0); occurred = timestamp(ms)
+        ms = p.get('elapsedMs', 0)
+        occurred = timestamp(ms)
         event_id = ident('event', f'{name}:{line}')
         mapped = {'model.requested': 'model_call.started', 'model.completed': 'model_call.completed',
                   'policy.action': 'tool.called', 'policy.result': 'tool.result',
@@ -69,16 +75,19 @@ def import_runebench(run: Path):
         if decision:
             calls[(native_actor, decision)].append((event_id, kind, occurred, detail))
         message_id = None
-        part = None; role = 'assistant'
+        part = None
+        role = 'assistant'
         if kind == 'model.requested':
-            role = 'user'; part = MessagePartV5(ident('part', event_id), 'observation', structured=p.get('observation', {}))
+            role = 'user'
+            part = MessagePartV5(ident('part', event_id), 'observation', structured=p.get('observation', {}))
         elif kind == 'model.completed':
             part = MessagePartV5(ident('part', event_id), 'text', text=p.get('content', ''))
         elif kind == 'policy.action':
             action = p.get('action', {})
             part = MessagePartV5(ident('part', event_id), 'tool_call', tool_call_id=decision, tool_name=action.get('type'), arguments_json=json.dumps(action))
         elif kind == 'policy.result':
-            role = 'tool'; part = MessagePartV5(ident('part', event_id), 'tool_result', tool_call_id=decision, structured={'result': p.get('result')}, is_error=isinstance(p.get('result'), dict) and p['result'].get('success') is False)
+            role = 'tool'
+            part = MessagePartV5(ident('part', event_id), 'tool_result', tool_call_id=decision, structured={'result': p.get('result')}, is_error=isinstance(p.get('result'), dict) and p['result'].get('success') is False)
         if part:
             message_id = ident('message', event_id)
             parts = (part,)
@@ -100,12 +109,17 @@ def import_runebench(run: Path):
     if engine.exists() and final_ms is not None:
         source_digests['episode/engine-states.jsonl'] = bytes_digest(engine.read_bytes())
         for line, raw in enumerate(engine.read_text().splitlines(), 1):
-            state = json.loads(raw); ms = state['elapsedMs']
-            if ms > final_ms: continue
+            state = json.loads(raw)
+            ms = state['elapsedMs']
+            if ms > final_ms:
+                continue
             for a, v in state['actors'].items():
-                if v is None or a not in previous: continue
-                delta = v['xp'] - previous[a]; previous[a] = v['xp']
-                if not delta: continue
+                if v is None or a not in previous:
+                    continue
+                delta = v['xp'] - previous[a]
+                previous[a] = v['xp']
+                if not delta:
+                    continue
                 events.append(EventV5(ident('event', f'reward:{line}:{a}'), 'environment.reward', ids[a], sessions[a], timestamp(ms),
                     order=EventOrderV1(chronological_sequence=len(events)), payload={
                         'elapsed_ms': ms, 'native_actor_id': a, 'value': delta, 'units': 'XP',
@@ -116,7 +130,8 @@ def import_runebench(run: Path):
     for (a, decision), records in calls.items():
         requested = next((x for x in records if x[1] == 'model.requested'), None)
         completed = next((x for x in records if x[1] == 'model.completed'), None)
-        if not requested: continue
+        if not requested:
+            continue
         input_ids = tuple(m.message_id for m in messages if m.produced_by_event_id == requested[0])
         output_ids = tuple(m.message_id for m in messages if completed and m.produced_by_event_id == completed[0])
         spans.append(SpanV5(ident('span', f'{a}:{decision}'), 'model_call', ids[a], sessions[a], requested[2],
@@ -133,7 +148,8 @@ def import_runebench(run: Path):
     from dataclasses import replace
     events = [replace(e, order=EventOrderV1(chronological_sequence=i)).sealed()
               for i, e in enumerate(sorted(events, key=lambda e: (e.payload['elapsed_ms'], e.event_id)))]
-    digest = bytes_digest(canonical_bytes(source_digests)); capture_id = ident('capture', digest)
+    digest = bytes_digest(canonical_bytes(source_digests))
+    capture_id = ident('capture', digest)
     ended = max((e.occurred_at for e in events), default=origin)
     document = TraceDocumentV5(ident('trace', digest), 'evaluation_attempt',
         TraceIdentityV5(run_id=run.name, episode_id=run.name, benchmark='runebench'),

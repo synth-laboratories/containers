@@ -19,7 +19,7 @@ from typing import Any, Mapping
 
 from ..adapters import provider_adapters
 from ..adapters.base import NormalizedMessage, NormalizedProviderResult
-from ..canonical import bytes_digest, record_id, utc_now
+from ..canonical import record_id, utc_now
 from ...gen_ai import request_observation
 from ..models.actors import (
     ActorKind,
@@ -56,7 +56,6 @@ from ..models.spans import (
     UsageProvenance,
     UsageV5,
 )
-from ..models.tokens import TokenCaptureV5
 from ..store.filesystem import FilesystemBlobStore
 from ..projections.reconciliation import build_live_reconciliation
 from .binding import TraceCaptureBindingV1
@@ -603,9 +602,6 @@ class TraceFinalizer:
 
         model_calls_state, usage_state, raw_state = _call_coverage(
             tuple(calls[item] for item in order)
-        )
-        application_state = (
-            CoverageState.COMPLETE if application_events else CoverageState.NOT_CAPTURED
         )
         event_names = {
             str((item.get("payload") or {}).get("event_type") or "")

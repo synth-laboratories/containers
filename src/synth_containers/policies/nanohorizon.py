@@ -21,7 +21,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlparse
 
 from .workshop_proxy import public_proxy_bearer
@@ -547,7 +547,7 @@ def _advertised_tool_names(tools: object) -> set[str]:
     for tool in tools:
         if not isinstance(tool, dict):
             continue
-        function = tool.get("function")
+        function = cast(dict[str, Any], tool).get("function")
         if not isinstance(function, dict):
             continue
         name = str(function.get("name") or "").strip()
@@ -1143,6 +1143,7 @@ class NanoHorizonPlanner:
             )
             return text
 
+        outcome: dict[str, Any]
         try:
             outcome = self.policy.run_episode(
                 opening={**result.observation, **({"done": True} if result.done else {})},

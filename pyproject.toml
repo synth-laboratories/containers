@@ -1,6 +1,6 @@
 [project]
 name = "synth-containers"
-version = "0.4.1"
+version = "0.4.3"
 description = "Shared Synth container and environment runtime substrate"
 authors = [{name = "Synth Laboratories", email = "josh@usesynth.ai"}]
 readme = "README.md"
@@ -19,6 +19,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "build>=1.2.1",
+    "pytest>=8.0.0",
     "twine>=5.0.0",
     "ruff>=0.6.0",
     "ty>=0.0.32",
