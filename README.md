@@ -58,19 +58,41 @@ The Python SDK also provides `Container`, `Container.serve()`,
 in-process app, or local `image_id`). CLI: `synth-containers serve` and
 `synth-containers up`.
 
-## Example
+## Runnable local example (no provider credentials)
+
+After `pip install synth-containers`, save this as `smoke.py` and run
+`python smoke.py`. It starts a loopback-only server, scores a deterministic
+exact-match task, prints `reward: 1.0`, and shuts the server down. This is an
+SDK/HTTP smoke test, not a model-quality evaluation.
 
 ```python
-from fastapi import Body, FastAPI
-from synth_containers import GEPA_OPTIMIZER_CONTRACT_VERSION
+from datetime import datetime, timezone
+import httpx
+from synth_containers import Container
 
-app = FastAPI()
+container = Container("local-exact-match", default_submission_mode="sync")
 
-@app.post("/rollout")
-def rollout(payload: dict = Body(...)) -> dict:
-    candidate, row = payload["candidate"], payload["row"]
-    # run the task with the candidate's mutable fields, score it with a real verifier
-    return {"reward": ..., "usage": ...}
+@container.rollout
+def rollout(payload):
+    now = datetime.now(timezone.utc).isoformat()
+    reward = float(payload["answer"] == payload["expected"])
+    return {
+        "rollout_id": payload["rollout_id"],
+        "status": "completed", "success_status": "success",
+        "created_at": now, "updated_at": now,
+        "summary": {"reward": reward},
+    }
+
+with container.serve() as running:
+    with httpx.Client(timeout=10, trust_env=False) as client:
+        response = client.post(running.url + "/rollouts", json={
+            "rollout_id": "smoke-1", "answer": "hello", "expected": "hello",
+        })
+        response.raise_for_status()
+        result = response.json()
+        assert result["status"] == "completed"
+        assert result["summary"]["reward"] == 1.0
+        print("reward:", result["summary"]["reward"])
 ```
 
 See the
