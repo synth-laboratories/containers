@@ -274,6 +274,7 @@ class RolloutEventLog:
     _chain_head: str = ""
     _items: list[LogEnvelope] = field(default_factory=list)
     _lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
+    _changed: threading.Condition = field(default_factory=threading.Condition, repr=False)
 
     @property
     def high_water(self) -> int:
@@ -284,6 +285,28 @@ class RolloutEventLog:
         """Head of the per-rollout event chain (see :func:`chain_genesis`)."""
 
         return self._chain_head or chain_genesis(self.rollout_id)
+
+    def _notify(self) -> None:
+        with self._changed:
+            self._changed.notify_all()
+
+    def wake_readers(self) -> None:
+        """Wake blocked ``wait_for_change`` callers without appending anything."""
+
+        self._notify()
+
+    def wait_for_change(self, after: int, timeout: float | None = None) -> bool:
+        """Block until a sequence above ``after`` exists, the log closes, or ``timeout`` elapses.
+
+        In-process tails (the live annotation runner) use this instead of a
+        sleep loop. Returns True when there is something new to read.
+        """
+
+        with self._changed:
+            if self._high_water > after or self.closed:
+                return True
+            self._changed.wait(timeout)
+            return self._high_water > after or self.closed
 
     def append_control(self, kind: str, payload: dict[str, Any]) -> LogEnvelope:
         with self._lock:
@@ -300,7 +323,8 @@ class RolloutEventLog:
             )
             self._persist({"record": "envelope", "envelope": envelope.to_dict()})
             self._items.append(envelope)
-            return envelope
+        self._notify()
+        return envelope
 
     def append(self, kind: str, payload: dict[str, Any]) -> LogEnvelope:
         with self._lock:
@@ -320,7 +344,8 @@ class RolloutEventLog:
             self._high_water = next_sequence
             self._chain_head = chain_extend(self.chain_head, envelope.digest)
             self._items.append(envelope)
-            return envelope
+        self._notify()
+        return envelope
 
     def mark_closed(self) -> None:
         with self._lock:
@@ -337,6 +362,7 @@ class RolloutEventLog:
             )
             self.closed = True
             self.closed_at = closed_at
+        self._notify()
 
     def seal_capture(self) -> None:
         """Append the capture watermark records and close the log.

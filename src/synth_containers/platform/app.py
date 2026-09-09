@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from ..event_log import SSE_HEADERS, RolloutEventLog, iter_sse
+from ..live_annotation.api import mount_live_annotation
 from .http_requests import (
     RequestParseError,
     parse_combine_reward,
@@ -70,6 +71,7 @@ def create_compat_app(
     )
     app.state.platform = platform
     app.state.spec = spec
+    mount_live_annotation(app, platform.live_annotation, platform=platform)
 
     def _runtime_identity() -> dict[str, Any]:
         """Safe, non-secret identity used by orchestrators for adoption receipts."""
