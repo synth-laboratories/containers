@@ -1226,6 +1226,9 @@ class TraceFinalizer:
             ),
             caused_by_event_ids=tuple(caused_by),
             payload=body,
+            artifact_ids=tuple(
+                str(item) for item in (payload.get("artifact_ids") or ()) if str(item)
+            ),
             raw_source_ref=envelope_id,
         ).sealed()
 

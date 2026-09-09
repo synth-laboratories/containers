@@ -76,8 +76,18 @@ class LocalCollector:
         occurred_at: str | None = None,
         caused_by: tuple[str, ...] = (),
         structural: dict[str, Any] | None = None,
+        artifact_ids: tuple[str, ...] = (),
     ) -> str:
-        """Append one application event and return its raw envelope id."""
+        """Append one application event and return its raw envelope id.
+
+        `artifact_ids` is how a producer says which stored artifacts this event
+        carries -- the frame a step rendered, the screenshot a tool returned.
+        Without it an artifact and the event that produced it are two records
+        with nothing joining them, and a consumer that wants "the frame for this
+        step" has to guess from ordering. The finalizer copies the declaration
+        onto `EventV5.artifact_ids`, and validation refuses an id no artifact
+        matches.
+        """
 
         redacted, report = redact_payload(payload)
         envelope = self.session.append(
@@ -87,6 +97,7 @@ class LocalCollector:
                 "body": redacted,
                 "caused_by": list(caused_by),
                 "structural": structural,
+                "artifact_ids": list(artifact_ids),
                 "redaction": report.to_dict(),
             },
             actor_id=actor_id,
