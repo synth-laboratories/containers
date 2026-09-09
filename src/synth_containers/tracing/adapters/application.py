@@ -28,6 +28,7 @@ class ApplicationEvent:
     session_id: str | None = None
     caused_by: tuple[str, ...] = ()
     structural: dict[str, Any] | None = None
+    artifact_ids: tuple[str, ...] = ()
 
 
 class ApplicationTraceAssembler:
@@ -44,6 +45,7 @@ class ApplicationTraceAssembler:
             session_id=event.session_id,
             caused_by=event.caused_by,
             structural=event.structural,
+            artifact_ids=event.artifact_ids,
         )
 
     def react_step(self, payload: Mapping[str, Any], **identity: Any) -> str:

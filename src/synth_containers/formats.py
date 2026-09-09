@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .capabilities import RuntimeCapabilitySurface, RuntimeMetadata, TaskInfo
+from .metadata import attach_runtime_provenance
 from .nouns import CheckpointDescriptor, ExecutionRecord
 from .ontology import ResumeSemantics
 
@@ -33,15 +34,17 @@ class ExecutionProgress:
 
 
 def metadata_to_http_payload(metadata: RuntimeMetadata) -> dict[str, Any]:
-    return {
-        "runtime": {
-            "runtime_id": metadata.runtime_id,
-            "name": metadata.name,
-            "description": metadata.description,
-        },
-        "capabilities": metadata.capabilities.to_dict(),
-        "metadata": dict(metadata.metadata),
-    }
+    return attach_runtime_provenance(
+        {
+            "runtime": {
+                "runtime_id": metadata.runtime_id,
+                "name": metadata.name,
+                "description": metadata.description,
+            },
+            "capabilities": metadata.capabilities.to_dict(),
+            "metadata": dict(metadata.metadata),
+        }
+    )
 
 
 

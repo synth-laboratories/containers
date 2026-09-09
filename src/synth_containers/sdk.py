@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import signal
 import socket
 import subprocess
 import threading
@@ -18,6 +19,11 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
+from .metadata import (
+    CONTAINER_CONTRACT_PROTOCOL,
+    RuntimeReadiness,
+    compose_metadata_payload,
+)
 from .ontology import CONTRACT_VERSION
 from .prompt_programs import gepa_optimizer_contract
 from .serde import JsonObject, jsonable
@@ -255,11 +261,13 @@ class ContainerHandle:
         url: str,
         stop: Callable[[], None] | None = None,
         log_reader: Callable[[], str] | None = None,
+        pid: int | None = None,
     ) -> None:
         self.url = url.rstrip("/")
         self._stop = stop
         self._log_reader = log_reader
         self._closed = False
+        self.pid = pid
 
     def connection(self) -> ContainerConnection:
         return ContainerConnection(url=self.url)
@@ -297,21 +305,33 @@ class ContainerRunner:
         app: FastAPI | None = None,
         command: list[str] | None = None,
         url: str | None = None,
+        image: str | None = None,
+        image_id: str | None = None,
+        catalog: str | Path | None = None,
         cwd: str | Path | None = None,
         env: Mapping[str, str] | None = None,
         host: str = "127.0.0.1",
         port: int | None = None,
         startup_timeout_seconds: float = 30.0,
+        build: bool = True,
+        pull: bool = False,
+        docker_backend: Any | None = None,
     ) -> None:
         self.target = target
         self.app = app
         self.command = [] if command is None else list(command)
         self.url = url
+        self.image = image
+        self.image_id = image_id
+        self.catalog = catalog
         self.cwd = Path(cwd) if cwd is not None else None
         self.env = {} if env is None else dict(env)
         self.host = host
         self.port = port
         self.startup_timeout_seconds = startup_timeout_seconds
+        self.build = build
+        self.pull = pull
+        self.docker_backend = docker_backend
 
     def serve(self) -> ContainerHandle:
         if self.url:
@@ -322,6 +342,21 @@ class ContainerRunner:
                     f"{self.startup_timeout_seconds:.1f}s"
                 )
             return handle
+        if self.image or self.image_id:
+            from .launch import serve_image
+
+            return serve_image(
+                self.image_id,
+                image=self.image,
+                catalog=self.catalog,
+                env=self.env,
+                host=self.host,
+                port=self.port,
+                startup_timeout_seconds=self.startup_timeout_seconds,
+                build=self.build,
+                pull=self.pull,
+                backend=self.docker_backend,
+            )
         if self.command:
             return self._serve_command()
         app = self.app
@@ -330,7 +365,9 @@ class ContainerRunner:
         if app is None and isinstance(self.target, Container):
             app = self.target.fastapi()
         if app is None:
-            raise ValueError("ContainerRunner requires a Container, FastAPI app, command, or url")
+            raise ValueError(
+                "ContainerRunner requires a Container, FastAPI app, command, url, image, or image_id"
+            )
         return self._serve_app(app)
 
     def _serve_app(self, app: FastAPI) -> ContainerHandle:
@@ -371,6 +408,7 @@ class ContainerRunner:
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
+            start_new_session=True,
         )
         log_lines: list[str] = []
 
@@ -386,16 +424,11 @@ class ContainerRunner:
         drain_thread.start()
 
         def stop() -> None:
-            if process.poll() is None:
-                process.terminate()
-                deadline = time.monotonic() + 5.0
-                while process.poll() is None and time.monotonic() < deadline:
-                    time.sleep(0.05)
-                if process.poll() is None:
-                    process.kill()
-                process.wait(timeout=5.0)
+            _kill_process_group(process.pid)
 
-        handle = ContainerHandle(url=url, stop=stop, log_reader=lambda: "".join(log_lines))
+        handle = ContainerHandle(
+            url=url, stop=stop, log_reader=lambda: "".join(log_lines), pid=process.pid
+        )
         if not self._wait_for_health(handle):
             stop()
             raise TimeoutError(
@@ -412,6 +445,26 @@ class ContainerRunner:
                 return True
             time.sleep(0.1)
         return False
+
+
+def _kill_process_group(pgid: int, *, timeout_seconds: float = 5.0) -> None:
+    if pgid <= 0:
+        return
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.05)
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
 
 
 class Container:
@@ -480,34 +533,66 @@ class Container:
                 payload = await _call(self._metadata, label="metadata")
             else:
                 payload = {}
-            base = {
-                "runtime": {
-                    "runtime_id": self.runtime_id,
-                    "name": self.name,
-                    "description": self.description,
-                },
-                "capabilities": {
-                    "contract_version": CONTRACT_VERSION,
-                    "rollout_modes": ["blocking", "async"],
-                    "route_hints": {
-                        "metadata_routes": ["/metadata", "/info"],
-                        "task_info_routes": ["/task_info"],
-                        "program_routes": ["/program"],
-                        "taskset_routes": ["/taskset", "/taskset/tasks"],
-                        "rollout_routes": ["/rollouts"],
-                        "state_routes": ["/rollouts/{rollout_id}/state"],
+            gepa_ready = all(
+                callback is not None
+                for callback in (
+                    self._program,
+                    self._taskset,
+                    self._taskset_tasks,
+                    self._rollout,
+                )
+            )
+            base = compose_metadata_payload(
+                base={
+                    "runtime": {
+                        "runtime_id": self.runtime_id,
+                        "name": self.name,
+                        "description": self.description,
                     },
-                    "metadata": {
-                        "policy_ready": self.policy_ready,
-                        "program_ready": self._program is not None,
+                    "capabilities": {
+                        "rollout_modes": ["blocking", "async"],
+                        "route_hints": {
+                            "metadata_routes": ["/metadata", "/info"],
+                            "task_info_routes": ["/task_info"],
+                            "program_routes": ["/program"],
+                            "taskset_routes": ["/taskset", "/taskset/tasks"],
+                            "rollout_routes": ["/rollouts"],
+                            "state_routes": ["/rollouts/{rollout_id}/state"],
+                        },
                     },
+                    "metadata": dict(self.metadata),
                 },
-                "metadata": _deep_merge(
-                    {"optimizer_contracts": {"gepa": gepa_optimizer_contract()}},
-                    dict(self.metadata),
+                protocol=CONTAINER_CONTRACT_PROTOCOL,
+                live_frames="unsupported",
+                readiness=RuntimeReadiness(
+                    policy_ready=self.policy_ready,
+                    program_ready=self._program is not None,
                 ),
-            }
-            return _deep_merge(base, payload)
+                optimizer_contracts={"gepa": gepa_optimizer_contract()} if gepa_ready else None,
+            )
+            merged = _deep_merge(base, payload)
+            if not gepa_ready:
+                # B2 ownership rule: the SDK may advertise the
+                # optimizers-owned GEPA contract only when every required
+                # callback is registered. Explicit user metadata must not
+                # claim a route surface that this app will answer with 404.
+                for parent in (
+                    merged,
+                    merged.get("capabilities"),
+                    merged.get("metadata"),
+                ):
+                    if not isinstance(parent, dict):
+                        continue
+                    contracts = parent.get("optimizer_contracts")
+                    if not isinstance(contracts, dict) or "gepa" not in contracts:
+                        continue
+                    contracts = dict(contracts)
+                    contracts.pop("gepa", None)
+                    if contracts:
+                        parent["optimizer_contracts"] = contracts
+                    else:
+                        parent.pop("optimizer_contracts", None)
+            return merged
 
         async def task_info_payload() -> dict[str, Any]:
             if self._task_info is None:

@@ -5,6 +5,7 @@ See: workshop/docs/container_compat.md C6 / §10.0 / §10.7
 
 from __future__ import annotations
 
+import tempfile
 from fastapi.testclient import TestClient
 
 from synth_containers.compat.openenv import openenv_capability_surface
@@ -19,7 +20,7 @@ POLICY = {"harness": "gym_loop", "config": "luna_med"}
 
 
 def _client() -> TestClient:
-    return TestClient(create_compat_app(TARGET))
+    return TestClient(create_compat_app(TARGET, storage_root=tempfile.mkdtemp(prefix="test_openenv_echo-")))
 
 
 def _prepare_start(client: TestClient, *, rollout_id: str, body: dict) -> dict:

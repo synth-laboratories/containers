@@ -5,14 +5,25 @@ packages in this monorepo.
 
 ## Build
 
-Run from `packages/synth-containers/`:
+Run from the repository root:
 
 ```bash
+uv run --group dev pytest tests
 uv run --group dev ruff check src
-uv run --group dev ty check src
+python3 scripts/check-type-debt.py
 uv build
 uv run --group dev twine check dist/*
 ```
+
+The eight historical metadata/reward failures have been reconciled with the
+current contracts. Missing rewards are still asserted before completion;
+terminal and recovered catalogs now test both scored and omitted rewards.
+The publish workflow runs the entire suite without deselections. Full-suite
+verification remains mandatory, including timing-sensitive annotation tests.
+The type-debt gate retains an explicit 173-diagnostic historical baseline;
+the integrated candidate currently reports 172 diagnostics,
+mostly `invalid-argument-type` and `unresolved-attribute`; annotating that
+surface is separate work. Neither is a licence to add more.
 
 ## Register a local development build
 
@@ -51,5 +62,8 @@ After confirming the version and inspecting the generated artifacts:
 uv publish dist/*
 ```
 
-Publish automation is intentionally TBD until the repository-level packaging
-pipeline is chosen.
+The `publish-pypi.yml` workflow validates official version tags, tests and builds
+the package, then publishes through the protected `pypi-release` environment
+using PyPI trusted publishing. Never create a public version tag before all
+release gates pass. Published `0.4.2` is immutable. The production-based
+consolidation candidate is `0.4.3`; its gates and publication remain pending.

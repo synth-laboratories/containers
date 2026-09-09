@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[3]
@@ -23,7 +24,8 @@ def write_pr_receipts(directory: Path | None = None) -> list[dict]:
     out.mkdir(parents=True, exist_ok=True)
     receipts: list[dict] = []
     for target in PR_TARGETS:
-        with TestClient(create_compat_app(target)) as client:
+        storage_root = tempfile.mkdtemp(prefix=f"pr-receipt-{target}-")
+        with TestClient(create_compat_app(target, storage_root=storage_root)) as client:
             suite = run_against_client(client, target, paid=False)
         receipt = receipt_from_suite(suite)
         path = out / f"{target}.json"

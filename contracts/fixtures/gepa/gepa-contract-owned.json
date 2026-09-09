@@ -1,0 +1,19 @@
+{
+  "owner": "optimizers-v08-release:src/synth_optimizers/contracts/gepa_contract.py",
+  "note": "Committed copy of the optimizers-owned GEPA sub-contract values. Regenerate from the owning module when it changes; tests/test_gepa_contract_vendored.py fails if synth_containers/vendored_gepa_contract.py drifts from this copy.",
+  "GEPA_OPTIMIZER_CONTRACT_VERSION": "synth_optimizers.gepa.v2",
+  "GEPA_CONTRACT_REQUIRED_ROUTES": [
+    "program_route",
+    "taskset_route",
+    "taskset_tasks_route",
+    "rollout_route"
+  ],
+  "GEPA_CONTRACT_OPTIONAL_ROUTES": [
+    "trace_route"
+  ],
+  "GEPA_CONTRACT_METADATA_PATH": [
+    "metadata",
+    "optimizer_contracts",
+    "gepa"
+  ]
+}

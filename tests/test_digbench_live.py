@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tempfile
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -178,7 +179,7 @@ def _start_public(monkeypatch, digbench_http, **body: Any) -> tuple[DigState, Te
     state, url = digbench_http
     monkeypatch.setenv("DIGBENCH_API_TOKEN", state.token)
     monkeypatch.setenv("SYNTH_DIGBENCH_URL", url)
-    client = TestClient(create_compat_app("digbench_public"))
+    client = TestClient(create_compat_app("digbench_public", storage_root=tempfile.mkdtemp(prefix="test_digbench_live-")))
     started = client.post(
         "/rollouts",
         json={
@@ -196,9 +197,9 @@ def test_mock_and_public_split_environments() -> None:
     assert TARGETS["digbench_public"].environment_ref == "env:digbench_relay"
 
 
-def test_public_without_token_does_not_invent_a_dungeon(monkeypatch) -> None:
+def test_public_without_token_does_not_invent_a_dungeon(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("DIGBENCH_API_TOKEN", raising=False)
-    client = TestClient(create_compat_app("digbench_public"))
+    client = TestClient(create_compat_app("digbench_public", storage_root=tmp_path / "p1"))
     started = client.post(
         "/rollouts",
         json={
@@ -235,11 +236,11 @@ def test_live_relay_maps_seven_kinds_and_hides_token(digbench_http, monkeypatch)
     assert scored["start_session_delta"] == 0
 
 
-def test_live_agentic_mcp_spans_share_the_eval_stream(digbench_http, monkeypatch) -> None:
+def test_live_agentic_mcp_spans_share_the_eval_stream(digbench_http, monkeypatch, tmp_path) -> None:
     state, url = digbench_http
     monkeypatch.setenv("DIGBENCH_API_TOKEN", state.token)
     monkeypatch.setenv("SYNTH_DIGBENCH_URL", url)
-    client = TestClient(create_compat_app("digbench_public"))
+    client = TestClient(create_compat_app("digbench_public", storage_root=tmp_path / "p2"))
     started = client.post(
         "/rollouts",
         json={
@@ -300,12 +301,12 @@ def test_live_token_absent_from_trace_seal(digbench_http, monkeypatch) -> None:
     assert "Bearer " not in blob
 
 
-def test_live_freezes_first_listed_game_when_p1_missing(digbench_http, monkeypatch) -> None:
+def test_live_freezes_first_listed_game_when_p1_missing(digbench_http, monkeypatch, tmp_path) -> None:
     state, url = digbench_http
     state.games = ["P-2"]
     monkeypatch.setenv("DIGBENCH_API_TOKEN", state.token)
     monkeypatch.setenv("SYNTH_DIGBENCH_URL", url)
-    client = TestClient(create_compat_app("digbench_public"))
+    client = TestClient(create_compat_app("digbench_public", storage_root=tmp_path / "p3"))
     started = client.post(
         "/rollouts",
         json={
@@ -321,12 +322,12 @@ def test_live_freezes_first_listed_game_when_p1_missing(digbench_http, monkeypat
     assert opened["payload"]["game"] == "P-2"
 
 
-def test_live_does_not_silently_swap_a_pinned_game(digbench_http, monkeypatch) -> None:
+def test_live_does_not_silently_swap_a_pinned_game(digbench_http, monkeypatch, tmp_path) -> None:
     state, url = digbench_http
     state.games = ["P-2"]
     monkeypatch.setenv("DIGBENCH_API_TOKEN", state.token)
     monkeypatch.setenv("SYNTH_DIGBENCH_URL", url)
-    client = TestClient(create_compat_app("digbench_public"))
+    client = TestClient(create_compat_app("digbench_public", storage_root=tmp_path / "p4"))
     started = client.post(
         "/rollouts",
         json={

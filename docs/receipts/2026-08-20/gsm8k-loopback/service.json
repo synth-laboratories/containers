@@ -1,0 +1,65 @@
+{
+  "capability": {
+    "api_families": [
+      "chat_completions",
+      "responses"
+    ],
+    "model": "Qwen/Qwen3.5-0.8B",
+    "objectives": {
+      "supported": [
+        "cross_entropy",
+        "importance_sampling",
+        "grpo",
+        "cispo_minimax",
+        "cispo_two_sided"
+      ],
+      "unavailable": {
+        "ppo": "ppo is not available in v1: this service has no value head and no critic, and aliasing ppo onto the grpo clipped surrogate would mislabel the run. Use grpo, cispo_minimax, cispo_two_sided, or importance_sampling."
+      }
+    },
+    "policy_snapshots": {
+      "capacity": 4,
+      "immutable": true,
+      "latest": "snap_6a7f35a9f877462b94bcc081d2ae45f0",
+      "pinned_per_request": true,
+      "resident": 1
+    },
+    "rollout_records": {
+      "capacity": 4096,
+      "join_key": "proxy_request_id",
+      "resident": 0,
+      "retrievable": true,
+      "rollout_logprobs_pre_truncation": true
+    },
+    "service": "synth-mlx-rl",
+    "template_digest": "a0846d856ba37affa1bd937d47664f6183425e9fc4ec032fd11aa77de3b0b304",
+    "token_emission": {
+      "logits": false,
+      "logprobs": true,
+      "old_logprobs": true,
+      "token_ids": true,
+      "top_logprobs": false
+    },
+    "tokenizer_digest": "d2162fc733a8e44c7363ab0567ec616a0d7e7a3d7f80c27fdd9e76b970e40c7d"
+  },
+  "healthz": {
+    "model": "Qwen/Qwen3.5-0.8B",
+    "recovered_jobs": [],
+    "status": "ok",
+    "version": "0.6.0"
+  },
+  "snapshot": {
+    "base_model": "Qwen/Qwen3.5-0.8B",
+    "created_at": 1787247827.348027,
+    "lora_rank": 8,
+    "lora_scale": 2.0,
+    "metadata": {
+      "purpose": "gsm8k-loopback-receipt"
+    },
+    "policy_snapshot_id": "snap_f6d46912f0ff48caa3faa5ae99668805",
+    "step": 0,
+    "template_digest": "a0846d856ba37affa1bd937d47664f6183425e9fc4ec032fd11aa77de3b0b304",
+    "tokenizer_digest": "d2162fc733a8e44c7363ab0567ec616a0d7e7a3d7f80c27fdd9e76b970e40c7d",
+    "training_version": 0
+  }
+}

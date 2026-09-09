@@ -91,7 +91,7 @@ class DockEvalExtension:
 def create_dock_eval_app(
     extension: DockEvalExtension | str | Path,
     *,
-    storage_root: str | Path | None = None,
+    storage_root: str | Path,
 ):
     """Create the ordinary Containers app from a private Dock extension."""
     if not isinstance(extension, DockEvalExtension):

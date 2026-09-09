@@ -43,6 +43,16 @@ from .annotations import (
 )
 from .nouns import CheckpointDescriptor, ExecutionRecord
 from .ontology import CONTRACT_VERSION
+from .cispo_contract import (
+    CISPO_ROUTE_PREFIX,
+    CispoNotImplementedError,
+    cispo_admission_port,
+    cispo_capability_document_for,
+    cispo_declaration_of,
+    cispo_declared_routes,
+    cispo_optimizer_contract,
+    cispo_rollout_port,
+)
 from .prompt_programs import gepa_optimizer_contract
 from .serde import JsonObject
 
@@ -130,6 +140,19 @@ def _gepa_optimizer_route_contract(runtime: ManagedRuntime) -> dict[str, Any] | 
     return gepa_optimizer_contract()
 
 
+def _cispo_optimizer_route_contract(runtime: ManagedRuntime) -> dict[str, Any] | None:
+    """Advertise CISPO only for a runtime that actually declares it.
+
+    Discovery is the whole point: a container with no CISPO declaration has no
+    capability document to hash and nothing to promise, so it advertises
+    nothing rather than a surface that would 501 on every call.
+    """
+
+    if cispo_declaration_of(runtime) is None:
+        return None
+    return cispo_optimizer_contract(CISPO_ROUTE_PREFIX)
+
+
 def _with_optimizer_contracts(payload: dict[str, Any], runtime: ManagedRuntime) -> dict[str, Any]:
     value = dict(payload)
     metadata = value.get("metadata")
@@ -137,20 +160,182 @@ def _with_optimizer_contracts(payload: dict[str, Any], runtime: ManagedRuntime) 
         metadata = {}
     else:
         metadata = dict(metadata)
-    gepa_contract = _gepa_optimizer_route_contract(runtime)
-    if gepa_contract is not None:
-        optimizer_contracts = metadata.get("optimizer_contracts")
-        if not isinstance(optimizer_contracts, dict):
-            optimizer_contracts = {}
-        else:
-            optimizer_contracts = dict(optimizer_contracts)
-        optimizer_contracts["gepa"] = {
-            **gepa_contract,
-            **dict(optimizer_contracts.get("gepa") or {}),
+    declared = {
+        "gepa": _gepa_optimizer_route_contract(runtime),
+        "cispo": _cispo_optimizer_route_contract(runtime),
+    }
+    optimizer_contracts = metadata.get("optimizer_contracts")
+    if not isinstance(optimizer_contracts, dict):
+        optimizer_contracts = {}
+    else:
+        optimizer_contracts = dict(optimizer_contracts)
+    changed = False
+    for name, contract in declared.items():
+        if contract is None:
+            continue
+        # A value already present in the payload wins: a deployment may rename
+        # a declared route, and the executor calls only what it reads here.
+        optimizer_contracts[name] = {
+            **contract,
+            **dict(optimizer_contracts.get(name) or {}),
         }
+        changed = True
+    if changed:
         metadata["optimizer_contracts"] = optimizer_contracts
     value["metadata"] = metadata
     return value
+
+
+async def _cispo_call(handler: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    """Call a port method and normalize its refusal.
+
+    A port method may be sync or async. A declared-but-unimplemented operation
+    comes back as a typed 501 rather than a 404: the route exists, the behavior
+    behind it does not yet.
+    """
+
+    try:
+        value = handler(*args, **kwargs)
+        if isawaitable(value):
+            value = await value
+    except CispoNotImplementedError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.to_payload()) from exc
+    if isinstance(value, Mapping):
+        return dict(value)
+    raise TypeError(f"{getattr(handler, '__name__', 'cispo port method')}() must return a mapping")
+
+
+async def _cispo_body(request: Request) -> dict[str, Any]:
+    payload = await request.json()
+    if not isinstance(payload, Mapping):
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "cispo_request_must_be_object", "route": request.url.path},
+        )
+    return dict(payload)
+
+
+def register_cispo_routes(
+    app: FastAPI, runtime: ManagedRuntime, *, prefix: str = CISPO_ROUTE_PREFIX
+) -> FastAPI:
+    """Register the seventeen declared CISPO routes.
+
+    Handlers own dispatch only. The capability document is built here from the
+    runtime's own declaration and capability surface; everything else delegates
+    to the admission port (stream B) or the rollout/evidence port (stream C).
+    """
+
+    routes = cispo_declared_routes(prefix)
+
+    # Resolved per request, not once at registration: a runtime may install a
+    # real port after the app is built, and the null port is only a fallback.
+    def admission() -> Any:
+        return cispo_admission_port(runtime)
+
+    def rollouts() -> Any:
+        return cispo_rollout_port(runtime)
+
+    @app.get(routes["health_route"])
+    async def cispo_health() -> dict[str, Any]:
+        return await _cispo_call(admission().cispo_health)
+
+    @app.get(routes["capabilities_route"])
+    async def cispo_capabilities() -> dict[str, Any]:
+        try:
+            return cispo_capability_document_for(runtime, routes=routes)
+        except ValueError as exc:
+            # An undeclared mandatory capability is a refusal, never a default.
+            raise HTTPException(
+                status_code=501,
+                detail={"error": "cispo_capability_not_declared", "reason": str(exc)},
+            ) from exc
+
+    @app.post(routes["handshake_route"])
+    async def cispo_handshake(request: Request) -> dict[str, Any]:
+        return await _cispo_call(admission().cispo_handshake, await _cispo_body(request))
+
+    @app.get(routes["taskset_route"])
+    async def cispo_taskset() -> dict[str, Any]:
+        return await _cispo_call(admission().cispo_taskset)
+
+    @app.post(routes["taskset_tasks_route"])
+    async def cispo_taskset_tasks(request: Request) -> dict[str, Any]:
+        return await _cispo_call(admission().cispo_taskset_tasks, await _cispo_body(request))
+
+    @app.get(routes["topology_route"])
+    async def cispo_topology(topology_id: str) -> dict[str, Any]:
+        return await _cispo_call(admission().cispo_topology, topology_id)
+
+    @app.post(routes["policy_bind_route"])
+    async def cispo_bind_policy(request: Request) -> dict[str, Any]:
+        return await _cispo_call(admission().cispo_bind_policy, await _cispo_body(request))
+
+    @app.post(routes["policy_set_bind_route"])
+    async def cispo_bind_policy_set(request: Request) -> dict[str, Any]:
+        return await _cispo_call(admission().cispo_bind_policy_set, await _cispo_body(request))
+
+    @app.post(routes["rollout_route"], status_code=202)
+    async def cispo_submit_rollout(request: Request) -> dict[str, Any]:
+        return await _cispo_call(rollouts().cispo_submit_rollout, await _cispo_body(request))
+
+    @app.get(routes["rollout_state_route"])
+    async def cispo_rollout_state(rollout_id: str) -> dict[str, Any]:
+        return await _cispo_call(rollouts().cispo_rollout_state, rollout_id)
+
+    @app.get(routes["rollout_events_route"])
+    async def cispo_rollout_events(
+        rollout_id: str,
+        cursor: str | None = Query(default=None),
+        limit: int | None = Query(default=None, ge=1, le=10_000),
+    ) -> dict[str, Any]:
+        return await _cispo_call(
+            rollouts().cispo_rollout_events, rollout_id, cursor=cursor, limit=limit
+        )
+
+    @app.post(routes["rollout_renew_route"])
+    async def cispo_renew_lease(rollout_id: str, request: Request) -> dict[str, Any]:
+        return await _cispo_call(
+            rollouts().cispo_renew_lease, rollout_id, await _cispo_body(request)
+        )
+
+    @app.post(routes["rollout_finalize_route"])
+    async def cispo_finalize_rollout(rollout_id: str, request: Request) -> dict[str, Any]:
+        return await _cispo_call(
+            rollouts().cispo_finalize_rollout, rollout_id, await _cispo_body(request)
+        )
+
+    @app.post(routes["rollout_terminate_route"])
+    async def cispo_terminate_rollout(rollout_id: str, request: Request) -> dict[str, Any]:
+        return await _cispo_call(
+            rollouts().cispo_terminate_rollout, rollout_id, await _cispo_body(request)
+        )
+
+    @app.get(routes["trace_route"])
+    async def cispo_rollout_trace(rollout_id: str) -> dict[str, Any]:
+        return await _cispo_call(rollouts().cispo_rollout_trace, rollout_id)
+
+    @app.get(routes["artifacts_route"])
+    async def cispo_rollout_artifacts(rollout_id: str) -> dict[str, Any]:
+        return await _cispo_call(rollouts().cispo_rollout_artifacts, rollout_id)
+
+    # The declared contract table says the reward route answers GET/POST. The
+    # optimizer client only ever GETs it, but a receipt request carrying a
+    # trace digest does not fit a query string, so both verbs are served.
+    @app.get(routes["reward_route"])
+    async def cispo_reward_get(
+        rollout_id: str = Query(...),
+        trace_digest: str | None = Query(default=None),
+    ) -> dict[str, Any]:
+        request_payload: dict[str, Any] = {"rollout_id": rollout_id}
+        if trace_digest is not None:
+            request_payload["trace_digest"] = trace_digest
+        return await _cispo_call(rollouts().cispo_reward, request_payload)
+
+    @app.post(routes["reward_route"])
+    async def cispo_reward_post(request: Request) -> dict[str, Any]:
+        return await _cispo_call(rollouts().cispo_reward, await _cispo_body(request))
+
+    return app
 
 
 async def _optional_runtime_contract_call(
@@ -227,6 +412,7 @@ def create_reference_app(
     app = FastAPI(title=title)
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
     telemetry_by_rollout: dict[str, dict[str, Any]] = {}
+    prepared_identity_by_rollout: dict[str, dict[str, Any]] = {}
     event_logs: dict[str, RolloutEventLog] = {}
     start_requests: dict[str, dict[str, Any]] = {}
     start_responses: dict[str, dict[str, Any]] = {}
@@ -450,6 +636,23 @@ def create_reference_app(
         if telemetry is None or not telemetry.enabled:
             raise HTTPException(status_code=400, detail="prepare_requires_telemetry")
         rollout_id = request.rollout_id or f"roll_{uuid.uuid4().hex[:12]}"
+        seed = request.seed
+        if seed is None and request.task_instance_id:
+            prefix, separator, value = request.task_instance_id.partition(":")
+            if separator and prefix == "seed":
+                try:
+                    seed = int(value)
+                except ValueError:
+                    pass
+        task_instance_id = request.task_instance_id
+        if task_instance_id is None and seed is not None:
+            task_instance_id = f"seed:{seed}"
+        requested_identity = {
+            "seed": seed,
+            "task_instance_id": task_instance_id,
+            "policy_ref": dict(request.policy_ref),
+            "policy_revision_id": request.policy_revision_id,
+        }
         if rollout_id in event_logs:
             prepared = telemetry_by_rollout[rollout_id]
             requested_binding = (telemetry.transport, telemetry.retention)
@@ -462,8 +665,20 @@ def create_reference_app(
                     status_code=409,
                     detail=f"rollout_prepare_identity_conflict:{rollout_id}",
                 )
+            prepared_identity = prepared_identity_by_rollout.get(rollout_id)
+            if prepared_identity != requested_identity:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": "rollout_prepare_identity_conflict",
+                        "rollout_id": rollout_id,
+                        "prepared": prepared_identity,
+                        "requested": requested_identity,
+                    },
+                )
             return {
                 "rollout_id": rollout_id,
+                **requested_identity,
                 "stream": stream_descriptor(
                     rollout_id=rollout_id,
                     stream_id=event_logs[rollout_id].stream_id,
@@ -477,6 +692,7 @@ def create_reference_app(
         log = _new_event_log(rollout_id, stream_id)
         event_logs[rollout_id] = log
         telemetry_by_rollout[rollout_id] = telemetry.model_dump(mode="json")
+        prepared_identity_by_rollout[rollout_id] = requested_identity
         log.append_control(CONTROL_SUBSCRIBED, log.subscribed_payload())
         descriptor = stream_descriptor(
             rollout_id=rollout_id,
@@ -484,7 +700,7 @@ def create_reference_app(
             bound_transport=bound,
             retention=telemetry.retention,
         )
-        return {"rollout_id": rollout_id, "stream": descriptor}
+        return {"rollout_id": rollout_id, **requested_identity, "stream": descriptor}
 
     @app.get("/rollouts/{rollout_id}/stream")
     async def rollout_stream(rollout_id: str, request: Request) -> StreamingResponse:
@@ -841,5 +1057,9 @@ def create_reference_app(
         if result is None:
             raise HTTPException(status_code=404, detail=f"unknown_rollout:{rollout_id}")
         return _coerce_rollout_payload(result)
+
+    # Additive: the CISPO surface lives under its own prefix, so nothing above
+    # is shadowed and nothing above shadows it.
+    register_cispo_routes(app, runtime)
 
     return app

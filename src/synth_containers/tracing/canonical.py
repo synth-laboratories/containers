@@ -16,9 +16,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import fields, is_dataclass, replace
 from datetime import UTC, datetime
-from typing import Any, TypeVar
+from typing import Any, Iterator, TypeVar
 
 from pydantic import BaseModel
 from synth_containers.serde import jsonable
@@ -138,9 +140,35 @@ def record_id(prefix: str, *, kind: str, scope: tuple[str, ...] = (), key: Any =
     return f"{clean_prefix}_{hexed[:RECORD_ID_HEX_LENGTH]}"
 
 
-def utc_now() -> str:
-    """RFC3339 UTC timestamp with microsecond precision."""
+_PINNED_NOW: ContextVar[str | None] = ContextVar("synth_trace_pinned_now", default=None)
 
+
+@contextmanager
+def pinned_utc_now(value: str) -> Iterator[str]:
+    """Pin :func:`utc_now` to ``value`` inside the context.
+
+    Deterministic importers (the harbor job-dir adapter) pin the clock to a
+    timestamp derived from their inputs so re-materializing the same inputs
+    yields byte-identical bundles and archive digests.  The pin is
+    context-local; concurrent captures on other contexts keep the wall clock.
+    """
+
+    moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if moment.utcoffset() is None:
+        raise ValueError(f"pinned utc_now must be timezone-aware: {value!r}")
+    token = _PINNED_NOW.set(value)
+    try:
+        yield value
+    finally:
+        _PINNED_NOW.reset(token)
+
+
+def utc_now() -> str:
+    """RFC3339 UTC timestamp with microsecond precision (or the pinned value)."""
+
+    pinned = _PINNED_NOW.get()
+    if pinned is not None:
+        return pinned
     return datetime.now(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
@@ -163,6 +191,7 @@ __all__ = [
     "canonical_text",
     "content_digest",
     "digest_hex",
+    "pinned_utc_now",
     "readable_json",
     "record_id",
     "seal_record",

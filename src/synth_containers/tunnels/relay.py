@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import queue
 import threading
 import time
 import urllib.error
@@ -29,6 +30,41 @@ _HOP_BY_HOP_HEADERS = {
     "upgrade",
 }
 _LOCAL_ONLY_AUTH_HEADERS = {"authorization", "x-api-key", "x-api-keys"}
+# Per-hop handshake headers. The agent handshakes with the origin using its own
+# key and negotiates its own extensions, so none of these are forwarded.
+# ``sec-websocket-protocol`` is deliberately absent from this set: it *is*
+# forwarded, as offered subprotocols, and whatever the origin selects comes back
+# in WS_OPEN_ACK.
+_WEBSOCKET_HANDSHAKE_HEADERS = {
+    "sec-websocket-key",
+    "sec-websocket-version",
+    "sec-websocket-accept",
+    "sec-websocket-extensions",
+}
+_WEBSOCKET_SUBPROTOCOL_HEADER = "sec-websocket-protocol"
+# Response headers the agent owns rather than the origin. Everything else in a
+# WS_OPEN_REJECT is forwarded verbatim -- notably ``upgrade`` and
+# ``sec-websocket-version``, which are what tell a client to stop retrying the
+# handshake against the Trace V5 capture proxy.
+_WEBSOCKET_REJECT_FRAMING_HEADERS = {"connection", "content-length", "transfer-encoding"}
+
+# One agent socket carries every stream for a lease, so a stream that blocks on a
+# slow origin must never block the shared receive loop. Each open WebSocket gets
+# this many queued outbound messages; on overflow the stream -- and only that
+# stream -- is closed with 1013.
+_WEBSOCKET_STREAM_QUEUE_FRAMES = 64
+# Default ceiling on concurrently open tunnelled WebSockets. Counted separately
+# from HTTP in-flight requests so a long-lived socket cannot consume the request
+# concurrency budget.
+_DEFAULT_MAX_WEBSOCKET_STREAMS = 64
+
+_WS_CLOSE_NORMAL = 1000
+_WS_CLOSE_GOING_AWAY = 1001  # lease expiry / deliberate agent shutdown
+_WS_CLOSE_PROTOCOL_ERROR = 1002
+_WS_CLOSE_MESSAGE_TOO_BIG = 1009
+_WS_CLOSE_INTERNAL_ERROR = 1011
+_WS_CLOSE_SERVICE_RESTART = 1012  # the agent lost its relay connection
+_WS_CLOSE_TRY_AGAIN_LATER = 1013  # per-stream queue overflow
 
 
 class SynthTunnelRelayError(RuntimeError):
@@ -70,6 +106,34 @@ class _PendingRequest:
     connection_generation: int
     received_monotonic: float
     body: bytearray = field(default_factory=bytearray)
+
+
+class _OriginUpgradeRefused(Exception):
+    """The local origin answered the WebSocket handshake with an HTTP response."""
+
+    def __init__(self, status: int, headers: list[list[str]], body: bytes) -> None:
+        super().__init__(f"origin refused websocket upgrade with HTTP {status}")
+        self.status = status
+        self.headers = headers
+        self.body = body
+
+
+@dataclass(slots=True)
+class _WebSocketStream:
+    rid: str
+    path: str
+    query: str
+    headers: list[tuple[str, str]]
+    deadline_ms: int
+    connection_generation: int
+    outbound: queue.Queue = field(
+        default_factory=lambda: queue.Queue(maxsize=_WEBSOCKET_STREAM_QUEUE_FRAMES)
+    )
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    origin: Any | None = None
+    pending: bytearray = field(default_factory=bytearray)
+    pending_opcode: str | None = None
+    closed: bool = False
 
 
 @dataclass(slots=True)
@@ -207,6 +271,7 @@ class SynthTunnelProvider:
         ready_timeout_seconds: float = 60.0,
         max_in_flight_requests: int = 256,
         max_request_body_bytes: int = 64 * 1024 * 1024,
+        max_websocket_streams: int = _DEFAULT_MAX_WEBSOCKET_STREAMS,
     ) -> None:
         if attach_timeout_seconds <= 0 or ready_timeout_seconds <= 0:
             raise ValueError("SynthTunnel timeouts must be positive")
@@ -214,6 +279,8 @@ class SynthTunnelProvider:
             raise ValueError("max_in_flight_requests must be positive")
         if max_request_body_bytes <= 0:
             raise ValueError("max_request_body_bytes must be positive")
+        if max_websocket_streams <= 0:
+            raise ValueError("max_websocket_streams must be positive")
         self._control_plane = control_plane
         self._client_instance_id = (
             client_instance_id or f"synth-containers-{uuid.uuid4().hex[:24]}"
@@ -222,6 +289,7 @@ class SynthTunnelProvider:
         self._ready_timeout_seconds = ready_timeout_seconds
         self._max_in_flight_requests = max_in_flight_requests
         self._max_request_body_bytes = max_request_body_bytes
+        self._max_websocket_streams = max_websocket_streams
 
     def open_synth_tunnel(
         self,
@@ -262,6 +330,7 @@ class SynthTunnelProvider:
                 agent_connect=agent_connect,
                 max_in_flight_requests=self._max_in_flight_requests,
                 max_request_body_bytes=self._max_request_body_bytes,
+                max_websocket_streams=self._max_websocket_streams,
             )
         except Exception as response_error:
             try:
@@ -318,6 +387,7 @@ class SynthTunnelRelayAgent:
         agent_connect: Mapping[str, Any],
         max_in_flight_requests: int,
         max_request_body_bytes: int,
+        max_websocket_streams: int = _DEFAULT_MAX_WEBSOCKET_STREAMS,
     ) -> None:
         transport = _required_text(agent_connect.get("transport"), "agent transport")
         if transport != "ws":
@@ -330,7 +400,13 @@ class SynthTunnelRelayAgent:
         self._agent_token = _required_text(agent_connect.get("agent_token"), "agent token")
         self._max_in_flight_requests = max_in_flight_requests
         self._max_request_body_bytes = max_request_body_bytes
+        if max_websocket_streams <= 0:
+            raise ValueError("max_websocket_streams must be positive")
+        self._max_websocket_streams = max_websocket_streams
         self._request_slots = threading.BoundedSemaphore(max_in_flight_requests)
+        # Separate ceiling: a long-lived socket must not consume the HTTP
+        # request concurrency budget.
+        self._websocket_slots = threading.BoundedSemaphore(max_websocket_streams)
         self._ready = threading.Event()
         self._fatal = threading.Event()
         self._stop = threading.Event()
@@ -340,6 +416,8 @@ class SynthTunnelRelayAgent:
         self._lifecycle_lock = threading.Lock()
         self._start_lock = threading.Lock()
         self._requests: dict[str, _PendingRequest] = {}
+        self._streams_lock = threading.Lock()
+        self._streams: dict[str, _WebSocketStream] = {}
         self._thread: threading.Thread | None = None
         self._websocket: Any | None = None
         self._connection_generation = 0
@@ -402,6 +480,13 @@ class SynthTunnelRelayAgent:
             self._start_lock.release()
 
     def stop(self) -> None:
+        # Deliberate lease teardown. Tell the relay 1001 while the agent socket
+        # is still up; the 1012 path in _run() only covers unplanned loss.
+        self._close_all_websocket_streams(
+            _WS_CLOSE_GOING_AWAY,
+            "lease closed",
+            notify_relay=True,
+        )
         with self._lifecycle_lock:
             self._stop.set()
             with self._connection_lock:
@@ -443,7 +528,11 @@ class SynthTunnelRelayAgent:
                     connection_generation = self._connection_generation
                     self._websocket = websocket
                 self._send_frame(
-                    {"type": "ATTACH", "leases": [{"lease_id": self._lease_id}]},
+                    {
+                        "type": "ATTACH",
+                        "leases": [{"lease_id": self._lease_id}],
+                        "capabilities": {"websocket": True},
+                    },
                     expected_generation=connection_generation,
                 )
                 while not self._stop.is_set():
@@ -479,6 +568,19 @@ class SynthTunnelRelayAgent:
                     ]
                     for rid in stale:
                         self._requests.pop(rid, None)
+                with self._streams_lock:
+                    stale_streams = [
+                        rid
+                        for rid, stream in self._streams.items()
+                        if stream.connection_generation == connection_generation
+                    ]
+                for rid in stale_streams:
+                    self._close_websocket_stream(
+                        rid,
+                        _WS_CLOSE_SERVICE_RESTART,
+                        "agent disconnected",
+                        notify_relay=False,
+                    )
 
     def _handle_frame(
         self,
@@ -558,6 +660,387 @@ class SynthTunnelRelayAgent:
                     name="synth-containers-tunnel-request",
                     daemon=True,
                 ).start()
+            return
+        if message_type == "WS_OPEN":
+            self._open_websocket_stream(request_id, payload, connection_generation)
+            return
+        if message_type == "WS_FRAME":
+            self._accept_websocket_frame(request_id, payload)
+            return
+        if message_type == "WS_CLOSE":
+            # The relay closed this stream. Stop sending for the rid and drop it;
+            # closing is idempotent, and the relay does not need an echo.
+            self._close_websocket_stream(
+                request_id,
+                _websocket_close_code(payload.get("code")),
+                str(payload.get("reason") or ""),
+                notify_relay=False,
+            )
+            return
+
+    # ------------------------------------------------------------------
+    # WebSocket streams
+    # ------------------------------------------------------------------
+
+    def _open_websocket_stream(
+        self,
+        request_id: str,
+        payload: Mapping[str, Any],
+        connection_generation: int,
+    ) -> None:
+        if not self._websocket_slots.acquire(blocking=False):
+            self._send_websocket_open_reject(
+                request_id,
+                connection_generation,
+                503,
+                [["content-type", "text/plain; charset=utf-8"]],
+                b"synth-tunnel: too many open websocket streams",
+            )
+            return
+        stream = _WebSocketStream(
+            rid=request_id,
+            path=_request_path(payload.get("path")),
+            query=str(payload.get("query") or ""),
+            headers=_header_pairs(payload.get("headers")),
+            deadline_ms=max(1000, int(payload.get("deadline_ms") or 120000)),
+            connection_generation=connection_generation,
+        )
+        with self._streams_lock:
+            if request_id in self._streams:
+                self._websocket_slots.release()
+                return
+            self._streams[request_id] = stream
+        try:
+            threading.Thread(
+                target=self._serve_websocket,
+                args=(stream,),
+                name="synth-containers-tunnel-ws",
+                daemon=True,
+            ).start()
+        except Exception:
+            with self._streams_lock:
+                if self._streams.get(request_id) is stream:
+                    del self._streams[request_id]
+            self._websocket_slots.release()
+            self._send_websocket_open_reject(
+                request_id,
+                connection_generation,
+                503,
+                [["content-type", "text/plain; charset=utf-8"]],
+                b"synth-tunnel: could not start a websocket stream",
+            )
+
+    def _accept_websocket_frame(
+        self,
+        request_id: str,
+        payload: Mapping[str, Any],
+    ) -> None:
+        """Queue one relay frame for the origin. Never blocks the receive loop."""
+        with self._streams_lock:
+            stream = self._streams.get(request_id)
+        if stream is None:
+            return
+        try:
+            data = _decode_bytes(str(payload.get("data_b64") or ""))
+        except ValueError:
+            self._close_websocket_stream(
+                request_id,
+                _WS_CLOSE_PROTOCOL_ERROR,
+                "invalid websocket frame payload",
+                notify_relay=True,
+            )
+            return
+        opcode = "text" if str(payload.get("opcode") or "binary") == "text" else "binary"
+        final = bool(payload.get("fin", True))
+        with stream.lock:
+            if stream.closed:
+                return
+            if len(stream.pending) + len(data) > self._max_request_body_bytes:
+                oversize = True
+            else:
+                oversize = False
+                if not final:
+                    if stream.pending_opcode is None:
+                        stream.pending_opcode = opcode
+                    stream.pending.extend(data)
+                    return
+                if stream.pending:
+                    opcode = stream.pending_opcode or opcode
+                    data = bytes(stream.pending) + data
+                    stream.pending = bytearray()
+                    stream.pending_opcode = None
+        if oversize:
+            self._close_websocket_stream(
+                request_id,
+                _WS_CLOSE_MESSAGE_TOO_BIG,
+                "websocket frame exceeded max_request_bytes",
+                notify_relay=True,
+            )
+            return
+        try:
+            stream.outbound.put_nowait(("frame", opcode, data))
+        except queue.Full:
+            self._close_websocket_stream(
+                request_id,
+                _WS_CLOSE_TRY_AGAIN_LATER,
+                "websocket stream queue overflowed",
+                notify_relay=True,
+            )
+
+    def _close_websocket_stream(
+        self,
+        request_id: str,
+        code: int,
+        reason: str,
+        *,
+        notify_relay: bool,
+    ) -> None:
+        """Drop one stream. Idempotent: a second call for the same rid is a no-op."""
+        with self._streams_lock:
+            stream = self._streams.pop(request_id, None)
+        if stream is None:
+            return
+        with stream.lock:
+            stream.closed = True
+            stream.pending = bytearray()
+            stream.pending_opcode = None
+        if notify_relay:
+            try:
+                self._send_frame(
+                    {
+                        "type": "WS_CLOSE",
+                        "lease_id": self._lease_id,
+                        "rid": request_id,
+                        "code": int(code),
+                        "reason": _close_reason_text(reason),
+                    },
+                    expected_generation=stream.connection_generation,
+                )
+            except SynthTunnelRelayError:
+                pass
+        while True:
+            try:
+                stream.outbound.get_nowait()
+            except queue.Empty:
+                break
+        try:
+            stream.outbound.put_nowait(("close", int(code), _close_reason_text(reason)))
+        except queue.Full:  # pragma: no cover - the queue was just drained
+            pass
+
+    def _close_all_websocket_streams(
+        self,
+        code: int,
+        reason: str,
+        *,
+        notify_relay: bool,
+    ) -> None:
+        with self._streams_lock:
+            request_ids = list(self._streams)
+        for request_id in request_ids:
+            self._close_websocket_stream(
+                request_id,
+                code,
+                reason,
+                notify_relay=notify_relay,
+            )
+
+    def _serve_websocket(self, stream: _WebSocketStream) -> None:
+        origin: Any | None = None
+        try:
+            try:
+                origin = self._dial_origin_websocket(stream)
+            except _OriginUpgradeRefused as refused:
+                # The path that matters most: the origin answered the upgrade with
+                # an ordinary HTTP response and the client must see it intact.
+                self._send_websocket_open_reject(
+                    stream.rid,
+                    stream.connection_generation,
+                    refused.status,
+                    refused.headers,
+                    refused.body,
+                )
+                return
+            except Exception:
+                self._send_websocket_open_reject(
+                    stream.rid,
+                    stream.connection_generation,
+                    502,
+                    [["content-type", "text/plain; charset=utf-8"]],
+                    b"synth-tunnel: local websocket dial failed",
+                )
+                return
+            with stream.lock:
+                already_closed = stream.closed
+                if not already_closed:
+                    stream.origin = origin
+            if already_closed:
+                _close_origin(origin, _WS_CLOSE_GOING_AWAY, "stream closed")
+                return
+            subprotocol = getattr(origin, "subprotocol", None)
+            ack_headers = (
+                [[_WEBSOCKET_SUBPROTOCOL_HEADER, str(subprotocol)]] if subprotocol else []
+            )
+            try:
+                self._send_frame(
+                    {
+                        "type": "WS_OPEN_ACK",
+                        "lease_id": self._lease_id,
+                        "rid": stream.rid,
+                        "headers": ack_headers,
+                    },
+                    expected_generation=stream.connection_generation,
+                )
+            except SynthTunnelRelayError:
+                _close_origin(origin, _WS_CLOSE_SERVICE_RESTART, "agent disconnected")
+                return
+            threading.Thread(
+                target=self._pump_origin_to_relay,
+                args=(stream, origin),
+                name="synth-containers-tunnel-ws-reader",
+                daemon=True,
+            ).start()
+            self._pump_relay_to_origin(stream, origin)
+        finally:
+            with self._streams_lock:
+                if self._streams.get(stream.rid) is stream:
+                    del self._streams[stream.rid]
+            if origin is not None:
+                _close_origin(origin, _WS_CLOSE_NORMAL, "")
+            # Released exactly once per acquired slot, by the owning thread.
+            self._websocket_slots.release()
+
+    def _pump_relay_to_origin(self, stream: _WebSocketStream, origin: Any) -> None:
+        while True:
+            try:
+                item = stream.outbound.get(timeout=0.5)
+            except queue.Empty:
+                if self._stop.is_set():
+                    _close_origin(origin, _WS_CLOSE_GOING_AWAY, "lease closed")
+                    return
+                with stream.lock:
+                    if stream.closed:
+                        _close_origin(origin, _WS_CLOSE_GOING_AWAY, "stream closed")
+                        return
+                continue
+            if item[0] == "close":
+                _close_origin(origin, int(item[1]), str(item[2]))
+                return
+            _, opcode, data = item
+            try:
+                origin.send(data.decode("utf-8", "replace") if opcode == "text" else data)
+            except Exception:
+                self._close_websocket_stream(
+                    stream.rid,
+                    _WS_CLOSE_INTERNAL_ERROR,
+                    "origin websocket send failed",
+                    notify_relay=True,
+                )
+                return
+
+    def _pump_origin_to_relay(self, stream: _WebSocketStream, origin: Any) -> None:
+        while True:
+            try:
+                message = origin.recv()
+            except Exception as error:
+                code, reason = _origin_close_reason(origin, error)
+                self._close_websocket_stream(
+                    stream.rid,
+                    code,
+                    reason,
+                    notify_relay=True,
+                )
+                return
+            if isinstance(message, str):
+                opcode, data = "text", message.encode("utf-8")
+            else:
+                opcode, data = "binary", bytes(message)
+            if len(data) > self._max_request_body_bytes:
+                self._close_websocket_stream(
+                    stream.rid,
+                    _WS_CLOSE_MESSAGE_TOO_BIG,
+                    "websocket frame exceeded max_request_bytes",
+                    notify_relay=True,
+                )
+                return
+            try:
+                self._send_frame(
+                    {
+                        "type": "WS_FRAME",
+                        "lease_id": self._lease_id,
+                        "rid": stream.rid,
+                        "opcode": opcode,
+                        "data_b64": _encode_bytes(data),
+                        "fin": True,
+                    },
+                    expected_generation=stream.connection_generation,
+                )
+            except SynthTunnelRelayError:
+                self._close_websocket_stream(
+                    stream.rid,
+                    _WS_CLOSE_SERVICE_RESTART,
+                    "agent disconnected",
+                    notify_relay=False,
+                )
+                return
+
+    def _dial_origin_websocket(self, stream: _WebSocketStream) -> Any:
+        from websockets.exceptions import InvalidStatus
+
+        headers: list[tuple[str, str]] = []
+        subprotocols: list[str] = []
+        for key, value in stream.headers:
+            name = key.strip().lower()
+            if name == _WEBSOCKET_SUBPROTOCOL_HEADER:
+                subprotocols.extend(
+                    part.strip() for part in value.split(",") if part.strip()
+                )
+                continue
+            if (
+                name in _HOP_BY_HOP_HEADERS
+                or name in _LOCAL_ONLY_AUTH_HEADERS
+                or name in _WEBSOCKET_HANDSHAKE_HEADERS
+            ):
+                continue
+            headers.append((key, value))
+        try:
+            return _connect_origin_websocket(
+                _local_websocket_url(self._local_target, stream.path, stream.query),
+                headers=headers,
+                subprotocols=subprotocols,
+                max_message_bytes=self._max_request_body_bytes,
+                open_timeout=max(1.0, stream.deadline_ms / 1000.0),
+            )
+        except InvalidStatus as refused:
+            response = refused.response
+            raise _OriginUpgradeRefused(
+                int(response.status_code),
+                _reject_header_pairs(response.headers),
+                bytes(response.body or b""),
+            ) from refused
+
+    def _send_websocket_open_reject(
+        self,
+        request_id: str,
+        connection_generation: int,
+        status: int,
+        headers: list[list[str]],
+        body: bytes,
+    ) -> None:
+        try:
+            self._send_frame(
+                {
+                    "type": "WS_OPEN_REJECT",
+                    "lease_id": self._lease_id,
+                    "rid": request_id,
+                    "status": int(status),
+                    "headers": headers,
+                    "body_b64": _encode_bytes(body),
+                },
+                expected_generation=connection_generation,
+            )
+        except SynthTunnelRelayError:
+            return
 
     def _serve_request(self, request_id: str, request: _PendingRequest) -> None:
         try:
@@ -631,8 +1114,15 @@ class SynthTunnelRelayAgent:
             },
             expected_generation=request.connection_generation,
         )
+        # read() blocks until it has the full request size or the stream ends,
+        # so an SSE origin writing a few bytes every few hundred ms produced one
+        # chunk at the very end: the agent, not the relay, was what stopped
+        # streaming from streaming. read1() returns whatever has arrived.
+        # Measured on a 6-event SSE origin: read() gave 1 chunk at 1.51s,
+        # read1() gave 6 chunks at 0.00, 0.30, 0.60, 0.91, 1.22, 1.52.
+        read_available = getattr(response, "read1", None) or response.read
         while True:
-            chunk = response.read(65536)
+            chunk = read_available(65536)
             if not chunk:
                 break
             self._send_frame(
@@ -699,6 +1189,102 @@ def _connect_websocket(
         close_timeout=5,
         max_size=max_message_bytes,
     )
+
+
+def _connect_origin_websocket(
+    url: str,
+    *,
+    headers: Sequence[tuple[str, str]],
+    subprotocols: Sequence[str],
+    max_message_bytes: int,
+    open_timeout: float,
+) -> Any:
+    from websockets.sync.client import connect
+    from websockets.typing import Subprotocol
+
+    offered = [Subprotocol(value) for value in subprotocols] or None
+    return connect(
+        url,
+        additional_headers=list(headers),
+        subprotocols=offered,
+        open_timeout=open_timeout,
+        close_timeout=5,
+        # max_size bounds a single origin message; websockets closes the socket
+        # with 1009 itself when the origin exceeds it.
+        max_size=max_message_bytes,
+        # The origin hop is loopback and the agent re-frames every message, so no
+        # extension is negotiated toward the origin.
+        compression=None,
+        # Never let a local WebSocket dial be redirected through a proxy.
+        proxy=None,
+    )
+
+
+def _local_websocket_url(target: _LocalTarget, path: str, query: str) -> str:
+    parsed = urlparse(_local_upstream_url(target, path, query))
+    scheme = "wss" if parsed.scheme == "https" else "ws"
+    return urlunparse(
+        (scheme, parsed.netloc, parsed.path, parsed.params, parsed.query, "")
+    )
+
+
+def _reject_header_pairs(headers: Any) -> list[list[str]]:
+    """Origin response headers for WS_OPEN_REJECT, forwarded verbatim.
+
+    Only the framing headers the relay must own are dropped. ``upgrade`` and
+    ``sec-websocket-version`` are kept: they are what makes a 426 from the Trace
+    V5 capture proxy stop a client from retrying the handshake.
+    """
+    raw_items = getattr(headers, "raw_items", None)
+    items = raw_items() if callable(raw_items) else headers.items()
+    return [
+        [str(key), str(value)]
+        for key, value in items
+        if str(key).strip().lower() not in _WEBSOCKET_REJECT_FRAMING_HEADERS
+    ]
+
+
+def _websocket_close_code(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int | float | str):
+        return _WS_CLOSE_NORMAL
+    try:
+        code = int(value)
+    except (TypeError, ValueError):
+        return _WS_CLOSE_NORMAL
+    return code if 1000 <= code <= 4999 else _WS_CLOSE_NORMAL
+
+
+def _close_reason_text(reason: str) -> str:
+    """A close frame carries at most 125 bytes, two of which are the code."""
+    return reason.encode("utf-8", "replace")[:120].decode("utf-8", "ignore")
+
+
+def _origin_close_reason(origin: Any, error: Exception) -> tuple[int, str]:
+    """Why the origin socket ended, as a close code to report to the relay.
+
+    ``ConnectionClosed`` carries the close frames that were received and sent.
+    The connection's own ``close_code`` is only 1006 when the peer never echoed
+    the close -- which is exactly what happens when the agent itself closes with
+    1009 for an oversize origin message -- so the frames are preferred.
+    """
+    for close in (getattr(error, "rcvd", None), getattr(error, "sent", None)):
+        code = getattr(close, "code", None)
+        if isinstance(code, int) and 1000 <= code <= 4999:
+            return code, str(getattr(close, "reason", "") or "")
+    code = getattr(origin, "close_code", None)
+    if isinstance(code, int) and 1000 <= code <= 4999:
+        return code, str(getattr(origin, "close_reason", None) or "")
+    return _WS_CLOSE_INTERNAL_ERROR, type(error).__name__
+
+
+def _close_origin(origin: Any, code: int, reason: str) -> None:
+    try:
+        origin.close(int(code), _close_reason_text(reason))
+    except Exception:
+        try:
+            origin.close_socket()
+        except Exception:
+            pass
 
 
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):

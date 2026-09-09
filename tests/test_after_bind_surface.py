@@ -44,17 +44,14 @@ def _subscribe(client: TestClient, stream: dict) -> list[dict]:
 
 
 def test_info_classifies_families_and_advertises_policy_refs() -> None:
-    craftax = TestClient(create_compat_app("craftax_engine")).get("/info").json()
-    gold = TestClient(create_compat_app("craftax_react")).get("/info").json()
     harbor = TestClient(create_compat_app("harbor_public")).get("/info").json()
     docker = TestClient(create_compat_app("harbor_docker")).get("/info").json()
     mock = TestClient(create_compat_app("digbench_mock")).get("/info").json()
     relay = TestClient(create_compat_app("digbench_public")).get("/info").json()
+    echo = TestClient(create_compat_app("openenv_echo")).get("/info").json()
 
-    assert craftax["runtime_family"] == gold["runtime_family"] == "craftax"
-    assert craftax["environment_ref"] == "env:craftax_fixture"
-    assert gold["environment_ref"] == "env:craftax_gold"
-    assert craftax["target_id"] != gold["target_id"]
+    assert echo["runtime_family"] == "openenv"
+    assert echo["environment_ref"] == "env:echo"
 
     assert harbor["runtime_family"] == docker["runtime_family"] == "harbor"
     assert harbor["live_frames"] == docker["live_frames"] == "unsupported"
@@ -63,6 +60,20 @@ def test_info_classifies_families_and_advertises_policy_refs() -> None:
     harbor_pins = {(row["harness"], row["config"]) for row in harbor["policy_refs"]}
     docker_pins = {(row["harness"], row["config"]) for row in docker["policy_refs"]}
     assert harbor_pins == docker_pins == {("harbor_fused", "luna_med"), ("harbor_fused", "sol_med")}
+    assert {key: harbor["capabilities"][key] for key in ("protocol", "operations", "policy_refs")} == {
+        "protocol": "synth.container.live-eval.v1",
+        "operations": {
+            "rollouts.prepare": True,
+            "rollouts.start_prepared": True,
+            "rollouts.get": True,
+            "rollouts.poll": True,
+            "reward.get": True,
+            "trace_v5.capture": True,
+            "annotation.live": True,
+            "annotation.protocol.put": True,
+        },
+        "policy_refs": harbor["policy_refs"],
+    }
 
     assert mock["runtime_family"] == relay["runtime_family"] == "digbench"
     assert mock["live_frames"] == relay["live_frames"] == "unsupported"
@@ -76,11 +87,24 @@ def test_info_classifies_families_and_advertises_policy_refs() -> None:
     }
 
 
-def test_health_names_runtime_family() -> None:
+def test_health_names_runtime_family(monkeypatch) -> None:
+    monkeypatch.setenv("SYNTH_CONTAINER_INSTANCE_ID", "docker:abc123")
+    monkeypatch.setenv("SYNTH_CONTAINER_IMAGE_DIGEST", "sha256:" + "a" * 64)
+    monkeypatch.setenv("SYNTH_CONTAINER_PRODUCER_SOURCE_REVISION", "b" * 40)
     harbor = TestClient(create_compat_app("harbor_public")).get("/health").json()
     assert harbor["runtime_family"] == "harbor"
     assert harbor["environment_ref"] == "env:harbor_sandbox"
     assert harbor["target"] == "harbor_public"
+    assert harbor["runtime_identity"] == {
+        "schema_version": "synth.container-runtime-identity.v1",
+        "instance_id": "docker:abc123",
+        "image_digest": "sha256:" + "a" * 64,
+        "producer_source_revision": "b" * 40,
+        "environment_version": None,
+    }
+
+    info = TestClient(create_compat_app("harbor_public")).get("/info").json()
+    assert info["runtime_identity"] == harbor["runtime_identity"]
 
 
 def test_prepare_get_returns_prepared_before_start() -> None:
@@ -98,7 +122,7 @@ def test_prepare_get_returns_prepared_before_start() -> None:
 
 
 def test_auto_transport_refused_on_authoritative_prepare() -> None:
-    client = TestClient(create_compat_app("craftax_engine"))
+    client = TestClient(create_compat_app("harbor_public"))
     refused = client.post(
         "/rollouts/prepare",
         json={"rollout_id": "roll_auto", "telemetry": {"enabled": True, "transport": "auto"}},
@@ -106,10 +130,10 @@ def test_auto_transport_refused_on_authoritative_prepare() -> None:
     assert refused.status_code == 422, refused.text
 
 
-def test_craftax_eleventh_lease_is_typed_429() -> None:
-    client = TestClient(create_compat_app("craftax_engine"))
-    leases = TARGETS["craftax_engine"].scale_leases
-    assert leases == 10
+def test_openenv_fifth_lease_is_typed_429() -> None:
+    client = TestClient(create_compat_app("openenv_echo"))
+    leases = TARGETS["openenv_echo"].scale_leases
+    assert leases == 4
     held: list[str] = []
     try:
         for index in range(leases):
@@ -118,27 +142,25 @@ def test_craftax_eleventh_lease_is_typed_429() -> None:
                 json={
                     "telemetry": TELEMETRY,
                     "submission_mode": "async",
-                    "execution": "on_complete",
                     "task_instance_id": f"seed:{index}",
-                    "policy_ref": {"harness": "react", "config": "luna_med"},
+                    "policy_ref": {"harness": "gym_loop", "config": "echo"},
                 },
             )
-            assert started.status_code == 202, started.text
+            assert started.status_code == 200, started.text
             held.append(started.json()["rollout_id"])
-        eleventh = client.post(
+        fifth = client.post(
             "/rollouts",
             json={
                 "telemetry": TELEMETRY,
                 "submission_mode": "async",
-                "execution": "on_complete",
                 "task_instance_id": "seed:10",
-                "policy_ref": {"harness": "react", "config": "luna_med"},
+                "policy_ref": {"harness": "gym_loop", "config": "echo"},
             },
         )
-        assert eleventh.status_code == 429, eleventh.text
-        body = eleventh.json()
+        assert fifth.status_code == 429, fifth.text
+        body = fifth.json()
         assert body["affordance"] == "scale_leases"
-        assert body["scale_leases"] == 10
+        assert body["scale_leases"] == 4
         assert "error" in body
     finally:
         for rollout_id in held:

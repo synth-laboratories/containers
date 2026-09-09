@@ -74,7 +74,7 @@ def choose_actions(*, observation_text, session, valid_actions, engine, seed, pl
         if "T" in row:
             tx, ty = row.index("T"), y
     if px is None:
-        return {"actions": ["noop"], "policy_reason": "no_player"}
+        return {"actions": [valid_actions[0] if valid_actions else "noop"], "policy_reason": "first_legal_action_without_craftax_map"}
     if tx is None:
         chosen = "do" if "do" in valid_actions else "noop"
         return {"actions": [chosen], "policy_reason": "collect"}

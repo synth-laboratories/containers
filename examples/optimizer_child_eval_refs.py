@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import tempfile
 
 from fastapi.testclient import TestClient
 
@@ -25,7 +26,7 @@ def child_ref(started: dict) -> dict:
 
 
 def main() -> int:
-    client = TestClient(create_compat_app("harbor_public"))
+    client = TestClient(create_compat_app("harbor_public", storage_root=tempfile.mkdtemp(prefix="optimizer-child-eval-")))
     refs = []
     for index in range(2):
         started = client.post(

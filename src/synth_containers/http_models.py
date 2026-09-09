@@ -120,6 +120,7 @@ class RolloutTelemetryModel(StrictModel):
 
 class RolloutRequestModel(StrictModel):
     rollout_id: str | None = None
+    seed: int | None = None
     trace_correlation_id: str | None = None
     trial_id: str | None = None
     submission_mode: str | None = None
@@ -130,6 +131,8 @@ class RolloutRequestModel(StrictModel):
     task_metadata: HttpObject = Field(default_factory=dict)
     env: HttpObject = Field(default_factory=dict)
     policy: RolloutPolicySpecModel | None = None
+    policy_ref: HttpObject = Field(default_factory=dict)
+    policy_revision_id: str | None = None
     candidate: HttpObject = Field(default_factory=dict)
     candidate_overlay: HttpObject = Field(default_factory=dict)
     task: HttpObject = Field(default_factory=dict)

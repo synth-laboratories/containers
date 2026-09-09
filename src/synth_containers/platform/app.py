@@ -3,22 +3,20 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 import time
 import uuid
 from pathlib import Path
+import os
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+
+from ..nested import NestedError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
-from ..event_log import (
-    STREAM_HEARTBEAT_INTERVAL_S,
-    STREAM_TERMINAL_GRACE_S,
-    RolloutEventLog,
-)
+from ..event_log import SSE_HEADERS, RolloutEventLog, iter_sse
+from ..live_annotation.api import mount_live_annotation
 from .http_requests import (
     RequestParseError,
     parse_combine_reward,
@@ -30,8 +28,9 @@ from .http_requests import (
     to_policy_config_dict,
     to_put_policy_dict,
 )
-from .state import CompatPlatform, PolicyConfig
-from .targets import TARGETS, TargetSpec
+from .state import CompatPlatform, _seed_from_task_instance_id
+from .reward import REWARD_STREAM_KINDS, reward_api_catalog
+from .targets import TARGETS, TargetSpec, advertised_reward_authority, advertised_reward_calculator
 
 
 def _raise_platform(result: dict[str, Any]) -> dict[str, Any]:
@@ -45,8 +44,6 @@ def _platform_response(result: dict[str, Any], *, default_status: int = 400) -> 
     if "error" in result:
         status = int(result["status_code"]) if "status_code" in result else default_status
         return JSONResponse(status_code=status, content=result)
-    if result.get("accepted") is True:
-        return JSONResponse(status_code=202, content=result)
     return result
 
 
@@ -56,7 +53,7 @@ def _http_from_parse(exc: BaseException) -> HTTPException:
 
 
 def create_compat_app(
-    target: str | TargetSpec = "craftax_engine",
+    target: str | TargetSpec = "openenv_echo",
     *,
     storage_root: str | Path | None = None,
     runtime_config: dict[str, Any] | None = None,
@@ -73,155 +70,112 @@ def create_compat_app(
     )
     app.state.platform = platform
     app.state.spec = spec
+    mount_live_annotation(app, platform.live_annotation, platform=platform)
+
+    def _runtime_identity() -> dict[str, Any]:
+        """Safe, non-secret identity used by orchestrators for adoption receipts."""
+        instance_id = (os.environ.get("SYNTH_CONTAINER_INSTANCE_ID") or os.environ.get("HOSTNAME") or "").strip()
+        image_digest = (os.environ.get("SYNTH_CONTAINER_IMAGE_DIGEST") or "").strip()
+        producer_revision = (os.environ.get("SYNTH_CONTAINER_PRODUCER_SOURCE_REVISION") or "").strip()
+        return {
+            "schema_version": "synth.container-runtime-identity.v1",
+            "instance_id": instance_id or None,
+            "image_digest": image_digest or None,
+            "producer_source_revision": producer_revision or None,
+            "environment_version": spec.environment_version,
+        }
 
     def _sse_event(rollout_id: str, envelope: Any) -> dict[str, Any]:
         row = envelope.to_dict()
         row["rollout_id"] = rollout_id
         return row
 
+    def _annotation_surface() -> dict[str, Any] | None:
+        mounted = getattr(app.state, "annotation", None)
+        if mounted is None:
+            return None
+        return {
+            "schema": "synth.container.annotation-api.v1",
+            "mounted": True,
+            "catalog": "/annotation/catalog",
+            "status": "/annotation/status",
+            "rewrites_reward_signal": False,
+            "hidden_cot": False,
+        }
+
     @app.get("/health")
     async def health() -> dict[str, Any]:
-        return platform.health_payload()
+        payload = {
+            "status": "ok",
+            "target": spec.target_id,
+            "runtime_family": spec.runtime_family.value,
+            "environment_ref": spec.environment_ref,
+            "runtime_identity": _runtime_identity(),
+        }
+        if spec.health_probe is not None:
+            extra = spec.health_probe()
+            if isinstance(extra, dict):
+                payload.update(extra)
+            if str(payload.get("status") or "ok") != "ok":
+                return JSONResponse(status_code=503, content=payload)
+        surface = _annotation_surface()
+        if surface is not None:
+            payload["annotation"] = "mounted"
+            payload["annotation_api"] = surface
+        return payload
 
     @app.get("/metadata")
     @app.get("/info")
     async def metadata() -> dict[str, Any]:
         payload = platform.metadata_payload()
-        if spec.runtime_family.value == "healthbench":
-            from .runtimes.healthbench import model_roles
-
-            gepa = (payload.get("optimizer_contracts") or {}).get("gepa") or {
-                "version": "synth_optimizers.gepa.v2",
-                "program_route": "/program",
-                "taskset_route": "/taskset",
-                "taskset_tasks_route": "/taskset/tasks",
-                "rollout_route": "/rollout",
-                "trace_route": "/rollouts/{rollout_id}/events",
-            }
-            capabilities = payload.get("capabilities")
-            if not isinstance(capabilities, dict):
-                capabilities = {}
-            capabilities.setdefault("contract_version", "container_contract.v1")
-            capabilities.setdefault("rollout_modes", ["blocking"])
-            capabilities.setdefault(
-                "operations",
-                {
-                    "prepare": True,
-                    "start": True,
-                    "get": True,
-                    "poll": True,
-                    "reward": True,
-                },
-            )
-            roles = model_roles()
-            metadata_blob = capabilities.setdefault("metadata", {})
-            if isinstance(metadata_blob, dict):
-                metadata_blob["policy_ready"] = bool(
-                    roles["policy"]["credential_present"]
-                )
-                metadata_blob["grader_ready"] = bool(
-                    roles["scorer"]["credential_present"]
-                )
-            capabilities["optimizer_contracts"] = {"gepa": gepa}
-            payload["capabilities"] = capabilities
-            metadata = payload.get("metadata")
-            if not isinstance(metadata, dict):
-                metadata = {}
-            metadata["model_roles"] = roles
-            metadata["optimizer_contracts"] = {"gepa": gepa}
-            payload["metadata"] = metadata
+        if spec.metadata_extra is not None:
+            extra = spec.metadata_extra(payload)
+            if isinstance(extra, dict):
+                payload = extra
+        payload["runtime_identity"] = _runtime_identity()
+        surface = _annotation_surface()
+        if surface is not None:
+            payload["annotation_api"] = surface
         return payload
 
+    @app.get("/task_catalog")
+    async def task_catalog() -> dict[str, Any]:
+        return platform.task_catalog_payload()
+
     @app.get("/task_info")
-    async def task_info() -> Any:
-        if spec.runtime_family.value != "healthbench":
-            raise HTTPException(status_code=404, detail="task_info_not_supported")
-        return {
-            "task_id": "healthbench.response",
-            "name": "HealthBench physician-rubric response",
-            "objective": "maximize physician-rubric score",
-            "output_kind": "open_text",
-            "literal_training_targets": "forbidden",
-            "proposer_hints": {
-                "do_not_memorize": True,
-                "focus": "safe, accurate, relevant, and appropriately escalated health responses",
-            },
-        }
+    async def task_info() -> dict[str, Any]:
+        return platform.task_info_payload()
 
-    @app.get("/program")
-    async def program() -> Any:
-        if spec.runtime_family.value != "healthbench":
-            raise HTTPException(status_code=404, detail="program_not_supported")
-        seed_prompt = (
-            "You are a careful health assistant. Give accurate, relevant, and safe guidance. "
-            "State uncertainty, ask useful follow-up questions, and recommend appropriate "
-            "professional or emergency care when warranted."
-        )
-        return {
-            "version": "prompt_program.v1",
-            "program_id": "healthbench.response.v1",
-            "modules": [
-                {
-                    "module_id": "system_prompt",
-                    "role": "system",
-                    "mutable": True,
-                    "candidate_field": "system_prompt",
-                    "content": seed_prompt,
-                }
-            ],
-            "target_modules": [
-                {
-                    "module_id": "system_prompt",
-                    "candidate_field": "system_prompt",
-                    "objective": "healthbench_physician_rubric_score",
-                }
-            ],
-            "seed_candidate": {"system_prompt": seed_prompt},
-            "rollout_task_id": "healthbench.response",
-            "rollout_overlay_schema": {"system_prompt": "policy.system_message"},
-        }
-
-    @app.get("/taskset")
-    async def taskset() -> Any:
-        if spec.runtime_family.value != "healthbench":
-            raise HTTPException(status_code=404, detail="taskset_not_supported")
-        from .healthbench_world import rows
-
-        count = len(rows())
-        return {
-            "taskset_id": "openai.healthbench.2025-05-07",
-            "splits": {"train": count, "heldout": count},
-            "source": "openai/healthbench",
-            "metadata": {"gold_visibility": "environment_only", "rubric_authority": "physician"},
-        }
-
-    @app.post("/taskset/tasks")
-    async def taskset_tasks(request: Request) -> Any:
-        if spec.runtime_family.value != "healthbench":
-            raise HTTPException(status_code=404, detail="taskset_tasks_not_supported")
-        from .healthbench_world import load_row, public_observation
-
+    @app.post("/task_instances/materialize")
+    async def materialize_task_instances(request: Request) -> dict[str, Any]:
         body = await request.json()
-        tasks = []
-        for task_id in body.get("task_ids") or []:
-            try:
-                seed = int(str(task_id).rsplit(":", 1)[-1])
-            except ValueError as exc:
-                raise HTTPException(status_code=422, detail="invalid_healthbench_task_id") from exc
-            row = load_row(seed)
-            if row is None:
-                raise HTTPException(status_code=404, detail=f"unknown_healthbench_task:{task_id}")
-            tasks.append(
-                {
-                    "task_id": str(task_id),
-                    "task_instance_id": f"seed:{seed}",
-                    "seed": seed,
-                    "split": str(body.get("split") or "train"),
-                    "input": public_observation(row, seed),
-                    "objective": "healthbench physician-rubric score",
-                }
-            )
-        return {"tasks": tasks, "metadata": {"requested": len(tasks)}}
+        task_id = body.get("task_id")
+        seeds = body.get("seeds")
+        limits = body.get("limits")
+        if not isinstance(task_id, str) or not task_id.strip():
+            raise HTTPException(status_code=422, detail="task_id_required")
+        if (
+            not isinstance(seeds, list)
+            or not seeds
+            or len(seeds) > 100
+            or any(isinstance(seed, bool) or not isinstance(seed, int) for seed in seeds)
+            or len(set(seeds)) != len(seeds)
+        ):
+            raise HTTPException(status_code=422, detail="seeds_must_be_1_to_100_distinct_integers")
+        if not isinstance(limits, dict):
+            raise HTTPException(status_code=422, detail="limits_required")
+        try:
+            instances = platform.materialize_task_instances(task_id.strip(), seeds)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {
+            "schema_version": "synth.container.task-instances.v1",
+            "instances": [{**instance, "limits": limits} for instance in instances],
+        }
+
+    @app.get("/policy")
+    async def get_policy() -> dict[str, Any]:
+        return platform.policy_state_payload()
 
     @app.post("/rollouts/prepare")
     async def prepare(request: Request) -> dict[str, Any]:
@@ -253,19 +207,81 @@ def create_compat_app(
                 raise HTTPException(
                     status_code=409, detail=f"rollout_prepare_identity_conflict:{rollout_id}"
                 )
+            pin = platform.pins.get(rollout_id)
+            if pin is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"rollout_prepare_identity_missing:{rollout_id}",
+                )
+            if pin.seed is None:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"rollout_prepare_seed_missing:{rollout_id}",
+                )
+            requested_seed = (
+                int(pin.seed)
+                if req.task_instance_id is None
+                else _seed_from_task_instance_id(req.task_instance_id)
+            )
+            requested_task = req.task_instance_id or f"seed:{requested_seed}"
+            requested_revision = req.policy_revision_id or pin.policy_revision_id
+            if (
+                pin.seed != requested_seed
+                or pin.task_instance_id != requested_task
+                or pin.policy_revision_id != requested_revision
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": "rollout_prepare_identity_conflict",
+                        "rollout_id": rollout_id,
+                        "prepared": {
+                            "seed": pin.seed,
+                            "task_instance_id": pin.task_instance_id,
+                            "policy_revision_id": pin.policy_revision_id,
+                        },
+                        "requested": {
+                            "seed": requested_seed,
+                            "task_instance_id": requested_task,
+                            "policy_revision_id": requested_revision,
+                        },
+                    },
+                )
             return {
                 "rollout_id": rollout_id,
+                "seed": pin.seed,
+                "task_instance_id": pin.task_instance_id,
+                "policy_ref": pin.policy_ref,
+                "policy_revision_id": pin.policy_revision_id,
                 "stream": platform.stream_descriptor_for(rollout_id),
                 "replayed": True,
             }
         try:
-            descriptor = platform.prepare(rollout_id, req.telemetry.transport, retention)
+            descriptor = platform.prepare(
+                rollout_id,
+                req.telemetry.transport,
+                retention,
+                request=req,
+            )
         except RuntimeError as exc:
             detail = str(exc)
             if detail.startswith(("event_log_sealed:", "event_log_unrecoverable:")):
                 raise HTTPException(status_code=409, detail=detail) from exc
             raise
-        return {"rollout_id": rollout_id, "stream": descriptor}
+        pin = platform.pins.get(rollout_id)
+        if pin is None:
+            raise HTTPException(
+                status_code=500,
+                detail=f"rollout_prepare_pin_missing:{rollout_id}",
+            )
+        return {
+            "rollout_id": rollout_id,
+            "seed": pin.seed,
+            "task_instance_id": pin.task_instance_id,
+            "policy_ref": pin.policy_ref,
+            "policy_revision_id": pin.policy_revision_id,
+            "stream": descriptor,
+        }
 
     @app.post("/rollouts")
     async def start(request: Request) -> Any:
@@ -275,99 +291,20 @@ def create_compat_app(
         except (RequestParseError, ValueError) as exc:
             # Translate once at the HTTP edge: parse failures are 422, not 500.
             raise _http_from_parse(exc) from exc
-        result = await asyncio.to_thread(platform.start_rollout, req)
+        try:
+            result = await asyncio.to_thread(platform.start_rollout, req)
+        except NestedError as exc:
+            # A rollout that named a trial the platform does not carry is a bad
+            # request, not a platform fault. A 500 tells the caller nothing; the
+            # known ids are in the message, so hand them back.
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _platform_response(result)
 
     @app.post("/rollout", include_in_schema=False)
     async def optimizer_rollout(request: Request) -> Any:
-        if spec.runtime_family.value != "healthbench":
-            return await start(request)
-        body = await request.json()
-        task = body.get("task") if isinstance(body.get("task"), dict) else {}
-        seed = int(task.get("seed") or 0)
-        candidate = body.get("candidate") if isinstance(body.get("candidate"), dict) else {}
-        policy = body.get("policy") if isinstance(body.get("policy"), dict) else {}
-        policy_provider = str(policy.get("provider") or "groq").lower()
-        default_policy_base_url = (
-            "https://api.groq.com/openai/v1"
-            if policy_provider == "groq"
-            else "https://api.openai.com/v1"
-        )
-        default_policy_api_key_env = (
-            "GROQ_API_KEY" if policy_provider == "groq" else "OPENAI_API_KEY"
-        )
-        policy_config = {
-            "provider": policy_provider,
-            "model": policy.get("model") or "llama-3.1-8b-instant",
-            "base_url": policy.get("base_url")
-            or policy.get("api_base")
-            or default_policy_base_url,
-            "api_key_env": policy.get("api_key_env") or default_policy_api_key_env,
-            "max_tokens": policy.get("max_tokens") or 1536,
-            "system_prompt": candidate.get("system_prompt"),
-        }
-        config_digest = hashlib.sha256(
-            json.dumps(policy_config, sort_keys=True).encode("utf-8")
-        ).hexdigest()[:12]
-        config_id = f"gepa_healthbench_{config_digest}"
-        # The optimizer adapter may dispatch several immutable candidates at
-        # once. Registering an additional future pin is not a mid-trial mutation
-        # of any active pin; each rollout retains its own config id.
-        platform.policy_configs.setdefault(
-            config_id,
-            PolicyConfig(
-                config_id=config_id,
-                harness="chat_completion",
-                config=policy_config,
-            ),
-        )
-        rollout_id = str(
-            body.get("rollout_id")
-            or body.get("trace_correlation_id")
-            or f"roll_{uuid.uuid4().hex[:12]}"
-        )
-        telemetry = {"enabled": True, "transport": "poll", "retention": "run"}
-        if rollout_id not in platform.logs:
-            platform.prepare(rollout_id, "poll", "run")
-        req = parse_create_rollout(
-            {
-                "rollout_id": rollout_id,
-                "submission_mode": "sync",
-                "slot": "stream",
-                "telemetry": telemetry,
-                "task_instance_id": f"seed:{seed}",
-                "world_ref": "world:healthbench@eval",
-                "evaluation_plan_ref": "healthbench_eval.v1",
-                "policy_ref": {"harness": "chat_completion", "config": config_id},
-            }
-        )
-        result = await asyncio.to_thread(platform.start_rollout, req)
-        if "error" in result:
-            return _platform_response(result)
-        reward_record = platform.compute_reward(
-            rollout_id=rollout_id,
-            evidence=None,
-            mode="terminal",
-            rescore=False,
-            plan_ref="healthbench_eval.v1",
-            after_sequence=None,
-        )
-        reward = reward_record.get("reward")
-        events = platform.events_payload(rollout_id, 0, 10_000).get("events", [])
-        return {
-            **result,
-            "status": result.get("status"),
-            "success_status": "success" if reward is not None else "failed",
-            "reward_info": {"outcome_reward": reward, "metrics": {"healthbench_score": reward}},
-            "trace": {"events": events, "prompt_assertions": body.get("prompt_assertions")},
-            "events": events,
-            "summary": {
-                "seed": seed,
-                "rubric_authority": "physician",
-                "reward_status": reward_record.get("status"),
-                "reward_reasons": reward_record.get("reasons", []),
-            },
-        }
+        if spec.compat_rollout is not None:
+            return await spec.compat_rollout(request, platform, spec)
+        return await start(request)
 
     @app.post("/rollouts/{rollout_id}/complete")
     async def complete(rollout_id: str) -> Any:
@@ -383,8 +320,19 @@ def create_compat_app(
         rollout_id: str,
         after: int = Query(default=0, ge=0),
         limit: int = Query(default=1000, ge=1, le=10_000),
+        ack: int | None = Query(default=None, ge=0),
+        wait_ms: int = Query(default=0, ge=0, le=10_000),
     ) -> Any:
-        result = platform.events_payload(rollout_id, after, limit)
+        if wait_ms > 0:
+            deadline = time.monotonic() + wait_ms / 1000.0
+            while True:
+                log = platform.logs.get(rollout_id)
+                if log is None or log.closed or log.high_water > after:
+                    break
+                if time.monotonic() >= deadline:
+                    break
+                await asyncio.sleep(0.05)
+        result = platform.events_payload(rollout_id, after, limit, ack=ack)
         return _platform_response(result, default_status=404)
 
     @app.get("/rollouts/{rollout_id}/frames/{step}.png")
@@ -397,65 +345,33 @@ def create_compat_app(
             raise HTTPException(status_code=404, detail="frame_not_found")
         return FileResponse(frame_path, media_type="image/png")
 
+    @app.get("/rollouts/{rollout_id}/frames/{step}/{name}.png")
+    async def named_frame_asset(rollout_id: str, step: int, name: str) -> FileResponse:
+        try:
+            frame_path = RolloutEventLog.frame_asset_path(
+                platform.storage_root, rollout_id, step, name
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="frame_not_found") from exc
+        if not frame_path.is_file():
+            raise HTTPException(status_code=404, detail="frame_not_found")
+        return FileResponse(frame_path, media_type="image/png")
+
     @app.get("/rollouts/{rollout_id}/stream")
-    async def sse(rollout_id: str, request: Request) -> Any:
+    async def sse(rollout_id: str, request: Request) -> StreamingResponse:
         log = platform.logs.get(rollout_id)
         if log is None or not platform.transport_is_bound(rollout_id, "sse"):
             raise HTTPException(status_code=404, detail=f"telemetry_not_enabled:{rollout_id}")
-        busy = platform.acquire_stream(rollout_id)
-        if busy:
-            return JSONResponse(
-                status_code=429,
-                content=busy,
-                headers={"Retry-After": str(int(busy["retry_after"]))},
-            )
         raw_last = request.headers.get("last-event-id", "0")
         try:
             after = int(raw_last)
         except ValueError:
             # Invalid Last-Event-ID is a cursor reset, not a failed request: resume from sequence 0.
             after = 0
-
-        async def generate():
-            nonlocal after
-            terminal_since: float | None = None
-            try:
-                while not await request.is_disconnected():
-                    emitted = False
-                    for envelope in log.after(after):
-                        sse_id = envelope.sequence if envelope.sequence is not None else 0
-                        if envelope.sequence is not None:
-                            after = envelope.sequence
-                        event = _sse_event(rollout_id, envelope)
-                        yield (
-                            f"id: {sse_id}\n"
-                            f"event: {event['kind']}\n"
-                            f"data: {json.dumps(event, separators=(',', ':'))}\n\n"
-                        )
-                        emitted = True
-                    pin = platform.pins.get(rollout_id)
-                    terminal = bool((pin is not None and pin.terminal) or log.closed)
-                    now = time.monotonic()
-                    if terminal and terminal_since is None:
-                        terminal_since = now
-                    if log.closed:
-                        break
-                    if (
-                        terminal
-                        and terminal_since is not None
-                        and (now - terminal_since) >= STREAM_TERMINAL_GRACE_S
-                    ):
-                        break
-                    if not emitted:
-                        yield ": heartbeat\n\n"
-                    await asyncio.sleep(STREAM_HEARTBEAT_INTERVAL_S)
-            finally:
-                platform.release_stream(rollout_id)
-
         return StreamingResponse(
-            generate(),
+            iter_sse(log, request, after=after, extra={"rollout_id": rollout_id}),
             media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            headers=SSE_HEADERS,
         )
 
     @app.websocket("/rollouts/{rollout_id}/ws")
@@ -464,13 +380,8 @@ def create_compat_app(
         if log is None or not platform.transport_is_bound(rollout_id, "websocket"):
             await websocket.close(code=4404, reason="telemetry_not_enabled")
             return
-        busy = platform.acquire_stream(rollout_id)
-        if busy:
-            await websocket.close(code=1013, reason="stream_backpressure")
-            return
         await websocket.accept()
         after = 0
-        terminal_since: float | None = None
         try:
             while True:
                 emitted = False
@@ -479,28 +390,22 @@ def create_compat_app(
                         after = envelope.sequence
                     await websocket.send_json(_sse_event(rollout_id, envelope))
                     emitted = True
-                pin = platform.pins.get(rollout_id)
-                terminal = bool((pin is not None and pin.terminal) or log.closed)
-                now = time.monotonic()
-                if terminal and terminal_since is None:
-                    terminal_since = now
                 if log.closed:
                     await websocket.close(code=1000)
                     return
-                if (
-                    terminal
-                    and terminal_since is not None
-                    and (now - terminal_since) >= STREAM_TERMINAL_GRACE_S
-                ):
-                    await websocket.close(code=1000)
-                    return
                 if not emitted:
-                    await websocket.send_json({"kind": "stream.heartbeat", "control": True})
-                await asyncio.sleep(STREAM_HEARTBEAT_INTERVAL_S)
+                    await asyncio.sleep(0.05)
         except WebSocketDisconnect:
             return
-        finally:
-            platform.release_stream(rollout_id)
+
+    @app.get("/reward/catalog")
+    async def reward_catalog() -> dict[str, Any]:
+        return reward_api_catalog(
+            calculator=advertised_reward_calculator(spec),
+            authority=advertised_reward_authority(spec),
+            aggregation=str(spec.reward_kind),
+            live=bool(spec.live_reward),
+        )
 
     @app.get("/reward")
     async def get_reward(rollout_id: str = Query(...)) -> dict[str, Any]:
@@ -509,6 +414,37 @@ def create_compat_app(
     @app.get("/rollouts/{rollout_id}/reward")
     async def get_reward_path(rollout_id: str) -> dict[str, Any]:
         return platform.get_reward(rollout_id)
+
+    @app.get("/rollouts/{rollout_id}/reward/events")
+    async def reward_events(
+        rollout_id: str,
+        after: int = Query(default=0, ge=0),
+        limit: int = Query(default=1000, ge=1, le=10_000),
+    ) -> Any:
+        result = platform.events_payload(rollout_id, after, limit, kinds=tuple(REWARD_STREAM_KINDS))
+        return _platform_response(result, default_status=404)
+
+    @app.get("/rollouts/{rollout_id}/reward/stream")
+    async def reward_sse(rollout_id: str, request: Request) -> StreamingResponse:
+        log = platform.logs.get(rollout_id)
+        if log is None or not platform.transport_is_bound(rollout_id, "sse"):
+            raise HTTPException(status_code=404, detail=f"telemetry_not_enabled:{rollout_id}")
+        raw_last = request.headers.get("last-event-id", "0")
+        try:
+            after = int(raw_last)
+        except ValueError:
+            after = 0
+        return StreamingResponse(
+            iter_sse(
+                log,
+                request,
+                after=after,
+                extra={"rollout_id": rollout_id},
+                kinds=REWARD_STREAM_KINDS,
+            ),
+            media_type="text/event-stream",
+            headers=SSE_HEADERS,
+        )
 
     @app.post("/reward")
     async def post_reward(request: Request) -> Any:
@@ -620,48 +556,22 @@ def create_compat_app(
         return seal
 
     @app.get("/rollouts/{rollout_id}/trace/bundle")
-    async def get_trace_bundle(rollout_id: str) -> Any:
-        result = platform.get_trace_bundle(rollout_id)
-        if "error" in result:
-            return _platform_response(result, default_status=404)
+    async def get_trace_bundle(rollout_id: str) -> FileResponse:
+        archive = platform.trace_bundle_archive(rollout_id)
+        if archive is None:
+            raise HTTPException(status_code=404, detail=f"trace_bundle_not_sealed:{rollout_id}")
         return FileResponse(
-            result["path"],
-            media_type=result["media_type"],
-            filename=f"{rollout_id}.trace-bundle.zip",
+            archive,
+            media_type="application/zip",
+            filename=f"{rollout_id}.trace-v5.zip",
         )
-
-    @app.get("/rollouts/{rollout_id}/manifest")
-    async def get_manifest(rollout_id: str) -> Any:
-        return _platform_response(platform.get_execution_manifest(rollout_id), default_status=404)
 
     @app.post("/rollouts/{rollout_id}/drop_session")
     async def drop_session(rollout_id: str) -> Any:
         result = platform.drop_session(rollout_id)
         return _platform_response(result)
 
-    @app.post("/rollouts/{rollout_id}/cancel")
-    async def cancel_rollout(rollout_id: str, request: Request) -> Any:
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
-        owner_id = None
-        if isinstance(body, dict):
-            owner_id = body.get("owner_id") or (body.get("metadata") or {}).get("owner_id")
-        result = platform.cancel_rollout(
-            rollout_id,
-            owner_id=str(owner_id) if owner_id else None,
-        )
-        return _platform_response(result, default_status=404)
-
-    @app.post("/cleanup")
-    async def cleanup(request: Request) -> Any:
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
-        owner_id = body.get("owner_id") if isinstance(body, dict) else None
-        result = platform.cleanup_owned(str(owner_id) if owner_id else "")
-        return _platform_response(result, default_status=422)
+    if spec.mount_routes is not None:
+        spec.mount_routes(app, platform, spec)
 
     return app

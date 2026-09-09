@@ -1,13 +1,8 @@
 """TargetRuntime umbrella.
 
 Callers on CompatPlatform say "run this target." They do not branch on
-Craftax / Harbor / dig.bench / OpenEnv. Those variants live as children
-under this protocol.
-
-Today: CraftaxRuntime, HarborRuntime, DigbenchRuntime, OpenEnvRuntime,
-Banking77Runtime.
-Later: rust gold HTTP, Docker Harbor, live dig.bench relay plug in here
-without rewriting pins, leases, logs, or /reward.
+Harbor / dig.bench / OpenEnv. Particular worlds (Craftax gold, …) supply
+``TargetSpec.runtime`` from outside this package.
 """
 
 from __future__ import annotations

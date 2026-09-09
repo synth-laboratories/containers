@@ -476,9 +476,20 @@ def _check_references(document: TraceDocumentV5) -> list[ValidationFindingV1]:
                         severity=Severity.ERROR,
                         message="event causal parent is not in this trace",
                         entity_id=event.event_id,
-                    detail={"caused_by": parent},
+                        detail={"caused_by": parent},
+                    )
                 )
-            )
+        for artifact_id in event.artifact_ids:
+            if artifact_id not in artifacts:
+                findings.append(
+                    ValidationFindingV1(
+                        code="dangling_artifact_ref",
+                        severity=Severity.ERROR,
+                        message="event references an unknown artifact",
+                        entity_id=event.event_id,
+                        detail={"artifact_id": artifact_id},
+                    )
+                )
     for message in document.messages:
         if message.sender_actor_id and message.sender_actor_id not in actors:
             findings.append(

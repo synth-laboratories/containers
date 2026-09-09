@@ -27,6 +27,7 @@ from ..adapters import provider_adapters
 from ..adapters.base import ProviderAdapterRegistry
 from ..adapters.sse import SSEDecoder, SSEEvent
 from ..canonical import bytes_digest, canonical_bytes, record_id, text_digest, utc_now
+from ...gen_ai import request_observation
 from ..models.capture_data import CapturedBodyRefV1, RawCaptureDisposition
 from ..models.identity import TraceContextV1
 from .binding import CaptureMode
@@ -569,6 +570,9 @@ class CaptureProxy:
                     "content_encodings": content_encodings,
                     "redaction": request_report.merged(header_report).to_dict(),
                     "started_at": started_at,
+                    **request_observation(
+                        request_payload if isinstance(request_payload, dict) else {},
+                    ),
                 },
                 call_id=call_id,
             )

@@ -7,7 +7,7 @@ from typing import Any
 
 from ...event_log import RolloutEventLog
 from ..state import CompatPlatform, RewardNode, RolloutPin
-from ..targets import TARGETS, ScriptNode
+from ..targets import ScriptNode
 from .harbor_docker import DOCKER_ENVIRONMENT, run_docker_trial
 
 
@@ -39,41 +39,53 @@ class HarborRuntime:
 
     def _nested_child(self, platform: CompatPlatform, pin: RolloutPin, log: RolloutEventLog) -> None:
         child_id = f"{pin.rollout_id}:child"
-        # Code-policy child so PUT /policy and POST /policy/restart are native
-        # (`update_policy_code=native`). Parent /reward stays held-out gate +
-        # baseline delta, not a copy of the child env-sum.
-        child_platform = CompatPlatform(TARGETS["craftax_code_policy"])
-        from ..http_requests import parse_create_rollout
+        child_spec = (platform.runtime_config or {}).get("nested_child_spec")
+        child_score = 0.5
+        if child_spec is not None:
+            child_platform = CompatPlatform(child_spec)
+            from ..http_requests import parse_create_rollout
 
-        child = child_platform.start_rollout(
-            parse_create_rollout(
-                {
-                    "rollout_id": child_id,
-                    "telemetry": {"enabled": True, "transport": "sse"},
-                    "task_instance_id": "seed:0",
-                    "policy_ref": {"harness": "isolated_policy_process"},
-                }
+            child = child_platform.start_rollout(
+                parse_create_rollout(
+                    {
+                        "rollout_id": child_id,
+                        "telemetry": {"enabled": True, "transport": "sse"},
+                        "task_instance_id": "seed:0",
+                        "policy_ref": {"harness": "isolated_policy_process"},
+                    }
+                )
             )
-        )
-        pin.child_rollout_id = child["rollout_id"]
-        child_stream = child["stream"]
-        pin.child_resource_ref = {
-            "schema": "synth.resource-ref.v1",
-            "kind": "container_rollout",
-            "id": child_id,
-            "attributes": {
-                "stream_id": child_stream["id"],
-                "reward_url": child_stream["reward"]["url"],
-            },
-        }
-        platform.logs[child_id] = child_platform.logs[child_id]
-        platform.stream_bindings[child_id] = child_platform.stream_bindings[child_id]
-        platform.pins[child_id] = child_platform.pins[child_id]
-        platform.seals[child_id] = child_platform.seals[child_id]
-        platform.artifacts.update(child_platform.artifacts)
-
-        child_pin = child_platform.pins[child_id]
-        child_score = float(sum(float(value) for value in child_pin.reward_signals if value is not None))
+            pin.child_rollout_id = child["rollout_id"]
+            child_stream = child["stream"]
+            pin.child_resource_ref = {
+                "schema": "synth.resource-ref.v1",
+                "kind": "container_rollout",
+                "id": child_id,
+                "attributes": {
+                    "stream_id": child_stream["id"],
+                    "reward_url": child_stream["reward"]["url"],
+                },
+            }
+            platform.logs[child_id] = child_platform.logs[child_id]
+            platform.stream_bindings[child_id] = child_platform.stream_bindings[child_id]
+            platform.pins[child_id] = child_platform.pins[child_id]
+            platform.seals[child_id] = child_platform.seals[child_id]
+            platform.artifacts.update(child_platform.artifacts)
+            child_pin = child_platform.pins[child_id]
+            child_score = float(
+                sum(float(value) for value in child_pin.reward_signals if value is not None)
+            )
+        else:
+            pin.child_rollout_id = child_id
+            pin.child_resource_ref = {
+                "schema": "synth.resource-ref.v1",
+                "kind": "container_rollout",
+                "id": child_id,
+                "attributes": {
+                    "stream_id": f"stream:{child_id}",
+                    "reward_url": f"/rollouts/{child_id}/reward",
+                },
+            }
         # Fixture baseline distinct from the child env-sum. Pin a 0.1 improvement
         # so the held-out gate passes without copying env-sum onto the parent.
         baseline = child_score - 0.1 if child_score > 0 else 0.0
