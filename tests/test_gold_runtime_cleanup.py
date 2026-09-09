@@ -87,6 +87,7 @@ def test_policy_failure_closes_world_and_planner(monkeypatch: pytest.MonkeyPatch
     assert world.closed is True
     assert planner.closed is True
     assert pin.status == "failed"
+    assert pin.terminal_reason == "policy_error"
     assert log.closed is True
 
 
@@ -115,3 +116,18 @@ def test_world_closes_even_when_planner_close_raises(monkeypatch: pytest.MonkeyP
 
     assert world.closed is True
     assert planner.closed is True
+
+
+def test_gold_terminal_reason_is_retained(monkeypatch):
+    world, planner = FakeWorld(), FakePlanner()
+    runtime = _runtime_with(monkeypatch, world, planner)
+    monkeypatch.setattr(gold_runtime_module, "run_episode", lambda **kwargs: {
+        "steps": 0, "reward_signals": [], "usage": {"calls": 8},
+        "frame_digest": "digest", "frames": [],
+        "status": "failed", "stopped_on": "policy_no_progress",
+    })
+    monkeypatch.setattr(gold_runtime_module, "_frames_from_log", lambda *a, **kw: [])
+    pin = _pin()
+    runtime.simulate(_platform(), pin, RolloutEventLog(pin.rollout_id, pin.stream_id))
+    assert pin.status == "failed"
+    assert pin.terminal_reason == "policy_no_progress"

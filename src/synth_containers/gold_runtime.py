@@ -218,6 +218,7 @@ class GoldRuntime:
                     log.append("capture.closed", {"high_water": evidence_high_water})
                     log.mark_closed()
                 pin.status = "failed"
+                pin.terminal_reason = "policy_error"
                 pin.terminal = True
                 pin.usage = dict(planner.usage())
                 return
@@ -232,6 +233,8 @@ class GoldRuntime:
         platform.step_calls += int(outcome["steps"])
         pin.reward_signals = list(outcome["reward_signals"])
         pin.status = str(outcome.get("status") or "completed")
+        reason = outcome.get("stopped_on")
+        pin.terminal_reason = reason if isinstance(reason, str) else None
         pin.terminal = True
         pin.usage = dict(outcome["usage"])
         pin.scheduled_checkpoints = list(outcome.get("scheduled_checkpoints") or [])

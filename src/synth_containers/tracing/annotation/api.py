@@ -22,6 +22,7 @@ from fastapi.responses import StreamingResponse
 
 from synth_containers.event_log import SSE_HEADERS, iter_sse
 
+from ..validation.rehydrate import RehydrationError
 from .operations import AnnotationOperations
 from .service import AnnotationService, AnnotationServiceError
 
@@ -42,6 +43,8 @@ def build_annotation_router(service: AnnotationService, *, prefix: str = "", sch
     def guard(callable_: Any, **kwargs: Any) -> Any:
         try:
             return callable_(**kwargs)
+        except RehydrationError as error:
+            raise HTTPException(status_code=422, detail={"code": "annotation_request_invalid", "message": str(error)}) from error
         except AnnotationServiceError as error:
             status = 402 if error.code == "reservation_required" else 403 if error.code == "reservation_rejected" else 409 if error.code == "revision_conflict" else 400
             raise HTTPException(status_code=status, detail=error.as_error().to_dict()) from error

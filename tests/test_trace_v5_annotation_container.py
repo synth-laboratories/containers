@@ -112,3 +112,18 @@ def test_install_from_env_declared_registrar_fails_closed(tmp_path: Path, monkey
     monkeypatch.setenv("SYNTH_ANNOTATION_DOMAINS", "nope.module:register")
     with pytest.raises(RegistrarLoadError, match="nope.module:register"):
         install_from_env(app, storage_root=tmp_path)
+
+
+@pytest.mark.parametrize("endpoint", ["annotation-estimates", "annotation-jobs"])
+def test_malformed_annotation_request_is_a_client_error(tmp_path, endpoint):
+    app = create_compat_app("openenv_echo", storage_root=tmp_path)
+    mounted = mount_annotation(app, storage_root=tmp_path, start=False)
+    client = TestClient(app)
+    response = client.post(f"/traces/selected/{endpoint}", json={"request": {
+        "source_trace_id": "selected", "annotator_id": ENVIRONMENT_STEP_STATUS_ID,
+        "annotator_digest": "sha256:" + "a" * 64,
+    }})
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "annotation_request_invalid"
+    assert "source_trace_digest" in response.json()["detail"]["message"]
+    assert mounted.scheduler.snapshot()["queued"] == 0
