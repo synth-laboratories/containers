@@ -33,6 +33,7 @@ which models are priced.
 
 from __future__ import annotations
 
+import fcntl
 import importlib
 import json
 import logging
@@ -76,11 +77,18 @@ def _extract(archive: Path, cache_root: Path) -> Path | None:
         return None
     target = cache_root / digest.replace(":", "_")
     marker = target / ".extracted"
-    if marker.exists():
-        return target
     try:
-        LocalTraceBundle.extract_archive(archive, target, require_self_contained=False)
-        marker.write_text(json.dumps({"archive": str(archive), "digest": digest}))
+        cache_root.mkdir(parents=True, exist_ok=True)
+        # Separate handles coordinate both worker threads and server processes.
+        # Keep the lock outside the directory atomically published by extraction.
+        with (cache_root / f".{target.name}.lock").open("a") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            try:
+                if not marker.exists():
+                    LocalTraceBundle.extract_archive(archive, target, require_self_contained=False)
+                    marker.write_text(json.dumps({"archive": str(archive), "digest": digest}))
+            finally:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
     except Exception as error:  # noqa: BLE001 - a bad archive is skipped, never fatal
         log.warning("annotation: cannot extract %s: %s", archive, error)
         return None

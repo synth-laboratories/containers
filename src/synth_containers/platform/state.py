@@ -146,6 +146,7 @@ class RolloutPin:
     usage: dict[str, Any] | None = None
     terminal: bool = False
     status: str = "prepared"
+    terminal_reason: str | None = None
     started: bool = False
     reward_signals: list[float | None] = field(default_factory=list)
     native_script_reward: float | None = None
@@ -343,6 +344,7 @@ class CompatPlatform:
                 "child_resource_ref": pin.child_resource_ref,
                 "usage": pin.usage,
                 "status": pin.status,
+                "terminal_reason": pin.terminal_reason,
                 "reward_signals": pin.reward_signals,
                 "native_script_reward": pin.native_script_reward,
                 "hillclimb_nodes": [node.to_dict() for node in (pin.hillclimb_nodes or ())],
@@ -429,6 +431,7 @@ class CompatPlatform:
                 usage=raw_pin.get("usage"),
                 terminal=True,
                 status=str(raw_pin["status"]),
+                terminal_reason=raw_pin.get("terminal_reason"),
                 started=True,
                 reward_signals=list(raw_pin.get("reward_signals") or []),
                 native_script_reward=raw_pin.get("native_script_reward"),
@@ -1250,7 +1253,7 @@ class CompatPlatform:
             "terminated",
             "stopped",
         }
-        reason = terminal.get("reason")
+        reason = terminal.get("reason") or pin.terminal_reason
         detail = terminal.get("detail") or terminal.get("error")
         if failed_terminal:
             reason = reason or "producer_failure"

@@ -41,6 +41,24 @@ from synth_containers.tracing.models.standards import (
 )
 
 
+def test_start_completes_recovery_before_background_dispatch(tmp_path: Path, monkeypatch) -> None:
+    service, _ = _service(tmp_path, CountingRunner())
+    original = service.recover_interrupted
+    recovery_threads = []
+
+    def recover():
+        recovery_threads.append(threading.current_thread())
+        return original()
+
+    monkeypatch.setattr(service, "recover_interrupted", recover)
+    scheduler = AnnotationScheduler(service)
+    try:
+        scheduler.start()
+        assert recovery_threads == [threading.current_thread()]
+    finally:
+        scheduler.stop()
+
+
 class CountingRunner:
     """Deterministic-class runner that records peak concurrency and sleeps a little."""
 
@@ -101,10 +119,18 @@ def _service(tmp_path: Path, runner: CountingRunner | None = None):
     return service, traces
 
 
-def test_scheduler_honours_per_class_and_global_limits(tmp_path: Path) -> None:
+def test_scheduler_honours_per_class_and_global_limits(tmp_path: Path, monkeypatch) -> None:
     runner = CountingRunner(delay=0.08)
     service, traces = _service(tmp_path, runner)
     scheduler = AnnotationScheduler(service, limits=ThroughputLimits(max_concurrent_total=3, per_class={RunnerKind.DETERMINISTIC.value: 2}, poll_seconds=0.01))
+    dispatched = []
+    original_start = scheduler._start
+
+    def record_dispatch(job_id, job, runner_class):
+        dispatched.append(job_id)
+        original_start(job_id, job, runner_class)
+
+    monkeypatch.setattr(scheduler, "_start", record_dispatch)
     jobs = []
     for trace in traces:
         for name in ("a", "b", "c"):
@@ -117,8 +143,10 @@ def test_scheduler_honours_per_class_and_global_limits(tmp_path: Path) -> None:
     assert scheduler.snapshot()["peak_by_class"][RunnerKind.DETERMINISTIC.value] == 2
     assert all(str(service.get(job.job_id).state) == AnnotationJobState.SEALED for job in jobs)
     assert scheduler.snapshot()["completed"] == 12 and scheduler.snapshot()["queued"] == 0
-    # FIFO: the first two started are the first two enqueued
-    assert runner.order[:2] == [jobs[0].job_id, jobs[1].job_id]
+    # FIFO is the scheduler's admission contract, not OS thread scheduling.
+    # Assert the entire dispatch sequence, plus exactly-once worker execution.
+    assert dispatched == [job.job_id for job in jobs]
+    assert sorted(runner.order) == sorted(job.job_id for job in jobs)
 
 
 def test_scheduler_background_start_recovers_and_dedupes(tmp_path: Path) -> None:
