@@ -7,6 +7,7 @@ import json
 import time
 import uuid
 from pathlib import Path
+import os
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
@@ -15,7 +16,7 @@ from ..nested import NestedError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
-from ..event_log import RolloutEventLog
+from ..event_log import SSE_HEADERS, RolloutEventLog, iter_sse
 from .http_requests import (
     RequestParseError,
     parse_combine_reward,
@@ -28,7 +29,8 @@ from .http_requests import (
     to_put_policy_dict,
 )
 from .state import CompatPlatform, _seed_from_task_instance_id
-from .targets import TARGETS, TargetSpec
+from .reward import REWARD_STREAM_KINDS, reward_api_catalog
+from .targets import TARGETS, TargetSpec, advertised_reward_authority, advertised_reward_calculator
 
 
 def _raise_platform(result: dict[str, Any]) -> dict[str, Any]:
@@ -69,10 +71,35 @@ def create_compat_app(
     app.state.platform = platform
     app.state.spec = spec
 
+    def _runtime_identity() -> dict[str, Any]:
+        """Safe, non-secret identity used by orchestrators for adoption receipts."""
+        instance_id = (os.environ.get("SYNTH_CONTAINER_INSTANCE_ID") or os.environ.get("HOSTNAME") or "").strip()
+        image_digest = (os.environ.get("SYNTH_CONTAINER_IMAGE_DIGEST") or "").strip()
+        producer_revision = (os.environ.get("SYNTH_CONTAINER_PRODUCER_SOURCE_REVISION") or "").strip()
+        return {
+            "schema_version": "synth.container-runtime-identity.v1",
+            "instance_id": instance_id or None,
+            "image_digest": image_digest or None,
+            "producer_source_revision": producer_revision or None,
+        }
+
     def _sse_event(rollout_id: str, envelope: Any) -> dict[str, Any]:
         row = envelope.to_dict()
         row["rollout_id"] = rollout_id
         return row
+
+    def _annotation_surface() -> dict[str, Any] | None:
+        mounted = getattr(app.state, "annotation", None)
+        if mounted is None:
+            return None
+        return {
+            "schema": "synth.container.annotation-api.v1",
+            "mounted": True,
+            "catalog": "/annotation/catalog",
+            "status": "/annotation/status",
+            "rewrites_reward_signal": False,
+            "hidden_cot": False,
+        }
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
@@ -81,6 +108,7 @@ def create_compat_app(
             "target": spec.target_id,
             "runtime_family": spec.runtime_family.value,
             "environment_ref": spec.environment_ref,
+            "runtime_identity": _runtime_identity(),
         }
         if spec.health_probe is not None:
             extra = spec.health_probe()
@@ -88,6 +116,10 @@ def create_compat_app(
                 payload.update(extra)
             if str(payload.get("status") or "ok") != "ok":
                 return JSONResponse(status_code=503, content=payload)
+        surface = _annotation_surface()
+        if surface is not None:
+            payload["annotation"] = "mounted"
+            payload["annotation_api"] = surface
         return payload
 
     @app.get("/metadata")
@@ -98,6 +130,10 @@ def create_compat_app(
             extra = spec.metadata_extra(payload)
             if isinstance(extra, dict):
                 payload = extra
+        payload["runtime_identity"] = _runtime_identity()
+        surface = _annotation_surface()
+        if surface is not None:
+            payload["annotation_api"] = surface
         return payload
 
     @app.get("/task_catalog")
@@ -318,46 +354,10 @@ def create_compat_app(
         except ValueError:
             # Invalid Last-Event-ID is a cursor reset, not a failed request: resume from sequence 0.
             after = 0
-
-        async def generate():
-            nonlocal after
-            # Control records intentionally have no semantic sequence and are
-            # therefore visible at cursor 0.  A prepared SSE consumer keeps
-            # cursor 0 until its first semantic event; without this local
-            # replay guard the `stream.subscribed` control record is emitted
-            # on every heartbeat tick, producing an unbounded duplicate flood
-            # before the rollout starts.
-            emitted_controls: set[str] = set()
-            while not await request.is_disconnected():
-                emitted = False
-                for envelope in log.after(after):
-                    if envelope.control:
-                        control_key = f"{envelope.kind}:{envelope.digest}"
-                        if control_key in emitted_controls:
-                            continue
-                        emitted_controls.add(control_key)
-                    sse_id = envelope.sequence if envelope.sequence is not None else 0
-                    if envelope.sequence is not None:
-                        after = envelope.sequence
-                    event = _sse_event(rollout_id, envelope)
-                    yield (
-                        f"id: {sse_id}\n"
-                        f"event: {event['kind']}\n"
-                        f"data: {json.dumps(event, separators=(',', ':'))}\n\n"
-                    )
-                    emitted = True
-                if log.closed:
-                    break
-                # Heartbeats must not end the stream. Luna plan calls are idle
-                # for seconds; cutting SSE after 1s dropped span.policy.data.
-                if not emitted:
-                    yield ": heartbeat\n\n"
-                await asyncio.sleep(0.05)
-
         return StreamingResponse(
-            generate(),
+            iter_sse(log, request, after=after, extra={"rollout_id": rollout_id}),
             media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            headers=SSE_HEADERS,
         )
 
     @app.websocket("/rollouts/{rollout_id}/ws")
@@ -384,6 +384,15 @@ def create_compat_app(
         except WebSocketDisconnect:
             return
 
+    @app.get("/reward/catalog")
+    async def reward_catalog() -> dict[str, Any]:
+        return reward_api_catalog(
+            calculator=advertised_reward_calculator(spec),
+            authority=advertised_reward_authority(spec),
+            aggregation=str(spec.reward_kind),
+            live=bool(spec.live_reward),
+        )
+
     @app.get("/reward")
     async def get_reward(rollout_id: str = Query(...)) -> dict[str, Any]:
         return platform.get_reward(rollout_id)
@@ -391,6 +400,37 @@ def create_compat_app(
     @app.get("/rollouts/{rollout_id}/reward")
     async def get_reward_path(rollout_id: str) -> dict[str, Any]:
         return platform.get_reward(rollout_id)
+
+    @app.get("/rollouts/{rollout_id}/reward/events")
+    async def reward_events(
+        rollout_id: str,
+        after: int = Query(default=0, ge=0),
+        limit: int = Query(default=1000, ge=1, le=10_000),
+    ) -> Any:
+        result = platform.events_payload(rollout_id, after, limit, kinds=tuple(REWARD_STREAM_KINDS))
+        return _platform_response(result, default_status=404)
+
+    @app.get("/rollouts/{rollout_id}/reward/stream")
+    async def reward_sse(rollout_id: str, request: Request) -> StreamingResponse:
+        log = platform.logs.get(rollout_id)
+        if log is None or not platform.transport_is_bound(rollout_id, "sse"):
+            raise HTTPException(status_code=404, detail=f"telemetry_not_enabled:{rollout_id}")
+        raw_last = request.headers.get("last-event-id", "0")
+        try:
+            after = int(raw_last)
+        except ValueError:
+            after = 0
+        return StreamingResponse(
+            iter_sse(
+                log,
+                request,
+                after=after,
+                extra={"rollout_id": rollout_id},
+                kinds=REWARD_STREAM_KINDS,
+            ),
+            media_type="text/event-stream",
+            headers=SSE_HEADERS,
+        )
 
     @app.post("/reward")
     async def post_reward(request: Request) -> Any:

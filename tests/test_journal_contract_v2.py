@@ -206,6 +206,22 @@ def test_events_ack_param_records_and_echoes_the_ack_head(tmp_path: Path) -> Non
     assert page["cursor"]["acked"] == 1, "ack head persists between requests"
 
 
+def test_filtered_events_keep_ack_chain_and_retention(tmp_path: Path) -> None:
+    _, platform = _make_app(tmp_path, journal_retention_ttl_seconds=60)
+    log = _open_log(platform)
+    log.append("env.step", {"step": 0})
+    log.append("reward.computed", {"value": 0.5})
+    page = platform.events_payload(ROLLOUT_ID, after=0, kinds=["reward.computed"], ack=1)
+    assert [row["kind"] for row in page["events"] if not row["control"]] == [
+        "reward.computed"
+    ]
+    assert page["cursor"]["acked"] == 1
+    assert page["cursor"]["chain_head"] == log.chain_head
+    assert page["cursor"]["high_water"] == log.high_water
+    assert page["retention"]["policy"] == "until-acked-or-ttl"
+    assert page["retention"]["released"] is False
+
+
 def test_retention_transitions_acked_and_ttl(tmp_path: Path) -> None:
     app, platform = _make_app(tmp_path, journal_retention_ttl_seconds=60)
     log = _open_log(platform)

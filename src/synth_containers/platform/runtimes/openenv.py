@@ -15,6 +15,7 @@ from typing import Any
 
 from ...event_log import RolloutEventLog
 from ..echo_world import ECHO_ENVIRONMENT, EchoWorld
+from ..reward import RewardStreamer
 from ..state import CompatPlatform, RolloutPin
 
 
@@ -61,10 +62,10 @@ class OpenEnvRuntime:
         log.append("action", {"action": action})
 
         value: float | None = None if pin.omit_reward else result.reward
-        log.append(
-            "reward_signal",
-            {"value": value, "authority": "environment"},
-        )
+        reward = RewardStreamer.code(log, authority="environment", kind="env_sum")
+        reward.opened()
+        reward.signal(value=value)
+        reward.closed()
         pin.reward_signals = [value]
         pin.status = "completed"
         pin.terminal = True

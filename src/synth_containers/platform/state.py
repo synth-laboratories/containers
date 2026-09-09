@@ -17,6 +17,7 @@ from typing import Any
 from ..event_log import (
     CONTROL_SUBSCRIBED,
     RolloutEventLog,
+    poll_payload,
     stream_descriptor,
     validate_rollout_id,
 )
@@ -39,7 +40,10 @@ from .targets import (
     TargetRuntimeKind,
     TargetSpec,
     TaskInstanceStatus,
+    advertised_reward_authority,
+    advertised_reward_calculator,
 )
+from .reward import reward_api_catalog
 from .trace_bundle import (
     HarborTraceBundleRef,
     inspect_harbor_trace_bundle,
@@ -641,9 +645,8 @@ class CompatPlatform:
             "active_leases": self.active_leases,
             "retention": self.spec.retention,
             "logical_service_ids": services,
-            "reward_authority": (
-                "trusted_scorer" if self.spec.reward_kind == "script" else "environment"
-            ),
+            "reward_authority": advertised_reward_authority(self.spec),
+            "reward_calculator": advertised_reward_calculator(self.spec).value,
             "live_reward": self.spec.live_reward,
             "live_frames": self.spec.live_frames,
             "true_checkpoint": self.spec.true_checkpoint,
@@ -654,6 +657,12 @@ class CompatPlatform:
             "target_id": self.spec.target_id,
             "runtime_family": self.spec.runtime_family.value,
             "max_episode_steps": self.spec.max_episode_steps,
+            "reward_api": reward_api_catalog(
+                calculator=advertised_reward_calculator(self.spec),
+                authority=advertised_reward_authority(self.spec),
+                aggregation=str(self.spec.reward_kind),
+                live=bool(self.spec.live_reward),
+            ),
             # This facade owns the complete prepare → start → reconcile →
             # reward workflow and seals its durable event log on terminal
             # rollout.  Advertise that contract explicitly so Workshop can
@@ -966,6 +975,12 @@ class CompatPlatform:
                 "detail": "harness nanohorizon requires PUT /policy before POST /rollouts",
             }
         requested_revision = request.policy_revision_id
+        if harness == NANOHORIZON_HARNESS and not requested_revision:
+            return {
+                "error": "policy_revision_required",
+                "status_code": 422,
+                "detail": "POST /rollouts requires policy_revision_id for harness nanohorizon",
+            }
         if requested_revision:
             revision = self.policy_revisions.get(requested_revision)
             if revision is None or (harness == NANOHORIZON_HARNESS and not revision.code):
@@ -1327,7 +1342,8 @@ class CompatPlatform:
         # already hold authoritative environment signals. This preserves null
         # for missing evidence while making an authoritative 0.0 discoverable.
         if pin.terminal and (
-            self.spec.runtime_family == TargetRuntimeKind.HARBOR
+            pin.status == "completed"
+            or self.spec.runtime_family == TargetRuntimeKind.HARBOR
             or self.spec.reward_kind == RewardKind.ENV_SUM
         ):
             self.compute_reward(
@@ -1794,13 +1810,16 @@ class CompatPlatform:
             gate_value = gates[0].value if gates else None
             return float(gate_value) if gate_value is not None else None, nodes, "scored", None
         kind = pin.reward_kind
-        if kind == "env_sum":
+        if kind in {"env_sum", "verifier"}:
+            authority = "verifier" if kind == "verifier" else "environment"
+            node_kind = "verifier_reward" if kind == "verifier" else "env_reward"
+            node_id = "verifier" if kind == "verifier" else "env_sum"
             if any(item is None for item in pin.reward_signals):
                 return None, [
                     {
-                        "node_id": "env_sum",
-                        "kind": "env_reward",
-                        "authority": "environment",
+                        "node_id": node_id,
+                        "kind": node_kind,
+                        "authority": authority,
                         "status": "skipped",
                         "value": None,
                     }
@@ -1810,9 +1829,9 @@ class CompatPlatform:
             )
             return total, [
                 {
-                    "node_id": "env_sum",
-                    "kind": "env_reward",
-                    "authority": "environment",
+                    "node_id": node_id,
+                    "kind": node_kind,
+                    "authority": authority,
                     "status": "scored",
                     "value": total,
                 }
@@ -1865,46 +1884,28 @@ class CompatPlatform:
         rollout_id: str,
         after: int,
         limit: int = 1000,
+        kinds: list[str] | tuple[str, ...] | None = None,
         *,
         ack: int | None = None,
     ) -> dict[str, Any]:
         log = self.logs.get(rollout_id)
         if log is None:
             return {"error": "unknown_rollout", "status_code": 404}
-        if isinstance(limit, bool) or limit < 1 or limit > 10_000:
+        try:
+            payload = poll_payload(log, after=after, limit=limit, kinds=kinds, subject_id=rollout_id)
+        except ValueError:
             return {"error": "invalid_page_limit", "status_code": 422}
         if ack is not None:
             try:
                 log.record_ack(ack)
             except ValueError:
                 return {"error": "invalid_ack", "status_code": 422}
-        available = log.after(after)
-        controls = [item for item in available if item.sequence is None]
-        evidence = [item for item in available if item.sequence is not None]
-        page = [*controls, *evidence[:limit]]
-        envelopes = [item.to_dict() for item in page]
-        for row in envelopes:
-            row["rollout_id"] = rollout_id
+        for row in payload["events"]:
             if "Authorization" in json.dumps(row) or "DIGBENCH_API_TOKEN" in json.dumps(row):
                 raise RuntimeError("token_leaked_into_log")
-        return {
-            "rollout_id": rollout_id,
-            "stream_id": log.stream_id,
-            "cursor": {
-                "kind": "sequence",
-                "after": after,
-                "high_water": log.high_water,
-                "closed": log.closed,
-                "next": max(
-                    [after, *(item.sequence for item in page if item.sequence is not None)]
-                ),
-                "has_more": len(evidence) > limit,
-                "chain_head": log.chain_head,
-                "acked": log.last_acked,
-            },
-            "retention": self._journal_retention(log),
-            "events": envelopes,
-        }
+        payload["cursor"].update(chain_head=log.chain_head, acked=log.last_acked)
+        payload["retention"] = self._journal_retention(log)
+        return payload
 
     def _retention_ttl_seconds(self) -> int:
         raw = (self.runtime_config or {}).get("journal_retention_ttl_seconds")
