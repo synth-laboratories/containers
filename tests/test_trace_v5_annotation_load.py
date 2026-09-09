@@ -171,9 +171,10 @@ class Harness:
     def measure_cpu_floor(self) -> dict[str, float]:
         """Serial bookkeeping cost per job and class (run + validate + seal + persist), with no sleep.
 
-        The seal path is pure Python, so under the GIL it never parallelizes: a
-        process cannot finish jobs faster than one per this many seconds even
-        with every slot busy. Saturation is judged against that floor.
+        This is a serial wall-time calibration, not a physical CPU floor:
+        persistence includes I/O waits that overlap across workers, and this
+        separate sample can experience different runner contention. Use it
+        for the upper throughput budget, never as a lower bound on a phase.
         """
 
         settings = {kind: (runner.delay, runner.fail_every) for kind, runner in self.runners.items()}
@@ -290,12 +291,24 @@ def _assert_saturated(measured: Measured, *, slack: float = 0.25) -> None:
     """Wall within 25% (+0.5 s) of the no-overlap bound.
 
     A scheduler that serialized would take ``jobs x (duration + bookkeeping)``,
-    several times the bound; one that saturates its slots lands between
-    ``max(cap_ideal, cpu_floor)`` and their sum.
+    several times the bound. The deterministic sleeps and binding caps supply
+    the lower bound; the separately sampled serial bookkeeping cost does not
+    (I/O can overlap and failed jobs do not traverse the full seal path).
     """
 
     assert measured.wall <= measured.expected * (1.0 + slack) + 0.5, measured.line("not saturated")
-    assert measured.wall >= max(measured.ideal, measured.cpu_floor) * 0.9, measured.line("faster than physically possible; the measurement is wrong")
+    assert measured.wall >= measured.ideal * 0.9, measured.line("faster than physically possible; the measurement is wrong")
+
+
+def test_saturation_measurement_uses_only_the_cap_as_a_physical_lower_bound() -> None:
+    measured = Measured(jobs=10, wall=2.0, ideal=2.0, cpu_floor=10.0, tracker=Tracker(), snapshot={}, states={})
+    _assert_saturated(measured)
+    measured.wall = 1.0
+    with pytest.raises(AssertionError, match="faster than physically possible"):
+        _assert_saturated(measured)
+    measured.wall = 30.0
+    with pytest.raises(AssertionError, match="not saturated"):
+        _assert_saturated(measured)
 
 
 def test_per_class_caps_bind_and_are_reached(tmp_path: Path, capsys) -> None:
