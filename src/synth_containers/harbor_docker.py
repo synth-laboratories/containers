@@ -28,7 +28,13 @@ class ObservedDockerEnvironment(DockerEnvironment):
     This extension does not claim those unsupported guarantees.
     """
 
-    def __init__(self, *args, egress_control_image: str | None = None, **kwargs):
+    def __init__(
+        self,
+        *args,
+        egress_control_image: str | None = None,
+        workspace_tmpfs_bytes: int | None = None,
+        **kwargs,
+    ):
         if version("harbor") != "0.22.0":
             raise ValueError("Native Docker requires qualified Harbor 0.22.0")
         if args:
@@ -40,6 +46,12 @@ class ObservedDockerEnvironment(DockerEnvironment):
             raise ValueError(
                 "Native Docker creation timeout must be positive and at most 300 seconds"
             )
+        self._workspace_tmpfs_bytes = workspace_tmpfs_bytes
+        self._quota_compose_path = None
+        if workspace_tmpfs_bytes is not None and (
+            type(workspace_tmpfs_bytes) is not int or not 1 <= workspace_tmpfs_bytes <= 16 * 1024**3
+        ):
+            raise ValueError("workspace_tmpfs_bytes must be an integer from 1 through 16 GiB")
         self._creation_timeout_seconds = timeout
         if egress_control_image is not None and not is_pinned_harbor_image(
             egress_control_image, "docker"
@@ -70,6 +82,46 @@ class ObservedDockerEnvironment(DockerEnvironment):
         self._resource_create_attempted = False
         self._resource_owner_lock = None
         self._resource_handles: list[dict[str, str]] = []
+
+    @property
+    def _docker_compose_paths(self):
+        paths = super()._docker_compose_paths
+        if self._quota_compose_path is not None:
+            paths.append(self._quota_compose_path)
+        return paths
+
+    def _arm_workspace_quota(self):
+        if self._workspace_tmpfs_bytes is None:
+            return
+        # Explicit opt-in: /workspace begins empty. Image content under this path
+        # is obscured, never copied using an unbounded host staging directory.
+        path = self._resource_root / "workspace-quota.compose.json"
+        with path.open("x") as handle:
+            json.dump(
+                {
+                    "services": {
+                        "main": {
+                            "tmpfs": [
+                                f"/workspace:rw,nosuid,nodev,size={self._workspace_tmpfs_bytes},mode=1777"
+                            ],
+                            "cap_drop": ["SYS_ADMIN"],
+                            "security_opt": ["no-new-privileges:true"],
+                        }
+                    }
+                },
+                handle,
+            )
+            handle.flush()
+            os.fsync(handle.fileno())
+        self._quota_compose_path = path
+        self._resource_event(
+            "resource.workspace_quota_armed",
+            path="/workspace",
+            bytes=self._workspace_tmpfs_bytes,
+            mechanism="docker_tmpfs",
+            scope="workspace_mount_only",
+            initial_contents="empty",
+        )
 
     async def _ensure_egress_control_sidecar_image_built(self):
         # Image preparation belongs to the manager/build lane, not trial startup.
@@ -134,6 +186,36 @@ class ObservedDockerEnvironment(DockerEnvironment):
             raise RuntimeError("Native Docker resource handle bound exceeded")
         self._resource_event("resource.handles_observed", handles=self._resource_handles)
 
+    def _confirm_workspace_quota(self):
+        if self._workspace_tmpfs_bytes is None:
+            return
+        with closing(docker.from_env(timeout=5)) as client:
+            primary = []
+            for resource in self._resource_handles:
+                if resource["kind"] != "container":
+                    continue
+                container = client.containers.get(resource["id"])
+                labels = container.attrs.get("Config", {}).get("Labels", {})
+                if labels.get("com.docker.compose.service") == "main":
+                    primary.append(container)
+            if len(primary) != 1:
+                raise RuntimeError("Workspace quota requires one observed primary container")
+            options = primary[0].attrs.get("HostConfig", {}).get("Tmpfs", {}).get("/workspace", "")
+            if f"size={self._workspace_tmpfs_bytes}" not in options.split(","):
+                raise RuntimeError("Provider did not confirm the workspace tmpfs quota")
+            for mount in primary[0].attrs.get("Mounts", []):
+                destination = mount.get("Destination", "")
+                if (
+                    destination == "/workspace" or destination.startswith("/workspace/")
+                ) and mount.get("Type") != "tmpfs":
+                    raise RuntimeError("A writable mount bypasses the workspace tmpfs quota")
+        self._resource_event(
+            "resource.workspace_quota_confirmed",
+            path="/workspace",
+            bytes=self._workspace_tmpfs_bytes,
+            mechanism="docker_tmpfs",
+        )
+
     async def start(self, force_build: bool):
         if force_build or self._resource_create_attempted:
             raise ValueError("Native Docker permits one prebuilt creation attempt")
@@ -158,18 +240,22 @@ class ObservedDockerEnvironment(DockerEnvironment):
         finally:
             os.close(directory)
         self._resource_create_attempted = True
+        self._arm_workspace_quota()
         self._resource_owner_lock = (self._resource_root / "resource-owner.lock").open("x+")
         fcntl.flock(self._resource_owner_lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         self._resource_event(
             "resource.create_requested",
             creation_timeout_seconds=self._creation_timeout_seconds,
             provider_ttl_supported=False,
-            workspace_quota_supported=False,
+            workspace_quota_supported=self._workspace_tmpfs_bytes is not None,
+            workspace_quota_scope="/workspace" if self._workspace_tmpfs_bytes else None,
         )
         try:
             async with asyncio.timeout(self._creation_timeout_seconds):
                 await super().start(force_build=False)
             await self._remember_resources()
+            async with asyncio.timeout(15):
+                await asyncio.to_thread(self._confirm_workspace_quota)
             if not any(h["kind"] == "container" for h in self._resource_handles):
                 raise RuntimeError("Native Docker primary container was not observed")
         except BaseException as error:

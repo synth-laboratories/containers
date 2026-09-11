@@ -11,7 +11,7 @@ import fcntl
 import json
 import os
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -26,6 +26,7 @@ class SnapshotBuildLimits:
     create_seconds: int = 30
     build_seconds: int = 600
     cleanup_seconds: int = 60
+    retention_seconds: int = 86400
 
     def __post_init__(self):
         for field, ceiling in (
@@ -33,6 +34,7 @@ class SnapshotBuildLimits:
             ("create_seconds", 60),
             ("build_seconds", 1800),
             ("cleanup_seconds", 120),
+            ("retention_seconds", 604800),
         ):
             value = getattr(self, field)
             if type(value) is not int or not 1 <= value <= ceiling:
@@ -58,7 +60,25 @@ class DaytonaSnapshotBuild:
         provider: Any,
         *,
         limits: SnapshotBuildLimits | None = None,
+        architecture: str = "amd64",
+        required_capabilities: tuple[str, ...] = (),
     ):
+        if architecture not in {"amd64", "arm64"}:
+            raise ValueError("Snapshot architecture must be amd64 or arm64")
+        available = frozenset(getattr(provider, "build_capabilities", ()))
+        missing = set(required_capabilities) - available
+        if missing:
+            raise SnapshotBuildError(
+                "Provider cannot enforce build capabilities: " + ", ".join(sorted(missing))
+            )
+        supported_architectures = getattr(provider, "build_architectures", ("amd64",))
+        if architecture not in supported_architectures:
+            raise SnapshotBuildError("Provider cannot bind requested build architecture")
+        self.architecture = architecture
+        self.required_capabilities = required_capabilities
+        self.expires_at = datetime.now(UTC) + timedelta(
+            seconds=(limits or SnapshotBuildLimits()).retention_seconds
+        )
         self.context = context
         self.output = output
         self.provider = provider
@@ -95,6 +115,9 @@ class DaytonaSnapshotBuild:
                     "owner": self.owner,
                     "context": self.context.as_dict(),
                     "limits": vars(self.limits),
+                    "architecture": self.architecture,
+                    "required_capabilities": list(self.required_capabilities),
+                    "expires_at": self.expires_at.isoformat(),
                     "created_at": datetime.now(UTC).isoformat(),
                 },
                 handle,
@@ -152,6 +175,11 @@ class DaytonaSnapshotBuild:
                         self.event("image.state_observed", snapshot_id=self.identifier, state=state)
                         previous = state
                     if state == "active":
+                        artifact = self._artifact_receipt(snapshot)
+                        with (self.output / "build-artifact.json").open("x") as handle:
+                            json.dump(artifact, handle, sort_keys=True, allow_nan=False)
+                            handle.flush()
+                            os.fsync(handle.fileno())
                         self.event(
                             "image.build_completed",
                             snapshot_id=self.identifier,
@@ -206,7 +234,12 @@ class DaytonaSnapshotBuild:
             "image_digest": None,
             "image_digest_verified": False,
             "native_pinned_image_launch_eligible": False,
-            "retention": "until_explicit_owner_release",
+            "architecture": self.architecture,
+            "architecture_enforcement": "provider_admission",
+            "retention": "owner_reconciled_expiry",
+            "expires_at": self.expires_at.isoformat(),
+            "provider_storage_expiry_supported": False,
+            "context_storage_release_confirmed": False,
         }
 
     async def cleanup(self) -> dict:
@@ -298,7 +331,9 @@ async def recover_daytona_snapshot_build(
                 raise SnapshotBuildError("Snapshot recovery requires exactly one create intent")
             kinds = {row.get("event") for row in rows}
             if "image.build_completed" in kinds and "image.cleanup_requested" not in kinds:
-                raise SnapshotBuildError("Completed snapshot has not been released by its owner")
+                retained_until = claim.get("expires_at")
+                if retained_until is None or observed_at < datetime.fromisoformat(retained_until):
+                    raise SnapshotBuildError("Completed snapshot has not expired or been released")
             identifiers = [row["snapshot_id"] for row in rows if row.get("snapshot_id")]
             if any(
                 not isinstance(value, str) or not 1 <= len(value) <= 255 for value in identifiers
@@ -317,7 +352,11 @@ async def recover_daytona_snapshot_build(
                 output,
                 provider,
                 limits=limits,
+                architecture=claim.get("architecture", "amd64"),
+                required_capabilities=tuple(claim.get("required_capabilities", ())),
             )
+            if claim.get("expires_at"):
+                operation.expires_at = datetime.fromisoformat(claim["expires_at"])
             operation.owner = owner
             operation.identifier = next(iter(known), None)
             operation.create_attempted = True

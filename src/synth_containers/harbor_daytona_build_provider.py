@@ -21,6 +21,11 @@ class DaytonaSnapshotProvider:
     are not a quota or charge ceiling on Daytona's internal image builder.
     """
 
+    # API resource fields apply to the resulting sandbox, not the builder.
+    # Hard builder spend/resource/remote-context-expiry requests fail admission.
+    build_capabilities = frozenset()
+    build_architectures = ()
+
     def __init__(
         self,
         client: Any,
@@ -29,6 +34,7 @@ class DaytonaSnapshotProvider:
         memory_gib: int = 1,
         disk_gib: int = 2,
         region_id: str | None = None,
+        qualified_architecture: str | None = None,
     ):
         if version("daytona") != "0.210.0":
             raise ValueError("Snapshot preparation requires qualified Daytona 0.210.0")
@@ -39,6 +45,12 @@ class DaytonaSnapshotProvider:
         ):
             if type(value) is not int or not 1 <= value <= ceiling:
                 raise ValueError(f"{field} exceeds snapshot resource bounds")
+        if qualified_architecture is not None:
+            if qualified_architecture not in {"amd64", "arm64"}:
+                raise ValueError("Invalid qualified provider architecture")
+            # Operator configuration must come from provider/region qualification;
+            # this is not an OCI inspection or cross-architecture build switch.
+            self.build_architectures = (qualified_architecture,)
         service = client.snapshot
         self.api = service._AsyncSnapshotService__snapshots_api
         self.storage_api = service._AsyncSnapshotService__object_storage_api

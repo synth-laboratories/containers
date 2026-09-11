@@ -33,6 +33,9 @@ class BoundedDaytonaEnvironment(DaytonaEnvironment):
         maximum_cpu: int = 1,
         maximum_memory_gib: int = 1,
         maximum_disk_gib: int = 1,
+        prepared_snapshot_artifact: str | None = None,
+        expected_source_package_digest: str | None = None,
+        expected_architecture: str = "amd64",
         **kwargs,
     ):
         if version("harbor") != "0.22.0" or version("daytona") != "0.210.0":
@@ -56,8 +59,35 @@ class BoundedDaytonaEnvironment(DaytonaEnvironment):
         super().__init__(*args, **kwargs)
         if self._auto_snapshot or self._snapshot_template_name:
             raise ValueError("Bounded native Daytona cannot create or select snapshots")
+        self._prepared_snapshot = None
+        self._prepared_resource_shape = None
+        if prepared_snapshot_artifact is not None:
+            raw = Path(prepared_snapshot_artifact).read_bytes()
+            if len(raw) > 16384:
+                raise ValueError("Snapshot artifact exceeds bound")
+            artifact = json.loads(raw)
+            if (
+                artifact.get("schema_version") != "synth.daytona-build-artifact.v1"
+                or artifact.get("provider") != "daytona"
+                or not expected_source_package_digest
+                or artifact.get("source_package_digest") != expected_source_package_digest
+                or artifact.get("architecture") != expected_architecture
+                or not re.fullmatch(
+                    r"synth-eval-build-[0-9a-f]{32}", artifact.get("snapshot_name", "")
+                )
+                or not isinstance(artifact.get("snapshot_id"), str)
+                or not 1 <= len(artifact["snapshot_id"]) <= 255
+            ):
+                raise ValueError("Prepared snapshot binding mismatch")
+            expiry = datetime.fromisoformat(artifact["expires_at"])
+            if expiry.tzinfo is None or expiry <= datetime.now(UTC):
+                raise ValueError("Prepared snapshot retention has expired")
+            self._prepared_snapshot = artifact
         image = str(self.task_env_config.docker_image or "")
-        if not re.fullmatch(r"[^\s]+@sha256:[0-9a-f]{64}", image) or self._compose_mode:
+        if (
+            self._prepared_snapshot is None
+            and not re.fullmatch(r"[^\s]+@sha256:[0-9a-f]{64}", image)
+        ) or self._compose_mode:
             raise ValueError("Bounded native Daytona requires a digest-pinned direct image")
         if self._dockerfile_path.exists():
             raise ValueError("Bounded native Daytona does not build task Dockerfiles")
@@ -89,10 +119,45 @@ class BoundedDaytonaEnvironment(DaytonaEnvironment):
             raise ValueError("Bounded native Daytona cannot force image builds")
         return await super().start(force_build=False)
 
+    async def _resolve_start_sandbox_params(self, daytona, resources, *, force_build):
+        if self._prepared_snapshot is None:
+            return await super()._resolve_start_sandbox_params(
+                daytona, resources, force_build=force_build
+            )
+        if force_build or resources is None:
+            raise ValueError("Prepared snapshot requires admitted resources and no build")
+        artifact = self._prepared_snapshot
+        if datetime.fromisoformat(artifact["expires_at"]) <= datetime.now(UTC):
+            raise ValueError("Prepared snapshot expired before launch")
+        async with asyncio.timeout(15):
+            snapshot = await daytona.snapshot.get(artifact["snapshot_id"])
+        state = getattr(snapshot, "state", "")
+        if (
+            getattr(snapshot, "id", None) != artifact["snapshot_id"]
+            or getattr(snapshot, "name", None) != artifact["snapshot_name"]
+            or str(getattr(state, "value", state)).lower() != "active"
+        ):
+            raise ValueError("Provider snapshot identity/state changed")
+        requested = (resources.cpu, resources.memory, resources.disk)
+        observed = tuple(getattr(snapshot, key, None) for key in ("cpu", "memory", "disk"))
+        if observed != requested:
+            raise ValueError("Prepared snapshot resource shape differs from admitted request")
+        self._prepared_resource_shape = resources
+        self._resource_event(
+            "resource.snapshot_bound",
+            snapshot_id=artifact["snapshot_id"],
+            source_package_digest=artifact["source_package_digest"],
+            context_digest=artifact["context_digest"],
+            architecture=artifact["architecture"],
+            image_digest_verified=False,
+        )
+        # The provider identity is checked afresh; it is never cast to an OCI digest.
+        return self._snapshot_sandbox_params(artifact["snapshot_name"])
+
     async def _create_sandbox(self, params, daytona=None):
         if self._resource_create_attempted:
             raise RuntimeError("Native Daytona creation allowance exhausted")
-        resources = getattr(params, "resources", None)
+        resources = getattr(params, "resources", None) or self._prepared_resource_shape
         if resources is None:
             raise ValueError("Native Daytona requires explicit CPU, memory and disk requests")
         requested = (resources.cpu, resources.memory, resources.disk)
@@ -197,7 +262,9 @@ class BoundedDaytonaEnvironment(DaytonaEnvironment):
                 "resource.cleanup_pending", provider_id=identifier, error_type=type(error).__name__
             )
             if isinstance(error, Exception):
-                raise HarborResourceCleanupPending("Native Daytona cleanup remains pending") from error
+                raise HarborResourceCleanupPending(
+                    "Native Daytona cleanup remains pending"
+                ) from error
             raise
         self._resource_event("resource.cleanup_confirmed", provider_id=identifier)
         self._sandbox = None
