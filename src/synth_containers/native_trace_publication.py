@@ -28,7 +28,11 @@ from .tracing.store.bundle import LocalTraceBundle
 class NativeTraceStore(Protocol):
     """Implemented by the SDK's AsyncFactoryTraceStoreAPI; credentials stay there."""
 
+    factory_id: str
+
     async def upload_bundle(self, root: Path, **kwargs: Any) -> Any: ...
+    async def query(self, **kwargs: Any) -> Any: ...
+    async def bundle_download(self, publication_id: str, **kwargs: Any) -> Any: ...
 
 
 def _json(path: Path, maximum: int = 1024 * 1024) -> dict:
@@ -117,6 +121,27 @@ def freeze_native_trace_evidence(
     collection = collect_bounded_artifacts(
         sources, destination, max_bytes=max_bytes, max_files=10000
     )
+    return _validate_frozen(
+        destination,
+        expected_manifest_digest=expected_manifest_digest,
+        expected_trace_digests=expected_trace_digests,
+        max_bytes=max_bytes,
+        required_visual_digests=required_visual_digests,
+        allow_interrupted=allow_interrupted,
+        collection=collection,
+    )
+
+
+def _validate_frozen(
+    destination,
+    *,
+    expected_manifest_digest,
+    expected_trace_digests,
+    max_bytes,
+    required_visual_digests,
+    allow_interrupted,
+    collection,
+):
     bundle_root = destination / "bundle"
     inspection = inspect_trace_input(bundle_root)
     if not (
@@ -171,6 +196,59 @@ def freeze_native_trace_evidence(
     return receipt
 
 
+async def _reconcile_committed(
+    store, *, run_id, project_id, manifest_digest, trace_digests, bundle_id, freeze
+):
+    def wire(value):
+        return value.to_wire() if hasattr(value, "to_wire") else value
+
+    async with asyncio.timeout(60):
+        query = wire(await store.query(run_id=run_id, project_id=project_id, limit=100))
+        if query.get("factory_id") != store.factory_id or query.get("count", 101) > 100:
+            raise ValueError("Native publication lookup is ambiguous or exceeds bound")
+        matches = [
+            row
+            for row in query.get("traces", [])
+            if row.get("manifest_digest") == manifest_digest and row.get("run_id") == run_id
+        ]
+        if {row.get("trace_digest") for row in matches} != set(trace_digests):
+            raise TimeoutError("Expired publication has no complete committed run binding")
+        publication_ids = {row["publication_id"] for row in matches}
+        if len(publication_ids) != 1:
+            raise ValueError("Native publication lookup has conflicting identities")
+        publication_id = publication_ids.pop()
+        # The backend download endpoint only returns committed publications and
+        # verifies store/tenant ownership; URLs returned here are never retained.
+        descriptor = wire(await store.bundle_download(publication_id, expires_in_seconds=60))
+    if (
+        descriptor.get("publication_id") != publication_id
+        or descriptor.get("manifest_digest") != manifest_digest
+        or descriptor.get("bundle_id") != bundle_id
+        or descriptor.get("receipt", {}).get("factory_id") != store.factory_id
+    ):
+        raise ValueError("Committed publication lookup differs from the original pins")
+    result = {
+        "schema_version": "synth.native-trace-publication.v1",
+        "run_id": run_id,
+        "project_id": project_id,
+        "factory_id": store.factory_id,
+        "manifest_digest": manifest_digest,
+        "trace_digests": sorted(trace_digests),
+        "status": "committed",
+        "evidence_complete": freeze["complete"],
+        "promotion_receipt_missing": True,
+        "publication": {
+            "publication_id": publication_id,
+            "bundle_id": bundle_id,
+            "manifest_digest": manifest_digest,
+            "reconciled_read_only": True,
+            "access_receipt": descriptor["receipt"],
+        },
+    }
+    assert_no_secrets(result, where="reconciled native publication custody")
+    return result
+
+
 async def publish_native_trace_evidence(
     source: Path,
     output: Path,
@@ -197,6 +275,14 @@ async def publish_native_trace_evidence(
         or not 0 < timeout_seconds <= 1800
     ):
         raise ValueError("Native publication timeout must be at most 1800 seconds")
+    factory_id = getattr(store, "factory_id", None)
+    if (
+        not isinstance(factory_id, str)
+        or not factory_id
+        or not isinstance(run_id, str)
+        or not run_id
+    ):
+        raise ValueError("Native publication requires bound factory and run identities")
     output.mkdir(parents=True, exist_ok=True)
     with (output / "publication-owner.lock").open("a+") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -209,6 +295,7 @@ async def publish_native_trace_evidence(
             "required_visual_digests": sorted(required_visual_digests),
             "allow_interrupted": allow_interrupted,
             "project_id": project_id,
+            "factory_id": factory_id,
         }
         assert_no_secrets(claim, where="native evidence publication claim")
         claim_path = output / "publication-claim.json"
@@ -229,14 +316,38 @@ async def publish_native_trace_evidence(
         )
         frozen = output / "frozen"
         if frozen.exists():
-            freeze = _json(frozen / "freeze-receipt.json")
-            if freeze.get("manifest_digest") != expected_manifest_digest or freeze.get(
-                "trace_digests"
-            ) != sorted(expected_trace_digests):
-                raise ValueError("Native publication frozen receipt changed")
-            inspection = inspect_trace_input(frozen / "bundle")
-            if not inspection.trusted or inspection.bundle_digest != expected_manifest_digest:
-                raise ValueError("Native publication frozen bundle changed")
+            # A crash after all payload writes but before the freeze receipt is
+            # recoverable from the pinned sealed bundle, without copying again.
+            bundle_root = frozen / "bundle"
+            bundle = LocalTraceBundle(bundle_root)
+            frozen_manifest = bundle.read_manifest()
+            if frozen_manifest.get("content_digest") != expected_manifest_digest:
+                raise ValueError("Native publication frozen manifest changed")
+            pointer = _json(bundle_root / "manifest.json")
+            paths = {"manifest.json"}
+            if "relative_path" in pointer:
+                paths.add(_relative(pointer["relative_path"]))
+            for item in frozen_manifest.get("objects", []):
+                paths.add(_relative(item["path"]))
+            if len(paths) > 10000:
+                raise ValueError("Frozen object inventory exceeds admission")
+            payload_bytes = 0
+            for name in paths:
+                path = bundle_root / name
+                if path.is_symlink() or not path.resolve().is_relative_to(bundle_root.resolve()):
+                    raise ValueError("Frozen object escapes custody")
+                payload_bytes += path.stat().st_size
+            if payload_bytes > max_bytes:
+                raise ValueError("Frozen evidence exceeds admitted bytes")
+            freeze = _validate_frozen(
+                frozen,
+                expected_manifest_digest=expected_manifest_digest,
+                expected_trace_digests=expected_trace_digests,
+                max_bytes=max_bytes,
+                required_visual_digests=required_visual_digests,
+                allow_interrupted=allow_interrupted,
+                collection={"payload_bytes": payload_bytes},
+            )
         else:
             freeze = freeze_native_trace_evidence(
                 source,
@@ -250,7 +361,12 @@ async def publish_native_trace_evidence(
         receipt_path = output / "publication-receipt.json"
         if receipt_path.exists():
             receipt = _json(receipt_path)
-            if receipt.get("manifest_digest") != expected_manifest_digest:
+            if (
+                receipt.get("manifest_digest") != expected_manifest_digest
+                or receipt.get("run_id") != run_id
+                or receipt.get("project_id") != project_id
+                or receipt.get("factory_id") != factory_id
+            ):
                 raise ValueError("Native publication receipt pin mismatch")
             return receipt
         remaining = min(
@@ -258,7 +374,17 @@ async def publish_native_trace_evidence(
             monotonic_deadline - asyncio.get_running_loop().time(),
         )
         if remaining <= 0:
-            raise TimeoutError("Native publication original allowance expired; reconcile custody")
+            receipt = await _reconcile_committed(
+                store,
+                run_id=run_id,
+                project_id=project_id,
+                manifest_digest=expected_manifest_digest,
+                trace_digests=expected_trace_digests,
+                bundle_id=LocalTraceBundle(frozen / "bundle").read_manifest()["bundle_id"],
+                freeze=freeze,
+            )
+            _durable(receipt_path, receipt)
+            return receipt
         async with asyncio.timeout(remaining):
             committed = await store.upload_bundle(
                 frozen / "bundle",
@@ -275,12 +401,26 @@ async def publish_native_trace_evidence(
             not isinstance(value, dict)
             or value.get("schema_version") != "synth.trace-promotion-receipt.v1"
             or value.get("manifest_digest") != expected_manifest_digest
+            or value.get("factory_id") != factory_id
+            or value.get("bundle_id")
+            != LocalTraceBundle(frozen / "bundle").read_manifest().get("bundle_id")
             or set(value.get("trace_digests", [])) != set(expected_trace_digests)
             or not value.get("committed_at")
             or not value.get("receipt_digest")
         ):
             raise ValueError("Trace store did not confirm the pinned native publication")
         assert_no_secrets(value, where="native trace promotion receipt")
+        binding = await _reconcile_committed(
+            store,
+            run_id=run_id,
+            project_id=project_id,
+            manifest_digest=expected_manifest_digest,
+            trace_digests=expected_trace_digests,
+            bundle_id=value["bundle_id"],
+            freeze=freeze,
+        )
+        if binding["publication"]["publication_id"] != value.get("publication_id"):
+            raise ValueError("Trace promotion is not bound to the requested run/project")
         receipt = {
             "schema_version": "synth.native-trace-publication.v1",
             "run_id": run_id,
@@ -288,7 +428,10 @@ async def publish_native_trace_evidence(
             "trace_digests": sorted(expected_trace_digests),
             "status": "committed",
             "evidence_complete": freeze["complete"],
+            "factory_id": factory_id,
+            "project_id": project_id,
             "publication": value,
+            "run_binding_access_receipt": binding["publication"]["access_receipt"],
         }
         _durable(receipt_path, receipt)
         return receipt

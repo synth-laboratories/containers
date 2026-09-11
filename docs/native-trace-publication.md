@@ -55,3 +55,18 @@ in local summary custody.
 Development validation: scoped Ruff and Python compilation only. Qualification,
 real cloud transfers, interrupted-finalize recovery, visual rendering and the
 32-attempt/two-viewer latency gate belong to the receiving engineer.
+
+Restart and binding details: a crash after complete frozen object writes but
+before the freeze receipt can reconstruct that receipt from the pinned, bounded,
+validated bundle without recopying or resetting allowance. Missing/corrupt payloads
+still require explicit recovery; they cannot be manufactured from a completion
+flag. Cached/final receipts bind factory, project and run identity. Promotion
+receipts additionally match the actual SDK bundle ID. A bounded read-only query
+and committed-bundle download descriptor verify the requested run/project binding.
+The backend descriptor endpoint rejects noncommitted publications.
+
+After the original upload deadline, the adapter performs only a bounded read-only
+lookup for an already committed matching publication. It saves a custody receipt
+marked `promotion_receipt_missing: true` when the original promotion response was
+lost, retaining the authenticated download access receipt rather than inventing a
+promotion receipt. No upload or finalize call is made by this recovery path.

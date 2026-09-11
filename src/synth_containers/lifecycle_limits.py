@@ -155,12 +155,20 @@ class DurableRolloutSupervisor:
                 # Persistence failures must not disable safety actuators.
                 self.receipt_errors.append(type(error).__name__)
 
-    async def run_phase(self, phase: str, operation: Callable[[], Awaitable[Any]]):
+    async def run_phase(
+        self,
+        phase: str,
+        operation: Callable[[], Awaitable[Any]],
+        *,
+        preserve_evidence: bool = False,
+    ):
         if phase not in {"setup", "work", "verifier", "publication", "cleanup"}:
             raise ValueError("Unknown execution phase")
         if phase in self._completed:
             raise RolloutStopped("Completed phase cannot be repeated under the same identity")
-        if self.causes and phase != "cleanup":
+        if preserve_evidence and phase != "publication":
+            raise ValueError("Preservation exception applies only to publication")
+        if self.causes and phase != "cleanup" and not preserve_evidence:
             raise RolloutStopped(self.causes[0])
         allowance = getattr(self.limits, phase + "_seconds")
         remaining = self.remaining_seconds()

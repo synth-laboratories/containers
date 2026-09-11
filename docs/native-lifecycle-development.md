@@ -134,3 +134,22 @@ No provider client was created or API called.
 - SnapshotDto contains provider `ref` and `image_name` strings but no independently
   verified OCI digest/architecture attestation. Those strings remain outside the
   immutable-image gate.
+
+## Integrated staged Harbor execution
+
+`staged_harbor_execution.execute_staged_harbor` is wired into evals' native CLI
+translator and HTTP task adapter. Setup returns a registrar receipt; the shared
+coordinator rechecks task digest, image, custody adapter and frozen inner agent /
+verifier limits before building a single-attempt/no-retry command. It supervises
+setup, bounded CLI execution, verifier-result decoding, evidence publication and
+independent provider cleanup. `execution-plan.json` explicitly labels outer work
+as combined CLI execution and outer verifier as receipt decoding; the real agent
+and verifier deadlines remain Harbor's frozen inner timers.
+
+Interrupted execution may enter the existing bounded publication allowance to
+retain already-owned evidence; it cannot admit new work. Publication receives a
+declared redacted representation while original native result custody remains
+separate. `cleanup_staged_harbor_jobs` reads exact resource custody and, if pending,
+invokes the existing age/ownership-guarded provider reconciler in a bounded
+subprocess. Early or ambiguous cleanup stays pending. It never relaxes recovery
+age guards to fabricate an immediate absence guarantee.
