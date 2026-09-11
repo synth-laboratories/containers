@@ -52,7 +52,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import quote
-from uuid import UUID
+from uuid import UUID, NAMESPACE_URL, uuid5
 from typing import AsyncIterator, Any, Iterable, Mapping, Sequence
 
 import httpx
@@ -1028,6 +1028,66 @@ class PoolClient:
 
     async def get_rollout(self, rollout_id: str) -> dict[str, Any]:
         return await self._request("GET", f"/rollouts/{rollout_id}")
+
+    async def get_result_snapshot(self, rollout_id: str) -> dict[str, Any]:
+        """Read committed result custody and verify its exact bytes and owner.
+
+        Execution completion alone does not imply publication. Reads use the
+        authenticated Artifact Platform, never a target-supplied storage URL.
+        """
+        self._deployment_coordinate(rollout_id)
+        rollout = await self.get_rollout(rollout_id)
+        metadata = rollout.get("metadata") or {}
+        receipt = metadata.get("result_publication") if isinstance(metadata, dict) else None
+        if not isinstance(receipt, dict) or receipt.get("status") != "committed":
+            raise PoolClientError("result publication is not committed")
+        try:
+            publication_id = str(UUID(receipt["publication_id"]))
+            digest = receipt["digest_sha256"]
+            size = receipt["size_bytes"]
+            if (
+                not isinstance(digest, str)
+                or len(digest) != 64
+                or any(c not in "0123456789abcdef" for c in digest)
+                or type(size) is not int
+                or not 0 < size <= 1024 * 1024
+            ):
+                raise ValueError("invalid result declaration")
+        except (KeyError, TypeError, ValueError, AttributeError) as error:
+            raise PoolClientError("invalid committed result receipt") from error
+        chunks = bytearray()
+        path = f"/artifacts/v1/publications/{publication_id}/assets/result.json"
+        try:
+            async with asyncio.timeout(60):
+                async with self._client.stream(
+                    "GET", path, headers={"Authorization": f"Bearer {self._api_key}"},
+                    follow_redirects=False,
+                ) as response:
+                    response.raise_for_status()
+                    async for chunk in response.aiter_bytes(chunk_size=64 * 1024):
+                        if len(chunks) + len(chunk) > size:
+                            raise PoolClientError("result bytes exceed committed size")
+                        chunks.extend(chunk)
+        except (httpx.HTTPError, TimeoutError) as error:
+            raise PoolClientError("committed result read failed") from error
+        if len(chunks) != size or hashlib.sha256(chunks).hexdigest() != digest:
+            raise PoolClientError("committed result integrity check failed")
+        try:
+            result = json.loads(chunks)
+            json.dumps(result, allow_nan=False)
+        except (ValueError, TypeError) as error:
+            raise PoolClientError("committed result is not finite JSON") from error
+        if (
+            not isinstance(result, dict)
+            or result.get("schema_version") != "synth.eval-result.v1"
+            or result.get("rollout_id") != rollout_id
+            or result.get("pool_id") != rollout.get("pool_id")
+            or publication_id != str(uuid5(
+                NAMESPACE_URL, f"rhodes-result:{result.get('org_id')}:{rollout_id}:{digest}"
+            ))
+        ):
+            raise PoolClientError("committed result owner or schema mismatch")
+        return result
 
     async def usage(self, rollout_id: str) -> dict[str, Any]:
         return await self._request("GET", f"/rollouts/{rollout_id}/usage", optional=True)

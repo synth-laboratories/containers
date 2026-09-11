@@ -89,6 +89,8 @@ def main(argv: list[str] | None = None) -> int:
     submit.add_argument("--idempotency-key", required=True)
     get = sub.add_parser("get", help="read a saved hosted rollout")
     get.add_argument("rollout_id")
+    result = sub.add_parser("result", help="read and verify a committed hosted result snapshot")
+    result.add_argument("rollout_id")
     cancel = sub.add_parser(
         "cancel", help="request cancellation; remote stop may remain unconfirmed"
     )
@@ -154,7 +156,7 @@ def main(argv: list[str] | None = None) -> int:
 
             print(json.dumps(asyncio.run(operate_deployment()), sort_keys=True))
             return 0
-        if args.command in {"submit", "get", "cancel"}:
+        if args.command in {"submit", "get", "result", "cancel"}:
             payload = None
             if args.command == "submit":
                 with args.request.open("rb") as handle:
@@ -181,6 +183,8 @@ def main(argv: list[str] | None = None) -> int:
                         return {"rollout_id": rollout_id, "idempotency_key": args.idempotency_key}
                     if args.command == "get":
                         return await client.get_rollout(args.rollout_id)
+                    if args.command == "result":
+                        return await client.get_result_snapshot(args.rollout_id)
                     return await client.cancel(args.rollout_id)
 
             print(json.dumps(asyncio.run(operate()), sort_keys=True))

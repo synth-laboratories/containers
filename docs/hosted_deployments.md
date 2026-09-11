@@ -43,3 +43,12 @@ Backends exposing `publication_pending` keep watchers attached until the queued
 result snapshot has a terminal publication receipt as well. Cleanup and result
 publication are independent; neither field certifies the full trace bundle or
 settled costs. Publication failures remain visible and may be retried by recovery.
+
+`synth-containers result ROLLOUT` (or `PoolClient.get_result_snapshot`) retrieves
+the committed `result.json` through the authenticated Artifact Platform. It
+refuses pending publication and verifies the bounded bytes against the receipt's
+size, SHA-256, rollout, pool and tenant-derived publication identity. Redirects
+are refused; target-provided storage URLs are never followed. The result preserves
+null rewards and the original scientific verdict. The download is bounded to
+1 MiB and 60 seconds, and can be redirected to a local JSON file. This snapshot
+has `custody_scope: result_snapshot_only`; full trace custody has its own receipt.

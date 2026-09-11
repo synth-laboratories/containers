@@ -44,6 +44,14 @@ def test_cancel_preserves_unconfirmed_stop(monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out)["stop_confirmed"] is False
 
 
+def test_result_uses_verified_custody_read(monkeypatch, capsys):
+    target = client(monkeypatch)
+    target.get_result_snapshot.return_value = {"status": "failed", "score": None}
+    assert cli.main(["result", "r1"]) == 0
+    target.get_result_snapshot.assert_awaited_once_with("r1")
+    assert json.loads(capsys.readouterr().out)["score"] is None
+
+
 
 def test_deployment_lookup_does_not_repeat_mutation(monkeypatch, capsys):
     target = client(monkeypatch)
