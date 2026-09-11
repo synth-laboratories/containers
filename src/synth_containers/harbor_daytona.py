@@ -139,7 +139,7 @@ class BoundedDaytonaEnvironment(DaytonaEnvironment):
         ):
             raise ValueError("Provider snapshot identity/state changed")
         requested = (resources.cpu, resources.memory, resources.disk)
-        observed = tuple(getattr(snapshot, key, None) for key in ("cpu", "memory", "disk"))
+        observed = tuple(getattr(snapshot, key, None) for key in ("cpu", "mem", "disk"))
         if observed != requested:
             raise ValueError("Prepared snapshot resource shape differs from admitted request")
         self._prepared_resource_shape = resources
@@ -152,7 +152,7 @@ class BoundedDaytonaEnvironment(DaytonaEnvironment):
             image_digest_verified=False,
         )
         # The provider identity is checked afresh; it is never cast to an OCI digest.
-        return self._snapshot_sandbox_params(artifact["snapshot_name"])
+        return self._snapshot_sandbox_params(artifact["snapshot_id"])
 
     async def _create_sandbox(self, params, daytona=None):
         if self._resource_create_attempted:

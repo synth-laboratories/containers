@@ -73,11 +73,11 @@ and is recorded separately; deleting a snapshot does not assert context release.
 Native `BoundedDaytonaEnvironment` accepts `prepared_snapshot_artifact`,
 `expected_source_package_digest` and `expected_architecture` kwargs. Before
 creation it checks expiry and source binding, then freshly reads the snapshot and
-checks provider id/name/active state and exact admitted resource shape. Creation
-still uses the provider's snapshot-name API. Therefore concurrent external
-replacement of that name is not excluded by a post-creation OCI digest receipt;
-this path requires private owner isolation and provider qualification. The
-adapter retains normal finite sandbox TTL and independent deletion/absence proof.
+checks provider id/name/active state and exact admitted resource shape. Creation passes the immutable provider snapshot ID, not the mutable name. The
+pinned Daytona 0.210.0 CreateSandbox schema explicitly accepts ID or name. This
+binds the provider snapshot identity, without claiming an independently verified
+OCI image digest. The adapter retains normal finite sandbox TTL and independent
+deletion/absence proof.
 
 ## Remaining implementation and qualification boundaries
 
@@ -116,3 +116,21 @@ No work callback or provider creation occurs during recovery.
 persistence, including matches split across reads. It bounds both raw admission
 and redacted retained bytes. On cancellation/overflow the withheld unfinished
 suffix is omitted. Redaction allows at most 128 patterns, each at most 4096 bytes.
+
+## Inspected Daytona 0.210.0 contract evidence
+
+The exact `daytona==0.210.0` and `daytona-api-client-async==0.210.0` wheels
+were installed without dependencies for source inspection at
+`/Users/joshuapurtell/GitHub/artifacts/native-dev-daytona-sdk-20260911`.
+No provider client was created or API called.
+
+- `daytona_api_client_async/models/create_sandbox.py` declares snapshot as ID or name.
+- `daytona/common/snapshot.py` documents snapshot memory as `mem`, not `memory`.
+- `daytona_api_client_async/models/create_snapshot.py` explicitly describes CPU,
+  memory and disk as resources of the **resulting sandbox**; it has no builder
+  budget, timeout, CPU or retained-context expiry field.
+- `daytona_api_client_async/api/object_storage_api.py` exposes only push-access
+  operations; there is no uploaded-context deletion/expiry operation in this seam.
+- SnapshotDto contains provider `ref` and `image_name` strings but no independently
+  verified OCI digest/architecture attestation. Those strings remain outside the
+  immutable-image gate.
