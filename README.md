@@ -87,3 +87,14 @@ for complete containers: Banking77, HotpotQA, MiniGrid, TBLite, and Crafter.
 ## License
 
 MIT
+
+### Native Harbor result decoding
+
+`synth_containers.harbor_results` provides a bounded native result reader and
+staged structural validation through `HarborTrialRecord`. Use
+`read_result_object(path, label=...)`, then `HarborTrialRecord.from_mapping(...)`.
+The reader caps each JSON result at 16 MiB. Explicit accessors validate exception
+information, agent context and verifier reward; missing/non-finite rewards are
+errors, while a genuine numeric zero remains zero. Benchmark-specific trusted
+scoring, exception harvesting and trace custody remain the caller's authority.
+This decoder is shared infrastructure, not a Docker/Daytona execution-parity claim.
