@@ -18,6 +18,7 @@ from harbor.environments.docker.docker import DockerEnvironment
 
 from .harbor_environment import is_pinned_harbor_image
 from .harbor_resource_receipts import HarborResourceCleanupPending
+from .native_limit_admission import require_native_limit_capabilities
 from .operator_journal import OperatorJournal
 
 
@@ -34,8 +35,10 @@ class ObservedDockerEnvironment(DockerEnvironment):
         egress_control_image: str | None = None,
         workspace_tmpfs_bytes: int | None = None,
         writable_layer_bytes: int | None = None,
+        required_limit_capabilities: object = (),
         **kwargs,
     ):
+        require_native_limit_capabilities(required_limit_capabilities)
         if version("harbor") != "0.22.0":
             raise ValueError("Native Docker requires qualified Harbor 0.22.0")
         if args:

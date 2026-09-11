@@ -24,6 +24,7 @@ from .harbor_environment import (
     read_harbor_task_toml,
 )
 from .harbor_phase_limits import NativeHarborPhaseLimits
+from .native_limit_admission import require_native_limit_capabilities
 
 
 def native_harbor_environment_flags(
@@ -50,7 +51,9 @@ def native_harbor_environment_flags(
     if docker_egress_image is not None and (
         not docker_resource_custody or not is_pinned_harbor_image(docker_egress_image, "docker")
     ):
-        raise HarborEnvironmentError("native Docker egress image requires custody and an immutable image")
+        raise HarborEnvironmentError(
+            "native Docker egress image requires custody and an immutable image"
+        )
     overrides = native_harbor_resource_overrides(resource_request)
     if provider == "docker":
         if not docker_resource_custody:
@@ -143,6 +146,7 @@ def stage_native_harbor_task(
     docker_resource_custody: bool = False,
     docker_egress_image: str | None = None,
     phase_limits: NativeHarborPhaseLimits | None = None,
+    required_limit_capabilities: object = (),
 ) -> dict[str, Any]:
     """Stage one immutable prebuilt-image task, retaining source/release identity.
 
@@ -152,6 +156,7 @@ def stage_native_harbor_task(
     The receipt is committed last, after source and copied-tree reconciliation.
     This binds an operator-selected image; it does not prove how it was built.
     """
+    admitted_capabilities = require_native_limit_capabilities(required_limit_capabilities)
     if environment_transfer not in {"preserve", "image_only"}:
         raise HarborEnvironmentError("harbor_native_environment_transfer_invalid")
     if phase_limits is not None and not isinstance(phase_limits, NativeHarborPhaseLimits):
@@ -251,6 +256,7 @@ def stage_native_harbor_task(
         "provider": release.provider.provider_id,
         "creation_timeout_seconds": creation_timeout_seconds,
         "phase_limits": phase_receipt,
+        "required_limit_capabilities": admitted_capabilities,
         "source_creation_timeout_seconds": tomllib.loads(original)["environment"].get(
             "build_timeout_sec"
         ),

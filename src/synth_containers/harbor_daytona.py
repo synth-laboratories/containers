@@ -20,6 +20,7 @@ from harbor.environments.daytona.environment import DaytonaEnvironment
 
 from .harbor_resource_receipts import HarborResourceCleanupPending
 from .harbor_results import finite_number
+from .native_limit_admission import require_native_limit_capabilities
 from .operator_journal import OperatorJournal
 
 
@@ -36,8 +37,10 @@ class BoundedDaytonaEnvironment(DaytonaEnvironment):
         prepared_snapshot_artifact: str | None = None,
         expected_source_package_digest: str | None = None,
         expected_architecture: str = "amd64",
+        required_limit_capabilities: object = (),
         **kwargs,
     ):
+        require_native_limit_capabilities(required_limit_capabilities)
         if version("harbor") != "0.22.0" or version("daytona") != "0.210.0":
             raise ValueError("Native Daytona requires qualified Harbor 0.22.0 and Daytona 0.210.0")
         for name, value, ceiling in (

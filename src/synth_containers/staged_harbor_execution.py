@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import json
 import math
 import os
+import re
 import tomllib
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
@@ -13,12 +16,14 @@ from typing import Any
 from .bounded_process import run_bounded_process
 from .harbor_environment import _tree_digest
 from .lifecycle_limits import DurableRolloutSupervisor, LifecycleLimits, RolloutStopped
+from .native_limit_admission import require_native_limit_capabilities
 from .tracing.capture.redaction import assert_no_secrets, redact_payload
 
 
 def validate_staged_harbor(receipt: Mapping[str, Any]) -> None:
     if receipt.get("schema_version") != "synth.harbor-native-task-stage.v1":
         raise ValueError("Native execution requires a registrar stage receipt")
+    require_native_limit_capabilities(receipt.get("required_limit_capabilities", ()))
     task = Path(receipt["task_path"])
     if _tree_digest(task) != receipt.get("staged_package_digest"):
         raise ValueError("Staged native task changed before launch")
@@ -52,7 +57,7 @@ async def execute_staged_harbor(
     limits: LifecycleLimits,
     setup: Callable[[], Awaitable[Mapping[str, Any]]],
     agent: str,
-    model: str,
+    model: str | None,
     jobs_dir: Path,
     job_name: str,
     max_output_bytes: int,
@@ -62,6 +67,9 @@ async def execute_staged_harbor(
     env: Mapping[str, str] | None = None,
     redact: Sequence[str] = (),
     executable: Sequence[str] = ("harbor",),
+    extra_cli_args: Sequence[str] = (),
+    should_cancel: Callable[[], bool | Awaitable[bool]] | None = None,
+    required_limit_capabilities: object = (),
 ) -> dict:
     """Setup produces exact staged custody; Harbor owns its inner phase timers.
 
@@ -70,6 +78,27 @@ async def execute_staged_harbor(
     does not execute a second grader. Publication and cleanup have separate bounds.
     Execution/scientific result, publication and cleanup remain separate facts.
     """
+    require_native_limit_capabilities(required_limit_capabilities)
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", job_name):
+        raise ValueError("Native Harbor job name is not a safe identifier")
+    if len(extra_cli_args) > 256 or any(
+        not isinstance(value, str) or len(value) > 16384 or "\x00" in value
+        for value in extra_cli_args
+    ):
+        raise ValueError("Native Harbor extra arguments exceed admission")
+    position = 0
+    while position < len(extra_cli_args):
+        option = extra_cli_args[position]
+        position += 1
+        if option == "--yes":
+            continue
+        if option not in {"--agent-kwarg", "--agent-env", "--verifier-env"} or position == len(
+            extra_cli_args
+        ):
+            raise ValueError("Native Harbor extra argument is not allowlisted")
+        if not extra_cli_args[position] or extra_cli_args[position].startswith("--"):
+            raise ValueError("Native Harbor extra argument value is missing")
+        position += 1
     supervisor = DurableRolloutSupervisor(output, run_id, limits)
     outcome: dict[str, Any] = {
         "run_id": run_id,
@@ -109,8 +138,8 @@ async def execute_staged_harbor(
                 *receipt["native_environment_flags"],
                 "--agent",
                 agent,
-                "--model",
-                model,
+                *(["--model", model] if model is not None else []),
+                *extra_cli_args,
                 "--jobs-dir",
                 str(jobs_dir),
                 "--job-name",
@@ -129,14 +158,40 @@ async def execute_staged_harbor(
 
             async def execute():
                 validate_staged_harbor(receipt)
-                return await run_bounded_process(
-                    argv,
-                    output=output / "process.log",
-                    max_output_bytes=max_output_bytes,
-                    env=env,
-                    cwd=output,
-                    redact=redact,
+
+                async def cancellation_requested():
+                    if should_cancel is None:
+                        return False
+                    value = should_cancel()
+                    value = await value if inspect.isawaitable(value) else value
+                    if type(value) is not bool:
+                        raise ValueError("Native cancellation callback must return a boolean")
+                    return value
+
+                if await cancellation_requested():
+                    raise RolloutStopped("Native execution cancelled before process creation")
+                process = asyncio.create_task(
+                    run_bounded_process(
+                        argv,
+                        output=output / "process.log",
+                        max_output_bytes=max_output_bytes,
+                        env=env,
+                        cwd=output,
+                        redact=redact,
+                    )
                 )
+                try:
+                    while not process.done():
+                        if await cancellation_requested():
+                            raise RolloutStopped("Native owner requested cancellation")
+                        await asyncio.wait({process}, timeout=0.25)
+                    return await process
+                finally:
+                    if not process.done():
+                        process.cancel()
+                    # Always observe the task outcome, including a process that
+                    # exits concurrently with the owner's cancellation request.
+                    await asyncio.gather(process, return_exceptions=True)
 
             outcome["execution_returncode"] = await supervisor.run_phase("work", execute)
             outcome["decoded_result"] = await supervisor.run_phase("verifier", decode)

@@ -153,3 +153,25 @@ separate. `cleanup_staged_harbor_jobs` reads exact resource custody and, if pend
 invokes the existing age/ownership-guarded provider reconciler in a bounded
 subprocess. Early or ambiguous cleanup stays pending. It never relaxes recovery
 age guards to fabricate an immediate absence guarantee.
+
+## Whole-attempt hard-limit admission
+
+`required_limit_capabilities` is now accepted and checked before any native task
+staging, shared execution, or Docker/Daytona environment creation. It uses the
+existing `LimitCapability` contract (typed instances or serialized entries).
+Requirements are rechecked from the staged receipt before launch. This native
+composition currently advertises **no whole-attempt guaranteed capabilities**:
+its narrower timer/mount/collection receipts do not become such guarantees.
+A request for `workspace_bytes/native_control`, including writable bind mounts,
+or total `output_bytes/native_control` therefore fails before provisioning.
+This is deliberate fail-closed admission, not implementation of host filesystem
+quotas. Host bind mounts need independently qualified backing-filesystem quota
+custody before a future adapter can advertise those capabilities.
+
+The shared executor also accepts `model=None` for oracle/nop agents, narrowly
+allowlisted `extra_cli_args` (`--agent-kwarg`, `--agent-env`, `--verifier-env`,
+`--yes`) and a synchronous/asynchronous boolean `should_cancel` callback.
+Cancellation is checked before creation and every 250 ms during execution;
+it cancels/reaps the owned process group and proceeds through independent provider
+cleanup. These arguments cannot override task path, retries, concurrency or phase
+multiplier ceilings.
