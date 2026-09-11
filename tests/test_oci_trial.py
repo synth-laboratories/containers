@@ -327,3 +327,30 @@ def test_invalid_cpu_is_rejected_before_execution(runtime, cpu):
     _, request, _, _ = runtime
     with pytest.raises(executor.ExecutionContractError):
         executor.validate_trial_request(replace(request, limits=replace(request.limits, cpus=cpu)))
+
+
+@pytest.mark.parametrize('capability', [
+    executor.LimitCapability(executor.LimitDimension.OUTPUT_BYTES, executor.LimitEnforcement.NATIVE_CONTROL),
+    executor.LimitCapability(executor.LimitDimension.WORK_TIME, executor.LimitEnforcement.OBSERVED_THRESHOLD, True),
+    executor.LimitCapability(executor.LimitDimension.WORKSPACE_BYTES, executor.LimitEnforcement.NATIVE_CONTROL),
+    executor.LimitCapability(executor.LimitDimension.PROVIDER_SPEND, executor.LimitEnforcement.RESERVED_ALLOWANCE),
+])
+def test_required_unsupported_guarantee_refused_before_filesystem_or_execution(runtime, capability, monkeypatch):
+    from dataclasses import replace
+    driver, request, process, stops = runtime
+    output = request.output_dir / 'must-not-be-created'
+    request = replace(request, output_dir=output, required_limit_capabilities=(capability,))
+    def forbidden(*args, **kwargs):
+        pytest.fail('Provider process must not start for unsupported required guarantee')
+    monkeypatch.setattr(executor.subprocess, 'Popen', forbidden)
+    with pytest.raises(executor.ExecutionContractError, match='unsupported required limit capabilities'):
+        driver.run(request, on_event=lambda _: None, should_cancel=lambda: False, heartbeat=lambda: None)
+    assert not output.exists()
+    assert stops == []
+
+
+def test_sampled_output_requirement_is_admitted_without_claiming_quota(runtime):
+    from dataclasses import replace
+    _, request, _, _ = runtime
+    requirement = executor.LimitCapability(executor.LimitDimension.OUTPUT_BYTES, executor.LimitEnforcement.OBSERVED_THRESHOLD)
+    executor.validate_trial_request(replace(request, required_limit_capabilities=(requirement,)))

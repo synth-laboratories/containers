@@ -36,6 +36,17 @@ from synth_containers.rollout_limits import (
     RolloutLimitSupervisor,
 )
 
+from synth_containers.limit_capabilities import (
+    LimitCapability, LimitDimension, LimitEnforcement, unsupported_limit_capabilities,
+)
+
+OCI_LIMIT_CAPABILITIES = (
+    LimitCapability(LimitDimension.WORK_TIME, LimitEnforcement.OBSERVED_THRESHOLD),
+    LimitCapability(LimitDimension.OUTPUT_BYTES, LimitEnforcement.OBSERVED_THRESHOLD),
+    LimitCapability(LimitDimension.CPU_ALLOCATION, LimitEnforcement.NATIVE_CONTROL, True),
+    LimitCapability(LimitDimension.MEMORY_BYTES, LimitEnforcement.NATIVE_CONTROL, True),
+)
+
 
 class ExecutionContractError(ValueError):
     """An execution request cannot be represented by this provider."""
@@ -98,6 +109,7 @@ class TrialRunRequest:
     network: str
     secrets: Mapping[str, str] = field(default_factory=dict)
     extra_hosts: tuple[str, ...] = ()
+    required_limit_capabilities: tuple[LimitCapability, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +136,18 @@ class TrialExecutor(Protocol):
 
 def validate_trial_request(request: TrialRunRequest) -> None:
     """Refuse unrepresentable controls before filesystem or provider work."""
+    try:
+        unsupported = unsupported_limit_capabilities(
+            request.required_limit_capabilities, OCI_LIMIT_CAPABILITIES
+        )
+    except ValueError as error:
+        raise ExecutionContractError(str(error)) from error
+    if unsupported:
+        names = ", ".join(
+            f"{item.dimension.value}:{item.enforcement.value}:survival={item.survives_supervisor_loss}"
+            for item in unsupported
+        )
+        raise ExecutionContractError(f"unsupported required limit capabilities: {names}")
     reference = request.image_reference
     if (
         not isinstance(reference, str)
@@ -174,6 +198,11 @@ class OciTrialExecutor:
                 f"in the eval home's runtime.toml"
             )
         self.binary = binary
+
+    @property
+    def limit_capabilities(self) -> tuple[LimitCapability, ...]:
+        """Declarative preflight surface; does not claim an actuator is armed."""
+        return OCI_LIMIT_CAPABILITIES
 
     def resource_identity(self, trial_id: str) -> dict[str, str]:
         fingerprint = hashlib.sha256(trial_id.encode("utf-8")).hexdigest()[:12]

@@ -98,3 +98,25 @@ information, agent context and verifier reward; missing/non-finite rewards are
 errors, while a genuine numeric zero remains zero. Benchmark-specific trusted
 scoring, exception harvesting and trace custody remain the caller's authority.
 This decoder is shared infrastructure, not a Docker/Daytona execution-parity claim.
+
+### Required execution-limit capabilities
+
+`oci_trial.TrialRunRequest.required_limit_capabilities` optionally requires typed
+`LimitCapability` entries from `synth_containers.limit_capabilities`. The executor
+checks them before creating output directories or starting a provider process.
+Read `OciTrialExecutor.limit_capabilities` during planning; declarations are not
+receipts that a particular container's actuators have been armed.
+
+The current OCI executor advertises sampled work-time and output-byte thresholds,
+and native CPU allocation and memory controls. Native allocation controls survive
+the Python supervisor; its sampled deadline and output checks do not. A required
+hard output/workspace quota, provider-spend reservation, or deadline surviving
+supervisor loss is refused. CPU allocation is not CPU-time accounting. Native
+memory controls describe the container memory setting, not a total swap budget.
+
+Requirements specify mechanisms, separately from `TrialExecutionLimits` values.
+The resolver does not silently rank native, sampled and reserved mechanisms as
+interchangeable. Call `unsupported_limit_capabilities` for optional planning
+requirements and report the returned entries; do not silently drop mandatory
+ones. This additive SDK surface does not yet establish hosted Rhodes or native
+Harbor capability parity.
