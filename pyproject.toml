@@ -1,6 +1,6 @@
 [project]
 name = "synth-containers"
-version = "0.4.3.dev2026091113"
+version = "0.4.3.dev2026091114"
 description = "Shared Synth container and environment runtime substrate"
 authors = [{name = "Synth Laboratories", email = "josh@usesynth.ai"}]
 readme = "README.md"
@@ -19,6 +19,10 @@ dependencies = [
 
 [project.optional-dependencies]
 native-harbor = ["harbor==0.22.0; python_version >= '3.12'"]
+native-harbor-docker = [
+    "harbor==0.22.0; python_version >= '3.12'",
+    "docker==7.1.0; python_version >= '3.12'",
+]
 native-harbor-daytona = [
     "harbor[daytona]==0.22.0; python_version >= '3.12'",
     "daytona==0.210.0; python_version >= '3.12'",

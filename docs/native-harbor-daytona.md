@@ -146,3 +146,24 @@ Stage receipts distinguish `docker_local_image_id` from
 `registry_manifest_digest`. Neither reference type by itself proves the image
 was built from the bound task package: build provenance remains explicitly
 unverified until a build receipt establishes that relationship.
+
+## Native Docker resource custody (opt-in)
+
+`--env synth_containers.harbor_docker:ObservedDockerEnvironment` selects the
+Harbor 0.22 Docker extension from the `native-harbor-docker` extra. It records
+an exclusive, fsynced creation claim and resource events in the trial directory,
+uses a fresh Compose project owner, saves observed container/network/volume
+handles before cleanup, and requires typed Docker absence plus an empty exact
+owner query before confirming cleanup. Harbor's best-effort cleanup return does
+not suffice. Ambiguous creation without an observed primary container remains
+pending, including when a later list is empty.
+
+Creation is bounded by the staged task's positive timeout (at most 300 seconds);
+cleanup has a 60-second deadline after bounded discovery. It accepts only
+prebuilt Linux single-container tasks, requires deletion, and refuses implicit
+sidecar image builds. Tasks needing egress control must provide an immutable,
+already prepared `egress_control_image` environment argument. Docker provider
+TTL and hard workspace quota remain unsupported and explicitly reported as such.
+Set the process `TMPDIR` to a run-owned directory for Harbor's temporary Compose
+files. This extension is opt-in while benchmark front doors retain their pinned
+runtime behavior; there is no automatic legacy lane migration.
