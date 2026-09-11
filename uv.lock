@@ -2966,7 +2966,7 @@ wheels = [
 
 [[package]]
 name = "synth-containers"
-version = "0.4.3.dev2026091107"
+version = "0.4.3.dev2026091108"
 source = { editable = "." }
 dependencies = [
     { name = "certifi" },
@@ -2987,6 +2987,9 @@ dev = [
     { name = "twine" },
     { name = "ty" },
 ]
+native-harbor = [
+    { name = "harbor", marker = "python_full_version >= '3.12'" },
+]
 native-harbor-daytona = [
     { name = "daytona", marker = "python_full_version >= '3.12'" },
     { name = "harbor", extra = ["daytona"], marker = "python_full_version >= '3.12'" },
@@ -3006,6 +3009,7 @@ requires-dist = [
     { name = "certifi", specifier = ">=2024.0.0" },
     { name = "daytona", marker = "python_full_version >= '3.12' and extra == 'native-harbor-daytona'", specifier = "==0.210.0" },
     { name = "fastapi", specifier = ">=0.110.0" },
+    { name = "harbor", marker = "python_full_version >= '3.12' and extra == 'native-harbor'", specifier = "==0.22.0" },
     { name = "harbor", extras = ["daytona"], marker = "python_full_version >= '3.12' and extra == 'native-harbor-daytona'", specifier = "==0.22.0" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
@@ -3016,7 +3020,7 @@ requires-dist = [
     { name = "websockets", specifier = ">=14.0" },
     { name = "zstandard", specifier = ">=0.23.0" },
 ]
-provides-extras = ["native-harbor-daytona", "dev"]
+provides-extras = ["native-harbor", "native-harbor-daytona", "dev"]
 
 [package.metadata.requires-dev]
 dev = [

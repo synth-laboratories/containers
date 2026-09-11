@@ -13,7 +13,6 @@ from synth_containers.harbor_environment import (
     register_harbor_environment,
 )
 
-
 AGENT = "example.test/agent@sha256:" + "a" * 64
 VERIFIER = "example.test/verifier@sha256:" + "b" * 64
 
@@ -62,7 +61,7 @@ def test_inspection_is_static_and_release_is_pinned(tmp_path: Path) -> None:
     package = _package(tmp_path / "package")
     marker = tmp_path / "must-not-run"
     task = package / "task.toml"
-    task.write_text(task.read_text(encoding="utf-8") + f'\n# $(touch {marker})\n', encoding="utf-8")
+    task.write_text(task.read_text(encoding="utf-8") + f"\n# $(touch {marker})\n", encoding="utf-8")
 
     draft = inspect_harbor_package(package)
 
@@ -113,3 +112,100 @@ def test_release_refuses_mutable_images_and_incompatible_gpu(tmp_path: Path) -> 
             verifier_image=VERIFIER,
             provider=HarborProviderCompatibility(provider_id="local-docker"),
         )
+
+
+@pytest.mark.parametrize(
+    "field,value", [("cpus", "1.5"), ("cpus", '"4"'), ("memory_mb", "true"), ("storage_mb", "inf")]
+)
+def test_resource_values_are_not_coerced_before_admission(tmp_path, field, value):
+    import re
+
+    package = _package(tmp_path / "package")
+    path = package / "task.toml"
+    path.write_text(
+        re.sub(rf"^{field} = .*$", f"{field} = {value}", path.read_text(), flags=re.MULTILINE)
+    )
+    with pytest.raises(HarborEnvironmentError):
+        inspect_harbor_package(package)
+
+
+@pytest.mark.parametrize("value", ["true", "inf", "nan", '"300"'])
+def test_phase_allowances_require_finite_numbers(tmp_path, value):
+    package = _package(tmp_path / "package")
+    path = package / "task.toml"
+    path.write_text(path.read_text().replace("timeout_sec = 300", f"timeout_sec = {value}"))
+    with pytest.raises(HarborEnvironmentError, match="timeout_invalid"):
+        inspect_harbor_package(package)
+
+
+def test_missing_network_policy_remains_unspecified(tmp_path):
+    package = _package(tmp_path / "package")
+    path = package / "task.toml"
+    path.write_text(path.read_text().replace('network_mode = "no-network"\n', ""))
+    draft = inspect_harbor_package(package)
+    assert draft.agent_network == draft.verifier_network == "unspecified"
+
+
+def test_modern_optional_task_metadata_uses_package_identity(tmp_path):
+    package = _package(tmp_path / "package")
+    path = package / "task.toml"
+    text = path.read_text()
+    start = text.index("[task]")
+    end = text.index("[metadata]")
+    path.write_text(text[:start] + text[end:])
+    assert inspect_harbor_package(package).package_id == "fix-defaults"
+
+
+@pytest.mark.parametrize("bound", ["file", "tree", "entries"])
+def test_inspection_refuses_resource_exhaustion_before_large_reads(tmp_path, monkeypatch, bound):
+    from synth_containers import harbor_environment as subject
+
+    package = _package(tmp_path / "package")
+    if bound == "file":
+        monkeypatch.setattr(subject, "_MAX_FILE_BYTES", 10)
+    elif bound == "tree":
+        monkeypatch.setattr(subject, "_MAX_TREE_BYTES", 10)
+    else:
+        monkeypatch.setattr(subject, "_MAX_TREE_ENTRIES", 2)
+    with pytest.raises(HarborEnvironmentError, match="too_large|entry_limit"):
+        inspect_harbor_package(package)
+
+
+def test_streamed_tree_digest_preserves_existing_release_identity(tmp_path):
+    import hashlib
+
+    from synth_containers.harbor_environment import _tree_digest
+
+    root = _package(tmp_path / "package")
+    legacy = hashlib.sha256()
+    for path in sorted(root.rglob("*"), key=lambda path: path.relative_to(root).as_posix()):
+        if path.is_file():
+            relative = path.relative_to(root).as_posix().encode()
+            contents = path.read_bytes()
+            legacy.update(len(relative).to_bytes(8, "big"))
+            legacy.update(relative)
+            legacy.update(len(contents).to_bytes(8, "big"))
+            legacy.update(contents)
+    assert _tree_digest(root) == "sha256:" + legacy.hexdigest()
+
+
+def test_special_files_cannot_block_inspection(tmp_path):
+    import os
+
+    package = _package(tmp_path / "package")
+    os.mkfifo(package / "pipe")
+    with pytest.raises(HarborEnvironmentError, match="special_file"):
+        inspect_harbor_package(package)
+
+
+def test_artifact_objects_are_not_silently_stringified(tmp_path):
+    package = _package(tmp_path / "package")
+    path = package / "task.toml"
+    path.write_text(
+        path.read_text().replace(
+            'artifacts = ["/logs/artifacts/model.patch"]',
+            'artifacts = [{source = "/logs/model.patch"}]',
+        )
+    )
+    with pytest.raises(HarborEnvironmentError, match="artifacts_invalid"):
+        inspect_harbor_package(package)

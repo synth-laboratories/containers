@@ -11,11 +11,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import os
 import re
+import stat
 import tomllib
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 __all__ = [
     "HARBOR_ENVIRONMENT_RELEASE_SCHEMA",
@@ -33,9 +37,13 @@ __all__ = [
 
 HARBOR_PACKAGE_DRAFT_SCHEMA = "synth.harbor-package-draft.v1"
 HARBOR_ENVIRONMENT_RELEASE_SCHEMA = "synth.harbor-environment-release.v1"
-_PINNED_IMAGE = re.compile(r"^.+@sha256:[0-9a-f]{64}$")
+_PINNED_IMAGE = re.compile(r"^[^\s]+@sha256:[0-9a-f]{64}$")
 _IDENTIFIER = re.compile(r"[^a-z0-9._-]+")
-_ISOLATED_NETWORKS = frozenset({"no-network", "none", "isolated", ""})
+_ISOLATED_NETWORKS = frozenset({"no-network", "none", "isolated"})
+_MAX_FILE_BYTES = 64 * 1024 * 1024
+_MAX_TREE_BYTES = 256 * 1024 * 1024
+_MAX_TREE_ENTRIES = 10000
+_IO_CHUNK_BYTES = 1024 * 1024
 
 
 class HarborEnvironmentError(ValueError):
@@ -226,18 +234,26 @@ def inspect_harbor_package(root: str | Path) -> HarborEnvironmentDraft:
             raise HarborEnvironmentError(code)
     try:
         with task_path.open("rb") as handle:
-            manifest = tomllib.load(handle)
-    except (OSError, tomllib.TOMLDecodeError) as exc:
+            encoded = handle.read(_IO_CHUNK_BYTES + 1)
+        if len(encoded) > _IO_CHUNK_BYTES:
+            raise HarborEnvironmentError("harbor_package_task_toml_too_large")
+        manifest = tomllib.loads(encoded.decode("utf-8"))
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as exc:
         raise HarborEnvironmentError("harbor_package_task_toml_invalid") from exc
     if not isinstance(manifest, dict):
         raise HarborEnvironmentError("harbor_package_task_toml_invalid")
 
-    task = _mapping(manifest.get("task"), "harbor_package_task_missing")
+    task = _mapping(manifest.get("task", {}), "harbor_package_task_missing")
     metadata = _optional_mapping(manifest.get("metadata"))
     agent = _optional_mapping(manifest.get("agent"))
     verifier = _mapping(manifest.get("verifier"), "harbor_package_verifier_contract_missing")
-    environment = _mapping(manifest.get("environment"), "harbor_package_environment_contract_missing")
-    package_id = _text(metadata.get("task_id") or task.get("name"), "harbor_package_id_missing")
+    environment = _mapping(
+        manifest.get("environment"), "harbor_package_environment_contract_missing"
+    )
+    package_id = _text(
+        metadata.get("task_id") or task.get("name") or package_root.name,
+        "harbor_package_id_missing",
+    )
     title = str(metadata.get("display_title") or task.get("name") or package_id).strip()
     description = str(metadata.get("display_description") or task.get("description") or "").strip()
     resource = HarborResourceRequest(
@@ -253,12 +269,21 @@ def inspect_harbor_package(root: str | Path) -> HarborEnvironmentDraft:
     verifier_digest = _tree_digest(package_root / "tests")
     contract = {
         "package_id": package_id,
-        "agent_timeout_seconds": _optional_float(agent.get("timeout_sec"), "harbor_package_agent_timeout_invalid"),
-        "verifier_timeout_seconds": _optional_float(verifier.get("timeout_sec"), "harbor_package_verifier_timeout_invalid"),
+        "agent_timeout_seconds": _optional_float(
+            agent.get("timeout_sec"), "harbor_package_agent_timeout_invalid"
+        ),
+        "verifier_timeout_seconds": _optional_float(
+            verifier.get("timeout_sec"), "harbor_package_verifier_timeout_invalid"
+        ),
         "agent_network": _network_mode(agent.get("network_mode")),
         "verifier_network": _network_mode(verifier.get("network_mode")),
-        "verifier_environment_mode": _text(verifier.get("environment_mode") or "shared", "harbor_package_verifier_environment_mode_invalid").lower(),
-        "candidate_artifacts": list(_string_array(manifest.get("artifacts"), "harbor_package_artifacts_invalid")),
+        "verifier_environment_mode": _text(
+            verifier.get("environment_mode") or "shared",
+            "harbor_package_verifier_environment_mode_invalid",
+        ).lower(),
+        "candidate_artifacts": list(
+            _string_array(manifest.get("artifacts"), "harbor_package_artifacts_invalid")
+        ),
         "collect_commands": list(_collect_commands(verifier)),
         "resource_request": resource.as_dict(),
         "source_package_digest": source_digest,
@@ -355,35 +380,33 @@ def _optional_text(value: Any) -> str | None:
 
 
 def _optional_float(value: Any, code: str) -> float | None:
-    if value is None or value == "":
+    if value is None:
         return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise HarborEnvironmentError(code)
     try:
         result = float(value)
-    except (TypeError, ValueError) as exc:
-        raise HarborEnvironmentError(code) from exc
-    if result <= 0 or result != result:
+    except OverflowError as error:
+        raise HarborEnvironmentError(code) from error
+    if result <= 0 or not math.isfinite(result):
         raise HarborEnvironmentError(code)
     return result
 
 
 def _optional_int(value: Any, code: str) -> int | None:
-    if value is None or value == "":
+    if value is None:
         return None
-    if isinstance(value, bool):
+    if type(value) is not int or value < 0:
         raise HarborEnvironmentError(code)
-    try:
-        result = int(value)
-    except (TypeError, ValueError) as exc:
-        raise HarborEnvironmentError(code) from exc
-    if result < 0:
-        raise HarborEnvironmentError(code)
-    return result
+    return value
 
 
 def _string_array(value: Any, code: str) -> tuple[str, ...]:
     if value is None:
         return ()
     if not isinstance(value, list):
+        raise HarborEnvironmentError(code)
+    if any(not isinstance(item, str) for item in value):
         raise HarborEnvironmentError(code)
     return tuple(_text(item, code) for item in value)
 
@@ -403,39 +426,89 @@ def _collect_commands(verifier: Mapping[str, Any]) -> tuple[str, ...]:
 
 
 def _network_mode(value: Any) -> str:
-    return str(value or "no-network").strip().lower()
+    return str(value or "unspecified").strip().lower()
+
+
+def _hash_file_into(digest: Any, path: Path, *, include_size: bool = False) -> int:
+    """Stream bounded regular files and refuse changes while taking the snapshot."""
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(descriptor, "rb") as handle:
+            before = os.fstat(handle.fileno())
+            if not stat.S_ISREG(before.st_mode):
+                raise HarborEnvironmentError("harbor_package_special_file_refused")
+            if before.st_size > _MAX_FILE_BYTES:
+                raise HarborEnvironmentError("harbor_package_file_too_large")
+            if include_size:
+                digest.update(before.st_size.to_bytes(8, "big"))
+            size = 0
+            while chunk := handle.read(_IO_CHUNK_BYTES):
+                size += len(chunk)
+                if size > _MAX_FILE_BYTES:
+                    raise HarborEnvironmentError("harbor_package_file_too_large")
+                digest.update(chunk)
+            after = os.fstat(handle.fileno())
+            if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
+                after.st_size,
+                after.st_mtime_ns,
+                after.st_ctime_ns,
+            ) or size != before.st_size:
+                raise HarborEnvironmentError("harbor_package_changed_during_inspection")
+            return size
+    except OSError as exc:
+        raise HarborEnvironmentError("harbor_package_unreadable") from exc
 
 
 def _file_digest(path: Path) -> str:
+    digest = hashlib.sha256()
+    _hash_file_into(digest, path)
+    return f"sha256:{digest.hexdigest()}"
+
+
+def _tree_files(root: Path) -> list[Path]:
+    if not root.is_dir() or root.is_symlink():
+        raise HarborEnvironmentError("harbor_package_tree_missing")
+    paths = []
+    entries = 0
+    total = 0
     try:
-        data = path.read_bytes()
+        pending = [root]
+        while pending:
+            directory = pending.pop()
+            with os.scandir(directory) as iterator:
+                for entry in iterator:
+                    entries += 1
+                    if entries > _MAX_TREE_ENTRIES:
+                        raise HarborEnvironmentError("harbor_package_entry_limit_exceeded")
+                    if entry.is_symlink():
+                        raise HarborEnvironmentError("harbor_package_symlink_refused")
+                    info = entry.stat(follow_symlinks=False)
+                    path = Path(entry.path)
+                    if stat.S_ISDIR(info.st_mode):
+                        pending.append(path)
+                        continue
+                    if not stat.S_ISREG(info.st_mode):
+                        raise HarborEnvironmentError("harbor_package_special_file_refused")
+                    total += info.st_size
+                    if total > _MAX_TREE_BYTES:
+                        raise HarborEnvironmentError("harbor_package_tree_too_large")
+                    paths.append(path)
     except OSError as exc:
         raise HarborEnvironmentError("harbor_package_unreadable") from exc
-    return f"sha256:{hashlib.sha256(data).hexdigest()}"
+    return sorted(paths, key=lambda item: item.relative_to(root).as_posix())
 
 
 def _tree_digest(root: Path) -> str:
-    if not root.is_dir() or root.is_symlink():
-        raise HarborEnvironmentError("harbor_package_tree_missing")
+    paths = _tree_files(root)
     digest = hashlib.sha256()
-    try:
-        paths = sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix())
-    except OSError as exc:
-        raise HarborEnvironmentError("harbor_package_unreadable") from exc
+    observed_total = 0
     for path in paths:
-        if path.is_symlink():
-            raise HarborEnvironmentError("harbor_package_symlink_refused")
-        if not path.is_file():
-            continue
         relative = path.relative_to(root).as_posix().encode("utf-8")
-        try:
-            contents = path.read_bytes()
-        except OSError as exc:
-            raise HarborEnvironmentError("harbor_package_unreadable") from exc
         digest.update(len(relative).to_bytes(8, "big"))
         digest.update(relative)
-        digest.update(len(contents).to_bytes(8, "big"))
-        digest.update(contents)
+        observed_total += _hash_file_into(digest, path, include_size=True)
+        if observed_total > _MAX_TREE_BYTES:
+            raise HarborEnvironmentError("harbor_package_tree_too_large")
     return f"sha256:{digest.hexdigest()}"
 
 

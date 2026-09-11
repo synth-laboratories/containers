@@ -84,3 +84,39 @@ This extension does not yet establish full Codex capture, isolated verifier pari
 cloud journal custody, pre-provision database recovery, experiment dollar budgets,
 or full Docker/direct-Daytona/hosted executor parity. Do not advertise those
 capabilities from this extension's resource bounds.
+
+
+## Prebuilt task migration
+
+`native-harbor` installs the qualified Harbor dependency for Docker task staging;
+`native-harbor-daytona` additionally installs the qualified Daytona SDK. Both
+optional integrations need Python 3.12+. The core package remains usable without
+Harbor or provider credentials.
+
+```sh
+synth-containers harbor-stage /path/to/source-task /path/to/new-stage \
+  --provider daytona --image "$PINNED_TASK_IMAGE" --creation-timeout-seconds 300
+```
+
+Staging reuses `HarborEnvironmentDraft` / `HarborEnvironmentRelease`. It checks
+source freshness, copies a bounded file inventory, preserves task instructions,
+verifier files and task configuration values, then changes only the prebuilt
+image and creation timeout and removes the unused Dockerfile. The original
+`task.toml` and a receipt bind source digest, staged digest, image, provider and
+release identity. The receipt is committed after copied data is flushed. An
+existing or partial destination is never reused.
+
+The image is selected by the operator. This binding is **not build-provenance
+verification** and does not prove the image contains the task runtime. Build
+receipts and scientific qualification must establish that before promotion.
+Separate verifier images, Compose and host mounts are refused in this slice;
+staging never converts a separate verifier into a shared one.
+
+Static package inspection bounds a file at 64 MiB, a source tree at 256 MiB and
+10,000 entries, and task TOML at 1 MiB. Hashing streams file bytes and preserves
+existing digest framing. Copying rechecks the bounds, and mutations during
+inspection/staging refuse a launch receipt. Fractional/string integer limits,
+boolean/nonfinite phase durations, special files and symlinks are refused.
+Missing network declarations remain `unspecified`; inspection cannot claim
+network isolation on their behalf. Artifact-object declarations need an explicit
+contract adapter and are refused rather than converted into strings.

@@ -86,6 +86,13 @@ def main(argv: list[str] | None = None) -> int:
     journal.add_argument("--follow", action="store_true")
     journal.add_argument("--timeout-seconds", type=float, default=300)
 
+    stage = sub.add_parser("harbor-stage", help="bind a native Harbor task to a prebuilt image")
+    stage.add_argument("source", type=Path)
+    stage.add_argument("destination", type=Path)
+    stage.add_argument("--image", required=True)
+    stage.add_argument("--provider", required=True, choices=["docker", "daytona"])
+    stage.add_argument("--creation-timeout-seconds", type=int, default=300)
+
     recovery = sub.add_parser("harbor-daytona-reconcile", help="reconcile an expired native Harbor trial")
     recovery.add_argument("trial_dir", type=Path)
 
@@ -137,6 +144,22 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     try:
+        if args.command == "harbor-stage":
+            from .harbor_environment import (
+                HarborProviderCompatibility, inspect_harbor_package, register_harbor_environment,
+            )
+            from .harbor_task_stage import stage_native_harbor_task
+
+            release = register_harbor_environment(
+                inspect_harbor_package(args.source), agent_image=args.image, verifier_image=args.image,
+                provider=HarborProviderCompatibility(
+                    provider_id=args.provider, supports_separate_verifier=False,
+                ),
+            )
+            print(json.dumps(stage_native_harbor_task(
+                release, args.destination, creation_timeout_seconds=args.creation_timeout_seconds,
+            ), sort_keys=True))
+            return 0
         if args.command == "harbor-daytona-reconcile":
             from daytona import AsyncDaytona
             from .harbor_daytona_recovery import reconcile_daytona_trial
