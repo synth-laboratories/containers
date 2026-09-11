@@ -338,7 +338,7 @@ def inspect_harbor_package(root: str | Path) -> HarborEnvironmentDraft:
 
 
 def is_pinned_harbor_image(image: str, provider_id: str) -> bool:
-    """Local config IDs are immutable Docker references, never registry digests."""
+    """Local image IDs are daemon-scoped references, never proof of registry availability."""
     if (
         not isinstance(image, str)
         or len(image) > 1024

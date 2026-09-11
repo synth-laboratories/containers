@@ -209,7 +209,7 @@ def stage_native_harbor_task(
         "environment_release_digest": release.release_digest,
         "image": release.agent_image,
         "image_reference_scope": (
-            "docker_local_config_id"
+            "docker_local_image_id"
             if release.agent_image.startswith("sha256:")
             else "registry_manifest_digest"
         ),

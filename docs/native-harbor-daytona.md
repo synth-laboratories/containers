@@ -140,9 +140,9 @@ allocation requests, not proof of every storage/quota enforcement capability or
 of benchmark qualification. No resource default is silently invented for Daytona.
 
 Docker prebuilt tasks also accept immutable local `sha256:<64 lowercase hex>`
-config IDs. These references are scoped to the Docker daemon that owns the
+image IDs. These references are scoped to the Docker daemon that owns the
 image; they are not pullable registry manifest digests and Daytona rejects them.
-Stage receipts distinguish `docker_local_config_id` from
+Stage receipts distinguish `docker_local_image_id` from
 `registry_manifest_digest`. Neither reference type by itself proves the image
 was built from the bound task package: build provenance remains explicitly
 unverified until a build receipt establishes that relationship.

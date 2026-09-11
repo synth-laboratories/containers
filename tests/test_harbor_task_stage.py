@@ -239,6 +239,6 @@ def test_stage_records_local_docker_image_scope(tmp_path):
         bound.draft, agent_image=image, verifier_image=image, provider=bound.provider
     )
     receipt = stage_native_harbor_task(bound, tmp_path / "staged")
-    assert receipt["image_reference_scope"] == "docker_local_config_id"
+    assert receipt["image_reference_scope"] == "docker_local_image_id"
     assert receipt["native_environment_flags"] == ["--env", "docker"]
     assert receipt["image_build_provenance"] == "operator_bound_not_verified"
