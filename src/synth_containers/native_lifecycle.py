@@ -55,3 +55,26 @@ async def execute_native_lifecycle(
         return results
     finally:
         supervisor.close()
+
+
+async def recover_native_lifecycle(output: Path, *, cleanup: Callable[[], Awaitable[dict]]) -> dict:
+    """Reconcile one expired owner using retained provider identity, without work.
+
+    The caller's cleanup adapter must independently enforce provider ownership.
+    Never infer deletion authority from a directory name or this limit claim.
+    """
+    import json
+
+    raw = (output / "limit-claim.json").read_bytes()
+    if len(raw) > 16384:
+        raise ValueError("Limit claim exceeds recovery bound")
+    claim = json.loads(raw)
+    supervisor = DurableRolloutSupervisor(
+        output, claim["run_id"], LifecycleLimits(**claim["limits"])
+    )
+    try:
+        if supervisor.remaining_seconds() > 0:
+            raise ValueError("Execution lifetime has not expired")
+        return await supervisor.stop("expired_owner_recovery", cleanup)
+    finally:
+        supervisor.close()

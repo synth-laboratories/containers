@@ -24,8 +24,8 @@ from .operator_journal import OperatorJournal
 class ObservedDockerEnvironment(DockerEnvironment):
     """Retain creation authority and require fresh absence after Harbor cleanup.
 
-    Docker supplies CPU/memory controls, not a provider TTL or workspace quota.
-    This extension does not claim those unsupported guarantees.
+    Optional kernel tmpfs and storage-driver quotas scope workspace/writable-layer
+    bytes. They do not quota bind mounts or provide a worker-independent TTL.
     """
 
     def __init__(
@@ -33,6 +33,7 @@ class ObservedDockerEnvironment(DockerEnvironment):
         *args,
         egress_control_image: str | None = None,
         workspace_tmpfs_bytes: int | None = None,
+        writable_layer_bytes: int | None = None,
         **kwargs,
     ):
         if version("harbor") != "0.22.0":
@@ -46,6 +47,11 @@ class ObservedDockerEnvironment(DockerEnvironment):
             raise ValueError(
                 "Native Docker creation timeout must be positive and at most 300 seconds"
             )
+        self._writable_layer_bytes = writable_layer_bytes
+        if writable_layer_bytes is not None and (
+            type(writable_layer_bytes) is not int or not 1024**2 <= writable_layer_bytes <= 1024**4
+        ):
+            raise ValueError("writable_layer_bytes must be from 1 MiB through 1 TiB")
         self._workspace_tmpfs_bytes = workspace_tmpfs_bytes
         self._quota_compose_path = None
         if workspace_tmpfs_bytes is not None and (
@@ -91,26 +97,22 @@ class ObservedDockerEnvironment(DockerEnvironment):
         return paths
 
     def _arm_workspace_quota(self):
-        if self._workspace_tmpfs_bytes is None:
+        if self._workspace_tmpfs_bytes is None and self._writable_layer_bytes is None:
             return
         # Explicit opt-in: /workspace begins empty. Image content under this path
         # is obscured, never copied using an unbounded host staging directory.
         path = self._resource_root / "workspace-quota.compose.json"
+        service = {"cap_drop": ["SYS_ADMIN"], "security_opt": ["no-new-privileges:true"]}
+        if self._workspace_tmpfs_bytes is not None:
+            service["tmpfs"] = [
+                f"/workspace:rw,nosuid,nodev,size={self._workspace_tmpfs_bytes},mode=1777"
+            ]
+        if self._writable_layer_bytes is not None:
+            # Docker rejects unsupported storage drivers/backing filesystems.
+            # No fallback to an unlimited writable layer is permitted.
+            service["storage_opt"] = {"size": str(self._writable_layer_bytes)}
         with path.open("x") as handle:
-            json.dump(
-                {
-                    "services": {
-                        "main": {
-                            "tmpfs": [
-                                f"/workspace:rw,nosuid,nodev,size={self._workspace_tmpfs_bytes},mode=1777"
-                            ],
-                            "cap_drop": ["SYS_ADMIN"],
-                            "security_opt": ["no-new-privileges:true"],
-                        }
-                    }
-                },
-                handle,
-            )
+            json.dump({"services": {"main": service}}, handle)
             handle.flush()
             os.fsync(handle.fileno())
         self._quota_compose_path = path
@@ -187,7 +189,7 @@ class ObservedDockerEnvironment(DockerEnvironment):
         self._resource_event("resource.handles_observed", handles=self._resource_handles)
 
     def _confirm_workspace_quota(self):
-        if self._workspace_tmpfs_bytes is None:
+        if self._workspace_tmpfs_bytes is None and self._writable_layer_bytes is None:
             return
         with closing(docker.from_env(timeout=5)) as client:
             primary = []
@@ -201,6 +203,17 @@ class ObservedDockerEnvironment(DockerEnvironment):
             if len(primary) != 1:
                 raise RuntimeError("Workspace quota requires one observed primary container")
             options = primary[0].attrs.get("HostConfig", {}).get("Tmpfs", {}).get("/workspace", "")
+            if self._writable_layer_bytes is not None:
+                storage = primary[0].attrs.get("HostConfig", {}).get("StorageOpt", {})
+                if storage.get("size") != str(self._writable_layer_bytes):
+                    raise RuntimeError("Provider did not confirm the writable-layer storage quota")
+                self._resource_event(
+                    "resource.writable_layer_quota_confirmed",
+                    bytes=self._writable_layer_bytes,
+                    mechanism="docker_storage_opt",
+                )
+            if self._workspace_tmpfs_bytes is None:
+                return
             if f"size={self._workspace_tmpfs_bytes}" not in options.split(","):
                 raise RuntimeError("Provider did not confirm the workspace tmpfs quota")
             for mount in primary[0].attrs.get("Mounts", []):

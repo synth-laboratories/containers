@@ -90,3 +90,29 @@ requires a provider capability or a bounded external builder/storage adapter.
 Hosted scheduling and multi-worker build deduplication remain owner-service work.
 The receiving engineer owns callback integration qualification, timeout/cancel
 faults, mount compatibility, resource absence and all provider runs.
+
+## Additional actuators and recovery
+
+`ObservedDockerEnvironment(writable_layer_bytes=N, ...)` asks Docker for the
+storage driver's writable-layer `storage_opt.size` quota (1 MiB through 1 TiB).
+Docker must accept the setting; unsupported backing filesystems fail creation
+without unlimited fallback. Startup inspects the primary container's StorageOpt
+before work. Bind mounts and tmpfs are separate resources and require their own
+allowances; this option is not a total host-disk guarantee.
+
+`collect_bounded_artifacts(sources, destination, max_bytes=..., max_files=...)`
+admits regular-file payloads before each retained write, refuses symlink final
+components and changed source metadata, and commits a hashed manifest last.
+A failed collection leaves bounded partial evidence without a completion manifest.
+The exclusively created destination prevents retries from resetting its allowance.
+This controls collection custody, not files produced elsewhere by the worker.
+
+`recover_native_lifecycle(output, cleanup=...)` loads original persisted limits,
+acquires the exclusive owner lock and refuses recovery before expiry. The caller
+supplies the existing provider reconciler, which independently checks ownership.
+No work callback or provider creation occurs during recovery.
+
+`run_bounded_process(..., redact=secrets)` redacts UTF-8 byte sequences before
+persistence, including matches split across reads. It bounds both raw admission
+and redacted retained bytes. On cancellation/overflow the withheld unfinished
+suffix is omitted. Redaction allows at most 128 patterns, each at most 4096 bytes.
