@@ -86,6 +86,17 @@ def main(argv: list[str] | None = None) -> int:
     journal.add_argument("--follow", action="store_true")
     journal.add_argument("--timeout-seconds", type=float, default=300)
 
+    publish = sub.add_parser("publish-native-journal", help="commit a sanitized native journal to its hosted rollout")
+    publish.add_argument("path", type=Path)
+    publish.add_argument("--run-id", required=True)
+    publish.add_argument("--pool-id", required=True)
+    publish.add_argument("--rollout-id", required=True)
+    publish.add_argument("--execution-epoch", required=True)
+    publish.add_argument("--producer-id", required=True)
+    publish.add_argument("--checkpoint", required=True, type=Path)
+    publish.add_argument("--complete", action="store_true")
+    publish.add_argument("--max-pages", type=int, default=100)
+
     stage = sub.add_parser("harbor-stage", help="bind a native Harbor task to a prebuilt image")
     stage.add_argument("source", type=Path)
     stage.add_argument("destination", type=Path)
@@ -140,6 +151,18 @@ def main(argv: list[str] | None = None) -> int:
         command.add_argument("lease_id")
         if action == "renew":
             command.add_argument("--ttl-seconds", type=int, default=900)
+
+    session = sub.add_parser("lease-session", help="bind an interactive lease to an exact task revision")
+    session.add_argument("lease_id")
+    session.add_argument("--task-id", required=True)
+    session.add_argument("--expected-revision", required=True)
+    for action in ("step", "reset", "invoke"):
+        command = sub.add_parser(f"lease-{action}", help=f"{action} an exact leased session")
+        command.add_argument("lease_id")
+        command.add_argument("session_id")
+        command.add_argument("request", type=Path, help="bounded JSON arguments file")
+        command.add_argument("--operation-id", required=True)
+        command.add_argument("--reconcile", action="store_true")
 
     for action in ("get", "create", "update", "delete", "operation", "lookup"):
         command = sub.add_parser(
@@ -220,6 +243,21 @@ def main(argv: list[str] | None = None) -> int:
                 receipt = reconcile_docker_trial(args.trial_dir, client)
             print(json.dumps(receipt, sort_keys=True))
             return 0
+        if args.command == "publish-native-journal":
+            from .native_evidence import publish_native_journal
+
+            async def publish_journal() -> dict:
+                async with PoolClient.from_env() as client:
+                    return await publish_native_journal(
+                        client, path=args.path, run_id=args.run_id, pool_id=args.pool_id,
+                        rollout_id=args.rollout_id, execution_epoch=args.execution_epoch,
+                        producer_id=args.producer_id, checkpoint=args.checkpoint,
+                        complete=args.complete, max_pages=args.max_pages,
+                    )
+
+            receipt = asyncio.run(publish_journal())
+            print(json.dumps(receipt, sort_keys=True))
+            return 2 if receipt["has_more"] else 0
         if args.command == "journal":
             from .operator_journal import follow_operator_events, read_operator_events
 
@@ -239,6 +277,22 @@ def main(argv: list[str] | None = None) -> int:
         if args.command.startswith("lease-"):
             async def operate_lease() -> dict:
                 async with PoolClient.from_env() as client:
+                    if args.command == "lease-session":
+                        return await client.create_lease_session(
+                            args.lease_id, task_id=args.task_id, expected_revision=args.expected_revision,
+                        )
+                    if args.command in {"lease-step", "lease-reset", "lease-invoke"}:
+                        with args.request.open("rb") as handle:
+                            data = handle.read(65537)
+                        if len(data) > 65536:
+                            raise ValueError("interactive arguments exceed 64 KiB")
+                        arguments = json.loads(data)
+                        if not isinstance(arguments, dict):
+                            raise ValueError("interactive arguments must be a JSON object")
+                        return await client.lease_session_action(
+                            args.lease_id, args.session_id, operation=args.command.removeprefix("lease-"),
+                            operation_id=args.operation_id, arguments=arguments, reconcile=args.reconcile,
+                        )
                     if args.command == "lease-assign":
                         return await client.assign_lease(
                             project_id=args.project_id, image_kind=args.image_kind,

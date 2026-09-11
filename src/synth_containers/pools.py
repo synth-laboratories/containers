@@ -706,6 +706,45 @@ class PoolClient:
         """Release the admission claim; this does not delete its deployment."""
         return await self._request("POST", f"/container_leases/{self._deployment_coordinate(lease_id)}/release")
 
+    async def create_lease_session(
+        self, lease_id: str, *, task_id: str, expected_revision: str,
+    ) -> dict[str, Any]:
+        """Bind a leased interaction to the inspected task revision before work."""
+        if not isinstance(expected_revision, str) or len(expected_revision) != 64 or any(
+            character not in "0123456789abcdef" for character in expected_revision
+        ):
+            raise ValueError("expected_revision must be a lowercase SHA-256 digest")
+        receipt = await self._request(
+            "POST", f"/container_leases/{self._deployment_coordinate(lease_id)}/sessions",
+            payload={"task_id": task_id, "expected_revision": expected_revision},
+        )
+        if (receipt.get("task_id") != task_id or receipt.get("revision") != expected_revision
+                or not isinstance(receipt.get("session_id"), str) or not receipt["session_id"]):
+            raise PoolClientError("lease session receipt identity mismatch; reconcile before retry")
+        return receipt
+
+    async def lease_session_action(
+        self, lease_id: str, session_id: str, *, operation: str,
+        operation_id: str, arguments: Mapping[str, Any], reconcile: bool = False,
+    ) -> dict[str, Any]:
+        """Perform or reconcile one declared action; retries retain operation_id.
+
+        Reconciliation queries the target's durable operation record and must
+        never re-execute an ambiguous step, reset, or invocation.
+        """
+        if operation not in {"step", "reset", "invoke"} or type(reconcile) is not bool:
+            raise ValueError("invalid lease operation or reconciliation flag")
+        self._deployment_coordinate(operation_id)
+        receipt = await self._request(
+            "POST", f"/container_leases/{self._deployment_coordinate(lease_id)}/sessions/"
+            f"{self._deployment_coordinate(session_id)}/{operation}",
+            payload={"operation_id": operation_id, "arguments": dict(arguments),
+                     "reconcile": reconcile},
+        )
+        if receipt.get("operation_id") != operation_id or receipt.get("operation") != operation:
+            raise PoolClientError("lease action receipt identity mismatch")
+        return receipt
+
     # -- tasks -------------------------------------------------------------
 
     @staticmethod
@@ -1153,6 +1192,43 @@ class PoolClient:
 
     async def usage(self, rollout_id: str) -> dict[str, Any]:
         return await self._request("GET", f"/rollouts/{rollout_id}/usage", optional=True)
+
+    async def publish_native_events(
+        self, pool_id: str, rollout_id: str, *, execution_epoch: str,
+        producer_id: str, events: Sequence[Mapping[str, Any]], complete: bool = False,
+    ) -> dict[str, Any]:
+        """Commit a bounded sanitized operator page under its hosted worker epoch.
+
+        This acknowledges journal custody only; it neither seals Trace V5 nor
+        publishes the scientific result. Retry the same page after uncertain IO.
+        """
+        if not isinstance(execution_epoch, str) or not execution_epoch.strip():
+            raise ValueError("execution_epoch is required")
+        if not isinstance(producer_id, str) or not 1 <= len(producer_id) <= 128:
+            raise ValueError("producer_id must have 1-128 characters")
+        if type(complete) is not bool or len(events) > 128:
+            raise ValueError("native pages require boolean complete and at most 128 events")
+        payload = {"execution_epoch": execution_epoch, "producer_id": producer_id,
+                   "events": list(events), "complete": complete}
+        if len(json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()) > 262144:
+            raise ValueError("native page exceeds 256 KiB")
+        receipt = await self._request(
+            "POST", f"/pools/{self._deployment_coordinate(pool_id)}/rollouts/"
+            f"{self._deployment_coordinate(rollout_id)}/native_events", payload=payload,
+        )
+        if any(receipt.get(key) != value for key, value in {
+            "pool_id": pool_id, "rollout_id": rollout_id,
+            "execution_epoch": execution_epoch, "producer_id": producer_id,
+        }.items()):
+            raise PoolClientError("native custody receipt identity mismatch")
+        cursor = receipt.get("next_sequence")
+        if type(cursor) is not int or cursor < 0 or type(receipt.get("complete")) is not bool:
+            raise PoolClientError("invalid native custody cursor")
+        if events and cursor < events[-1]["sequence"]:
+            raise PoolClientError("native custody receipt did not acknowledge page")
+        if complete and receipt["complete"] is not True:
+            raise PoolClientError("native custody completion was not acknowledged")
+        return receipt
 
     async def events(
         self, rollout_id: str, *, after_sequence: int = 0, limit: int = 200
