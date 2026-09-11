@@ -20,9 +20,10 @@ from .harbor_environment import (
     HarborResourceRequest,
     _tree_digest,
     _tree_files,
-    read_harbor_task_toml,
     is_pinned_harbor_image,
+    read_harbor_task_toml,
 )
+from .harbor_phase_limits import NativeHarborPhaseLimits
 
 
 def native_harbor_environment_flags(
@@ -141,6 +142,7 @@ def stage_native_harbor_task(
     resource_request: HarborResourceRequest | None = None,
     docker_resource_custody: bool = False,
     docker_egress_image: str | None = None,
+    phase_limits: NativeHarborPhaseLimits | None = None,
 ) -> dict[str, Any]:
     """Stage one immutable prebuilt-image task, retaining source/release identity.
 
@@ -152,6 +154,8 @@ def stage_native_harbor_task(
     """
     if environment_transfer not in {"preserve", "image_only"}:
         raise HarborEnvironmentError("harbor_native_environment_transfer_invalid")
+    if phase_limits is not None and not isinstance(phase_limits, NativeHarborPhaseLimits):
+        raise HarborEnvironmentError("harbor_native_phase_limits_invalid")
     if type(creation_timeout_seconds) is not int or not 1 <= creation_timeout_seconds <= 300:
         raise HarborEnvironmentError("harbor_native_creation_allowance_invalid")
     if not release.validation.valid or not release.freshness().fresh:
@@ -193,6 +197,7 @@ def stage_native_harbor_task(
     environment.update(native_harbor_resource_overrides(resource_request))
     environment["docker_image"] = release.agent_image
     environment["build_timeout_sec"] = creation_timeout_seconds
+    phase_receipt = phase_limits.apply(manifest) if phase_limits is not None else None
     staged_toml = toml.dumps(manifest)
     try:
         TaskConfig.model_validate_toml(staged_toml)
@@ -245,6 +250,7 @@ def stage_native_harbor_task(
         ),
         "provider": release.provider.provider_id,
         "creation_timeout_seconds": creation_timeout_seconds,
+        "phase_limits": phase_receipt,
         "source_creation_timeout_seconds": tomllib.loads(original)["environment"].get(
             "build_timeout_sec"
         ),

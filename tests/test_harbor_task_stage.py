@@ -20,6 +20,21 @@ from synth_containers.harbor_task_stage import stage_native_harbor_task
 IMAGE = "registry.example/task@sha256:" + "a" * 64
 
 
+def test_explicit_phase_limits_are_frozen_without_widening_source(tmp_path):
+    from synth_containers.harbor_phase_limits import NativeHarborPhaseLimits
+
+    bound = release(tmp_path / "source")
+    original = (bound.draft.root / "task.toml").read_bytes()
+    receipt = stage_native_harbor_task(
+        bound, tmp_path / "stage", phase_limits=NativeHarborPhaseLimits(60, 300)
+    )
+    staged = tomllib.loads((Path(receipt["task_path"]) / "task.toml").read_text())
+    assert staged["agent"]["timeout_sec"] == 60
+    assert staged["verifier"]["timeout_sec"] == 30
+    assert receipt["phase_limits"]["resolved_seconds"] == {"agent": 60, "verifier": 30}
+    assert (bound.draft.root / "task.toml").read_bytes() == original
+
+
 def release(root: Path, *, provider="daytona"):
     root.mkdir()
     (root / "environment").mkdir()
@@ -254,9 +269,9 @@ def test_native_docker_custody_flags_are_frozen_in_stage(tmp_path):
         "--ek", "egress_control_image=" + IMAGE]
 
 
-@pytest.mark.parametrize("options", [dict(docker_resource_custody="true"),
-                                     dict(docker_egress_image=IMAGE),
-                                     dict(docker_resource_custody=True, docker_egress_image="latest")])
+@pytest.mark.parametrize("options", [{"docker_resource_custody": "true"},
+                                     {"docker_egress_image": IMAGE},
+                                     {"docker_resource_custody": True, "docker_egress_image": "latest"}])
 def test_invalid_native_docker_custody_options_refused_before_staging(tmp_path, options):
     bound = release(tmp_path / "source", provider="docker")
     with pytest.raises(HarborEnvironmentError):

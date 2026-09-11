@@ -99,6 +99,8 @@ def main(argv: list[str] | None = None) -> int:
     stage.add_argument("--docker-resource-custody", action="store_true")
     stage.add_argument("--docker-egress-image")
     stage.add_argument("--environment-transfer", choices=["preserve", "image_only"], default="preserve")
+    stage.add_argument("--work-timeout-seconds", type=float)
+    stage.add_argument("--verifier-timeout-seconds", type=float)
 
     context = sub.add_parser("harbor-image-context", help="freeze a Harbor image context without provider access")
     context.add_argument("source", type=Path)
@@ -172,6 +174,11 @@ def main(argv: list[str] | None = None) -> int:
                 register_harbor_environment,
             )
             from .harbor_task_stage import stage_native_harbor_task
+            from .harbor_phase_limits import NativeHarborPhaseLimits
+
+            phase_limits = None
+            if args.work_timeout_seconds is not None or args.verifier_timeout_seconds is not None:
+                phase_limits = NativeHarborPhaseLimits(args.work_timeout_seconds, args.verifier_timeout_seconds)
 
             release = register_harbor_environment(
                 inspect_harbor_package(args.source), agent_image=args.image, verifier_image=args.image,
@@ -185,6 +192,7 @@ def main(argv: list[str] | None = None) -> int:
                 environment_transfer=args.environment_transfer,
                 docker_resource_custody=args.docker_resource_custody,
                 docker_egress_image=args.docker_egress_image,
+                phase_limits=phase_limits,
                 resource_request=(HarborResourceRequest(cpus=args.cpus, memory_mb=args.memory_mb,
                                                        storage_mb=args.storage_mb, gpus=0)
                                   if any(value is not None for value in (args.cpus, args.memory_mb, args.storage_mb)) else None),

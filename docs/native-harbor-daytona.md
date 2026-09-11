@@ -242,3 +242,19 @@ remaining request timeout. Recovery is synchronous so a timed-out caller cannot
 leave an untracked deletion thread behind. Keep the trial directory after a
 pending outcome and retry the same recovery operation. This local command does
 not replace the hosted Rhodes reaper or add provider-enforced Docker expiry.
+
+## Frozen phase ceilings
+
+`harbor-stage --work-timeout-seconds 600 --verifier-timeout-seconds 300` supplies
+an explicit `NativeHarborPhaseLimits` pair. Both source phases must already have
+finite positive timeouts. Staging uses the smaller of each requested and source
+ceiling and records source, requested and resolved seconds in `phase_limits`.
+It preserves the original task and binds the changed task through its staged
+digest. Missing, nonfinite or nonpositive ceilings never mean unlimited.
+
+These are Harbor's separate agent-execution and verification clocks. They do
+not include queue or setup time, establish an overall attempt deadline, or
+survive Harbor worker failure. Creation and provider lifetime remain separate
+limits. Native callers must not widen the frozen values with later Harbor timeout
+multipliers. Full hosted supervision, output quotas and monetary reservations
+remain independently required for profiles that advertise those guarantees.
