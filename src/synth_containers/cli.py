@@ -93,6 +93,9 @@ def main(argv: list[str] | None = None) -> int:
     stage.add_argument("--provider", required=True, choices=["docker", "daytona"])
     stage.add_argument("--creation-timeout-seconds", type=int, default=300)
     stage.add_argument("--resource-ttl-minutes", type=int, default=20)
+    stage.add_argument("--cpus", type=int)
+    stage.add_argument("--memory-mb", type=int)
+    stage.add_argument("--storage-mb", type=int)
 
     recovery = sub.add_parser("harbor-daytona-reconcile", help="reconcile an expired native Harbor trial")
     recovery.add_argument("trial_dir", type=Path)
@@ -148,6 +151,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "harbor-stage":
             from .harbor_environment import (
                 HarborProviderCompatibility,
+                HarborResourceRequest,
                 inspect_harbor_package,
                 register_harbor_environment,
             )
@@ -162,6 +166,9 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(stage_native_harbor_task(
                 release, args.destination, creation_timeout_seconds=args.creation_timeout_seconds,
                 resource_ttl_minutes=args.resource_ttl_minutes,
+                resource_request=(HarborResourceRequest(cpus=args.cpus, memory_mb=args.memory_mb,
+                                                       storage_mb=args.storage_mb, gpus=0)
+                                  if any(value is not None for value in (args.cpus, args.memory_mb, args.storage_mb)) else None),
             ), sort_keys=True))
             return 0
         if args.command == "harbor-daytona-reconcile":

@@ -205,3 +205,28 @@ def test_shared_native_resource_policy_refuses_missing_or_excessive_limits(tmp_p
         (tmp_path / 'task.toml').write_text(text)
         with pytest.raises(HarborEnvironmentError):
             native_harbor_environment_flags(tmp_path, provider='daytona', image=IMAGE, resource_ttl_minutes=20)
+
+
+def test_explicit_resources_resolve_missing_declarations_without_rewriting_source(tmp_path):
+    from synth_containers.harbor_environment import HarborResourceRequest
+    source = tmp_path / 'source'
+    bound = release(source)
+    path = source / 'task.toml'
+    path.write_text(path.read_text().replace('cpus = 1\n', '').replace('memory_mb = 1024\n', '').replace('storage_mb = 1024\n', ''))
+    original = path.read_bytes()
+    bound = register_harbor_environment(inspect_harbor_package(source), agent_image=IMAGE, verifier_image=IMAGE, provider=bound.provider)
+    receipt = stage_native_harbor_task(bound, tmp_path / 'staged', resource_request=HarborResourceRequest(cpus=2, memory_mb=2048, storage_mb=4096, gpus=0))
+    assert path.read_bytes() == original
+    assert receipt['source_resource_request']['cpus'] is None
+    assert receipt['resolved_resource_request']=={'cpus':2,'memory_mb':2048,'storage_mb':4096,'gpus':0}
+    assert 'maximum_cpu=2' in receipt['native_environment_flags']
+    staged = tomllib.loads((Path(receipt['task_path'])/'task.toml').read_text())
+    assert staged['environment']['memory_mb']==2048
+
+
+@pytest.mark.parametrize('cpu,memory,storage', [(None,1024,1024),(True,1024,1024),(65,1024,1024),(1,0,1024),(1,1024,1024*1024+1)])
+def test_partial_or_unbounded_resource_overrides_fail_before_materialization(tmp_path,cpu,memory,storage):
+    from synth_containers.harbor_environment import HarborResourceRequest
+    with pytest.raises(HarborEnvironmentError, match='bounded positive'):
+        stage_native_harbor_task(release(tmp_path/'source'),tmp_path/'staged', resource_request=HarborResourceRequest(cpus=cpu,memory_mb=memory,storage_mb=storage,gpus=0))
+    assert not (tmp_path/'staged').exists()

@@ -130,3 +130,11 @@ arguments in `stage-receipt.json`. Python consumers use
 `native_harbor_environment_flags` from `harbor_task_stage`; benchmark wrappers do
 not maintain their own Daytona ceiling/rounding policy. Docker receipts select
 native Docker without claiming the Daytona lifetime guarantee.
+
+When a legacy task omits resource requests, operators may provide an explicit,
+complete `--cpus`, `--memory-mb`, `--storage-mb` override to `harbor-stage` (or a
+`HarborResourceRequest` to the Python API). Partial, non-integer or above-ceiling
+requests fail before materialization. The original package remains unchanged;
+the staged task and receipt record both source and resolved requests. These are
+allocation requests, not proof of every storage/quota enforcement capability or
+of benchmark qualification. No resource default is silently invented for Daytona.
