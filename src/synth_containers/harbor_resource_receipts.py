@@ -57,7 +57,10 @@ def read_harbor_resource_receipt(trial_dir: Path) -> dict[str, Any]:
                     "Native Docker confirmed cleanup requires observed primary handles"
                 )
         else:
-            known = {event.get("provider_id") for event in events[:-1] if event.get("provider_id")}
+            identifiers = [event.get("provider_id") for event in events[:-1] if event.get("provider_id")]
+            if any(not isinstance(value, str) for value in identifiers):
+                raise ValueError("Native Daytona resource identifiers must be strings")
+            known = set(identifiers)
             identifier = last.get("provider_id")
             if (
                 not isinstance(identifier, str)

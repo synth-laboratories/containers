@@ -16,8 +16,8 @@ from docker.errors import NotFound
 from harbor.environments.docker.docker import DockerEnvironment
 
 from .harbor_environment import is_pinned_harbor_image
-from .operator_journal import OperatorJournal
 from .harbor_resource_receipts import HarborResourceCleanupPending
+from .operator_journal import OperatorJournal
 
 
 class ObservedDockerEnvironment(DockerEnvironment):

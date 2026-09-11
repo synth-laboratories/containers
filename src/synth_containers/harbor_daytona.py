@@ -18,6 +18,7 @@ from uuid import uuid4
 from daytona.common.errors import DaytonaNotFoundError
 from harbor.environments.daytona.environment import DaytonaEnvironment
 
+from .harbor_resource_receipts import HarborResourceCleanupPending
 from .harbor_results import finite_number
 from .operator_journal import OperatorJournal
 
@@ -195,6 +196,8 @@ class BoundedDaytonaEnvironment(DaytonaEnvironment):
             self._resource_event(
                 "resource.cleanup_pending", provider_id=identifier, error_type=type(error).__name__
             )
+            if isinstance(error, Exception):
+                raise HarborResourceCleanupPending("Native Daytona cleanup remains pending") from error
             raise
         self._resource_event("resource.cleanup_confirmed", provider_id=identifier)
         self._sandbox = None
