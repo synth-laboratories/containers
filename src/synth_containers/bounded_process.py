@@ -103,6 +103,9 @@ async def run_bounded_process(
             pending = pending[cutoff:]
             allowance = max_output_bytes - written
             handle.write(data[:allowance])
+            # Observers tail only the already-redacted file; publish bounded
+            # retained bytes promptly without making stdout the custody authority.
+            handle.flush()
             written += min(len(data), allowance)
             if len(data) > allowance:
                 raise ProcessOutputLimit("Redacted process output exceeded admitted bytes")
