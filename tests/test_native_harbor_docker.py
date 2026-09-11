@@ -41,6 +41,9 @@ def events(env):
 
 
 def test_claim_and_intent_precede_creation_and_survive_restart(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        ObservedDockerEnvironment, "_daemon_identity", staticmethod(lambda: "daemon")
+    )
     env = environment(tmp_path)
     assert env.session_id == env._resource_owner
 
@@ -62,6 +65,7 @@ def test_claim_and_intent_precede_creation_and_survive_restart(tmp_path, monkeyp
 
 def test_failed_journal_never_launches(tmp_path, monkeypatch):
     env = environment(tmp_path)
+    monkeypatch.setattr(env, "_daemon_identity", lambda: "daemon")
     launch = AsyncMock()
     monkeypatch.setattr(DockerEnvironment, "start", launch)
     monkeypatch.setattr(env, "_resource_event", Mock(side_effect=OSError("disk full")))

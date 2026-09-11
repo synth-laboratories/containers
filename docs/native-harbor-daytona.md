@@ -218,3 +218,27 @@ resource limits, provider storage expiry, monetary reservations, context-upload
 object retention and hosted orphan recovery are not established here. A cloud
 qualification must separately establish those operational bounds and authorize
 its costs. No paid provider build is implied by the offline tests.
+
+## Native Docker worker recovery
+
+New native Docker trials save the daemon identity and creation allowance and
+hold `resource-owner.lock` from creation through terminal cleanup. The process
+releases that advisory lock when it exits. To recover its retained trial folder,
+use `synth-containers harbor-docker-reconcile TRIAL_DIRECTORY` against the same
+Docker daemon. Recovery refuses a live worker, a different daemon, older custody
+without the lifetime-lock protocol, and the creation allowance plus a one-minute
+grace period. The grace period is not a Docker TTL.
+
+Recovery combines saved handles with exact Compose-project discovery. It saves
+discovered handles before deletion, checks all current ownership labels, removes
+containers before networks and volumes, and requires typed absence of every
+known handle plus empty owner discovery. An empty listing without an observed
+primary container remains pending. No image build, eval rerun, score mutation or
+resource creation occurs. Provider errors retain cleanup-pending custody.
+
+The SDK uses five-second request timeouts and the recovery loop checks its
+90-second budget before each request; the last in-flight request may take its
+remaining request timeout. Recovery is synchronous so a timed-out caller cannot
+leave an untracked deletion thread behind. Keep the trial directory after a
+pending outcome and retry the same recovery operation. This local command does
+not replace the hosted Rhodes reaper or add provider-enforced Docker expiry.

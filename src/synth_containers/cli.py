@@ -106,6 +106,8 @@ def main(argv: list[str] | None = None) -> int:
 
     recovery = sub.add_parser("harbor-daytona-reconcile", help="reconcile an expired native Harbor trial")
     recovery.add_argument("trial_dir", type=Path)
+    docker_recovery = sub.add_parser("harbor-docker-reconcile", help="reconcile a native Docker trial after its worker exits")
+    docker_recovery.add_argument("trial_dir", type=Path)
 
     watch = sub.add_parser("watch", help="observe a hosted rollout from a saved sequence")
     watch.add_argument("rollout_id")
@@ -198,6 +200,17 @@ def main(argv: list[str] | None = None) -> int:
                     return await reconcile_daytona_trial(args.trial_dir, client)
 
             print(json.dumps(asyncio.run(recover_trial()), sort_keys=True))
+            return 0
+        if args.command == "harbor-docker-reconcile":
+            from contextlib import closing
+
+            import docker
+
+            from .harbor_docker_recovery import reconcile_docker_trial
+
+            with closing(docker.from_env(timeout=5)) as client:
+                receipt = reconcile_docker_trial(args.trial_dir, client)
+            print(json.dumps(receipt, sort_keys=True))
             return 0
         if args.command == "journal":
             from .operator_journal import follow_operator_events, read_operator_events

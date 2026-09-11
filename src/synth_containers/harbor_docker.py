@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import json
 import os
 from contextlib import closing
@@ -67,6 +68,7 @@ class ObservedDockerEnvironment(DockerEnvironment):
             max_record_bytes=16384,
         )
         self._resource_create_attempted = False
+        self._resource_owner_lock = None
         self._resource_handles: list[dict[str, str]] = []
 
     async def _ensure_egress_control_sidecar_image_built(self):
@@ -135,9 +137,19 @@ class ObservedDockerEnvironment(DockerEnvironment):
     async def start(self, force_build: bool):
         if force_build or self._resource_create_attempted:
             raise ValueError("Native Docker permits one prebuilt creation attempt")
+        async with asyncio.timeout(10):
+            daemon_id = await asyncio.to_thread(self._daemon_identity)
         self._resource_root.mkdir(parents=True, exist_ok=True)
         with (self._resource_root / "resource-create-claim.json").open("x") as claim:
-            json.dump({"owner": self._resource_owner, "provider": "docker"}, claim)
+            json.dump(
+                {
+                    "owner": self._resource_owner,
+                    "provider": "docker",
+                    "recovery_protocol": "owner_lock.v1",
+                    "daemon_id": daemon_id,
+                },
+                claim,
+            )
             claim.flush()
             os.fsync(claim.fileno())
         directory = os.open(self._resource_root, os.O_RDONLY | os.O_DIRECTORY)
@@ -146,8 +158,11 @@ class ObservedDockerEnvironment(DockerEnvironment):
         finally:
             os.close(directory)
         self._resource_create_attempted = True
+        self._resource_owner_lock = (self._resource_root / "resource-owner.lock").open("x+")
+        fcntl.flock(self._resource_owner_lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         self._resource_event(
             "resource.create_requested",
+            creation_timeout_seconds=self._creation_timeout_seconds,
             provider_ttl_supported=False,
             workspace_quota_supported=False,
         )
@@ -161,6 +176,14 @@ class ObservedDockerEnvironment(DockerEnvironment):
             self._resource_event("resource.create_unconfirmed", error_type=type(error).__name__)
             raise
         self._resource_event("resource.created", handles=self._resource_handles)
+
+    @staticmethod
+    def _daemon_identity():
+        with closing(docker.from_env(timeout=5)) as client:
+            identifier = client.info().get("ID")
+        if not isinstance(identifier, str) or not 1 <= len(identifier) <= 255:
+            raise ValueError("Native Docker daemon identity was not observed")
+        return identifier
 
     def _confirm_absence(self):
         with closing(docker.from_env(timeout=5)) as client:
@@ -193,6 +216,7 @@ class ObservedDockerEnvironment(DockerEnvironment):
                 if not any(h["kind"] == "container" for h in self._resource_handles):
                     raise RuntimeError("Native Docker ambiguous creation has no primary handle")
                 await asyncio.to_thread(self._confirm_absence)
+            self._resource_event("resource.cleanup_confirmed", handles=self._resource_handles)
         except BaseException as error:
             self._resource_event(
                 "resource.cleanup_pending",
@@ -200,6 +224,12 @@ class ObservedDockerEnvironment(DockerEnvironment):
                 handles=self._resource_handles,
             )
             if isinstance(error, Exception):
-                raise HarborResourceCleanupPending("Native Docker cleanup remains pending") from error
+                raise HarborResourceCleanupPending(
+                    "Native Docker cleanup remains pending"
+                ) from error
             raise
-        self._resource_event("resource.cleanup_confirmed", handles=self._resource_handles)
+        finally:
+            if self._resource_owner_lock is not None:
+                fcntl.flock(self._resource_owner_lock.fileno(), fcntl.LOCK_UN)
+                self._resource_owner_lock.close()
+                self._resource_owner_lock = None
