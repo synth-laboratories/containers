@@ -60,3 +60,21 @@ def test_deployment_lookup_does_not_repeat_mutation(monkeypatch, capsys):
     target.find_deployment_operation.assert_awaited_once_with("pool", "task", project_id="project", idempotency_key="stable")
     target.mutate_deployment.assert_not_called()
     assert json.loads(capsys.readouterr().out)["state"] == "recovery_required"
+
+
+def test_lease_assign_uses_shared_client_and_prints_receipt(monkeypatch, capsys):
+    target = client(monkeypatch)
+    target.assign_lease.return_value = {'lease':{'lease_id':'lease-1','execution_substrate':'docker'}}
+    assert cli.main(['lease-assign','project','--image-kind','synth_sdk','--substrate','docker',
+                     '--idempotency-key','stable','--ttl-seconds','300']) == 0
+    target.assign_lease.assert_awaited_once_with(project_id='project',image_kind='synth_sdk',
+                                                substrate='docker',idempotency_key='stable',ttl_seconds=300)
+    assert json.loads(capsys.readouterr().out)['lease']['lease_id']=='lease-1'
+
+
+def test_lease_release_does_not_delete_deployment(monkeypatch, capsys):
+    target = client(monkeypatch)
+    target.release_lease.return_value = {'lease':{'status':'released'}}
+    assert cli.main(['lease-release','lease-1']) == 0
+    target.release_lease.assert_awaited_once_with('lease-1')
+    target.mutate_deployment.assert_not_called()

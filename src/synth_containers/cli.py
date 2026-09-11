@@ -96,6 +96,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     cancel.add_argument("rollout_id")
 
+    lease_assign = sub.add_parser("lease-assign", help="acquire a project lease with verified placement")
+    lease_assign.add_argument("project_id")
+    lease_assign.add_argument("--image-kind", required=True)
+    lease_assign.add_argument("--substrate", required=True, choices=("docker", "daytona"))
+    lease_assign.add_argument("--idempotency-key", required=True)
+    lease_assign.add_argument("--ttl-seconds", type=int, default=900)
+    for action in ("get", "renew", "release"):
+        command = sub.add_parser(f"lease-{action}", help=f"{action} a hosted container lease")
+        command.add_argument("lease_id")
+        if action == "renew":
+            command.add_argument("--ttl-seconds", type=int, default=900)
+
     for action in ("get", "create", "update", "delete", "operation", "lookup"):
         command = sub.add_parser(
             f"deployment-{action}", help=f"{action} a project-owned hosted deployment"
@@ -114,6 +126,22 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     try:
+        if args.command.startswith("lease-"):
+            async def operate_lease() -> dict:
+                async with PoolClient.from_env() as client:
+                    if args.command == "lease-assign":
+                        return await client.assign_lease(
+                            project_id=args.project_id, image_kind=args.image_kind,
+                            substrate=args.substrate, idempotency_key=args.idempotency_key,
+                            ttl_seconds=args.ttl_seconds,
+                        )
+                    if args.command == "lease-get":
+                        return await client.get_lease(args.lease_id)
+                    if args.command == "lease-renew":
+                        return await client.renew_lease(args.lease_id, ttl_seconds=args.ttl_seconds)
+                    return await client.release_lease(args.lease_id)
+            print(json.dumps(asyncio.run(operate_lease()), sort_keys=True))
+            return 0
         if args.command.startswith("deployment-"):
             action = args.command.removeprefix("deployment-")
             deployment_payload = {}

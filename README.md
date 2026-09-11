@@ -120,3 +120,26 @@ interchangeable. Call `unsupported_limit_capabilities` for optional planning
 requirements and report the returned entries; do not silently drop mandatory
 ones. This additive SDK surface does not yet establish hosted Rhodes or native
 Harbor capability parity.
+
+### Project container leases
+
+`PoolClient.assign_lease` requires a project, image capability, explicit substrate
+and stable idempotency key. It verifies the returned server-resolved substrate,
+project, image capability and active status. An older response that only repeats
+the requested provider in metadata is refused. A refusal after a response may
+refer to an allocated lease: inspect the reported lease ID and reconcile before
+changing the request. Mutating transport failures are never retried automatically.
+
+The CLI exposes the same client methods:
+
+```sh
+synth-containers lease-assign PROJECT_UUID --image-kind synth_sdk --substrate docker --idempotency-key stable --ttl-seconds 300
+synth-containers lease-get LEASE_ID
+synth-containers lease-renew LEASE_ID --ttl-seconds 300
+synth-containers lease-release LEASE_ID
+```
+
+Use `daytona` for an explicitly Daytona-backed pool. Renewal requests accept
+60–3600 seconds. Releasing a lease releases its admission claim; deployment
+deletion remains a separate revision-checked operation. These methods do not
+bypass Rhodes rollout admission by calling the returned container URL directly.

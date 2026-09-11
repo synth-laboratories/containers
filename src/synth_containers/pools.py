@@ -644,6 +644,68 @@ class PoolClient:
             else []
         )
 
+    # -- project container leases -----------------------------------------
+
+    async def assign_lease(
+        self, *, project_id: str, image_kind: str,
+        substrate: ContainerComputeProvider | str, idempotency_key: str,
+        ttl_seconds: int = 900,
+    ) -> dict[str, Any]:
+        """Require acknowledged placement; retain the key after uncertain delivery.
+
+        A legacy server that merely echoes placement in metadata does not
+        establish it. A mismatched receipt may describe an allocated lease:
+        inspect it before changing the request or issuing another assignment.
+        """
+        project_id = str(UUID(project_id))
+        provider = ContainerComputeProvider.parse(substrate).value
+        if not isinstance(image_kind, str) or not 1 <= len(image_kind) <= 128 or image_kind.strip() != image_kind:
+            raise PoolClientError("image_kind must be 1-128 non-padded characters")
+        image_kind = image_kind.lower()
+        if not isinstance(idempotency_key, str) or not 1 <= len(idempotency_key) <= 128 or idempotency_key.strip() != idempotency_key:
+            raise PoolClientError("lease idempotency key must be 1-128 non-padded characters")
+        self._validate_lease_ttl(ttl_seconds)
+        body = await self._request("POST", "/container_leases", payload={
+            "project_id": project_id, "image_kind": image_kind,
+            "substrate": provider, "idempotency_key": idempotency_key,
+            "ttl_seconds": ttl_seconds,
+        })
+        lease = body.get("lease")
+        if (
+            not isinstance(lease, dict)
+            or not isinstance(lease.get("lease_id"), str)
+            or not lease["lease_id"]
+            or lease.get("project_id") != project_id
+            or lease.get("image_kind") != image_kind
+            or lease.get("execution_substrate") != provider
+            or lease.get("status") != "active"
+        ):
+            lease_id = str(lease.get("lease_id", "unknown"))[:256] if isinstance(lease, dict) else "unknown"
+            raise PoolClientError(
+                f"lease receipt does not establish requested placement; lease_id={lease_id!r}; "
+                "reconcile the saved lease before another assignment"
+            )
+        return body
+
+    @staticmethod
+    def _validate_lease_ttl(ttl_seconds: int) -> None:
+        if type(ttl_seconds) is not int or not 60 <= ttl_seconds <= 3600:
+            raise PoolClientError("lease ttl_seconds must be an integer between 60 and 3600")
+
+    async def get_lease(self, lease_id: str) -> dict[str, Any]:
+        return await self._request("GET", f"/container_leases/{self._deployment_coordinate(lease_id)}")
+
+    async def renew_lease(self, lease_id: str, *, ttl_seconds: int = 900) -> dict[str, Any]:
+        self._validate_lease_ttl(ttl_seconds)
+        return await self._request(
+            "POST", f"/container_leases/{self._deployment_coordinate(lease_id)}/renew",
+            payload={"ttl_seconds": ttl_seconds},
+        )
+
+    async def release_lease(self, lease_id: str) -> dict[str, Any]:
+        """Release the admission claim; this does not delete its deployment."""
+        return await self._request("POST", f"/container_leases/{self._deployment_coordinate(lease_id)}/release")
+
     # -- tasks -------------------------------------------------------------
 
     @staticmethod
