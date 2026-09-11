@@ -78,6 +78,14 @@ def main(argv: list[str] | None = None) -> int:
     logs.add_argument("--port", type=int, default=None)
     logs.add_argument("--tail", type=int, default=200)
 
+    journal = sub.add_parser("journal", help="replay a local operator journal without provider access")
+    journal.add_argument("path", type=Path)
+    journal.add_argument("--run-id", default=None)
+    journal.add_argument("--after-sequence", type=int, default=0)
+    journal.add_argument("--limit", type=int, default=100)
+    journal.add_argument("--follow", action="store_true")
+    journal.add_argument("--timeout-seconds", type=float, default=300)
+
     watch = sub.add_parser("watch", help="observe a hosted rollout from a saved sequence")
     watch.add_argument("rollout_id")
     watch.add_argument("--after-sequence", type=int, default=0)
@@ -126,6 +134,22 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     try:
+        if args.command == "journal":
+            from .operator_journal import follow_operator_events, read_operator_events
+
+            if args.follow:
+                for event in follow_operator_events(
+                    args.path, run_id=args.run_id, after_sequence=args.after_sequence,
+                    limit=args.limit, timeout_seconds=args.timeout_seconds,
+                ):
+                    print(json.dumps(event, sort_keys=True), flush=True)
+            else:
+                page = read_operator_events(
+                    args.path, run_id=args.run_id,
+                    after_sequence=args.after_sequence, limit=args.limit,
+                )
+                print(json.dumps(page, sort_keys=True))
+            return 0
         if args.command.startswith("lease-"):
             async def operate_lease() -> dict:
                 async with PoolClient.from_env() as client:

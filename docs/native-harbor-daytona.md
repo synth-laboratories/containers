@@ -41,6 +41,22 @@ owner, timestamp and typed facts. Error messages and credentials are excluded.
 This is a local operator journal, not sealed Trace V5 evidence or the hosted
 Rhodes event service. The caller must retain/upload the trial directory.
 
+The CLI can replay that custody without provider credentials:
+
+```sh
+synth-containers journal /path/to/trial/resource-events.jsonl --limit 100
+synth-containers journal /path/to/trial/resource-events.jsonl --after-sequence 3
+synth-containers journal /path/to/trial/resource-events.jsonl --follow --timeout-seconds 300
+```
+
+Replay returns `events`, `next_sequence`, `high_water` and `has_more`; save the
+last processed sequence for reconnect. Follow emits one JSON event per line,
+flushes each event, and stops at the observation timeout without stopping the
+sandbox. It pins the first observed run identity and retries only writer-lock
+contention. Missing files, corrupt/partial history and cursors ahead of durable
+history are explicit errors. Reading is capped at 64 MiB; larger journals need
+indexed/hosted custody. This CLI does not imply Workshop upload or cloud retention.
+
 Cleanup issues one delete request, then requires a fresh typed provider absence.
 Deletion errors and ambiguous reads emit `resource.cleanup_pending` and retain
 the handle. Keeping a sandbox indefinitely with `delete=False` is refused.
