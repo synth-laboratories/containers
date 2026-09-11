@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from contextlib import closing
 from datetime import UTC, datetime
 from importlib.metadata import version
 from pathlib import Path
@@ -73,7 +74,7 @@ class ObservedDockerEnvironment(DockerEnvironment):
             raise ValueError("Native Docker egress image was not prepared")
 
         def inspect_image():
-            with docker.from_env(timeout=5) as client:
+            with closing(docker.from_env(timeout=5)) as client:
                 client.images.get(self._qualified_egress_image)
 
         async with asyncio.timeout(10):
@@ -96,7 +97,7 @@ class ObservedDockerEnvironment(DockerEnvironment):
 
     def _discover(self) -> list[dict[str, str]]:
         """Read only; refuse ambiguous labels rather than widening cleanup."""
-        with docker.from_env(timeout=5) as client:
+        with closing(docker.from_env(timeout=5)) as client:
             filters = {"label": "com.docker.compose.project=" + self._resource_owner}
             found = []
             for kind, manager in (
@@ -161,7 +162,7 @@ class ObservedDockerEnvironment(DockerEnvironment):
         self._resource_event("resource.created", handles=self._resource_handles)
 
     def _confirm_absence(self):
-        with docker.from_env(timeout=5) as client:
+        with closing(docker.from_env(timeout=5)) as client:
             managers = {
                 "container": client.containers,
                 "network": client.networks,

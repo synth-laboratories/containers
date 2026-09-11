@@ -106,9 +106,7 @@ def test_ambiguous_creation_without_primary_handle_stays_pending(tmp_path, monke
 def client_fixture(monkeypatch, env, *, foreign=False):
     labels = {"com.docker.compose.project": "foreign" if foreign else env._resource_owner}
     container = SimpleNamespace(id="owned", attrs={"Config": {"Labels": labels}})
-    client = Mock()
-    client.__enter__ = Mock(return_value=client)
-    client.__exit__ = Mock(return_value=None)
+    client = SimpleNamespace(containers=Mock(), networks=Mock(), volumes=Mock(), close=Mock())
     client.containers.list.return_value = [container]
     client.networks.list.return_value = []
     client.volumes.list.return_value = []
@@ -120,6 +118,7 @@ def test_discovery_is_exact_and_rejects_foreign_resources(tmp_path, monkeypatch)
     env = environment(tmp_path)
     client = client_fixture(monkeypatch, env)
     assert env._discover() == [{"kind": "container", "id": "owned"}]
+    client.close.assert_called_once()
     client.containers.list.assert_called_once_with(
         all=True, filters={"label": "com.docker.compose.project=" + env._resource_owner}
     )
