@@ -34,3 +34,12 @@ A custody receipt confirms an operator journal in the hosted database. It does
 not mean the scientific result or attachments were published and does not seal
 Trace V5. The Workshop projection keeps these outcomes separate. Provider runs
 and restart/duplication qualification belong to the receiving testing engineer.
+
+## Hosted process capture recovery
+
+The canonical `PoolClient.read_native_agent_capture(pool_id, rollout_id, capture_id)`
+reads the original backend-admitted capture and coverage.
+`publish_native_agent_capture(...)` retries publication of those original bytes;
+it never reruns the agent. Open captures require backend epoch fencing before
+interrupted recovery. These methods first ship in the unpublished dev29 candidate.
+They do not establish whole-attempt, visual, or lossless live capture.

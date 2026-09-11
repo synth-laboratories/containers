@@ -1237,6 +1237,39 @@ class PoolClient:
             raise PoolClientError("native custody completion was not acknowledged")
         return receipt
 
+    async def read_native_agent_capture(
+        self, pool_id: str, rollout_id: str, capture_id: str,
+    ) -> dict[str, Any]:
+        """Read admitted process-event custody and its explicit coverage limits."""
+        receipt = await self._request(
+            "GET", f"/pools/{self._deployment_coordinate(pool_id)}/rollouts/"
+            f"{self._deployment_coordinate(rollout_id)}/native_agent_captures/"
+            f"{self._deployment_coordinate(capture_id)}",
+        )
+        binding = receipt.get("binding")
+        if (
+            receipt.get("capture_id") != capture_id
+            or not isinstance(binding, dict)
+            or binding.get("pool_id") != pool_id
+            or binding.get("rollout_id") != rollout_id
+        ):
+            raise PoolClientError("native agent capture identity mismatch")
+        return receipt
+
+    async def publish_native_agent_capture(
+        self, pool_id: str, rollout_id: str, capture_id: str,
+    ) -> dict[str, Any]:
+        """Recover publication of original captured bytes without rerunning work.
+
+        An open capture can close as interrupted only after backend epoch fencing.
+        Publication does not establish complete native-attempt coverage.
+        """
+        return await self._request(
+            "POST", f"/pools/{self._deployment_coordinate(pool_id)}/rollouts/"
+            f"{self._deployment_coordinate(rollout_id)}/native_agent_captures/"
+            f"{self._deployment_coordinate(capture_id)}/publish",
+        )
+
     async def attach_trace_archive(
         self, pool_id: str, rollout_id: str, *, file_id: str, factory_id: str,
         run_id: str, expected_bundle_id: str, expected_manifest_digest: str,
