@@ -1317,9 +1317,9 @@ class PoolClient:
             raise PoolClientError("invalid rollout event continuation")
         if page.get("rollout_id") != rollout_id or not isinstance(page.get("status"), str):
             raise PoolClientError("invalid rollout event page identity/status")
-        for field in ("cleanup_pending", "publication_pending", "inference_pending"):
-            if field in page and type(page[field]) is not bool:
-                raise PoolClientError(f"invalid rollout {field}")
+        for status_field in ("cleanup_pending", "publication_pending", "inference_pending"):
+            if status_field in page and type(page[status_field]) is not bool:
+                raise PoolClientError(f"invalid rollout {status_field}")
         return page
 
     async def watch_events(
