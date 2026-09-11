@@ -178,3 +178,43 @@ mode asserts that the selected image already supplies its required runtime
 files; it does not manufacture build provenance. CyberneticsBench uses this mode
 because its image recipe bakes the environment payload and its verifier must not
 find build-only/scorer-source markers copied into the agent workspace.
+
+## Private image preparation
+
+`synth-containers harbor-image-context SOURCE NEW_DESTINATION` freezes the
+bounded `environment/` tree and saves its digest together with the complete
+source-package digest. It does not load a provider SDK. It preserves the
+Dockerfile, rejects changed source or context, and excludes verifier files that
+live outside `environment/`. It does not resolve mutable base tags or assert
+that image bytes are reproducible from the recipe.
+
+The Python `DaytonaSnapshotBuild` coordinator and version-pinned
+`DaytonaSnapshotProvider` separate context upload, create admission, readiness
+polling and cleanup. `SnapshotBuildLimits` bounds each phase independently.
+The provider adapter uses Daytona 0.210's context uploader and generated API
+with request timeouts; it avoids the SDK's unbounded create/poll loop.
+The journal records intent before creation and snapshot identity before polling.
+Creation is never retried. A lost response triggers exact owner-name recovery,
+with discovered identity saved before deletion. Cleanup requires typed absence
+of the known ID and owner name. Empty discovery without an observed ID remains
+pending. Provider exception text and registry references are excluded from events.
+
+The local `image-events.jsonl` uses the same replay/follow CLI as trial resource
+events. An active snapshot produces an artifact receipt binding provider ID,
+owner and context/source digests. It explicitly has no verified image digest and
+cannot pass the native digest-pinned launch gate. A provider tagged registry ref
+is not silently converted into an immutable image identity.
+
+Failed builds attempt bounded cleanup. For a terminated worker,
+`recover_daytona_snapshot_build(output, provider)` reconciles expired custody
+under an exclusive lock; it cannot take over a live builder or create another
+snapshot. Successful snapshots remain artifacts until the owning operation
+calls `cleanup()`. Recovery only deletes a completed artifact after a durable
+cleanup request exists. Preserve the custody directory until absence is confirmed.
+
+This is a local build foundation, not a hosted build service. Resulting sandbox
+CPU/memory/disk settings are not limits on Daytona's internal builder. Builder
+resource limits, provider storage expiry, monetary reservations, context-upload
+object retention and hosted orphan recovery are not established here. A cloud
+qualification must separately establish those operational bounds and authorize
+its costs. No paid provider build is implied by the offline tests.

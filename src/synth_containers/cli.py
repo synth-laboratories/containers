@@ -100,6 +100,10 @@ def main(argv: list[str] | None = None) -> int:
     stage.add_argument("--docker-egress-image")
     stage.add_argument("--environment-transfer", choices=["preserve", "image_only"], default="preserve")
 
+    context = sub.add_parser("harbor-image-context", help="freeze a Harbor image context without provider access")
+    context.add_argument("source", type=Path)
+    context.add_argument("destination", type=Path)
+
     recovery = sub.add_parser("harbor-daytona-reconcile", help="reconcile an expired native Harbor trial")
     recovery.add_argument("trial_dir", type=Path)
 
@@ -151,6 +155,13 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     try:
+        if args.command == "harbor-image-context":
+            from .harbor_environment import inspect_harbor_package
+            from .harbor_image_context import freeze_harbor_image_context
+
+            context = freeze_harbor_image_context(inspect_harbor_package(args.source), args.destination)
+            print(json.dumps(context.as_dict(), sort_keys=True))
+            return 0
         if args.command == "harbor-stage":
             from .harbor_environment import (
                 HarborProviderCompatibility,
