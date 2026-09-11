@@ -17,6 +17,7 @@ from harbor.environments.docker.docker import DockerEnvironment
 
 from .harbor_environment import is_pinned_harbor_image
 from .operator_journal import OperatorJournal
+from .harbor_resource_receipts import HarborResourceCleanupPending
 
 
 class ObservedDockerEnvironment(DockerEnvironment):
@@ -198,5 +199,7 @@ class ObservedDockerEnvironment(DockerEnvironment):
                 error_type=type(error).__name__,
                 handles=self._resource_handles,
             )
+            if isinstance(error, Exception):
+                raise HarborResourceCleanupPending("Native Docker cleanup remains pending") from error
             raise
         self._resource_event("resource.cleanup_confirmed", handles=self._resource_handles)

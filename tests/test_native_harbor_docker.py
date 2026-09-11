@@ -98,7 +98,7 @@ def test_ambiguous_creation_without_primary_handle_stays_pending(tmp_path, monke
     env._resource_create_attempted = True
     monkeypatch.setattr(env, "_discover", list)
     monkeypatch.setattr(DockerEnvironment, "stop", AsyncMock())
-    with pytest.raises(RuntimeError, match="primary handle"):
+    with pytest.raises(RuntimeError, match="cleanup remains pending"):
         asyncio.run(env.stop(True))
     assert events(env)[-1]["event"] == "resource.cleanup_pending"
 
