@@ -268,3 +268,19 @@ def test_daytona_refuses_docker_custody_options(tmp_path):
     bound = release(tmp_path / "source")
     with pytest.raises(HarborEnvironmentError, match="require Docker"):
         stage_native_harbor_task(bound, tmp_path / "stage", docker_resource_custody=True)
+
+
+def test_image_only_prevents_build_context_upload_into_agent_workspace(tmp_path):
+    bound = release(tmp_path / "source", provider="docker")
+    context = bound.draft.root / "environment" / "private-build-input.txt"
+    context.write_text("This was baked into the image, not a runtime upload.")
+    bound = register_harbor_environment(inspect_harbor_package(bound.draft.root), agent_image=IMAGE,
+                                       verifier_image=IMAGE, provider=bound.provider)
+    receipt = stage_native_harbor_task(bound, tmp_path / "stage", environment_transfer="image_only")
+    task = Path(receipt["task_path"])
+    assert (task / "environment").is_dir() and not list((task / "environment").iterdir())
+    assert (task / "tests/test.sh").read_bytes() == (bound.draft.root / "tests/test.sh").read_bytes()
+    assert context.is_file()
+    assert receipt["environment_transfer"] == "image_only"
+    assert set(receipt["excluded_build_files"]) == {"environment/Dockerfile", "environment/private-build-input.txt"}
+    assert receipt["image_build_provenance"] == "operator_bound_not_verified"

@@ -98,6 +98,7 @@ def main(argv: list[str] | None = None) -> int:
     stage.add_argument("--storage-mb", type=int)
     stage.add_argument("--docker-resource-custody", action="store_true")
     stage.add_argument("--docker-egress-image")
+    stage.add_argument("--environment-transfer", choices=["preserve", "image_only"], default="preserve")
 
     recovery = sub.add_parser("harbor-daytona-reconcile", help="reconcile an expired native Harbor trial")
     recovery.add_argument("trial_dir", type=Path)
@@ -168,6 +169,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(stage_native_harbor_task(
                 release, args.destination, creation_timeout_seconds=args.creation_timeout_seconds,
                 resource_ttl_minutes=args.resource_ttl_minutes,
+                environment_transfer=args.environment_transfer,
                 docker_resource_custody=args.docker_resource_custody,
                 docker_egress_image=args.docker_egress_image,
                 resource_request=(HarborResourceRequest(cpus=args.cpus, memory_mb=args.memory_mb,

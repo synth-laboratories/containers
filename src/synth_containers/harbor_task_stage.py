@@ -137,6 +137,7 @@ def stage_native_harbor_task(
     *,
     creation_timeout_seconds: int = 300,
     resource_ttl_minutes: int = 20,
+    environment_transfer: str = "preserve",
     resource_request: HarborResourceRequest | None = None,
     docker_resource_custody: bool = False,
     docker_egress_image: str | None = None,
@@ -149,6 +150,8 @@ def stage_native_harbor_task(
     The receipt is committed last, after source and copied-tree reconciliation.
     This binds an operator-selected image; it does not prove how it was built.
     """
+    if environment_transfer not in {"preserve", "image_only"}:
+        raise HarborEnvironmentError("harbor_native_environment_transfer_invalid")
     if type(creation_timeout_seconds) is not int or not 1 <= creation_timeout_seconds <= 300:
         raise HarborEnvironmentError("harbor_native_creation_allowance_invalid")
     if not release.validation.valid or not release.freshness().fresh:
@@ -212,7 +215,13 @@ def stage_native_harbor_task(
         raise HarborEnvironmentError("harbor_native_source_changed_during_stage")
     (destination / "source-task.toml").write_text(original)
     (task / "task.toml").write_text(staged_toml)
-    (task / "environment" / "Dockerfile").unlink()
+    excluded = ["environment/Dockerfile"]
+    if environment_transfer == "image_only":
+        excluded = [str(path.relative_to(task)) for path in _tree_files(task / "environment")]
+        shutil.rmtree(task / "environment")
+        (task / "environment").mkdir()
+    else:
+        (task / "environment" / "Dockerfile").unlink()
     receipt = {
         "schema_version": "synth.harbor-native-task-stage.v1",
         "task_path": str(task),
@@ -239,7 +248,8 @@ def stage_native_harbor_task(
         "source_creation_timeout_seconds": tomllib.loads(original)["environment"].get(
             "build_timeout_sec"
         ),
-        "excluded_build_files": ["environment/Dockerfile"],
+        "environment_transfer": environment_transfer,
+        "excluded_build_files": excluded,
         "image_build_provenance": "operator_bound_not_verified",
         "release": release.as_dict(),
     }

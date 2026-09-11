@@ -167,3 +167,14 @@ TTL and hard workspace quota remain unsupported and explicitly reported as such.
 Set the process `TMPDIR` to a run-owned directory for Harbor's temporary Compose
 files. This extension is opt-in while benchmark front doors retain their pinned
 runtime behavior; there is no automatic legacy lane migration.
+
+Prebuilt staging distinguishes build context from runtime upload.
+`environment_transfer="image_only"` (CLI `--environment-transfer image_only`)
+retains an empty `environment/` directory after verifying the complete source
+copy. It records every omitted build-context file in the receipt and preserves
+the task, instruction and verifier files. This is explicit: the default
+`preserve` behavior still uploads non-Dockerfile environment files. Image-only
+mode asserts that the selected image already supplies its required runtime
+files; it does not manufacture build provenance. CyberneticsBench uses this mode
+because its image recipe bakes the environment payload and its verifier must not
+find build-only/scorer-source markers copied into the agent workspace.
