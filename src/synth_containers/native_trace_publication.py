@@ -373,7 +373,8 @@ async def publish_native_trace_evidence(
             (deadline - datetime.now(UTC)).total_seconds(),
             monotonic_deadline - asyncio.get_running_loop().time(),
         )
-        if remaining <= 0:
+        promotion_path = output / "promotion-custody.json"
+        if remaining <= 0 and not promotion_path.exists():
             receipt = await _reconcile_committed(
                 store,
                 run_id=run_id,
@@ -385,18 +386,21 @@ async def publish_native_trace_evidence(
             )
             _durable(receipt_path, receipt)
             return receipt
-        async with asyncio.timeout(remaining):
-            committed = await store.upload_bundle(
-                frozen / "bundle",
-                project_id=project_id,
-                run_id=run_id,
-                metadata={
-                    "native_evidence_complete": freeze["complete"],
-                    "incomplete_trace_digests": freeze["incomplete_trace_digests"],
-                },
-                transfer_timeout_seconds=remaining,
-            )
-        value = committed.to_wire() if hasattr(committed, "to_wire") else committed
+        if promotion_path.exists():
+            value = _json(promotion_path)
+        else:
+            async with asyncio.timeout(remaining):
+                committed = await store.upload_bundle(
+                    frozen / "bundle",
+                    project_id=project_id,
+                    run_id=run_id,
+                    metadata={
+                        "native_evidence_complete": freeze["complete"],
+                        "incomplete_trace_digests": freeze["incomplete_trace_digests"],
+                    },
+                    transfer_timeout_seconds=remaining,
+                )
+            value = committed.to_wire() if hasattr(committed, "to_wire") else committed
         if (
             not isinstance(value, dict)
             or value.get("schema_version") != "synth.trace-promotion-receipt.v1"
@@ -410,6 +414,9 @@ async def publish_native_trace_evidence(
         ):
             raise ValueError("Trace store did not confirm the pinned native publication")
         assert_no_secrets(value, where="native trace promotion receipt")
+        # Artifact custody survives catalog/run-link outages independently. This
+        # original receipt has no invented run/project attestation.
+        _durable(promotion_path, value)
         binding = await _reconcile_committed(
             store,
             run_id=run_id,
