@@ -1062,8 +1062,9 @@ class PoolClient:
             raise PoolClientError("invalid rollout event continuation")
         if page.get("rollout_id") != rollout_id or not isinstance(page.get("status"), str):
             raise PoolClientError("invalid rollout event page identity/status")
-        if "cleanup_pending" in page and type(page["cleanup_pending"]) is not bool:
-            raise PoolClientError("invalid rollout cleanup state")
+        for field in ("cleanup_pending", "publication_pending"):
+            if field in page and type(page[field]) is not bool:
+                raise PoolClientError(f"invalid rollout {field}")
         return page
 
     async def watch_events(
@@ -1097,7 +1098,9 @@ class PoolClient:
                 cursor = event["sequence"]
             if page["has_more"]:
                 continue
-            if page["status"] in TERMINAL_STATUSES and not page.get("cleanup_pending", False):
+            if (page["status"] in TERMINAL_STATUSES
+                and not page.get("cleanup_pending", False)
+                and not page.get("publication_pending", False)):
                 return
             await asyncio.sleep(min(poll_interval_seconds, max(0, deadline - loop.time())))
         raise PoolRolloutTimeout(

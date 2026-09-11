@@ -38,3 +38,8 @@ termination until recovery and capacity release are confirmed. Its timeout bound
 observation only; disconnecting does not cancel execution or recovery. Resume
 with `--after-sequence` from the last persisted event. Older backends without the
 field retain scientific-terminal behavior.
+
+Backends exposing `publication_pending` keep watchers attached until the queued
+result snapshot has a terminal publication receipt as well. Cleanup and result
+publication are independent; neither field certifies the full trace bundle or
+settled costs. Publication failures remain visible and may be retried by recovery.

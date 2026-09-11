@@ -89,16 +89,20 @@ def test_ambiguous_mutation_is_not_automatically_repeated():
 
 
 
-def test_terminal_verdict_keeps_watching_until_cleanup_receipt():
+@pytest.mark.parametrize("pending,receipt", [
+    ("cleanup_pending", "rollout.cleanup_confirmed"),
+    ("publication_pending", "rollout.result_publication"),
+])
+def test_terminal_verdict_keeps_watching_until_cleanup_receipt(pending, receipt):
     cursors = []
     def handler(request):
         cursor = int(request.url.params["after_sequence"])
         cursors.append(cursor)
         return httpx.Response(200, json={
             "rollout_id": "r1", "status": "failed", "has_more": False,
-            "cleanup_pending": cursor == 0, "next_sequence": cursor + 1,
+            pending: cursor == 0, "next_sequence": cursor + 1,
             "events": [{"rollout_id": "r1", "sequence": cursor + 1,
-                        "event_type": "rollout.failed" if cursor == 0 else "rollout.cleanup_confirmed"}],
+                        "event_type": "rollout.failed" if cursor == 0 else receipt}],
         })
     async def run():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="https://fixture") as transport:
@@ -106,4 +110,4 @@ def test_terminal_verdict_keeps_watching_until_cleanup_receipt():
             return [event async for event in client.watch_events("r1", poll_interval_seconds=.001)]
     events = asyncio.run(run())
     assert cursors == [0, 1]
-    assert events[-1]["event_type"] == "rollout.cleanup_confirmed"
+    assert events[-1]["event_type"] == receipt
