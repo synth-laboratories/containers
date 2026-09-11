@@ -216,6 +216,30 @@ class HarborEnvironmentRelease:
         }
 
 
+def read_harbor_task_toml(root: str | Path) -> str:
+    """Read at most 1 MiB of regular task metadata without following its symlink."""
+    task_path = Path(root) / "task.toml"
+    try:
+        descriptor = os.open(task_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(descriptor, "rb") as reader:
+            before = os.fstat(reader.fileno())
+            if not stat.S_ISREG(before.st_mode):
+                raise HarborEnvironmentError("harbor_package_task_toml_invalid")
+            encoded = reader.read(_IO_CHUNK_BYTES + 1)
+            after = os.fstat(reader.fileno())
+        if len(encoded) > _IO_CHUNK_BYTES:
+            raise HarborEnvironmentError("harbor_package_task_toml_too_large")
+        if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
+        ):
+            raise HarborEnvironmentError("harbor_package_task_toml_changed")
+        return encoded.decode("utf-8")
+    except (OSError, UnicodeError) as error:
+        raise HarborEnvironmentError("harbor_package_task_toml_invalid") from error
+
+
 def inspect_harbor_package(root: str | Path) -> HarborEnvironmentDraft:
     """Parse a Harbor package without executing any of its content."""
 
@@ -233,12 +257,8 @@ def inspect_harbor_package(root: str | Path) -> HarborEnvironmentDraft:
         if not path.is_file() or path.is_symlink():
             raise HarborEnvironmentError(code)
     try:
-        with task_path.open("rb") as handle:
-            encoded = handle.read(_IO_CHUNK_BYTES + 1)
-        if len(encoded) > _IO_CHUNK_BYTES:
-            raise HarborEnvironmentError("harbor_package_task_toml_too_large")
-        manifest = tomllib.loads(encoded.decode("utf-8"))
-    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as exc:
+        manifest = tomllib.loads(read_harbor_task_toml(package_root))
+    except tomllib.TOMLDecodeError as exc:
         raise HarborEnvironmentError("harbor_package_task_toml_invalid") from exc
     if not isinstance(manifest, dict):
         raise HarborEnvironmentError("harbor_package_task_toml_invalid")

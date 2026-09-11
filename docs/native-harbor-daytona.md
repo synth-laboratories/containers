@@ -120,3 +120,7 @@ boolean/nonfinite phase durations, special files and symlinks are refused.
 Missing network declarations remain `unspecified`; inspection cannot claim
 network isolation on their behalf. Artifact-object declarations need an explicit
 contract adapter and are refused rather than converted into strings.
+
+Task metadata inspection and staging share a bounded reader: at most 1 MiB,
+regular files only, no final symlink following, and no FIFO blocking. Staging
+rechecks the bound at the actual read rather than relying on a prior inventory.

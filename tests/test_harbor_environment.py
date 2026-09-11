@@ -209,3 +209,20 @@ def test_artifact_objects_are_not_silently_stringified(tmp_path):
     )
     with pytest.raises(HarborEnvironmentError, match="artifacts_invalid"):
         inspect_harbor_package(package)
+
+
+@pytest.mark.parametrize('kind', ['oversize', 'symlink', 'fifo'])
+def test_task_metadata_reader_refuses_unbounded_or_nonregular_inputs(tmp_path, kind):
+    import os
+    from synth_containers.harbor_environment import read_harbor_task_toml
+    path = tmp_path / 'task.toml'
+    if kind == 'oversize':
+        path.write_bytes(b'x' * (1024 * 1024 + 1))
+    elif kind == 'symlink':
+        target = tmp_path / 'other.toml'
+        target.write_text('[task]\nname="fixture"\n')
+        path.symlink_to(target)
+    else:
+        os.mkfifo(path)
+    with pytest.raises(HarborEnvironmentError):
+        read_harbor_task_toml(tmp_path)

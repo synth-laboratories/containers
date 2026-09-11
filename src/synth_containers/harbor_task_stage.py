@@ -19,6 +19,7 @@ from .harbor_environment import (
     HarborEnvironmentRelease,
     _tree_digest,
     _tree_files,
+    read_harbor_task_toml,
 )
 
 
@@ -82,7 +83,7 @@ def stage_native_harbor_task(
         raise HarborEnvironmentError("harbor_native_stage_requires_harbor_extra") from error
     if version("harbor") != "0.22.0":
         raise HarborEnvironmentError("harbor_native_stage_requires_qualified_harbor_022")
-    original = (source / "task.toml").read_text()
+    original = read_harbor_task_toml(source)
     manifest = tomllib.loads(original)
     environment = manifest["environment"]
     if environment.get("mounts") or environment.get("volumes"):
