@@ -226,3 +226,29 @@ def test_task_metadata_reader_refuses_unbounded_or_nonregular_inputs(tmp_path, k
         os.mkfifo(path)
     with pytest.raises(HarborEnvironmentError):
         read_harbor_task_toml(tmp_path)
+
+
+@pytest.mark.parametrize("provider", ["docker", "daytona"])
+def test_local_image_identity_is_provider_scoped(tmp_path, provider):
+    draft = inspect_harbor_package(_package(tmp_path / "package"))
+    image = "sha256:" + "c" * 64
+    compatibility = HarborProviderCompatibility(provider_id=provider)
+    if provider == "daytona":
+        with pytest.raises(HarborEnvironmentError, match="agent_image_unpinned"):
+            register_harbor_environment(
+                draft, agent_image=image, verifier_image=image, provider=compatibility
+            )
+    else:
+        bound = register_harbor_environment(
+            draft, agent_image=image, verifier_image=image, provider=compatibility
+        )
+        assert bound.agent_image == image
+
+
+@pytest.mark.parametrize(
+    "image", ["latest", "sha256:abc", "sha256:" + "A" * 64, "bad\x00@sha256:" + "a" * 64, None]
+)
+def test_malformed_image_references_are_not_pinned(image):
+    from synth_containers.harbor_environment import is_pinned_harbor_image
+
+    assert not is_pinned_harbor_image(image, "docker")

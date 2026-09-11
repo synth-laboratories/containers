@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shutil
 import stat
 import tomllib
@@ -22,6 +21,7 @@ from .harbor_environment import (
     _tree_digest,
     _tree_files,
     read_harbor_task_toml,
+    is_pinned_harbor_image,
 )
 
 
@@ -34,7 +34,7 @@ def native_harbor_environment_flags(
     resource_request: HarborResourceRequest | None = None,
 ) -> list[str]:
     """Resolve qualified native backend arguments without widening task resources."""
-    if not re.fullmatch(r"[^\s]+@sha256:[0-9a-f]{64}", image):
+    if not is_pinned_harbor_image(image, provider):
         raise HarborEnvironmentError("native image must be digest-pinned")
     if type(resource_ttl_minutes) is not int or not 1 <= resource_ttl_minutes <= 360:
         raise HarborEnvironmentError(
@@ -208,6 +208,11 @@ def stage_native_harbor_task(
         "environment_release_id": release.release_id,
         "environment_release_digest": release.release_digest,
         "image": release.agent_image,
+        "image_reference_scope": (
+            "docker_local_config_id"
+            if release.agent_image.startswith("sha256:")
+            else "registry_manifest_digest"
+        ),
         "provider": release.provider.provider_id,
         "creation_timeout_seconds": creation_timeout_seconds,
         "source_creation_timeout_seconds": tomllib.loads(original)["environment"].get(

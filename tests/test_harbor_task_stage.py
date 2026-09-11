@@ -230,3 +230,15 @@ def test_partial_or_unbounded_resource_overrides_fail_before_materialization(tmp
     with pytest.raises(HarborEnvironmentError, match='bounded positive'):
         stage_native_harbor_task(release(tmp_path/'source'),tmp_path/'staged', resource_request=HarborResourceRequest(cpus=cpu,memory_mb=memory,storage_mb=storage,gpus=0))
     assert not (tmp_path/'staged').exists()
+
+
+def test_stage_records_local_docker_image_scope(tmp_path):
+    bound = release(tmp_path / "source", provider="docker")
+    image = "sha256:" + "c" * 64
+    bound = register_harbor_environment(
+        bound.draft, agent_image=image, verifier_image=image, provider=bound.provider
+    )
+    receipt = stage_native_harbor_task(bound, tmp_path / "staged")
+    assert receipt["image_reference_scope"] == "docker_local_config_id"
+    assert receipt["native_environment_flags"] == ["--env", "docker"]
+    assert receipt["image_build_provenance"] == "operator_bound_not_verified"

@@ -32,12 +32,14 @@ __all__ = [
     "HarborResourceRequest",
     "HarborValidation",
     "inspect_harbor_package",
+    "is_pinned_harbor_image",
     "register_harbor_environment",
 ]
 
 HARBOR_PACKAGE_DRAFT_SCHEMA = "synth.harbor-package-draft.v1"
 HARBOR_ENVIRONMENT_RELEASE_SCHEMA = "synth.harbor-environment-release.v1"
 _PINNED_IMAGE = re.compile(r"^[^\s]+@sha256:[0-9a-f]{64}$")
+_LOCAL_IMAGE = re.compile(r"sha256:[0-9a-f]{64}")
 _IDENTIFIER = re.compile(r"[^a-z0-9._-]+")
 _ISOLATED_NETWORKS = frozenset({"no-network", "none", "isolated"})
 _MAX_FILE_BYTES = 64 * 1024 * 1024
@@ -335,6 +337,20 @@ def inspect_harbor_package(root: str | Path) -> HarborEnvironmentDraft:
     )
 
 
+def is_pinned_harbor_image(image: str, provider_id: str) -> bool:
+    """Local config IDs are immutable Docker references, never registry digests."""
+    if (
+        not isinstance(image, str)
+        or len(image) > 1024
+        or any(ord(character) < 33 or ord(character) == 127 for character in image)
+    ):
+        return False
+    return bool(
+        _PINNED_IMAGE.fullmatch(image)
+        or (provider_id == "docker" and _LOCAL_IMAGE.fullmatch(image))
+    )
+
+
 def register_harbor_environment(
     draft: HarborEnvironmentDraft,
     *,
@@ -342,11 +358,11 @@ def register_harbor_environment(
     verifier_image: str,
     provider: HarborProviderCompatibility,
 ) -> HarborEnvironmentRelease:
-    """Register prebuilt pinned images as a scored Harbor environment release."""
+    """Bind immutable image references; registration does not qualify scoring."""
 
-    if not _PINNED_IMAGE.fullmatch(agent_image):
+    if not is_pinned_harbor_image(agent_image, provider.provider_id):
         raise HarborEnvironmentError("harbor_release_agent_image_unpinned")
-    if not _PINNED_IMAGE.fullmatch(verifier_image):
+    if not is_pinned_harbor_image(verifier_image, provider.provider_id):
         raise HarborEnvironmentError("harbor_release_verifier_image_unpinned")
     validation = draft.validate(provider)
     if not validation.valid:
