@@ -8,6 +8,7 @@ import pytest
 from dataclasses import dataclass
 from synth_containers import oci_trial as executor
 
+
 @dataclass(frozen=True)
 class TrialLimits:
     max_parallel_trials: int
@@ -199,3 +200,130 @@ def test_stderr_tail_reads_only_the_requested_suffix(tmp_path):
         handle.seek(10_000_000)
         handle.write(b"last message")
     assert executor._tail_text(path, limit=7) == "message"
+
+
+@pytest.mark.parametrize("record", [b"{broken}\n", b"[]\n", b'{"x":NaN}\n', b"\xff\n", b'{"x":1}'])
+def test_final_target_drain_refuses_corrupt_or_partial_records(tmp_path, record):
+    import threading
+
+    path = tmp_path / "events.jsonl"
+    path.write_bytes(record)
+    stop = threading.Event()
+    stop.set()
+    with pytest.raises(executor.ContainerEventStreamError):
+        executor._tail_events(path, lambda _: None, stop)
+
+
+def test_target_drain_has_a_record_bound(tmp_path):
+    import threading
+
+    path = tmp_path / "events.jsonl"
+    path.write_bytes(b"x" * 33)
+    stop = threading.Event()
+    stop.set()
+    with pytest.raises(executor.ContainerEventStreamError, match="record bound"):
+        executor._tail_events(path, lambda _: None, stop, max_record_bytes=32)
+
+
+def test_target_drain_pages_all_retained_records(tmp_path):
+    import threading
+
+    path = tmp_path / "events.jsonl"
+    path.write_bytes(b'{"event":"fixture"}\n' * 600)
+    stop = threading.Event()
+    stop.set()
+    events = []
+    executor._tail_events(path, events.append, stop)
+    assert len(events) == 600
+
+
+def test_live_partial_record_waits_until_completed(tmp_path):
+    path = tmp_path / "events.jsonl"
+    path.write_bytes(b'{"event":')
+
+    class Stop:
+        done = False
+
+        def is_set(self):
+            return self.done
+
+        def wait(self, timeout):
+            with path.open("ab") as handle:
+                handle.write(b'"fixture"}\n')
+            self.done = True
+
+    events = []
+    executor._tail_events(path, events.append, Stop())
+    assert events == [{"event": "fixture"}]
+
+
+def test_event_thread_failure_reaches_owner_and_stops_process(runtime, monkeypatch):
+    driver, request, process, stops = runtime
+    failed = executor.threading.Event()
+
+    def corrupt(*args, **kwargs):
+        failed.set()
+        raise ValueError("fixture corruption")
+
+    monkeypatch.setattr(executor, "_tail_events", corrupt)
+
+    def heartbeat():
+        assert failed.wait(1)
+
+    with pytest.raises(executor.ContainerEventStreamError):
+        driver.run(
+            request, on_event=lambda _: None, should_cancel=lambda: False, heartbeat=heartbeat
+        )
+    assert process.returncode == -9
+    assert len(stops) == 1
+
+
+def test_event_stream_replacement_is_visible(tmp_path):
+    path = tmp_path / "events.jsonl"
+    path.write_bytes(b'{"event":"first"}\n')
+
+    class Stop:
+        def is_set(self):
+            return False
+
+        def wait(self, timeout):
+            replacement = tmp_path / "replacement"
+            replacement.write_bytes(b'{"event":"next"}\n')
+            replacement.replace(path)
+
+    with pytest.raises(executor.ContainerEventStreamError, match="replaced"):
+        executor._tail_events(path, lambda _: None, Stop())
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"image_reference": "mutable:latest"},
+        {"image_reference": "--bad@sha256:" + "ab" * 32},
+        {"network": "typo"},
+        {"secrets": {"BAD=KEY": "value"}},
+    ],
+)
+def test_invalid_direct_request_never_starts(runtime, monkeypatch, change):
+    from dataclasses import replace
+
+    driver, request, _, _ = runtime
+    monkeypatch.setattr(
+        executor.subprocess, "Popen", lambda *a, **k: pytest.fail("invalid request started")
+    )
+    with pytest.raises(executor.ExecutionContractError):
+        driver.run(
+            replace(request, **change),
+            on_event=lambda _: None,
+            should_cancel=lambda: False,
+            heartbeat=lambda: None,
+        )
+
+
+@pytest.mark.parametrize("cpu", [float("nan"), float("inf"), True, -1, 10**1000])
+def test_invalid_cpu_is_rejected_before_execution(runtime, cpu):
+    from dataclasses import replace
+
+    _, request, _, _ = runtime
+    with pytest.raises(executor.ExecutionContractError):
+        executor.validate_trial_request(replace(request, limits=replace(request.limits, cpus=cpu)))

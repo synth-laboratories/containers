@@ -15,7 +15,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
+import queue
+import re
+import stat
 import shutil
 import subprocess
 import threading
@@ -31,6 +35,7 @@ from synth_containers.rollout_limits import (
     RolloutLimits,
     RolloutLimitSupervisor,
 )
+
 
 class ExecutionContractError(ValueError):
     """An execution request cannot be represented by this provider."""
@@ -51,6 +56,10 @@ class TrialExecutionLimits(Protocol):
 
 class ContainerRuntimeError(RuntimeError):
     """The OCI runtime, not the evaluated policy, is what went wrong."""
+
+
+class ContainerEventStreamError(ContainerRuntimeError):
+    """Target observation failed; do not present its evidence as complete."""
 
 
 class StopFailureReason(StrEnum):
@@ -111,6 +120,44 @@ class TrialExecutor(Protocol):
         should_cancel: Callable[[], bool],
         heartbeat: Callable[[], None],
     ) -> TrialExecution: ...
+
+
+def validate_trial_request(request: TrialRunRequest) -> None:
+    """Refuse unrepresentable controls before filesystem or provider work."""
+    reference = request.image_reference
+    if (
+        not isinstance(reference, str)
+        or reference.startswith("-")
+        or re.fullmatch(r"(?:[^\s@]+@)?sha256:[0-9a-f]{64}", reference) is None
+    ):
+        raise ExecutionContractError("trial image must be pinned by sha256 digest")
+    if request.network not in {"none", "bridge"}:
+        raise ExecutionContractError("trial network must be none or bridge")
+    cpu = request.limits.cpus
+    if isinstance(cpu, bool) or not isinstance(cpu, (int, float)):
+        raise ExecutionContractError("trial cpus must be finite and positive")
+    try:
+        valid_cpu = math.isfinite(cpu) and cpu > 0
+    except OverflowError:
+        valid_cpu = False
+    if not valid_cpu:
+        raise ExecutionContractError("trial cpus must be finite and positive")
+    if type(request.limits.memory_mb) is not int or request.limits.memory_mb <= 0:
+        raise ExecutionContractError("trial memory_mb must be a positive integer")
+    try:
+        RolloutLimits(request.limits.timeout_seconds, request.limits.max_output_bytes)
+    except (ValueError, TypeError, OverflowError) as error:
+        raise ExecutionContractError("invalid trial time/output limits") from error
+    for path in (request.input_dir, request.policy_dir, request.output_dir):
+        if not path.is_absolute() or "," in str(path) or path.is_symlink():
+            raise ExecutionContractError(
+                "trial mount paths must be absolute, non-symlink and comma-free"
+            )
+    for name, value in request.secrets.items():
+        if not isinstance(name, str) or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) is None:
+            raise ExecutionContractError("invalid injected environment name")
+        if not isinstance(value, str) or "\0" in value:
+            raise ExecutionContractError("invalid injected environment value")
 
 
 class OciTrialExecutor:
@@ -196,6 +243,7 @@ class OciTrialExecutor:
         should_cancel: Callable[[], bool],
         heartbeat: Callable[[], None],
     ) -> TrialExecution:
+        validate_trial_request(request)
         request.output_dir.mkdir(parents=True, exist_ok=True)
         # Docker must not create this nested mountpoint inside a read-only parent.
         policy_mount = request.input_dir / "policy"
@@ -244,7 +292,14 @@ class OciTrialExecutor:
         supervisor = RolloutLimitSupervisor(
             RolloutLimits(request.limits.timeout_seconds, request.limits.max_output_bytes)
         )
-        with stderr_path.open("wb") as stderr_handle:
+        stderr_fd = os.open(
+            stderr_path,
+            os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW | os.O_NONBLOCK,
+            0o600,
+        )
+        with os.fdopen(stderr_fd, "wb") as stderr_handle:
+            if not stat.S_ISREG(os.fstat(stderr_handle.fileno()).st_mode):
+                raise ExecutionContractError("stderr output must be a regular file")
             process = subprocess.Popen(  # noqa: S603 - fixed binary, recipe-pinned argv
                 argv,
                 stdin=subprocess.DEVNULL,
@@ -253,17 +308,31 @@ class OciTrialExecutor:
                 env=self._env(),
             )
             stop_tailing = threading.Event()
-            tail = threading.Thread(
-                target=_tail_events,
-                args=(request.output_dir / "events.jsonl", on_event, stop_tailing),
-                daemon=True,
-            )
+            tail_errors: queue.SimpleQueue[Exception] = queue.SimpleQueue()
+
+            def follow_target_events() -> None:
+                try:
+                    _tail_events(request.output_dir / "events.jsonl", on_event, stop_tailing)
+                except Exception as error:
+                    # Relay across the thread boundary; never lose a target or
+                    # observer failure as an unobserved background exception.
+                    tail_errors.put(error)
+
+            def check_target_events() -> None:
+                try:
+                    error = tail_errors.get_nowait()
+                except queue.Empty:
+                    return
+                raise ContainerEventStreamError("target event observation failed") from error
+
+            tail = threading.Thread(target=follow_target_events, daemon=True)
             tail.start()
             timed_out = False
             cancelled = False
             output_limit_exceeded = False
             try:
                 while True:
+                    check_target_events()
                     decision = supervisor.observe(output_bytes=_output_bytes(request.output_dir))
                     if decision is not None:
                         timed_out = decision.kind == RolloutLimitKind.WORK_TIME
@@ -297,6 +366,9 @@ class OciTrialExecutor:
                 finally:
                     stop_tailing.set()
                     tail.join(timeout=2.0)
+            if tail.is_alive():
+                raise ContainerEventStreamError("target event drain exceeded two seconds")
+            check_target_events()
         finished = time.time()
         return TrialExecution(
             exit_code=process.returncode,
@@ -368,48 +440,75 @@ def _output_bytes(root: Path, *, max_entries: int = 100_000) -> int:
 
 
 def _tail_events(
-    path: Path, on_event: Callable[[dict[str, Any]], None], stop: threading.Event
+    path: Path,
+    on_event: Callable[[dict[str, Any]], None],
+    stop: threading.Event,
+    *,
+    max_record_bytes: int = 1024 * 1024,
 ) -> None:
-    """Follow the container's optional live event stream while it runs."""
+    """Observe optional JSONL without silently dropping corrupt evidence.
 
+    A file that never appears is optional. Once observed, replacement, truncation,
+    malformed records, I/O errors and observer errors fail the observation. Each
+    read is bounded; partial records wait for completion until the final drain.
+    This is not a content-addressed evidence seal or durable custody receipt.
+    """
+    if type(max_record_bytes) is not int or max_record_bytes <= 0:
+        raise ValueError("max_record_bytes must be a positive integer")
     offset = 0
+    identity: tuple[int, int] | None = None
+
+    def reject_constant(value: str) -> None:
+        raise ValueError("nonfinite JSON value")
+
     while True:
-        if path.is_file():
-            try:
-                with path.open("r", encoding="utf-8") as handle:
-                    handle.seek(offset)
-                    for line in handle:
-                        if not line.endswith("\n"):
-                            break
-                        offset += len(line.encode("utf-8"))
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            payload = json.loads(line)
-                        except json.JSONDecodeError:
-                            continue
-                        if isinstance(payload, dict):
-                            on_event(payload)
-            except OSError:
-                pass
-        if stop.wait(0.4):
-            # Drain whatever landed between the last read and the container exit.
-            if not path.is_file():
+        draining = stop.is_set()
+        try:
+            descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+        except FileNotFoundError:
+            if identity is not None:
+                raise ContainerEventStreamError("target event file disappeared")
+            if draining:
                 return
-            with path.open("r", encoding="utf-8") as handle:
-                handle.seek(offset)
-                for line in handle:
-                    line = line.strip()
-                    if not line:
-                        continue
+            stop.wait(0.4)
+            continue
+        with os.fdopen(descriptor, "rb") as handle:
+            info = os.fstat(handle.fileno())
+            if not stat.S_ISREG(info.st_mode):
+                raise ContainerEventStreamError("target event path is not a regular file")
+            observed_identity = (info.st_dev, info.st_ino)
+            if identity is not None and observed_identity != identity:
+                raise ContainerEventStreamError("target event file was replaced")
+            identity = observed_identity
+            if info.st_size < offset:
+                raise ContainerEventStreamError("target event file was truncated")
+            handle.seek(offset)
+            for _ in range(256):
+                line = handle.readline(max_record_bytes + 1)
+                if not line:
+                    if draining:
+                        return
+                    break
+                if len(line) > max_record_bytes:
+                    raise ContainerEventStreamError("target event exceeds record bound")
+                if not line.endswith(b"\n"):
+                    if draining:
+                        raise ContainerEventStreamError("target event ends with a partial record")
+                    break
+                if line.strip():
                     try:
-                        payload = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if isinstance(payload, dict):
-                        on_event(payload)
-            return
+                        payload = json.loads(line.decode("utf-8"), parse_constant=reject_constant)
+                    except (UnicodeDecodeError, ValueError) as error:
+                        raise ContainerEventStreamError("malformed target event record") from error
+                    if not isinstance(payload, dict):
+                        raise ContainerEventStreamError("target event must be a JSON object")
+                    on_event(payload)
+                offset += len(line)
+            else:
+                # Bound each page, then immediately continue from its byte cursor.
+                continue
+        if not draining:
+            stop.wait(0.4)
 
 
 def _tail_text(path: Path, limit: int = 4000) -> str:
