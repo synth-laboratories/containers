@@ -1,7 +1,8 @@
-"""``synth-containers`` — the only thing that starts or stops catalog images."""
+"""Catalog containers and hosted pool execution, observation, and deployment."""
 
 from __future__ import annotations
 
+import asyncio
 import argparse
 import json
 import os
@@ -17,6 +18,7 @@ from .launch import (
     up_image,
 )
 from .serve import main as serve_target
+from .pools import PoolClient, PoolClientError
 
 
 def _env_pairs(items: list[str] | None) -> dict[str, str]:
@@ -49,7 +51,9 @@ def main(argv: list[str] | None = None) -> int:
     up.add_argument("--catalog", type=Path, default=None)
     up.add_argument("--host", default="127.0.0.1")
     up.add_argument("--port", type=int, default=None)
-    up.add_argument("--env", action="append", default=None, help="KEY=VALUE or KEY (forward from host)")
+    up.add_argument(
+        "--env", action="append", default=None, help="KEY=VALUE or KEY (forward from host)"
+    )
     up.add_argument("--replace", action="store_true")
     up.add_argument("--no-build", action="store_true")
     up.add_argument("--pull", action="store_true")
@@ -74,8 +78,126 @@ def main(argv: list[str] | None = None) -> int:
     logs.add_argument("--port", type=int, default=None)
     logs.add_argument("--tail", type=int, default=200)
 
+    watch = sub.add_parser("watch", help="observe a hosted rollout from a saved sequence")
+    watch.add_argument("rollout_id")
+    watch.add_argument("--after-sequence", type=int, default=0)
+    watch.add_argument("--timeout-seconds", type=float, default=300.0)
+
+    submit = sub.add_parser("submit", help="durably submit a hosted rollout request")
+    submit.add_argument("pool_id")
+    submit.add_argument("request", type=Path)
+    submit.add_argument("--idempotency-key", required=True)
+    get = sub.add_parser("get", help="read a saved hosted rollout")
+    get.add_argument("rollout_id")
+    cancel = sub.add_parser(
+        "cancel", help="request cancellation; remote stop may remain unconfirmed"
+    )
+    cancel.add_argument("rollout_id")
+
+    for action in ("get", "create", "update", "delete", "operation", "lookup"):
+        command = sub.add_parser(
+            f"deployment-{action}", help=f"{action} a project-owned hosted deployment"
+        )
+        command.add_argument("pool_id")
+        command.add_argument(
+            "resource_id", help="task ID, or operation ID for deployment-operation"
+        )
+        command.add_argument("--project-id", required=True)
+        if action in {"create", "update"}:
+            command.add_argument("request", type=Path)
+        if action in {"create", "update", "delete", "lookup"}:
+            command.add_argument("--idempotency-key", required=True)
+        if action in {"update", "delete"}:
+            command.add_argument("--expected-revision", required=True)
+
     args = parser.parse_args(argv)
     try:
+        if args.command.startswith("deployment-"):
+            action = args.command.removeprefix("deployment-")
+            deployment_payload = {}
+            if action in {"create", "update"}:
+                with args.request.open("rb") as handle:
+                    raw = handle.read(1024 * 1024 + 1)
+                if len(raw) > 1024 * 1024:
+                    raise ValueError("deployment request exceeds 1 MiB")
+                deployment_payload = json.loads(raw)
+                if not isinstance(deployment_payload, dict):
+                    raise ValueError("deployment request must be a JSON object")
+                json.dumps(deployment_payload, allow_nan=False)
+
+            async def operate_deployment() -> dict:
+                async with PoolClient.from_env() as client:
+                    if action == "get":
+                        return await client.get_deployment(
+                            args.pool_id, args.resource_id, project_id=args.project_id
+                        )
+                    if action == "lookup":
+                        return await client.find_deployment_operation(
+                            args.pool_id,
+                            args.resource_id,
+                            project_id=args.project_id,
+                            idempotency_key=args.idempotency_key,
+                        )
+                    if action == "operation":
+                        return await client.get_deployment_operation(
+                            args.pool_id, args.resource_id, project_id=args.project_id
+                        )
+                    return await client.mutate_deployment(
+                        args.pool_id,
+                        args.resource_id,
+                        project_id=args.project_id,
+                        operation=action,
+                        idempotency_key=args.idempotency_key,
+                        payload=deployment_payload,
+                        expected_revision=getattr(args, "expected_revision", None),
+                    )
+
+            print(json.dumps(asyncio.run(operate_deployment()), sort_keys=True))
+            return 0
+        if args.command in {"submit", "get", "cancel"}:
+            payload = None
+            if args.command == "submit":
+                with args.request.open("rb") as handle:
+                    raw = handle.read(1024 * 1024 + 1)
+                if len(raw) > 1024 * 1024:
+                    raise ValueError("rollout request exceeds 1 MiB")
+                payload = json.loads(raw)
+                if not isinstance(payload, dict):
+                    raise ValueError("rollout request must be a JSON object")
+                if payload.get("idempotency_key", args.idempotency_key) != args.idempotency_key:
+                    raise ValueError("request idempotency key conflicts with --idempotency-key")
+                payload["idempotency_key"] = args.idempotency_key
+                if (
+                    not 1 <= len(args.idempotency_key) <= 128
+                    or args.idempotency_key.strip() != args.idempotency_key
+                ):
+                    raise ValueError("idempotency key must be 1-128 non-padded characters")
+                json.dumps(payload, allow_nan=False)
+
+            async def operate() -> dict:
+                async with PoolClient.from_env() as client:
+                    if args.command == "submit":
+                        rollout_id = await client.submit(args.pool_id, payload)
+                        return {"rollout_id": rollout_id, "idempotency_key": args.idempotency_key}
+                    if args.command == "get":
+                        return await client.get_rollout(args.rollout_id)
+                    return await client.cancel(args.rollout_id)
+
+            print(json.dumps(asyncio.run(operate()), sort_keys=True))
+            return 0
+        if args.command == "watch":
+
+            async def observe() -> None:
+                async with PoolClient.from_env() as client:
+                    async for event in client.watch_events(
+                        args.rollout_id,
+                        after_sequence=args.after_sequence,
+                        timeout_seconds=args.timeout_seconds,
+                    ):
+                        print(json.dumps(event, sort_keys=True), flush=True)
+
+            asyncio.run(observe())
+            return 0
         if args.command == "serve":
             serve_argv = ["--target", args.target, "--host", args.host, "--port", str(args.port)]
             if args.storage_root:
@@ -112,7 +234,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(json.dumps(record.to_json(), indent=2, sort_keys=True), flush=True)
         return 0
-    except LaunchError as exc:
+    except (LaunchError, PoolClientError, ValueError, OSError) as exc:
         raise SystemExit(str(exc)) from exc
 
 

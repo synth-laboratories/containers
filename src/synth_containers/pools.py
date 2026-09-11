@@ -43,13 +43,17 @@ import base64
 import fnmatch
 import hashlib
 import io
+import json
 import logging
+import math
 import os
 import tarfile
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from urllib.parse import quote
+from uuid import UUID
+from typing import AsyncIterator, Any, Iterable, Mapping, Sequence
 
 import httpx
 
@@ -465,7 +469,8 @@ class PoolClient:
     ) -> dict[str, Any]:
         url = f"{POOL_API_PREFIX}{path}"
         last_error: Exception | None = None
-        for attempt in range(self._max_retries + 1):
+        retries = self._max_retries if method.upper() in {"GET", "HEAD"} else 0
+        for attempt in range(retries + 1):
             try:
                 response = await self._client.request(
                     method.upper(),
@@ -496,7 +501,7 @@ class PoolClient:
                 last_error = PoolClientError(message)
             except (httpx.RequestError, ValueError) as exc:
                 last_error = exc
-            if attempt < self._max_retries:
+            if attempt < retries:
                 await asyncio.sleep(self._retry_backoff_seconds * (attempt + 1))
         raise PoolClientError(
             f"pool request failed {method.upper()} {url}: {last_error}"
@@ -640,6 +645,90 @@ class PoolClient:
         )
 
     # -- tasks -------------------------------------------------------------
+
+    @staticmethod
+    def _deployment_coordinate(value: str) -> str:
+        if (
+            not isinstance(value, str)
+            or not 1 <= len(value) <= 256
+            or value in {".", ".."}
+            or "/" in value
+        ):
+            raise PoolClientError(
+                "deployment coordinate must be a nonempty path segment of at most 256 characters"
+            )
+        return quote(value, safe="")
+
+    async def get_deployment(
+        self, pool_id: str, task_id: str, *, project_id: str
+    ) -> dict[str, Any]:
+        """Read the deployment revision and observed resource usage."""
+        return await self._request(
+            "GET",
+            f"/pools/{self._deployment_coordinate(pool_id)}/deployments/{self._deployment_coordinate(task_id)}",
+            params={"project_id": str(UUID(project_id))},
+        )
+
+    async def mutate_deployment(
+        self,
+        pool_id: str,
+        task_id: str,
+        *,
+        project_id: str,
+        operation: str,
+        idempotency_key: str,
+        payload: Mapping[str, Any] | None = None,
+        expected_revision: str | None = None,
+    ) -> dict[str, Any]:
+        """Use the shared actor intent service; never repeat an ambiguous mutation.
+
+        Read the operation receipt before deciding how to reconcile uncertainty.
+        Update/delete require the exact revision returned by get_deployment.
+        """
+        if operation not in {"create", "update", "delete"}:
+            raise PoolClientError("deployment operation must be create, update, or delete")
+        if (
+            not isinstance(idempotency_key, str)
+            or not 1 <= len(idempotency_key) <= 256
+            or idempotency_key.strip() != idempotency_key
+        ):
+            raise PoolClientError("deployment idempotency key must be 1-256 non-padded characters")
+        if operation != "create" and not expected_revision:
+            raise PoolClientError("update/delete require expected_revision")
+        body = {
+            "project_id": str(UUID(project_id)),
+            "operation": operation,
+            "idempotency_key": idempotency_key,
+            "payload": dict(payload or {}),
+            "expected_revision": expected_revision,
+        }
+        encoded = json.dumps(body, allow_nan=False).encode()
+        if len(encoded) > 1024 * 1024:
+            raise PoolClientError("deployment request exceeds 1 MiB")
+        return await self._request(
+            "POST",
+            f"/pools/{self._deployment_coordinate(pool_id)}/deployments/{self._deployment_coordinate(task_id)}/operations",
+            payload=body,
+        )
+
+    async def find_deployment_operation(
+        self, pool_id: str, task_id: str, *, project_id: str, idempotency_key: str
+    ) -> dict[str, Any]:
+        """Recover the accepted intent after a lost mutation response."""
+        return await self._request(
+            "GET",
+            f"/pools/{self._deployment_coordinate(pool_id)}/deployments/{self._deployment_coordinate(task_id)}/operations",
+            params={"project_id": str(UUID(project_id)), "idempotency_key": idempotency_key},
+        )
+
+    async def get_deployment_operation(
+        self, pool_id: str, operation_id: str, *, project_id: str
+    ) -> dict[str, Any]:
+        return await self._request(
+            "GET",
+            f"/pools/{self._deployment_coordinate(pool_id)}/deployment-operations/{self._deployment_coordinate(operation_id)}",
+            params={"project_id": str(UUID(project_id))},
+        )
 
     async def list_tasks(self, pool_id: str) -> list[dict[str, Any]]:
         body = await self._request("GET", f"/pools/{pool_id}/tasks", optional=True)
@@ -846,9 +935,20 @@ class PoolClient:
             "DELETE", f"/pools/{pool_id}/runtime_image_releases/{release_id}"
         )
 
-    async def bind_image_release(self, pool_id: str, release_id: str) -> dict[str, Any]:
+    async def bind_image_release(
+        self, pool_id: str, release_id: str, *, expected_release_id: str | None = None
+    ) -> dict[str, Any]:
+        """Switch a release binding with optional compare-and-swap protection.
+
+        An empty expected ID means unbound; None preserves legacy behavior.
+        Binding is not proof that the target passed runtime readiness checks.
+        """
         return await self._request(
-            "POST", f"/pools/{pool_id}/runtime_image_releases/{release_id}/bind"
+            "POST",
+            f"/pools/{pool_id}/runtime_image_releases/{release_id}/bind",
+            params={"expected_release_id": expected_release_id}
+            if expected_release_id is not None
+            else None,
         )
 
     # -- container probes, proxied through the pool ------------------------
@@ -932,8 +1032,73 @@ class PoolClient:
     async def usage(self, rollout_id: str) -> dict[str, Any]:
         return await self._request("GET", f"/rollouts/{rollout_id}/usage", optional=True)
 
-    async def events(self, rollout_id: str) -> dict[str, Any]:
-        return await self._request("GET", f"/rollouts/{rollout_id}/events", optional=True)
+    async def events(
+        self, rollout_id: str, *, after_sequence: int = 0, limit: int = 200
+    ) -> dict[str, Any]:
+        """Read one authorized committed page; missing history is an error."""
+        if type(after_sequence) is not int or after_sequence < 0:
+            raise ValueError("after_sequence must be a nonnegative integer")
+        if type(limit) is not int or not 1 <= limit <= 1000:
+            raise ValueError("limit must be between 1 and 1000")
+        page = await self._request(
+            "GET",
+            f"/rollouts/{rollout_id}/events",
+            params={"format": "json", "after_sequence": after_sequence, "limit": limit},
+        )
+        rows = page.get("events")
+        if not isinstance(rows, list) or len(rows) > limit:
+            raise PoolClientError("invalid rollout event page")
+        cursor = after_sequence
+        for event in rows:
+            if not isinstance(event, dict) or event.get("rollout_id") != rollout_id:
+                raise PoolClientError("event rollout identity mismatch")
+            sequence = event.get("sequence")
+            if type(sequence) is not int or sequence != cursor + 1:
+                raise PoolClientError("rollout event sequence gap; reconcile history")
+            cursor = sequence
+        if type(page.get("next_sequence")) is not int or page["next_sequence"] != cursor:
+            raise PoolClientError("invalid rollout event cursor")
+        if type(page.get("has_more")) is not bool or (page["has_more"] and not rows):
+            raise PoolClientError("invalid rollout event continuation")
+        if page.get("rollout_id") != rollout_id or not isinstance(page.get("status"), str):
+            raise PoolClientError("invalid rollout event page identity/status")
+        return page
+
+    async def watch_events(
+        self,
+        rollout_id: str,
+        *,
+        after_sequence: int = 0,
+        limit: int = 200,
+        timeout_seconds: float = 300.0,
+        poll_interval_seconds: float = 1.0,
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Replay then poll with bounded memory; disconnect never cancels work.
+
+        Persist the yielded sequence after applying an event. Reattach using that
+        cursor. Terminal execution status ends observation only after its backlog
+        drains; it does not claim artifact custody or completed resource cleanup.
+        """
+        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be finite and positive")
+        if not math.isfinite(poll_interval_seconds) or poll_interval_seconds <= 0:
+            raise ValueError("poll_interval_seconds must be finite and positive")
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_seconds
+        cursor = after_sequence
+        while loop.time() < deadline:
+            page = await self.events(rollout_id, after_sequence=cursor, limit=limit)
+            for event in page["events"]:
+                yield event
+                cursor = event["sequence"]
+            if page["has_more"]:
+                continue
+            if page["status"] in TERMINAL_STATUSES:
+                return
+            await asyncio.sleep(min(poll_interval_seconds, max(0, deadline - loop.time())))
+        raise PoolRolloutTimeout(
+            f"event observation timed out for {rollout_id}; resume after {cursor}"
+        )
 
     async def cancel(self, rollout_id: str) -> dict[str, Any]:
         return await self._request("POST", f"/rollouts/{rollout_id}/cancel")

@@ -1,0 +1,34 @@
+# Hosted deployment operations
+
+The public `PoolClient` and `synth-containers` CLI use backend project-bound
+operation intents. The backend owns provisioning, revision checks, resource
+cleanup and metering observations. A client disconnect does not undo acceptance.
+Use `SYNTH_BACKEND_URL` and `SYNTH_API_KEY` from an authorized environment.
+
+Commands:
+
+- `deployment-create POOL TASK REQUEST.json --project-id PROJECT --idempotency-key KEY`
+- `deployment-get POOL TASK --project-id PROJECT`
+- `deployment-update POOL TASK REQUEST.json --project-id PROJECT --idempotency-key KEY --expected-revision REVISION`
+- `deployment-delete POOL TASK --project-id PROJECT --idempotency-key KEY --expected-revision REVISION`
+- `deployment-lookup POOL TASK --project-id PROJECT --idempotency-key KEY`
+- `deployment-operation POOL OPERATION_ID --project-id PROJECT`
+
+Read a revision immediately before update/delete. Reusing an accepted key with
+changed content conflicts. Mutations do not automatically retry transport errors.
+If a response is lost, use deployment-lookup with the original key. Pending or
+recovery-required means reconcile the existing intent; a new key is not a repair.
+A completed lookup returns the persisted receipt. A 404 means no visible intent
+at observation time; it is not proof that an in-flight request has finished.
+
+The request file contains the deployment configuration (provider, pinned image,
+interface, limits and service settings). Keep files containing credentials
+private. CLI output is the backend's redacted receipt, not a copy of the request.
+Bodies are bounded to 1 MiB and finite JSON. Public operations bind a project;
+only authenticated internal runtime context can supply an SMR run binding.
+
+Use existing `submit`, `watch`, `get` and `cancel` for evaluations. A terminal
+scientific result does not establish provider cleanup or settled cost. Resource
+observations report their own status; unknown cost stays null. Hosted execution
+limits and replay support depend on the deployed backend version, not merely
+this client being installed. Direct Docker catalog commands keep local ownership.
