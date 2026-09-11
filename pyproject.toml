@@ -5,7 +5,8 @@ description = "Shared Synth container and environment runtime substrate"
 authors = [{name = "Synth Laboratories", email = "josh@usesynth.ai"}]
 readme = "README.md"
 requires-python = ">=3.11"
-license = "MIT"
+license = "MIT AND Apache-2.0"
+license-files = ["LICENSES/*", "NOTICE"]
 dependencies = [
     "certifi>=2024.0.0",
     "pydantic>=2.0.0",
@@ -42,7 +43,7 @@ Repository = "https://github.com/synth-laboratories/containers"
 Issues = "https://github.com/synth-laboratories/containers/issues"
 
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.uv]

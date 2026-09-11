@@ -1,0 +1,7 @@
+synth_containers/oci_trial.py is derived from Synth Laboratories
+synth-optimizers/src/synth_optimizers/eval/executor.py (Apache-2.0).
+Its Apache-2.0 license is preserved. It was extracted and modified on 2026-09-10
+to remove optimizer dependencies and accept structural execution limits.
+The remainder of synth-containers retains its existing MIT licensing.
+The associated tests/test_oci_trial.py was moved from the optimizer executor
+checks under the same Apache-2.0 license.
