@@ -128,6 +128,7 @@ class BoundedDaytonaEnvironment(DaytonaEnvironment):
             "resource.create_requested",
             provider="daytona",
             ttl_minutes=self._resource_ttl_minutes,
+            creation_timeout_seconds=timeout,
             cpu=requested[0],
             memory_gib=requested[1],
             disk_gib=requested[2],

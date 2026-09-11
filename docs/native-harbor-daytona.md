@@ -62,6 +62,23 @@ Deletion errors and ambiguous reads emit `resource.cleanup_pending` and retain
 the handle. Keeping a sandbox indefinitely with `delete=False` is refused.
 The provider TTL remains armed regardless of client/viewer survival.
 
+For a worker that exits before cleanup, retain the complete trial directory and
+run `synth-containers harbor-daytona-reconcile /path/to/trial` with the same
+provider account's environment credentials. Recovery never creates or renews a
+sandbox. It waits until the recorded creation allowance plus provider lifetime
+and a one-minute margin have expired; there is no force override. Older journals
+use their qualified 300-second creation ceiling. A file lock excludes concurrent
+recovery in the same directory.
+
+The reconciler combines the durable provider ID with an exact owner-label lookup,
+refuses multiple resources or mismatched ownership, records discovered identity
+before deleting, and requires both fresh typed absence and an empty owned listing.
+An empty listing alone cannot settle an ambiguous create with no known ID. Errors
+append cleanup-pending facts while preserving custody; retrying recovery never
+retries creation. Provider operations have individual timeouts inside a 90-second
+reconciliation deadline. This is explicit local recovery, not a cloud reaper or
+permission to delete another trial's resource.
+
 The qualification scope is one deterministic oracle task with shared verification.
 This extension does not yet establish full Codex capture, isolated verifier parity,
 cloud journal custody, pre-provision database recovery, experiment dollar budgets,

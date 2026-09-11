@@ -86,6 +86,9 @@ def main(argv: list[str] | None = None) -> int:
     journal.add_argument("--follow", action="store_true")
     journal.add_argument("--timeout-seconds", type=float, default=300)
 
+    recovery = sub.add_parser("harbor-daytona-reconcile", help="reconcile an expired native Harbor trial")
+    recovery.add_argument("trial_dir", type=Path)
+
     watch = sub.add_parser("watch", help="observe a hosted rollout from a saved sequence")
     watch.add_argument("rollout_id")
     watch.add_argument("--after-sequence", type=int, default=0)
@@ -134,6 +137,16 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     try:
+        if args.command == "harbor-daytona-reconcile":
+            from daytona import AsyncDaytona
+            from .harbor_daytona_recovery import reconcile_daytona_trial
+
+            async def recover_trial() -> dict:
+                async with AsyncDaytona() as client:
+                    return await reconcile_daytona_trial(args.trial_dir, client)
+
+            print(json.dumps(asyncio.run(recover_trial()), sort_keys=True))
+            return 0
         if args.command == "journal":
             from .operator_journal import follow_operator_events, read_operator_events
 
