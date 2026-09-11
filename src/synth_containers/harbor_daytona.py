@@ -69,6 +69,7 @@ class BoundedDaytonaEnvironment(DaytonaEnvironment):
             if (
                 artifact.get("schema_version") != "synth.daytona-build-artifact.v1"
                 or artifact.get("provider") != "daytona"
+                or artifact.get("private_snapshot_confirmed") is not True
                 or not expected_source_package_digest
                 or artifact.get("source_package_digest") != expected_source_package_digest
                 or artifact.get("architecture") != expected_architecture
@@ -135,6 +136,7 @@ class BoundedDaytonaEnvironment(DaytonaEnvironment):
         if (
             getattr(snapshot, "id", None) != artifact["snapshot_id"]
             or getattr(snapshot, "name", None) != artifact["snapshot_name"]
+            or getattr(snapshot, "general", None) is not False
             or str(getattr(state, "value", state)).lower() != "active"
         ):
             raise ValueError("Provider snapshot identity/state changed")

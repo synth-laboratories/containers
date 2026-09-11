@@ -142,6 +142,7 @@ class DaytonaSnapshotBuild:
         identifier = getattr(snapshot, "id", None)
         if (
             getattr(snapshot, "name", None) != self.owner
+            or getattr(snapshot, "general", None) is not False
             or not isinstance(identifier, str)
             or not 1 <= len(identifier) <= 255
         ):
@@ -216,6 +217,7 @@ class DaytonaSnapshotBuild:
         if (
             getattr(snapshot, "id", None) != self.identifier
             or getattr(snapshot, "name", None) != self.owner
+            or getattr(snapshot, "general", None) is not False
         ):
             raise SnapshotBuildError("Snapshot identity changed while building")
 
@@ -229,6 +231,7 @@ class DaytonaSnapshotBuild:
             "provider": "daytona",
             "snapshot_id": self.identifier,
             "snapshot_name": self.owner,
+            "private_snapshot_confirmed": True,
             "source_package_digest": self.context.source_package_digest,
             "context_digest": self.context.context_digest,
             "image_digest": None,
