@@ -33,7 +33,9 @@ def build(tmp_path):
         is_not_found=lambda e: isinstance(e, Absent),
     )
     operation = DaytonaSnapshotBuild(context, tmp_path / "receipt", provider)
-    provider.create.return_value = SimpleNamespace(id="owned", name=operation.owner, state="active")
+    provider.create.return_value = SimpleNamespace(
+        id="owned", name=operation.owner, state="active", general=False
+    )
     return operation, provider
 
 
@@ -47,7 +49,7 @@ def test_build_claim_and_identity_are_saved_before_readiness(tmp_path):
     async def create(name, prepared):
         assert (operation.output / "build-claim.json").is_file()
         assert events(operation)[-1]["event"] == "image.create_requested"
-        return SimpleNamespace(id="owned", name=name, state="active")
+        return SimpleNamespace(id="owned", name=name, state="active", general=False)
 
     provider.create.side_effect = create
     snapshot = asyncio.run(operation.build())
@@ -87,7 +89,7 @@ def test_snapshot_reference_is_never_promoted_to_verified_image_digest(tmp_path)
 def test_lost_create_response_recovers_exact_name_then_records_handle_before_delete(tmp_path):
     operation, provider = build(tmp_path)
     provider.create.side_effect = TimeoutError()
-    snapshot = SimpleNamespace(id="owned", name=operation.owner, state="building")
+    snapshot = SimpleNamespace(id="owned", name=operation.owner, state="building", general=False)
     provider.get.side_effect = [snapshot, snapshot, Absent(), Absent()]
 
     async def delete(identifier):
@@ -135,7 +137,7 @@ def test_recovery_preserves_completed_artifact_until_explicit_release(tmp_path):
 
     operation, provider = build(tmp_path)
     asyncio.run(operation.build())
-    with pytest.raises(SnapshotBuildError, match="not been released"):
+    with pytest.raises(SnapshotBuildError, match="not expired or been released"):
         asyncio.run(
             recover_daytona_snapshot_build(
                 operation.output, provider, now=datetime.now(UTC) + timedelta(hours=2)

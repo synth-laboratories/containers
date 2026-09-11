@@ -512,14 +512,31 @@ class Runner:
                     self.suite.fail("C1-07", f"absent={absent} defects={defects}")
 
     def _c2(self, meta: dict[str, Any]) -> None:
-        started = self._start(task_instance_id="seed:2")
+        # Deferred delivery runs nothing until /complete, so no producer can have
+        # scored it. A blocking start may be scored at completion (C2-01b).
+        started = self._start(submission_mode="async", task_instance_id="seed:2")
         rid = _json(started)["rollout_id"]
         absent = self.client.get("/reward", params={"rollout_id": rid})
         body = _json(absent)
-        if absent.status_code == 200 and body.get("status") == "absent" and body.get("reward") is None:
+        if (
+            absent.status_code == 200
+            and body.get("status") in {"absent", "incomplete"}
+            and body.get("reward") is None
+        ):
             self.suite.ok("C2-01")
         else:
             self.suite.fail("C2-01", f"{absent.status_code} {body}")
+        self.client.post(f"/rollouts/{rid}/complete")
+
+        blocking = self._start(task_instance_id="seed:5")
+        blocking_body = _json(self.client.get("/reward", params={"rollout_id": _json(blocking)["rollout_id"]}))
+        blocking_status = blocking_body.get("status")
+        if (blocking_status == "absent" and blocking_body.get("reward") is None) or (
+            blocking_status == "scored" and blocking_body.get("reward") is not None
+        ):
+            self.suite.ok("C2-01b", str(blocking_status))
+        else:
+            self.suite.fail("C2-01b", f"blocking start reward={blocking_body}")
 
         live = self._start(submission_mode="async", task_instance_id="seed:3")
         live_id = _json(live)["rollout_id"]
