@@ -92,6 +92,7 @@ def test_ambiguous_mutation_is_not_automatically_repeated():
 @pytest.mark.parametrize("pending,receipt", [
     ("cleanup_pending", "rollout.cleanup_confirmed"),
     ("publication_pending", "rollout.result_publication"),
+    ("inference_pending", "rollout.inference_accounting"),
 ])
 def test_terminal_verdict_keeps_watching_until_cleanup_receipt(pending, receipt):
     cursors = []

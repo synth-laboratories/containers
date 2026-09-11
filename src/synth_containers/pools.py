@@ -1122,7 +1122,7 @@ class PoolClient:
             raise PoolClientError("invalid rollout event continuation")
         if page.get("rollout_id") != rollout_id or not isinstance(page.get("status"), str):
             raise PoolClientError("invalid rollout event page identity/status")
-        for field in ("cleanup_pending", "publication_pending"):
+        for field in ("cleanup_pending", "publication_pending", "inference_pending"):
             if field in page and type(page[field]) is not bool:
                 raise PoolClientError(f"invalid rollout {field}")
         return page
@@ -1140,7 +1140,8 @@ class PoolClient:
 
         Persist the yielded sequence after applying an event. Reattach using that
         cursor. Terminal execution status ends observation only after its backlog
-        drains and any declared cleanup obligation clears. Older servers without
+        drains and declared cleanup, publication and unfinished inference obligations
+        clear. Older servers without
         cleanup_pending retain scientific-terminal behavior. This does not claim
         artifact custody or settled cost.
         """
@@ -1160,7 +1161,8 @@ class PoolClient:
                 continue
             if (page["status"] in TERMINAL_STATUSES
                 and not page.get("cleanup_pending", False)
-                and not page.get("publication_pending", False)):
+                and not page.get("publication_pending", False)
+                and not page.get("inference_pending", False)):
                 return
             await asyncio.sleep(min(poll_interval_seconds, max(0, deadline - loop.time())))
         raise PoolRolloutTimeout(

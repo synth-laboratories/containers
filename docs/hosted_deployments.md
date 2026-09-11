@@ -52,3 +52,10 @@ are refused; target-provided storage URLs are never followed. The result preserv
 null rewards and the original scientific verdict. The download is bounded to
 1 MiB and 60 seconds, and can be redirected to a local JSON file. This snapshot
 has `custody_scope: result_snapshot_only`; full trace custody has its own receipt.
+
+When `inference_pending` is exposed, watchers also retain observation while a
+managed invocation is unfinished or awaiting accounting reconciliation. This is
+independent of scientific completion, provider cleanup and result publication.
+The existing watcher deadline still bounds the wait; a timeout preserves the
+resume cursor and never starts another evaluation. A false value means no
+unfinished managed invocation was reported, not that every external cost is known.
