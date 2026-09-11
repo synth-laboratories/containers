@@ -152,6 +152,9 @@ def main(argv: list[str] | None = None) -> int:
         if action == "renew":
             command.add_argument("--ttl-seconds", type=int, default=900)
 
+    interactive = sub.add_parser("lease-interactive", help="inspect a task's revision and interactive capabilities")
+    interactive.add_argument("lease_id")
+    interactive.add_argument("--task-id", required=True)
     session = sub.add_parser("lease-session", help="bind an interactive lease to an exact task revision")
     session.add_argument("lease_id")
     session.add_argument("--task-id", required=True)
@@ -277,6 +280,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command.startswith("lease-"):
             async def operate_lease() -> dict:
                 async with PoolClient.from_env() as client:
+                    if args.command == "lease-interactive":
+                        return await client.get_lease_interactive(args.lease_id, task_id=args.task_id)
                     if args.command == "lease-session":
                         return await client.create_lease_session(
                             args.lease_id, task_id=args.task_id, expected_revision=args.expected_revision,

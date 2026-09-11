@@ -706,6 +706,13 @@ class PoolClient:
         """Release the admission claim; this does not delete its deployment."""
         return await self._request("POST", f"/container_leases/{self._deployment_coordinate(lease_id)}/release")
 
+    async def get_lease_interactive(self, lease_id: str, *, task_id: str) -> dict[str, Any]:
+        """Inspect the task revision and declared interaction verbs before binding."""
+        return await self._request(
+            "GET", f"/container_leases/{self._deployment_coordinate(lease_id)}/interactive",
+            params={"task_id": task_id},
+        )
+
     async def create_lease_session(
         self, lease_id: str, *, task_id: str, expected_revision: str,
     ) -> dict[str, Any]:
@@ -1229,6 +1236,23 @@ class PoolClient:
         if complete and receipt["complete"] is not True:
             raise PoolClientError("native custody completion was not acknowledged")
         return receipt
+
+    async def attach_trace_archive(
+        self, pool_id: str, rollout_id: str, *, file_id: str, factory_id: str,
+        run_id: str, expected_bundle_id: str, expected_manifest_digest: str,
+    ) -> dict[str, Any]:
+        """Attach an owned archive only after backend trace-store promotion.
+
+        The receipt establishes operator-attached custody, not proof that this
+        rollout produced the trace or that its scientific result is complete.
+        """
+        return await self._request(
+            "POST", f"/pools/{self._deployment_coordinate(pool_id)}/rollouts/"
+            f"{self._deployment_coordinate(rollout_id)}/trace_archives",
+            payload={"file_id": file_id, "factory_id": factory_id, "run_id": run_id,
+                     "expected_bundle_id": expected_bundle_id,
+                     "expected_manifest_digest": expected_manifest_digest},
+        )
 
     async def events(
         self, rollout_id: str, *, after_sequence: int = 0, limit: int = 200
