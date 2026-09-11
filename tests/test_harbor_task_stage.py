@@ -242,3 +242,29 @@ def test_stage_records_local_docker_image_scope(tmp_path):
     assert receipt["image_reference_scope"] == "docker_local_image_id"
     assert receipt["native_environment_flags"] == ["--env", "docker"]
     assert receipt["image_build_provenance"] == "operator_bound_not_verified"
+
+
+def test_native_docker_custody_flags_are_frozen_in_stage(tmp_path):
+    bound = release(tmp_path / "source", provider="docker")
+    receipt = stage_native_harbor_task(bound, tmp_path / "stage", docker_resource_custody=True,
+                                       docker_egress_image=IMAGE)
+    assert receipt["docker_resource_custody"] is True
+    assert receipt["native_environment_flags"] == [
+        "--env", "synth_containers.harbor_docker:ObservedDockerEnvironment",
+        "--ek", "egress_control_image=" + IMAGE]
+
+
+@pytest.mark.parametrize("options", [dict(docker_resource_custody="true"),
+                                     dict(docker_egress_image=IMAGE),
+                                     dict(docker_resource_custody=True, docker_egress_image="latest")])
+def test_invalid_native_docker_custody_options_refused_before_staging(tmp_path, options):
+    bound = release(tmp_path / "source", provider="docker")
+    with pytest.raises(HarborEnvironmentError):
+        stage_native_harbor_task(bound, tmp_path / "stage", **options)
+    assert not (tmp_path / "stage").exists()
+
+
+def test_daytona_refuses_docker_custody_options(tmp_path):
+    bound = release(tmp_path / "source")
+    with pytest.raises(HarborEnvironmentError, match="require Docker"):
+        stage_native_harbor_task(bound, tmp_path / "stage", docker_resource_custody=True)

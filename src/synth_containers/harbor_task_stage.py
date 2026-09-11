@@ -32,6 +32,8 @@ def native_harbor_environment_flags(
     image: str,
     resource_ttl_minutes: int,
     resource_request: HarborResourceRequest | None = None,
+    docker_resource_custody: bool = False,
+    docker_egress_image: str | None = None,
 ) -> list[str]:
     """Resolve qualified native backend arguments without widening task resources."""
     if not is_pinned_harbor_image(image, provider):
@@ -40,9 +42,22 @@ def native_harbor_environment_flags(
         raise HarborEnvironmentError(
             "native resource TTL must be an integer from 1 through 360 minutes"
         )
+    if type(docker_resource_custody) is not bool:
+        raise HarborEnvironmentError("native Docker resource custody must be boolean")
+    if (docker_resource_custody or docker_egress_image is not None) and provider != "docker":
+        raise HarborEnvironmentError("native Docker custody options require Docker")
+    if docker_egress_image is not None and (
+        not docker_resource_custody or not is_pinned_harbor_image(docker_egress_image, "docker")
+    ):
+        raise HarborEnvironmentError("native Docker egress image requires custody and an immutable image")
     overrides = native_harbor_resource_overrides(resource_request)
     if provider == "docker":
-        return ["--env", "docker"]
+        if not docker_resource_custody:
+            return ["--env", "docker"]
+        flags = ["--env", "synth_containers.harbor_docker:ObservedDockerEnvironment"]
+        if docker_egress_image is not None:
+            flags += ["--ek", f"egress_control_image={docker_egress_image}"]
+        return flags
     if provider != "daytona":
         raise HarborEnvironmentError("native image provider must be docker or daytona")
     config = tomllib.loads(read_harbor_task_toml(package))
@@ -123,6 +138,8 @@ def stage_native_harbor_task(
     creation_timeout_seconds: int = 300,
     resource_ttl_minutes: int = 20,
     resource_request: HarborResourceRequest | None = None,
+    docker_resource_custody: bool = False,
+    docker_egress_image: str | None = None,
 ) -> dict[str, Any]:
     """Stage one immutable prebuilt-image task, retaining source/release identity.
 
@@ -149,6 +166,8 @@ def stage_native_harbor_task(
         image=release.agent_image,
         resource_ttl_minutes=resource_ttl_minutes,
         resource_request=resource_request,
+        docker_resource_custody=docker_resource_custody,
+        docker_egress_image=docker_egress_image,
     )
     for name in ("docker-compose.yaml", "docker-compose.yml", "compose.yaml", "compose.yml"):
         if (source / "environment" / name).exists():
@@ -198,6 +217,8 @@ def stage_native_harbor_task(
         "schema_version": "synth.harbor-native-task-stage.v1",
         "task_path": str(task),
         "native_environment_flags": environment_flags,
+        "docker_resource_custody": docker_resource_custody,
+        "docker_egress_image": docker_egress_image,
         "source_resource_request": release.draft.resource_request.as_dict(),
         "resolved_resource_request": {
             field: environment.get(field, 0 if field == "gpus" else None)
