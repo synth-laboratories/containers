@@ -169,7 +169,7 @@ def follow_operator_events(
         (poll_interval_seconds, "poll_interval_seconds", 60),
     ):
         if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise ValueError(f"{name} must be a finite positive number")
+            raise ValueError(f"{name} must be a finite positive number")  # noqa: TRY004 - CLI validation
         if not math.isfinite(value) or not 0 < value <= maximum:
             raise ValueError(f"{name} must be between zero (exclusive) and {maximum}")
     deadline = time.monotonic() + timeout_seconds

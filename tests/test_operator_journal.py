@@ -137,6 +137,7 @@ def test_follow_pins_identity_across_polling(tmp_path):
 
 def test_follow_writer_contention_obeys_deadline(tmp_path):
     import fcntl
+
     from synth_containers.operator_journal import follow_operator_events
 
     path = tmp_path / "events.jsonl"
