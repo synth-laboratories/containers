@@ -1062,6 +1062,8 @@ class PoolClient:
             raise PoolClientError("invalid rollout event continuation")
         if page.get("rollout_id") != rollout_id or not isinstance(page.get("status"), str):
             raise PoolClientError("invalid rollout event page identity/status")
+        if "cleanup_pending" in page and type(page["cleanup_pending"]) is not bool:
+            raise PoolClientError("invalid rollout cleanup state")
         return page
 
     async def watch_events(
@@ -1077,7 +1079,9 @@ class PoolClient:
 
         Persist the yielded sequence after applying an event. Reattach using that
         cursor. Terminal execution status ends observation only after its backlog
-        drains; it does not claim artifact custody or completed resource cleanup.
+        drains and any declared cleanup obligation clears. Older servers without
+        cleanup_pending retain scientific-terminal behavior. This does not claim
+        artifact custody or settled cost.
         """
         if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be finite and positive")
@@ -1093,7 +1097,7 @@ class PoolClient:
                 cursor = event["sequence"]
             if page["has_more"]:
                 continue
-            if page["status"] in TERMINAL_STATUSES:
+            if page["status"] in TERMINAL_STATUSES and not page.get("cleanup_pending", False):
                 return
             await asyncio.sleep(min(poll_interval_seconds, max(0, deadline - loop.time())))
         raise PoolRolloutTimeout(

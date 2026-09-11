@@ -32,3 +32,9 @@ scientific result does not establish provider cleanup or settled cost. Resource
 observations report their own status; unknown cost stays null. Hosted execution
 limits and replay support depend on the deployed backend version, not merely
 this client being installed. Direct Docker catalog commands keep local ownership.
+
+On backends exposing `cleanup_pending`, `watch` stays attached after scientific
+termination until recovery and capacity release are confirmed. Its timeout bounds
+observation only; disconnecting does not cancel execution or recovery. Resume
+with `--after-sequence` from the last persisted event. Older backends without the
+field retain scientific-terminal behavior.
