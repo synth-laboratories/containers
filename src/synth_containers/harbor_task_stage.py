@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import stat
 import tomllib
@@ -21,6 +22,47 @@ from .harbor_environment import (
     _tree_files,
     read_harbor_task_toml,
 )
+
+
+def native_harbor_environment_flags(
+    package: Path, *, provider: str, image: str, resource_ttl_minutes: int
+) -> list[str]:
+    """Resolve qualified native backend arguments without widening task resources."""
+    if not re.fullmatch(r"[^\s]+@sha256:[0-9a-f]{64}", image):
+        raise HarborEnvironmentError("native image must be digest-pinned")
+    if type(resource_ttl_minutes) is not int or not 1 <= resource_ttl_minutes <= 360:
+        raise HarborEnvironmentError("native resource TTL must be an integer from 1 through 360 minutes")
+    if provider == "docker":
+        return ["--env", "docker"]
+    if provider != "daytona":
+        raise HarborEnvironmentError("native image provider must be docker or daytona")
+    config = tomllib.loads(read_harbor_task_toml(package))
+    environment = config.get("environment")
+    if not isinstance(environment, dict):
+        raise HarborEnvironmentError("native Daytona requires an environment resource table")
+    values = [environment.get(field) for field in ("cpus", "memory_mb", "storage_mb")]
+    if any(type(value) is not int or value < 1 for value in values):
+        raise HarborEnvironmentError(
+            "native Daytona requires explicit positive CPU, memory and storage requests"
+        )
+    cpus, memory, storage = values
+    memory_gib, storage_gib = (memory + 1023) // 1024, (storage + 1023) // 1024
+    if cpus > 64 or memory_gib > 512 or storage_gib > 1024 or environment.get("gpus", 0):
+        raise HarborEnvironmentError("native Daytona task request exceeds qualified resource ceilings")
+    return [
+        "--env",
+        "synth_containers.harbor_daytona:BoundedDaytonaEnvironment",
+        "--ek",
+        "auto_snapshot=false",
+        "--ek",
+        f"resource_ttl_minutes={resource_ttl_minutes}",
+        "--ek",
+        f"maximum_cpu={cpus}",
+        "--ek",
+        f"maximum_memory_gib={memory_gib}",
+        "--ek",
+        f"maximum_disk_gib={storage_gib}",
+    ]
 
 
 def _copy_bounded_file(source: Path, target: Path, remaining_bytes: int) -> int:
@@ -50,6 +92,7 @@ def stage_native_harbor_task(
     destination: Path,
     *,
     creation_timeout_seconds: int = 300,
+    resource_ttl_minutes: int = 20,
 ) -> dict[str, Any]:
     """Stage one immutable prebuilt-image task, retaining source/release identity.
 
@@ -70,6 +113,12 @@ def stage_native_harbor_task(
     if release.provider.provider_id not in {"docker", "daytona"}:
         raise HarborEnvironmentError("harbor_native_provider_unqualified")
     source = release.draft.root
+    environment_flags = native_harbor_environment_flags(
+        source,
+        provider=release.provider.provider_id,
+        image=release.agent_image,
+        resource_ttl_minutes=resource_ttl_minutes,
+    )
     for name in ("docker-compose.yaml", "docker-compose.yml", "compose.yaml", "compose.yml"):
         if (source / "environment" / name).exists():
             raise HarborEnvironmentError("harbor_native_compose_unqualified")
@@ -116,6 +165,7 @@ def stage_native_harbor_task(
     receipt = {
         "schema_version": "synth.harbor-native-task-stage.v1",
         "task_path": str(task),
+        "native_environment_flags": environment_flags,
         "source_package_digest": release.draft.source_package_digest,
         "staged_package_digest": _tree_digest(task),
         "environment_release_id": release.release_id,

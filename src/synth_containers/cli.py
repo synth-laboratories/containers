@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import argparse
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -17,8 +17,8 @@ from .launch import (
     status_payload,
     up_image,
 )
-from .serve import main as serve_target
 from .pools import PoolClient, PoolClientError
+from .serve import main as serve_target
 
 
 def _env_pairs(items: list[str] | None) -> dict[str, str]:
@@ -92,6 +92,7 @@ def main(argv: list[str] | None = None) -> int:
     stage.add_argument("--image", required=True)
     stage.add_argument("--provider", required=True, choices=["docker", "daytona"])
     stage.add_argument("--creation-timeout-seconds", type=int, default=300)
+    stage.add_argument("--resource-ttl-minutes", type=int, default=20)
 
     recovery = sub.add_parser("harbor-daytona-reconcile", help="reconcile an expired native Harbor trial")
     recovery.add_argument("trial_dir", type=Path)
@@ -146,7 +147,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "harbor-stage":
             from .harbor_environment import (
-                HarborProviderCompatibility, inspect_harbor_package, register_harbor_environment,
+                HarborProviderCompatibility,
+                inspect_harbor_package,
+                register_harbor_environment,
             )
             from .harbor_task_stage import stage_native_harbor_task
 
@@ -158,10 +161,12 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(json.dumps(stage_native_harbor_task(
                 release, args.destination, creation_timeout_seconds=args.creation_timeout_seconds,
+                resource_ttl_minutes=args.resource_ttl_minutes,
             ), sort_keys=True))
             return 0
         if args.command == "harbor-daytona-reconcile":
             from daytona import AsyncDaytona
+
             from .harbor_daytona_recovery import reconcile_daytona_trial
 
             async def recover_trial() -> dict:

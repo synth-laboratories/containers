@@ -180,3 +180,28 @@ def test_cli_stages_without_provider_access(tmp_path, capsys):
     receipt = json.loads(capsys.readouterr().out)
     assert receipt["environment_release_digest"] == bound.release_digest
     assert Path(receipt["task_path"]).is_dir()
+
+
+def test_stage_receipt_freezes_native_daytona_limits(tmp_path):
+    bound = release(tmp_path / 'source')
+    receipt = stage_native_harbor_task(bound, tmp_path / 'staged', resource_ttl_minutes=12)
+    flags = receipt['native_environment_flags']
+    assert 'resource_ttl_minutes=12' in flags
+    assert 'maximum_cpu=1' in flags
+    assert 'auto_snapshot=false' in flags
+
+
+@pytest.mark.parametrize('memory,expected', [(1024, 1), (1025, 2)])
+def test_shared_native_resource_rounding_is_explicit(tmp_path, memory, expected):
+    from synth_containers.harbor_task_stage import native_harbor_environment_flags
+    (tmp_path / 'task.toml').write_text(f'[environment]\ncpus=1\nmemory_mb={memory}\nstorage_mb=1024\n')
+    flags = native_harbor_environment_flags(tmp_path, provider='daytona', image=IMAGE, resource_ttl_minutes=20)
+    assert f'maximum_memory_gib={expected}' in flags
+
+
+def test_shared_native_resource_policy_refuses_missing_or_excessive_limits(tmp_path):
+    from synth_containers.harbor_task_stage import native_harbor_environment_flags
+    for text in ('', '[environment]\ncpus=65\nmemory_mb=1024\nstorage_mb=1024\n'):
+        (tmp_path / 'task.toml').write_text(text)
+        with pytest.raises(HarborEnvironmentError):
+            native_harbor_environment_flags(tmp_path, provider='daytona', image=IMAGE, resource_ttl_minutes=20)

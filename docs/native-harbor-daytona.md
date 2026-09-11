@@ -124,3 +124,9 @@ contract adapter and are refused rather than converted into strings.
 Task metadata inspection and staging share a bounded reader: at most 1 MiB,
 regular files only, no final symlink following, and no FIFO blocking. Staging
 rechecks the bound at the actual read rather than relying on a prior inventory.
+
+`harbor-stage --resource-ttl-minutes N` now freezes the qualified native backend
+arguments in `stage-receipt.json`. Python consumers use
+`native_harbor_environment_flags` from `harbor_task_stage`; benchmark wrappers do
+not maintain their own Daytona ceiling/rounding policy. Docker receipts select
+native Docker without claiming the Daytona lifetime guarantee.
