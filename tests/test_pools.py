@@ -355,3 +355,53 @@ def test_create_image_release_refuses_backend_hash_mismatch() -> None:
 
     with pytest.raises(PoolClientError, match="hash mismatch"):
         asyncio.run(exercise())
+
+
+def test_list_methods_read_the_backend_items_envelope() -> None:
+    """GET /pools, /pools/{id}/tasks and /pools/{id}/rollouts answer {"items": [...]}.
+
+    Live F14 (2026-09-12): submitted rollouts existed but list_rollouts read
+    body["rollouts"] and returned [] before and after four submissions.
+    """
+    bodies = {
+        "/pools": {"items": [{"id": "pool-1"}], "cursor": None, "limit": 100},
+        "/pools/pool-1/tasks": {"items": [{"task_id": "echo"}]},
+        "/pools/pool-1/rollouts": {
+            "items": [{"rollout_id": "smoke"}, {"rollout_id": "r1"}, "not-a-row"],
+            "cursor": None,
+            "limit": 100,
+        },
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        suffix = next(path for path in bodies if request.url.path.endswith(path))
+        return httpx.Response(200, json=bodies[suffix], request=request)
+
+    async def run() -> tuple[list, list, list]:
+        async with httpx.AsyncClient(
+            base_url="https://example.test", transport=httpx.MockTransport(handler)
+        ) as http:
+            client = PoolClient(api_key="test", client=http)
+            return (
+                await client.list_rollouts("pool-1"),
+                await client.list_tasks("pool-1"),
+                await client.list_pools(),
+            )
+
+    rollouts, tasks, pools = asyncio.run(run())
+    assert [item["rollout_id"] for item in rollouts] == ["smoke", "r1"]
+    assert tasks == [{"task_id": "echo"}]
+    assert pools == [{"id": "pool-1"}]
+
+
+def test_list_methods_still_accept_legacy_resource_keys() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"rollouts": [{"rollout_id": "legacy"}]}, request=request)
+
+    async def run() -> list:
+        async with httpx.AsyncClient(
+            base_url="https://example.test", transport=httpx.MockTransport(handler)
+        ) as http:
+            return await PoolClient(api_key="test", client=http).list_rollouts("pool-1")
+
+    assert asyncio.run(run()) == [{"rollout_id": "legacy"}]

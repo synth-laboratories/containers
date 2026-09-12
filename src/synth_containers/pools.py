@@ -511,10 +511,7 @@ class PoolClient:
 
     async def list_pools(self) -> list[dict[str, Any]]:
         body = await self._request("GET", "/pools")
-        pools = body.get("pools")
-        if isinstance(pools, list):
-            return [item for item in pools if isinstance(item, dict)]
-        return [item for item in body.get("value", []) if isinstance(item, dict)]
+        return _list_items(body, "pools", "value")
 
     async def get_pool(self, pool_id: str) -> dict[str, Any]:
         return await self._request("GET", f"/pools/{pool_id}")
@@ -637,12 +634,7 @@ class PoolClient:
 
     async def list_rollouts(self, pool_id: str) -> list[dict[str, Any]]:
         body = await self._request("GET", f"/pools/{pool_id}/rollouts", optional=True)
-        rollouts = body.get("rollouts")
-        return (
-            [item for item in rollouts if isinstance(item, dict)]
-            if isinstance(rollouts, list)
-            else []
-        )
+        return _list_items(body, "rollouts")
 
     # -- project container leases -----------------------------------------
 
@@ -840,8 +832,7 @@ class PoolClient:
 
     async def list_tasks(self, pool_id: str) -> list[dict[str, Any]]:
         body = await self._request("GET", f"/pools/{pool_id}/tasks", optional=True)
-        tasks = body.get("tasks")
-        return [item for item in tasks if isinstance(item, dict)] if isinstance(tasks, list) else []
+        return _list_items(body, "tasks")
 
     async def create_task(self, pool_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         return await self._request("POST", f"/pools/{pool_id}/tasks", payload=payload)
@@ -1536,6 +1527,17 @@ def _archive_bytes(archive: bytes | str | Path) -> bytes:
     if not path.is_file():
         raise PoolClientError(f"archive is not a readable file: {path}")
     return path.read_bytes()
+
+
+def _list_items(body: Mapping[str, Any], *legacy_keys: str) -> list[dict[str, Any]]:
+    """Backend list endpoints answer ``{"items": [...]}``; older servers used a
+    resource-named key. Reading only the legacy key returned an empty list for
+    every current backend response."""
+    for key in ("items", *legacy_keys):
+        value = body.get(key)
+        if isinstance(value, list):
+            return [item for item in value if isinstance(item, dict)]
+    return []
 
 
 def _rollout_id(body: Mapping[str, Any]) -> str:
