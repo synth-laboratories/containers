@@ -250,6 +250,7 @@ class OpenRouterReAct:
             or "Make measurable progress on the environment objective while staying alive."
         )
         self.model = str(config.get("model") or "meta/muse-spark-1.1")
+        self.provider = str(config.get("provider") or "openrouter").strip().lower()
         self.reasoning_effort = str(config.get("effort") or "medium")
         self.base_url = str(config.get("base_url") or "https://openrouter.ai/api/v1").rstrip("/")
         self.api_key_env = str(config.get("api_key_env") or "OPENROUTER_API_KEY")
@@ -324,7 +325,7 @@ class OpenRouterReAct:
             "kind": "openrouter_react",
             "config": self.config_id,
             "model": self.model,
-            "provider": "openrouter",
+            "provider": self.provider,
             "reasoning_effort": self.reasoning_effort,
             "plan_min": self.plan_min,
             "plan_max": self.plan_max,
@@ -469,7 +470,7 @@ class OpenRouterReAct:
         self._last_trace = {
             "call": self.calls,
             "model": self.model,
-            "provider": "openrouter",
+            "provider": self.provider,
             "generation_id": body.get("id"),
             "assistant": assistant,
             "reasoning": reasoning,
@@ -677,7 +678,7 @@ class OpenRouterReAct:
                     "kept_turns": len(keep),
                     "call": self.calls,
                     "model": self.model,
-                    "provider": "openrouter",
+                    "provider": self.provider,
                 }
             )
 
@@ -690,9 +691,6 @@ class OpenRouterReAct:
         payload = {
             "model": self.model,
             "messages": list(self._messages),
-            "temperature": 0,
-            "max_tokens": self.max_tokens,
-            "reasoning": {"effort": self.reasoning_effort},
             "stream": True,
             "stream_options": {"include_usage": True},
             "tools": [
@@ -723,6 +721,13 @@ class OpenRouterReAct:
             # named forced choice.
             "tool_choice": "auto",
         }
+        if self.provider == "openai":
+            payload["max_completion_tokens"] = self.max_tokens
+            payload["reasoning_effort"] = self.reasoning_effort
+        else:
+            payload["temperature"] = 0
+            payload["max_tokens"] = self.max_tokens
+            payload["reasoning"] = {"effort": self.reasoning_effort}
         request = urllib.request.Request(
             f"{self.base_url}/chat/completions",
             data=json.dumps(payload).encode("utf-8"),
@@ -848,7 +853,7 @@ class OpenRouterReAct:
                 "text": text,
                 "call": self.calls + 1,
                 "model": self.model,
-                "provider": "openrouter",
+                "provider": self.provider,
             }
         )
 
