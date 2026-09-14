@@ -723,7 +723,9 @@ class OpenRouterReAct:
         }
         if self.provider == "openai":
             payload["max_completion_tokens"] = self.max_tokens
-            payload["reasoning_effort"] = self.reasoning_effort
+            # OpenAI's Chat Completions endpoint rejects function tools when
+            # reasoning_effort is set for Luna. Leaving it absent preserves
+            # tool calling; reasoning-enabled agentic policies use Responses.
         else:
             payload["temperature"] = 0
             payload["max_tokens"] = self.max_tokens
