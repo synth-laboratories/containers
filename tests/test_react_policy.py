@@ -79,7 +79,7 @@ def test_react_uses_openai_chat_completion_fields_for_openai_proxy(monkeypatch) 
 
     assert policy.metadata()["provider"] == "openai"
     assert observed["max_completion_tokens"] == policy.max_tokens
-    assert "reasoning_effort" not in observed
+    assert observed["reasoning_effort"] == "none"
     assert "max_tokens" not in observed
     assert "reasoning" not in observed
     assert "temperature" not in observed
