@@ -17,6 +17,11 @@ from synth_containers.serde import JsonDataclassMixin
 
 REDACTION_PROFILE = "strict_headers_and_secrets"
 REDACTED = "<redacted>"
+# A distinct marker for a value that matched a *secret shape* (not merely a
+# credential-bearing field name). The fail-closed seal refuses to persist any
+# body that still carries this marker: if a live credential shape transited the
+# capture path, the record is dropped rather than stored with a partial scrub.
+SECRET_REDACTED = "<redacted:secret>"
 
 DENIED_HEADERS = frozenset(
     {
@@ -66,9 +71,15 @@ DENIED_BODY_KEYS = frozenset(
         "client_secret",
         "cookie",
         "password",
+        "passwd",
         "secret",
+        "secret_key",
+        "private_key",
+        "aws_secret_access_key",
+        "credentials",
         "token",
         "bearer",
+        "key",
     }
 )
 
@@ -80,10 +91,15 @@ _DENIED_BODY_KEY_SUFFIXES = (
     "_apikey",
     "_authorization",
     "_password",
+    "_passwd",
     "_secret",
+    "_secret_key",
+    "_private_key",
     "_token",
     "_bearer",
     "_cookie",
+    "_key",
+    "_credentials",
 )
 
 _SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
@@ -92,8 +108,26 @@ _SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("groq_key", re.compile(r"\bgsk_[A-Za-z0-9]{16,}")),
     ("google_key", re.compile(r"\bAIza[0-9A-Za-z._\-]{20,}")),
     ("tinker_key", re.compile(r"\btk-[A-Za-z0-9._\-]{16,}")),
-    ("synth_key", re.compile(r"\bsk_(?:live|test|prod|dev)_[A-Za-z0-9._\-]{12,}")),
+    # Synth mints user keys as sk_synth_user_<48 hex> (backend
+    # routes_api_keys.py:58,211) and demo keys as sk_demo_<urlsafe>
+    # (demo/routes.py:256), alongside the sk_(live|test|prod|dev)_ shapes.
+    (
+        "synth_key",
+        re.compile(r"\bsk_(?:live|test|prod|dev|synth_user|demo)_[A-Za-z0-9._\-]{12,}"),
+    ),
     ("trace_capability", re.compile(r"\bsk_trace_[A-Za-z0-9._\-]{16,}")),
+    # Third-party credential shapes coding-agent traces routinely carry.
+    ("github_pat_classic", re.compile(r"\bghp_[A-Za-z0-9]{20,}")),
+    ("github_pat_fine_grained", re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}")),
+    ("aws_access_key_id", re.compile(r"\b(?:AKIA|ASIA|AGPA|AIDA|AROA|AIPA)[0-9A-Z]{12,}")),
+    ("huggingface_token", re.compile(r"\bhf_[A-Za-z0-9]{20,}")),
+    ("slack_token", re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}")),
+    # Bare JWTs (three base64url segments); anchored on the "eyJ" header to
+    # avoid matching ordinary dotted identifiers.
+    (
+        "jwt",
+        re.compile(r"\beyJ[A-Za-z0-9_=-]+\.[A-Za-z0-9_=-]+\.[A-Za-z0-9_=-]+"),
+    ),
 )
 
 
@@ -153,7 +187,7 @@ def scrub_text(text: str) -> tuple[str, tuple[str, ...]]:
     for name, pattern in _SECRET_PATTERNS:
         if pattern.search(result):
             matched.append(name)
-            result = pattern.sub(REDACTED, result)
+            result = pattern.sub(SECRET_REDACTED, result)
     return result, tuple(matched)
 
 
@@ -276,6 +310,13 @@ def assert_no_secrets(value: Any, *, where: str) -> None:
     for name, pattern in _SECRET_PATTERNS:
         if pattern.search(text):
             raise RedactionError(f"{where}: unredacted secret shape {name!r} would be persisted")
+    # Fail closed: a payload that required a secret-shape scrub carries the
+    # SECRET_REDACTED marker. A live credential transited the capture path, so
+    # the record is refused rather than persisted with a best-effort scrub.
+    if SECRET_REDACTED in text:
+        raise RedactionError(
+            f"{where}: payload carried a secret credential shape (scrubbed) and is refused"
+        )
 
     def visit(node: Any) -> None:
         if isinstance(node, Mapping):
@@ -303,6 +344,7 @@ __all__ = [
     "DENIED_BODY_KEYS",
     "DENIED_HEADERS",
     "REDACTED",
+    "SECRET_REDACTED",
     "REDACTION_PROFILE",
     "RedactionError",
     "RedactionReportV1",
