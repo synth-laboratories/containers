@@ -48,11 +48,25 @@ def test_openrouter_react_uses_public_bearer_for_workshop_capability_proxy(
     assert observed["authorization"] == "Bearer workshop-proxy"
 
 def test_openrouter_react_normalizes_craftax_direction_aliases() -> None:
-    actions = OpenRouterReAct._parse_actions(
+    policy = OpenRouterReAct(config_id="alias_test", config={})
+    actions = policy._parse_actions(
         '{"actions":["North","east","do"]}',
         ["up", "right", "do"],
     )
     assert actions == ["up", "right", "do"]
+
+
+def test_openrouter_react_honors_configured_plan_bounds() -> None:
+    policy = OpenRouterReAct(
+        config_id="single_action",
+        config={"plan_min": 1, "plan_max": 1},
+    )
+    assert policy.metadata()["plan_min"] == 1
+    assert policy.metadata()["plan_max"] == 1
+    assert policy._parse_actions(
+        '{"actions":["up","right","do"]}',
+        ["up", "right", "do"],
+    ) == ["up"]
 
 
 def test_openrouter_react_binds_candidate_system_prompt() -> None:

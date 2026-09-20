@@ -250,6 +250,12 @@ class OpenRouterReAct:
         self.base_url = str(config.get("base_url") or "https://openrouter.ai/api/v1").rstrip("/")
         self.api_key_env = str(config.get("api_key_env") or "OPENROUTER_API_KEY")
         self.max_tokens = min(max(int(config.get("max_tokens") or 768), 64), 2048)
+        raw_min = config.get("plan_min")
+        raw_max = config.get("plan_max")
+        plan_min = int(raw_min) if raw_min is not None else type(self).plan_min
+        plan_max = int(raw_max) if raw_max is not None else type(self).plan_max
+        self.plan_min = min(max(plan_min, 1), 20)
+        self.plan_max = min(max(plan_max, self.plan_min), 20)
         self.parse_retries = min(max(int(config.get("parse_retries") or 0), 0), 2)
         self.compact_every = min(max(int(config.get("compact_every") or 16), 1), 64)
         # A turn count only predicts context length when every turn is the same
@@ -822,8 +828,7 @@ class OpenRouterReAct:
             return "\n".join(parts)
         return ""
 
-    @staticmethod
-    def _parse_actions(raw: str, valid: list[str]) -> list[str]:
+    def _parse_actions(self, raw: str, valid: list[str]) -> list[str]:
         try:
             value = json.loads(raw)
         except json.JSONDecodeError:
@@ -840,7 +845,7 @@ class OpenRouterReAct:
             aliases.get(str(action).strip().lower(), str(action).strip().lower())
             for action in requested or []
         ]
-        actions = [action for action in normalized if action in valid][: OpenRouterReAct.plan_max]
+        actions = [action for action in normalized if action in valid][: self.plan_max]
         if not actions:
             raise RuntimeError("policy returned no valid actions")
         return actions
