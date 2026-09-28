@@ -102,6 +102,19 @@ _DENIED_BODY_KEY_SUFFIXES = (
     "_credentials",
 )
 
+# Attribution/identity fields whose names end in ``_key`` but carry no credential.
+# They are exempt from the broad ``_key`` suffix denial (and only from that: their
+# values are still scanned for secret shapes). ``prompt_cache_key`` attributes a
+# provider call to its native Codex child; ``idempotency_key`` and ``trace_key``
+# identify rollouts and capture sessions.
+NON_SECRET_BODY_KEYS = frozenset(
+    {
+        "prompt_cache_key",
+        "idempotency_key",
+        "trace_key",
+    }
+)
+
 _SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("bearer_token", re.compile(r"\bBearer\s+[A-Za-z0-9._\-]{16,}")),
     ("openai_key", re.compile(r"\bsk-[A-Za-z0-9._\-]{16,}")),
@@ -296,6 +309,8 @@ def _normalize_body_key(key: str) -> str:
 
 
 def _body_key_denied(normalized_key: str) -> bool:
+    if normalized_key in NON_SECRET_BODY_KEYS:
+        return False
     return normalized_key in DENIED_BODY_KEYS or normalized_key.endswith(
         _DENIED_BODY_KEY_SUFFIXES
     )
@@ -342,6 +357,7 @@ __all__ = [
     "CORRELATION_HEADERS",
     "CORRELATION_HEADER_PREFIXES",
     "DENIED_BODY_KEYS",
+    "NON_SECRET_BODY_KEYS",
     "DENIED_HEADERS",
     "REDACTED",
     "SECRET_REDACTED",
