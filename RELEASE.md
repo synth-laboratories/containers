@@ -1,7 +1,8 @@
 # Release: synth-containers
 
-Release this package from the root of this standalone repository. Tested
-pairing: `synth-optimizers==0.2.22` pins `synth-containers==0.4.3`.
+Release this package from the root of this standalone repository. It is
+versioned and published independently of other Synth packages. Tested pairing:
+`synth-optimizers==0.2.22` pins `synth-containers==0.4.3`.
 
 ## Build
 
@@ -18,24 +19,25 @@ uv run --group dev twine check dist/*
 The eight historical metadata/reward failures have been reconciled with the
 current contracts. Missing rewards are still asserted before completion;
 terminal and recovered catalogs now test both scored and omitted rewards.
-The publish workflow runs the entire suite without deselections. Full-suite
+The release gate runs the entire suite without deselections. Full-suite
 verification remains mandatory, including timing-sensitive annotation tests.
 The type-debt gate retains an explicit 173-diagnostic historical baseline;
 the integrated candidate currently reports 172 diagnostics,
 mostly `invalid-argument-type` and `unresolved-attribute`; annotating that
 surface is separate work. Neither is a licence to add more.
 
-## Cookbook compile check
-
-Runnable cookbooks live in the separate
-[`synth-cookbooks-public`](https://github.com/synth-laboratories/synth-cookbooks-public)
-repository. For cookbook-facing releases, clone it next to this checkout and
-compile the touched cookbook entrypoints against this source tree:
+For cookbook-facing releases, also compile the touched cookbook entrypoints.
+Cookbooks live in a separate checkout (for example
+[`synth-cookbooks-public`](https://github.com/synth-laboratories/synth-cookbooks-public));
+from this repository root, point the command at that checkout:
 
 ```bash
-git clone https://github.com/synth-laboratories/synth-cookbooks-public.git ../synth-cookbooks-public
-PYTHONPATH=src python -m py_compile $(rg --files ../synth-cookbooks-public/cookbooks -g '*.py')
+COOKBOOKS_DIR=../synth-cookbooks-public
+uv run python -m py_compile $(rg --files "$COOKBOOKS_DIR" -g '*.py')
 ```
+
+Internal developer-machine registration of a local build is optional and not
+part of the release flow; see `docs/internal/local-dev-build.md`.
 
 ## Changelog
 
