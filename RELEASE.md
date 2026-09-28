@@ -1,7 +1,7 @@
 # Release: synth-containers
 
-Release this package independently from the repository root and from other
-packages in this monorepo.
+Release this package from the root of this standalone repository. It is
+versioned and published independently of other Synth packages.
 
 ## Build
 
@@ -25,23 +25,18 @@ the integrated candidate currently reports 172 diagnostics,
 mostly `invalid-argument-type` and `unresolved-attribute`; annotating that
 surface is separate work. Neither is a licence to add more.
 
-## Register a local development build
+For cookbook-facing releases, also compile the touched cookbook entrypoints.
+Cookbooks live in a separate checkout (for example
+[`synth-cookbooks-public`](https://github.com/synth-laboratories/synth-cookbooks-public));
+from this repository root, point the command at that checkout:
 
 ```bash
-./scripts/register-local-dev-build.sh
+COOKBOOKS_DIR=../synth-cookbooks-public
+uv run python -m py_compile $(rg --files "$COOKBOOKS_DIR" -g '*.py')
 ```
 
-This no-argument command registers an immutable, versioned wheel under
-`~/.synth-desktop/dev-builds/synth-containers/`. Workshop resolves its exact
-checked-in version from that registry, so local app launches need no flags or
-environment variables.
-
-For cookbook-facing releases, also compile the touched cookbook entrypoints
-from the repository root:
-
-```bash
-PYTHONPATH=packages/synth-containers/src python -m py_compile $(rg --files cookbooks -g '*.py')
-```
+Internal developer-machine registration of a local build is optional and not
+part of the release flow; see `docs/internal/local-dev-build.md`.
 
 ## Changelog
 

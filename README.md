@@ -22,20 +22,9 @@ pip install synth-containers
 uv add synth-containers
 ```
 
-## Local Synth development
+## Development
 
-Register the current checkout once after changing Containers or its package version:
-
-```bash
-./scripts/register-local-dev-build.sh
-```
-
-The command builds a wheel, installs it into an immutable machine-local directory,
-verifies the installed version, and atomically selects it for local Workshop builds.
-No launch flags or environment variables are required. Re-running it reuses an
-identical registered wheel.
-
-Sibling Optimizers development remains editable through its checked-in uv source:
+Sibling Optimizers development stays editable through its checked-in uv source:
 
 ```bash
 cd ../optimizers
