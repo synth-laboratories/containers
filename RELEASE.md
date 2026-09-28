@@ -1,7 +1,7 @@
 # Release: synth-containers
 
-Release this package independently from the repository root and from other
-packages in this monorepo.
+Release this package from the root of this standalone repository. Tested
+pairing: `synth-optimizers==0.2.22` pins `synth-containers==0.4.3`.
 
 ## Build
 
@@ -25,22 +25,16 @@ the integrated candidate currently reports 172 diagnostics,
 mostly `invalid-argument-type` and `unresolved-attribute`; annotating that
 surface is separate work. Neither is a licence to add more.
 
-## Register a local development build
+## Cookbook compile check
+
+Runnable cookbooks live in the separate
+[`synth-cookbooks-public`](https://github.com/synth-laboratories/synth-cookbooks-public)
+repository. For cookbook-facing releases, clone it next to this checkout and
+compile the touched cookbook entrypoints against this source tree:
 
 ```bash
-./scripts/register-local-dev-build.sh
-```
-
-This no-argument command registers an immutable, versioned wheel under
-`~/.synth-desktop/dev-builds/synth-containers/`. Workshop resolves its exact
-checked-in version from that registry, so local app launches need no flags or
-environment variables.
-
-For cookbook-facing releases, also compile the touched cookbook entrypoints
-from the repository root:
-
-```bash
-PYTHONPATH=packages/synth-containers/src python -m py_compile $(rg --files cookbooks -g '*.py')
+git clone https://github.com/synth-laboratories/synth-cookbooks-public.git ../synth-cookbooks-public
+PYTHONPATH=src python -m py_compile $(rg --files ../synth-cookbooks-public/cookbooks -g '*.py')
 ```
 
 ## Changelog
@@ -62,8 +56,8 @@ After confirming the version and inspecting the generated artifacts:
 uv publish dist/*
 ```
 
-The `publish-pypi.yml` workflow validates official version tags, tests and builds
-the package, then publishes through the protected `pypi-release` environment
-using PyPI trusted publishing. Never create a public version tag before all
-release gates pass. Published `0.4.2` is immutable. The production-based
-consolidation candidate is `0.4.3`; its gates and publication remain pending.
+This repository no longer carries a GitHub Actions publish workflow; publish
+only artifacts built from a tree that passed every gate above. Never create a
+public version tag before all release gates pass. Published versions are
+immutable: `0.4.3` (tag `v0.4.3`) is the current published release and the
+version `synth-optimizers==0.2.22` pins; `0.4.2` remains published unchanged.

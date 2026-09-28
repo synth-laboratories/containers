@@ -1,4 +1,9 @@
 #!/bin/sh
+# Internal developer tool, not part of public setup: builds a wheel from this
+# checkout and registers it immutably under
+# ~/.synth-desktop/dev-builds/synth-containers/<version>/ for local Synth desktop
+# builds, which resolve their pinned Containers version from that registry.
+# Re-running with identical sources reuses the registered wheel.
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
