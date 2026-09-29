@@ -50,6 +50,40 @@ def test_openrouter_react_uses_public_bearer_for_workshop_capability_proxy(
     assert policy.plan({"valid_actions": ["do"], "observation_text": "obs"}) == ["do"]
     assert observed["authorization"] == "Bearer workshop-proxy"
 
+
+def test_react_uses_openai_chat_completion_fields_for_openai_proxy(monkeypatch) -> None:
+    class Response:
+        headers = {"Content-Type": "application/json"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self, *_args) -> bytes:
+            return b'{"choices":[{"message":{"content":"{\\"actions\\":[\\"do\\"]}"}}],"usage":{}}'
+
+    observed: dict[str, object] = {}
+
+    def fake_urlopen(request, **_kwargs):
+        observed.update(json.loads(request.data))
+        return Response()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    policy = OpenRouterReAct(
+        config_id="luna_low",
+        config={"provider": "openai", "model": "gpt-5.6-luna", "effort": "low"},
+    )
+    policy._complete("workshop-proxy", ["do"], None)
+
+    assert policy.metadata()["provider"] == "openai"
+    assert observed["max_completion_tokens"] == policy.max_tokens
+    assert observed["reasoning_effort"] == "none"
+    assert "max_tokens" not in observed
+    assert "reasoning" not in observed
+    assert "temperature" not in observed
+
 def test_openrouter_react_normalizes_craftax_direction_aliases() -> None:
     policy = OpenRouterReAct(config_id="alias_test", config={})
     actions = policy._parse_actions(
