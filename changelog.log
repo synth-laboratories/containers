@@ -2,6 +2,7 @@
 
 ## 2026-09-29 — unreleased 0.4.4 candidate
 
+* Require patched AnyIO >=4.14.2 for TLS hostname validation and process-pool handling.
 * Carry forward fail-closed trace credential redaction and tunnel relay target confinement absent from the published 0.4.3 wheel.
 * Match pool list responses to backend items envelopes and support provider-aware ReAct tool calls and completion-token limits.
 * Prepare 0.4.4 for local artifact qualification; not yet published.
