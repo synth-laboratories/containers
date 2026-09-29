@@ -15,3 +15,6 @@ temp/_runs/
 # Local rollout store from a loopback training run
 .b77-store/
 .venv/
+
+# Project-scoped local publishing credentials
+.env.pypi

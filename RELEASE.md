@@ -50,6 +50,25 @@ part of the release flow; see `docs/internal/local-dev-build.md`.
 - Include the PyPI version in one bullet when a package was published.
 - Keep unreleased or blocked work explicit and short.
 
+## Published 0.4.4 and local publishing credentials
+
+`0.4.4` is published from the qualified source tagged `v0.4.4`. Its PyPI
+wheel SHA-256 is
+`fb226fa105f057078217d9058bdee622ee08e6792c199c9cba47364d7742c909`.
+The previous `0.4.3` remains immutable and is still the dependency of public
+Optimizers `0.2.22`.
+
+A project-scoped upload token is stored locally in ignored `.env.pypi`
+with mode `0600`, using `UV_PUBLISH_TOKEN`. Load it explicitly for an authorized
+future release; never print or commit it. Keychain is not part of this flow:
+
+```sh
+set -a
+. ./.env.pypi
+set +a
+uv publish --keyring-provider disabled dist/*
+```
+
 ## Publish
 
 After confirming the version and inspecting the generated artifacts:
@@ -61,5 +80,5 @@ uv publish dist/*
 This repository no longer carries a GitHub Actions publish workflow; publish
 only artifacts built from a tree that passed every gate above. Never create a
 public version tag before all release gates pass. Published versions are
-immutable: `0.4.3` (tag `v0.4.3`) is the current published release and the
-version `synth-optimizers==0.2.22` pins; `0.4.2` remains published unchanged.
+immutable: `0.4.4` (tag `v0.4.4`) is the current published release.
+`synth-optimizers==0.2.22` still pins `0.4.3`; earlier packages remain unchanged.
