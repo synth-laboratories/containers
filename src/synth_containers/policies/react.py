@@ -688,7 +688,7 @@ class OpenRouterReAct:
         valid: list[str],
         on_delta: DeltaCallback | None,
     ) -> dict[str, Any]:
-        payload = {
+        payload: dict[str, Any] = {
             "model": self.model,
             "messages": list(self._messages),
             "stream": True,
