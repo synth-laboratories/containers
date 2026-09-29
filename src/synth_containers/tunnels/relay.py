@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import queue
+import re
 import threading
 import time
 import urllib.error
@@ -1300,15 +1301,33 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
         return None
 
 
+_ALLOWED_UPSTREAM_SCHEMES = frozenset({"http", "https"})
+
+
 def _open_upstream(
     request: urllib.request.Request,
     *,
     timeout: float,
 ) -> Any:
-    return urllib.request.build_opener(_NoRedirectHandler()).open(
-        request,
-        timeout=timeout,
-    )
+    scheme = (request.type or "").lower()
+    if scheme not in _ALLOWED_UPSTREAM_SCHEMES:
+        raise SynthTunnelRelayError(
+            f"SynthTunnel upstream scheme {scheme!r} is not permitted"
+        )
+    # Build an opener that only speaks http(s): no FileHandler/FTPHandler/
+    # UnknownHandler, so a ``file://``/``ftp://`` request can never be served
+    # even if one reached this far. Redirects are refused, and no proxy is used.
+    opener = urllib.request.OpenerDirector()
+    for handler in (
+        urllib.request.ProxyHandler({}),
+        urllib.request.HTTPHandler(),
+        urllib.request.HTTPSHandler(),
+        urllib.request.HTTPDefaultErrorHandler(),
+        _NoRedirectHandler(),
+        urllib.request.HTTPErrorProcessor(),
+    ):
+        opener.add_handler(handler)
+    return opener.open(request, timeout=timeout)
 
 
 def _parse_local_target(local_url: str) -> _LocalTarget:
@@ -1368,8 +1387,66 @@ def _join_health_url(base_url: str) -> str:
     return urljoin(base_url.rstrip("/") + "/", "health")
 
 
+# A worker-supplied forward path is only ever a path *under* the leased target.
+# Anything that carries a URI scheme (``http:``, ``file:``, ``ws:`` …) escapes it.
+_FORWARD_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*:")
+
+
+def _confined_forward_path(path: str) -> str:
+    """Reduce a worker-supplied forward path to a plain path under the target.
+
+    The rust gateway forwards ``/s/{route}/{*path}`` verbatim, so ``path`` is
+    attacker-controlled. ``urljoin`` treats a value that is itself an absolute
+    URL (``/http://evil/x``) or an authority (``//evil/x``) as replacing the
+    base, which is an SSRF primitive. Reject any scheme, authority, or upward
+    traversal and return only a relative path confined beneath the lease.
+    """
+
+    raw = str(path or "/").replace("\\", "/")
+    stripped = raw.lstrip("/")
+    if not stripped:
+        return "/"
+    # ``scheme://host`` / ``ws://…`` / ``file:///…`` — an absolute URL; a bare
+    # ``//authority``; or any ``scheme:`` prefix. None is a relative path.
+    if (
+        "://" in stripped
+        or stripped.startswith("//")
+        or _FORWARD_SCHEME_RE.match(stripped)
+    ):
+        return "/"
+    trailing = stripped.endswith("/")
+    segments: list[str] = []
+    for segment in stripped.split("/"):
+        if segment in ("", "."):
+            continue
+        if segment == "..":
+            # Refuse to let ``..`` climb above the lease's own path prefix.
+            return "/"
+        segments.append(segment)
+    result = "/" + "/".join(segments)
+    if trailing and not result.endswith("/"):
+        result += "/"
+    return result
+
+
 def _local_upstream_url(target: _LocalTarget, path: str, query: str) -> str:
-    upstream_url = urljoin(target.base_url.rstrip("/") + "/", path.lstrip("/"))
+    # Build the URL from the lease's own scheme/host/port. The forwarded path is
+    # confined to a relative path so it can never redirect the dial to another
+    # host, loopback port, or a non-http scheme.
+    base = urlparse(target.base_url)
+    prefix = base.path.rstrip("/")
+    safe_path = _confined_forward_path(path)
+    upstream_url = urlunparse(
+        (base.scheme, base.netloc, f"{prefix}{safe_path}", "", "", "")
+    )
+    # Fail closed: the resolved URL must stay on the leased host/port/scheme.
+    resolved = urlparse(upstream_url)
+    if (resolved.scheme, resolved.hostname, resolved.port) != (
+        base.scheme,
+        base.hostname,
+        base.port,
+    ):
+        upstream_url = urlunparse((base.scheme, base.netloc, f"{prefix}/", "", "", ""))
     return f"{upstream_url}?{query}" if query else upstream_url
 
 

@@ -56,7 +56,7 @@ from synth_containers.tracing.capture.proxy import (
     _decode_request_body,
     _forward_headers,
 )
-from synth_containers.tracing.capture.redaction import REDACTED
+from synth_containers.tracing.capture.redaction import REDACTED, RedactionError
 from synth_containers.tracing.capture.routes import (
     ProviderEndpointConfig,
     UpstreamAuthKind,
@@ -516,46 +516,51 @@ def test_configured_provider_route_preserves_query_and_retained_blob_is_not_trun
     assert finished_record["payload"]["usage"]["total_tokens"] == 8
 
 
-def test_native_import_persists_only_redacted_source_artifact(tmp_path: Path) -> None:
+def _bundle_bytes(root: Path) -> bytes:
+    if not root.exists():
+        return b""
+    return b"".join(path.read_bytes() for path in sorted(root.rglob("*")) if path.is_file())
+
+
+def test_native_import_with_secret_shapes_is_refused_without_echoing_them(
+    tmp_path: Path,
+) -> None:
+    # Fail-closed secret persistence: an import whose source carried a
+    # credential shape is refused outright, not stored with a best-effort scrub.
     secret = "sk-test-native-import-secret-123456789"
     source = tmp_path / "react.json"
-    source_bytes = canonical_bytes(
-        {
-            "api_key": secret,
-            "trace_correlation_id": secret,
-            "events": [
-                {
-                    "event_id": "step-1",
-                    "event_type": "react.step",
-                    "payload": {
-                        "authorization": f"Bearer {secret}",
-                        "action": "wait",
-                    },
-                }
-            ],
-        }
+    source.write_bytes(
+        canonical_bytes(
+            {
+                "api_key": secret,
+                "trace_correlation_id": secret,
+                "events": [
+                    {
+                        "event_id": "step-1",
+                        "event_type": "react.step",
+                        "payload": {
+                            "authorization": f"Bearer {secret}",
+                            "action": "wait",
+                        },
+                    }
+                ],
+            }
+        )
     )
-    source.write_bytes(source_bytes)
-    bundle = LocalTraceBundle(tmp_path / "native-import")
+    bundle_root = tmp_path / "native-import"
+    bundle = LocalTraceBundle(bundle_root)
 
-    imported = import_native_to_bundle(
-        source,
-        source_format="react",
-        bundle=bundle,
-    )
-    stored = bundle.blobs.get(imported["stored_source_digest"])
+    with pytest.raises(RedactionError) as refused:
+        import_native_to_bundle(source, source_format="react", bundle=bundle)
 
-    assert imported["source_digest"] == bytes_digest(source_bytes)
-    assert imported["stored_source_digest"] != imported["source_digest"]
-    assert secret.encode() not in stored
-    assert REDACTED.encode() in stored
-    assert secret.encode() not in bundle.archive_bytes()
-    trace = bundle.read_trace(imported["trace_digest"])
-    assert trace["identity"]["correlation_id"] == REDACTED
-    assert bundle.verify_self_contained() == (True, ())
+    message = str(refused.value)
+    assert "secret credential shape" in message
+    assert "refused" in message
+    assert secret not in message
+    assert secret.encode() not in _bundle_bytes(bundle_root)
 
 
-def test_legacy_cli_import_persists_only_redacted_source_artifact(
+def test_legacy_cli_import_with_secret_shapes_is_refused_without_echoing_them(
     tmp_path: Path,
 ) -> None:
     secret = "sk-test-legacy-import-secret-123456789"
@@ -592,7 +597,7 @@ def test_legacy_cli_import_persists_only_redacted_source_artifact(
     )
     bundle_root = tmp_path / "legacy-import"
 
-    assert (
+    with pytest.raises(RedactionError) as refused:
         trace_cli_main(
             [
                 "import",
@@ -603,16 +608,12 @@ def test_legacy_cli_import_persists_only_redacted_source_artifact(
                 str(bundle_root),
             ]
         )
-        == 0
-    )
-    bundle = LocalTraceBundle(bundle_root)
 
-    assert secret.encode() not in bundle.archive_bytes()
-    assert any(
-        REDACTED.encode() in bundle.blobs.get(digest)
-        for digest in bundle.read_manifest()["blob_digests"]
-    )
-    assert bundle.verify_self_contained() == (True, ())
+    message = str(refused.value)
+    assert "secret credential shape" in message
+    assert "refused" in message
+    assert secret not in message
+    assert secret.encode() not in _bundle_bytes(bundle_root)
 
 
 def test_supervisor_resume_loads_exact_binding_and_continues_high_water(
@@ -2547,3 +2548,44 @@ def test_v4_importers_produce_valid_completed_terminal_lifecycles() -> None:
         assert document.lifecycle.status == TraceStatus.COMPLETED
         assert document.completeness.terminal_event_observed is True
         assert validate_trace(document) == []
+
+
+def test_non_secret_key_fields_survive_while_credential_keys_are_redacted() -> None:
+    from synth_containers.tracing.capture.redaction import (
+        assert_no_secrets,
+        redact_payload,
+    )
+
+    payload = {
+        "model": "gpt-test",
+        "prompt_cache_key": "thread-attr-1",
+        "idempotency_key": "rollout-k-1",
+        "trace_key": {"task": "attribution"},
+        "api_key": "not-a-shape-but-a-credential-field",
+        "aws_secret_access_key": "plain-credential-value",
+        "service_secret_key": "plain-credential-value",
+        "signing_key": "plain-credential-value",
+    }
+    redacted, _report = redact_payload(payload)
+
+    assert redacted["prompt_cache_key"] == "thread-attr-1"
+    assert redacted["idempotency_key"] == "rollout-k-1"
+    assert redacted["trace_key"] == {"task": "attribution"}
+    for field in ("api_key", "aws_secret_access_key", "service_secret_key", "signing_key"):
+        assert redacted[field] == REDACTED, field
+    assert_no_secrets(redacted, where="exemption-law")
+
+
+def test_exempt_key_field_still_refuses_a_secret_shaped_value() -> None:
+    from synth_containers.tracing.capture.redaction import (
+        assert_no_secrets,
+        redact_payload,
+    )
+
+    secret = "sk-test-exempt-field-secret-123456789"
+    redacted, _report = redact_payload({"prompt_cache_key": secret})
+
+    assert secret not in repr(redacted)
+    with pytest.raises(RedactionError) as refused:
+        assert_no_secrets(redacted, where="exemption-law")
+    assert secret not in str(refused.value)

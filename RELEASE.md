@@ -1,7 +1,8 @@
 # Release: synth-containers
 
-Release this package independently from the repository root and from other
-packages in this monorepo.
+Release this package from the root of this standalone repository. It is
+versioned and published independently of other Synth packages. Tested pairing:
+`synth-optimizers==0.2.22` pins `synth-containers==0.4.3`.
 
 ## Build
 
@@ -18,30 +19,25 @@ uv run --group dev twine check dist/*
 The eight historical metadata/reward failures have been reconciled with the
 current contracts. Missing rewards are still asserted before completion;
 terminal and recovered catalogs now test both scored and omitted rewards.
-The publish workflow runs the entire suite without deselections. Full-suite
+The release gate runs the entire suite without deselections. Full-suite
 verification remains mandatory, including timing-sensitive annotation tests.
 The type-debt gate retains an explicit 173-diagnostic historical baseline;
 the integrated candidate currently reports 172 diagnostics,
 mostly `invalid-argument-type` and `unresolved-attribute`; annotating that
 surface is separate work. Neither is a licence to add more.
 
-## Register a local development build
+For cookbook-facing releases, also compile the touched cookbook entrypoints.
+Cookbooks live in a separate checkout (for example
+[`synth-cookbooks-public`](https://github.com/synth-laboratories/synth-cookbooks-public));
+from this repository root, point the command at that checkout:
 
 ```bash
-./scripts/register-local-dev-build.sh
+COOKBOOKS_DIR=../synth-cookbooks-public
+uv run python -m py_compile $(rg --files "$COOKBOOKS_DIR" -g '*.py')
 ```
 
-This no-argument command registers an immutable, versioned wheel under
-`~/.synth-desktop/dev-builds/synth-containers/`. Workshop resolves its exact
-checked-in version from that registry, so local app launches need no flags or
-environment variables.
-
-For cookbook-facing releases, also compile the touched cookbook entrypoints
-from the repository root:
-
-```bash
-PYTHONPATH=packages/synth-containers/src python -m py_compile $(rg --files cookbooks -g '*.py')
-```
+Internal developer-machine registration of a local build is optional and not
+part of the release flow; see `docs/internal/local-dev-build.md`.
 
 ## Changelog
 
@@ -62,8 +58,8 @@ After confirming the version and inspecting the generated artifacts:
 uv publish dist/*
 ```
 
-The `publish-pypi.yml` workflow validates official version tags, tests and builds
-the package, then publishes through the protected `pypi-release` environment
-using PyPI trusted publishing. Never create a public version tag before all
-release gates pass. Published `0.4.2` is immutable. The production-based
-consolidation candidate is `0.4.3`; its gates and publication remain pending.
+This repository no longer carries a GitHub Actions publish workflow; publish
+only artifacts built from a tree that passed every gate above. Never create a
+public version tag before all release gates pass. Published versions are
+immutable: `0.4.3` (tag `v0.4.3`) is the current published release and the
+version `synth-optimizers==0.2.22` pins; `0.4.2` remains published unchanged.

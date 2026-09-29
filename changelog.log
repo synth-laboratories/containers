@@ -1,5 +1,16 @@
 # synth-containers changelog
 
+## 2026-09-29 — unreleased 0.4.4 candidate
+
+* Carry forward fail-closed trace credential redaction and tunnel relay target confinement absent from the published 0.4.3 wheel.
+* Match pool list responses to backend items envelopes and support provider-aware ReAct tool calls and completion-token limits.
+* Prepare 0.4.4 for local artifact qualification; not yet published.
+
+## 2026-09-28
+
+* `0.4.3` is published on PyPI (tag `v0.4.3`); `synth-optimizers==0.2.22` pins and is tested against it.
+* Public README/RELEASE setup no longer includes internal desktop-build registration or monorepo paths; cookbook compile check uses a separate `synth-cookbooks-public` checkout.
+
 ## 2026-09-09 — consolidation candidate
 
 * Prepare unpublished `0.4.3`, combining production API/metadata/journal contracts with the v0.10 runtime, CISPO, annotations, tunnel streaming and trace artifact fixes.

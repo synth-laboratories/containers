@@ -22,24 +22,16 @@ pip install synth-containers
 uv add synth-containers
 ```
 
-## Local Synth development
+Tested pair: `synth-optimizers==0.2.22` pins and is tested against
+`synth-containers==0.4.3`; both are published on PyPI.
 
-Register the current checkout once after changing Containers or its package version:
-
-```bash
-./scripts/register-local-dev-build.sh
-```
-
-The command builds a wheel, installs it into an immutable machine-local directory,
-verifies the installed version, and atomically selects it for local Workshop builds.
-No launch flags or environment variables are required. Re-running it reuses an
-identical registered wheel.
-
-Sibling Optimizers development remains editable through its checked-in uv source:
+## Development
 
 ```bash
-cd ../optimizers
+git clone https://github.com/synth-laboratories/containers.git
+cd containers
 uv sync --group dev
+uv run --group dev pytest tests
 ```
 
 ## The contract
