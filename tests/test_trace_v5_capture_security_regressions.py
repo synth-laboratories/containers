@@ -56,7 +56,7 @@ from synth_containers.tracing.capture.proxy import (
     _decode_request_body,
     _forward_headers,
 )
-from synth_containers.tracing.capture.redaction import REDACTED
+from synth_containers.tracing.capture.redaction import REDACTED, RedactionError
 from synth_containers.tracing.capture.routes import (
     ProviderEndpointConfig,
     UpstreamAuthKind,
@@ -516,7 +516,7 @@ def test_configured_provider_route_preserves_query_and_retained_blob_is_not_trun
     assert finished_record["payload"]["usage"]["total_tokens"] == 8
 
 
-def test_native_import_persists_only_redacted_source_artifact(tmp_path: Path) -> None:
+def test_native_import_rejects_secret_bearing_source(tmp_path: Path) -> None:
     secret = "sk-test-native-import-secret-123456789"
     source = tmp_path / "react.json"
     source_bytes = canonical_bytes(
@@ -538,24 +538,15 @@ def test_native_import_persists_only_redacted_source_artifact(tmp_path: Path) ->
     source.write_bytes(source_bytes)
     bundle = LocalTraceBundle(tmp_path / "native-import")
 
-    imported = import_native_to_bundle(
-        source,
-        source_format="react",
-        bundle=bundle,
-    )
-    stored = bundle.blobs.get(imported["stored_source_digest"])
-
-    assert imported["source_digest"] == bytes_digest(source_bytes)
-    assert imported["stored_source_digest"] != imported["source_digest"]
-    assert secret.encode() not in stored
-    assert REDACTED.encode() in stored
-    assert secret.encode() not in bundle.archive_bytes()
-    trace = bundle.read_trace(imported["trace_digest"])
-    assert trace["identity"]["correlation_id"] == REDACTED
-    assert bundle.verify_self_contained() == (True, ())
+    with pytest.raises(RedactionError, match="secret credential shape"):
+        import_native_to_bundle(
+            source,
+            source_format="react",
+            bundle=bundle,
+        )
 
 
-def test_legacy_cli_import_persists_only_redacted_source_artifact(
+def test_legacy_cli_import_rejects_secret_bearing_source(
     tmp_path: Path,
 ) -> None:
     secret = "sk-test-legacy-import-secret-123456789"
@@ -592,7 +583,7 @@ def test_legacy_cli_import_persists_only_redacted_source_artifact(
     )
     bundle_root = tmp_path / "legacy-import"
 
-    assert (
+    with pytest.raises(RedactionError, match="secret credential shape"):
         trace_cli_main(
             [
                 "import",
@@ -603,16 +594,6 @@ def test_legacy_cli_import_persists_only_redacted_source_artifact(
                 str(bundle_root),
             ]
         )
-        == 0
-    )
-    bundle = LocalTraceBundle(bundle_root)
-
-    assert secret.encode() not in bundle.archive_bytes()
-    assert any(
-        REDACTED.encode() in bundle.blobs.get(digest)
-        for digest in bundle.read_manifest()["blob_digests"]
-    )
-    assert bundle.verify_self_contained() == (True, ())
 
 
 def test_supervisor_resume_loads_exact_binding_and_continues_high_water(

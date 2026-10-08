@@ -79,7 +79,6 @@ DENIED_BODY_KEYS = frozenset(
         "credentials",
         "token",
         "bearer",
-        "key",
     }
 )
 
@@ -98,7 +97,6 @@ _DENIED_BODY_KEY_SUFFIXES = (
     "_token",
     "_bearer",
     "_cookie",
-    "_key",
     "_credentials",
 )
 
