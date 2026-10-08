@@ -1,0 +1,425 @@
+{
+  "bundle": {
+    "annotations": [
+      {
+        "abstention_reason": null,
+        "annotation_id": "ann_287a4a31a31e7724",
+        "annotation_type": "problem_model",
+        "annotator_digest": "sha256:49642338f168a648475c5d1004ba0ad7adb8bc894826471483131d8c7bd6a517",
+        "annotator_execution_trace_digest": "sha256:8010aaf616c88070107d50b2c61a3fddf893131cb2afbc91f39898ea70bbf226",
+        "annotator_execution_trace_id": "trace_619f728ee4b0f464",
+        "annotator_id": "test.jesterky.problem_model",
+        "annotator_version": "v1",
+        "author_kind": "agentic",
+        "confidence": 0.7,
+        "content_digest": "sha256:8e42a42604738a39318c00c212ed969f9c52b227708ba5132e25833daeb068b7",
+        "created_at": "2026-09-07T23:41:43.124420Z",
+        "derivation": null,
+        "evidence": [
+          {
+            "entity_digest": null,
+            "entity_id": "evt_049420e03659e201",
+            "json_pointer": null,
+            "kind": "event",
+            "part_id": null,
+            "quote": null,
+            "quote_digest": null,
+            "range": null,
+            "schema_version": "synth.trace-selector.v1",
+            "source_projection": null,
+            "token_sequence": null,
+            "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+            "trace_id": "trace_db61f67b4e043a03"
+          },
+          {
+            "entity_digest": null,
+            "entity_id": "evt_718283a6711531d9",
+            "json_pointer": null,
+            "kind": "event",
+            "part_id": null,
+            "quote": null,
+            "quote_digest": null,
+            "range": null,
+            "schema_version": "synth.trace-selector.v1",
+            "source_projection": null,
+            "token_sequence": null,
+            "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+            "trace_id": "trace_db61f67b4e043a03"
+          }
+        ],
+        "grounding": "grounded",
+        "inspected_projection": null,
+        "inspection": {
+          "losses": [],
+          "projection_digest": null,
+          "projection_id": null,
+          "projection_manifest_digest": null,
+          "source": "trace_authority",
+          "trace_body_read": true
+        },
+        "labels": [
+          "problem_model.matches_issue"
+        ],
+        "payload": {},
+        "producer": {
+          "config_digest": "sha256:3de93485cf999cdfa5d1019ff85b76d31cc9099c4a5d5f31bf2c0e5428d0d2aa",
+          "credential_profile": null,
+          "kind": "agentic",
+          "model": "gpt-5.6-luna",
+          "name": "jesterky",
+          "version": "synth.annotation-runner@1"
+        },
+        "rationale": "cli fake swarm worker",
+        "review_state": "unreviewed",
+        "revision": 1,
+        "schema_version": "synth.annotation.v1",
+        "status": "applied",
+        "supersedes_id": null,
+        "target": {
+          "entity_digest": null,
+          "entity_id": null,
+          "json_pointer": null,
+          "kind": "trace",
+          "part_id": null,
+          "quote": null,
+          "quote_digest": null,
+          "range": null,
+          "schema_version": "synth.trace-selector.v1",
+          "source_projection": null,
+          "token_sequence": null,
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        },
+        "unavailable_evidence": null,
+        "visibility": "private"
+      }
+    ],
+    "annotator_definitions": [
+      {
+        "annotator_id": "test.jesterky.problem_model",
+        "confidence_calibration_ref": null,
+        "confidence_semantics": "self_reported",
+        "content_digest": "sha256:49642338f168a648475c5d1004ba0ad7adb8bc894826471483131d8c7bd6a517",
+        "grounding_requirement": "exact_selector",
+        "metadata": {},
+        "minimum_evidence": 2,
+        "model": "gpt-5.6-luna",
+        "name": "Problem model",
+        "output_contract": {
+          "allowed_producer_kinds": [],
+          "annotation_types": [
+            "problem_model"
+          ],
+          "payload_schema": null,
+          "task_kind": "classify",
+          "taxonomy": [
+            {
+              "aliases": [],
+              "description": "",
+              "label": "problem_model.matches_issue",
+              "parent_label": null
+            },
+            {
+              "aliases": [],
+              "description": "",
+              "label": "problem_model.wrong",
+              "parent_label": null
+            }
+          ]
+        },
+        "program_ref": null,
+        "purpose": "diagnosis vs issue",
+        "reasoning_policy": "not_captured",
+        "required_subject_scope": "trace",
+        "schema_version": "synth.trace-annotator.v1",
+        "supported_trace_schemas": [
+          "synth.trace.v5"
+        ],
+        "taxonomy": [
+          "problem_model.matches_issue",
+          "problem_model.wrong"
+        ],
+        "unavailable_evidence_behavior": "abstain",
+        "version": "v1"
+      }
+    ],
+    "artifacts": [],
+    "benchmark_verdicts": [],
+    "bundle_id": "evb_7490a725bfb9eaf4",
+    "content_digest": "sha256:437fe87e1dfe207b6c1dae57086ae81a166012e01ac49ffeeebcabef144e595a",
+    "created_at": "2026-09-07T23:41:43.129816Z",
+    "criteria": [],
+    "evaluation_results": [],
+    "metadata": {
+      "revision_records": [
+        {
+          "kind": "annotator_definition",
+          "record_digest": "sha256:49642338f168a648475c5d1004ba0ad7adb8bc894826471483131d8c7bd6a517",
+          "record_id": "test.jesterky.problem_model"
+        },
+        {
+          "kind": "annotation",
+          "record_digest": "sha256:8e42a42604738a39318c00c212ed969f9c52b227708ba5132e25833daeb068b7",
+          "record_id": "ann_287a4a31a31e7724"
+        },
+        {
+          "kind": "receipt",
+          "record_digest": "sha256:e8eaa21202fc9df990ab480adf161f3684cd1633c446288596313d2b59cf6ee5",
+          "record_id": "rcpt_12c8cfd069ffffc5"
+        }
+      ],
+      "supersedes_bundle_digest": "sha256:4c68291e98ff72b15d230645496edeecc02c0cf14e86685b13b5fcfbf34abcad",
+      "supersedes_bundle_id": "evb_b103362cf293641b"
+    },
+    "receipts": [
+      {
+        "completeness": "complete",
+        "content_digest": "sha256:e8eaa21202fc9df990ab480adf161f3684cd1633c446288596313d2b59cf6ee5",
+        "detail": {
+          "abstained_count": 0,
+          "annotator_digest": "sha256:49642338f168a648475c5d1004ba0ad7adb8bc894826471483131d8c7bd6a517",
+          "annotator_id": "test.jesterky.problem_model",
+          "applied_count": 1,
+          "cached_from_job_id": null,
+          "execution_trace_digest": "sha256:8010aaf616c88070107d50b2c61a3fddf893131cb2afbc91f39898ea70bbf226",
+          "execution_trace_id": "trace_619f728ee4b0f464",
+          "global_abstentions": [],
+          "idempotency_key": "sha256:1704d527f471dace599e7a2abf243f4a586c2e111b8ac16715f95bbcab5bc01c",
+          "job_id": "ajob_3396fa775c45e657",
+          "limits": {
+            "max_cost_usd": 0.5,
+            "max_tool_calls": 200,
+            "max_tool_response_bytes": 32000,
+            "max_total_tokens": 50000,
+            "max_total_tool_bytes": 2000000,
+            "timeout_seconds": 900.0
+          },
+          "mode": "annotate",
+          "model": "gpt-5.6-luna",
+          "parent_job_id": null,
+          "program_digest": "sha256:3de93485cf999cdfa5d1019ff85b76d31cc9099c4a5d5f31bf2c0e5428d0d2aa",
+          "reasoning_effort": "medium",
+          "rejected": [],
+          "rejected_count": 0,
+          "repeat_index": 0,
+          "reservation_id": "rsv_d6df65f62076179e",
+          "rubric_digest": null,
+          "rubric_id": null,
+          "runner_version": "synth.annotation-runner@1",
+          "source_trace_id": "trace_db61f67b4e043a03",
+          "tool_contract_digest": "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+          "usage": {
+            "cached_input_tokens": null,
+            "cost_status": "unavailable",
+            "cost_usd": null,
+            "input_tokens": null,
+            "output_tokens": null,
+            "reasoning_output_tokens": null,
+            "tool_bytes": 0,
+            "tool_calls": 0,
+            "total_tokens": null,
+            "wall_time_seconds": 0.5055765839933883
+          },
+          "verifier_result_id": null
+        },
+        "ended_at": "2026-09-07T23:41:43.128904Z",
+        "errors": [],
+        "input_digests": [
+          "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "sha256:49642338f168a648475c5d1004ba0ad7adb8bc894826471483131d8c7bd6a517",
+          "sha256:3de93485cf999cdfa5d1019ff85b76d31cc9099c4a5d5f31bf2c0e5428d0d2aa",
+          "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+          "sha256:a1efc4c731eaa717866540e298ecbc830ffe94324340bee34bdf90c523f1cbe0"
+        ],
+        "new_state": "sealed",
+        "next_safe_action": "reuse_sealed_result",
+        "operation": "annotation.run",
+        "output_digests": [
+          "sha256:8e42a42604738a39318c00c212ed969f9c52b227708ba5132e25833daeb068b7"
+        ],
+        "previous_state": "validating",
+        "producer": null,
+        "receipt_id": "rcpt_12c8cfd069ffffc5",
+        "return_code": null,
+        "schema_version": "synth.receipt.v1",
+        "started_at": "2026-09-07T23:41:42.595598Z",
+        "status": "sealed",
+        "target_ids": [
+          "trace_db61f67b4e043a03",
+          "ajob_3396fa775c45e657"
+        ],
+        "wall_time_seconds": 0.5055765839933883
+      }
+    ],
+    "reward_aggregations": [],
+    "reward_definitions": [],
+    "reward_records": [],
+    "rubrics": [],
+    "schema_version": "synth.trace-evidence-bundle.v5",
+    "trace_ref": {
+      "content_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+      "schema_version": "synth.trace.v5",
+      "trace_id": "trace_db61f67b4e043a03"
+    },
+    "verifier_definitions": [],
+    "verifier_results": []
+  },
+  "expected_prior_digest": null,
+  "receipt": {
+    "completeness": "complete",
+    "content_digest": "sha256:e8eaa21202fc9df990ab480adf161f3684cd1633c446288596313d2b59cf6ee5",
+    "detail": {
+      "abstained_count": 0,
+      "annotator_digest": "sha256:49642338f168a648475c5d1004ba0ad7adb8bc894826471483131d8c7bd6a517",
+      "annotator_id": "test.jesterky.problem_model",
+      "applied_count": 1,
+      "cached_from_job_id": null,
+      "execution_trace_digest": "sha256:8010aaf616c88070107d50b2c61a3fddf893131cb2afbc91f39898ea70bbf226",
+      "execution_trace_id": "trace_619f728ee4b0f464",
+      "global_abstentions": [],
+      "idempotency_key": "sha256:1704d527f471dace599e7a2abf243f4a586c2e111b8ac16715f95bbcab5bc01c",
+      "job_id": "ajob_3396fa775c45e657",
+      "limits": {
+        "max_cost_usd": 0.5,
+        "max_tool_calls": 200,
+        "max_tool_response_bytes": 32000,
+        "max_total_tokens": 50000,
+        "max_total_tool_bytes": 2000000,
+        "timeout_seconds": 900.0
+      },
+      "mode": "annotate",
+      "model": "gpt-5.6-luna",
+      "parent_job_id": null,
+      "program_digest": "sha256:3de93485cf999cdfa5d1019ff85b76d31cc9099c4a5d5f31bf2c0e5428d0d2aa",
+      "reasoning_effort": "medium",
+      "rejected": [],
+      "rejected_count": 0,
+      "repeat_index": 0,
+      "reservation_id": "rsv_d6df65f62076179e",
+      "rubric_digest": null,
+      "rubric_id": null,
+      "runner_version": "synth.annotation-runner@1",
+      "source_trace_id": "trace_db61f67b4e043a03",
+      "tool_contract_digest": "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+      "usage": {
+        "cached_input_tokens": null,
+        "cost_status": "unavailable",
+        "cost_usd": null,
+        "input_tokens": null,
+        "output_tokens": null,
+        "reasoning_output_tokens": null,
+        "tool_bytes": 0,
+        "tool_calls": 0,
+        "total_tokens": null,
+        "wall_time_seconds": 0.5055765839933883
+      },
+      "verifier_result_id": null
+    },
+    "ended_at": "2026-09-07T23:41:43.128904Z",
+    "errors": [],
+    "input_digests": [
+      "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+      "sha256:49642338f168a648475c5d1004ba0ad7adb8bc894826471483131d8c7bd6a517",
+      "sha256:3de93485cf999cdfa5d1019ff85b76d31cc9099c4a5d5f31bf2c0e5428d0d2aa",
+      "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+      "sha256:a1efc4c731eaa717866540e298ecbc830ffe94324340bee34bdf90c523f1cbe0"
+    ],
+    "new_state": "sealed",
+    "next_safe_action": "reuse_sealed_result",
+    "operation": "annotation.run",
+    "output_digests": [
+      "sha256:8e42a42604738a39318c00c212ed969f9c52b227708ba5132e25833daeb068b7"
+    ],
+    "previous_state": "validating",
+    "producer": null,
+    "receipt_id": "rcpt_12c8cfd069ffffc5",
+    "return_code": null,
+    "schema_version": "synth.receipt.v1",
+    "started_at": "2026-09-07T23:41:42.595598Z",
+    "status": "sealed",
+    "target_ids": [
+      "trace_db61f67b4e043a03",
+      "ajob_3396fa775c45e657"
+    ],
+    "wall_time_seconds": 0.5055765839933883
+  },
+  "terminal_job": {
+    "abstained_count": 0,
+    "annotation_ids": [
+      "ann_287a4a31a31e7724"
+    ],
+    "applied_count": 1,
+    "bundle_digest": "sha256:437fe87e1dfe207b6c1dae57086ae81a166012e01ac49ffeeebcabef144e595a",
+    "bundle_id": "evb_7490a725bfb9eaf4",
+    "cached_from_job_id": null,
+    "content_digest": "sha256:86ad65d08867022a3744e85a5b1fabf09d4f31ca7c6f51435ec70f3cd8b6f2bb",
+    "created_at": "2026-09-07T23:41:42.584664Z",
+    "error": null,
+    "execution_trace_digest": "sha256:8010aaf616c88070107d50b2c61a3fddf893131cb2afbc91f39898ea70bbf226",
+    "execution_trace_id": "trace_619f728ee4b0f464",
+    "idempotency_key": "sha256:1704d527f471dace599e7a2abf243f4a586c2e111b8ac16715f95bbcab5bc01c",
+    "job_id": "ajob_3396fa775c45e657",
+    "metadata": {
+      "reservation": {
+        "cap_usd_micros": 1000000,
+        "reservation_id": "rsv_d6df65f62076179e",
+        "session_id": "sess-cli"
+      }
+    },
+    "prior_bundle_digest": null,
+    "program_digest": "sha256:3de93485cf999cdfa5d1019ff85b76d31cc9099c4a5d5f31bf2c0e5428d0d2aa",
+    "receipt_ids": [
+      "rcpt_12c8cfd069ffffc5"
+    ],
+    "rejected_count": 0,
+    "request": {
+      "allowed_projection_digests": [],
+      "allowed_projection_ids": [],
+      "annotator_digest": "sha256:49642338f168a648475c5d1004ba0ad7adb8bc894826471483131d8c7bd6a517",
+      "annotator_id": "test.jesterky.problem_model",
+      "limits": {
+        "max_cost_usd": 0.5,
+        "max_tool_calls": 200,
+        "max_tool_response_bytes": 32000,
+        "max_total_tokens": 50000,
+        "max_total_tool_bytes": 2000000,
+        "timeout_seconds": 900.0
+      },
+      "metadata": {},
+      "mode": "annotate",
+      "model": "gpt-5.6-luna",
+      "parent_job_id": null,
+      "reasoning_effort": "medium",
+      "repeat_index": 0,
+      "rubric_digest": null,
+      "rubric_id": null,
+      "runner_kind": "jesterky",
+      "runner_version": "synth.annotation-runner@1",
+      "schema_version": "synth.annotation-job-request.v1",
+      "source_annotation_ids": [],
+      "source_trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+      "source_trace_id": "trace_db61f67b4e043a03",
+      "target_selector_ids": []
+    },
+    "reservation_id": "rsv_d6df65f62076179e",
+    "revision": 4,
+    "schema_version": "synth.annotation-job.v1",
+    "state": "sealed",
+    "tool_contract_digest": "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+    "updated_at": "2026-09-07T23:41:43.131070Z",
+    "usage": {
+      "cached_input_tokens": null,
+      "cost_status": "unavailable",
+      "cost_usd": null,
+      "input_tokens": null,
+      "output_tokens": null,
+      "reasoning_output_tokens": null,
+      "tool_bytes": 0,
+      "tool_calls": 0,
+      "total_tokens": null,
+      "wall_time_seconds": 0.5055765839933883
+    },
+    "verifier_result_ids": [],
+    "workspace_manifest_digest": "sha256:a1efc4c731eaa717866540e298ecbc830ffe94324340bee34bdf90c523f1cbe0"
+  }
+}

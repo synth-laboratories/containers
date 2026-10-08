@@ -52,7 +52,13 @@ def test_harbor_docker_fails_closed_without_inventing_reward(monkeypatch) -> Non
     assert scored.json().get("reward") is None
 
 
-def test_harbor_docker_distinct_executions_read_verifier_reward_txt(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("reward_text", "expected_reward"),
+    [("0.25\n", 0.25), ("0\n", 0.0)],
+)
+def test_harbor_docker_distinct_executions_read_verifier_reward_txt(
+    monkeypatch, reward_text: str, expected_reward: float
+) -> None:
     monkeypatch.setattr(
         "synth_containers.platform.runtimes.harbor_docker.docker_runtime_available",
         lambda: True,
@@ -83,7 +89,7 @@ def test_harbor_docker_distinct_executions_read_verifier_reward_txt(monkeypatch)
         if role == "verifier":
             reward_dir = Path(volumes["/logs"]) / "verifier"
             reward_dir.mkdir(parents=True, exist_ok=True)
-            (reward_dir / "reward.txt").write_text("0.25\n", encoding="utf-8")
+            (reward_dir / "reward.txt").write_text(reward_text, encoding="utf-8")
             return DockerExecution(role=role, exit_code=0, stdout="", name=name)
         raise AssertionError(role)
 
@@ -117,11 +123,21 @@ def test_harbor_docker_distinct_executions_read_verifier_reward_txt(monkeypatch)
     native = next(
         item["payload"].get("reward.txt") for item in events if item["kind"] == "verifier"
     )
-    assert native == 0.25
+    assert native == expected_reward
+    # Harbor's completed verifier result is materialized without a second
+    # caller-authored reward request. This guards the score=0.0 path too:
+    # truthiness must never turn a verifier score into an "absent" outcome.
+    terminal = client.get(f"/rollouts/{rid}/reward").json()
+    assert terminal["status"] == "scored"
+    assert terminal["reward"] == native
+    assert body["reward_status"] == "scored"
+    assert body["reward"] == native
+    assert body["native_script_reward"] == native
+    assert body["reward_signals"] == []
     scored = client.post("/reward", json={"rollout_id": rid, "mode": "terminal"})
     assert scored.status_code in {200, 202, 409}
-    assert scored.json().get("reward") == native == 0.25
-    assert project_harbor_atif(events)["reward.txt"] == 0.25
+    assert scored.json().get("reward") == native == expected_reward
+    assert project_harbor_atif(events)["reward.txt"] == expected_reward
     blob = str(events)
     assert "DOCKER_HOST" not in blob
 

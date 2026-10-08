@@ -18,11 +18,16 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import threading
 import urllib.error
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+from urllib.parse import parse_qs, urlparse
+
+if TYPE_CHECKING:
+    import httpx
 
 from .pid1 import probe_http_health
 
@@ -42,6 +47,16 @@ PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 ACTION_KEY = "action"
 
 
+def _is_omniscient_render(url: str) -> bool:
+    """True for ``/render.png`` with no ``viewer`` — never persist that as a hero frame."""
+
+    parsed = urlparse(url)
+    if not parsed.path.endswith("/render.png"):
+        return False
+    viewers = [value for value in parse_qs(parsed.query).get("viewer", []) if value.strip()]
+    return not viewers
+
+
 @dataclass
 class StepResult:
     observation: dict[str, Any]
@@ -53,6 +68,10 @@ class StepResult:
     env_steps: int
     frame_url: str | None = None
     frame_bytes: bytes | None = None
+    # Per-hero ego PNGs keyed by agent id (e.g. agent_0). gold_episode.py should
+    # persist these with persist_frame(step, payload, name=agent_id); this
+    # adapter only fetches them. Never includes omniscient render.png.
+    view_frames: dict[str, bytes] = field(default_factory=dict)
 
 
 class GoldFrameMissing(RuntimeError):
@@ -70,6 +89,50 @@ def probe_gold_health(base_url: str, *, timeout: float = 1.0) -> dict[str, Any]:
         return probe_http_health(base_url, path="/health", timeout=timeout)
     except Exception as exc:  # noqa: BLE001 — normalise to the adapter's error text
         raise RuntimeError(f"gold_unreachable:{base_url.rstrip('/')}/health") from exc
+
+
+_CLIENT_LOCK = threading.Lock()
+_CLIENT: "httpx.Client | None" = None
+
+
+def engine_client() -> "httpx.Client":
+    """The process-wide pooled client every rollout steps the engine through.
+
+    One TCP connection per step is most of the cost once more than a couple of
+    rollouts run at once: the handshake is paid on the hot path and nothing is
+    reused. Measured against the engine directly, holding the server and the
+    concurrency fixed and only giving the callers more connections cut median
+    step latency 5.6x. Keep-alive plus a pool wider than any single facade's
+    admission limit takes that off the path entirely.
+
+    Shared deliberately. httpx.Client is safe to use from several threads, and a
+    client per rollout would rebuild the pool the point of which is to be shared.
+    """
+
+    global _CLIENT
+    with _CLIENT_LOCK:
+        if _CLIENT is None:
+            import httpx
+
+            limits = httpx.Limits(
+                # Wider than scale_leases so admission, not the pool, is what
+                # ever limits concurrency.
+                max_connections=512,
+                max_keepalive_connections=512,
+                keepalive_expiry=300.0,
+            )
+            _CLIENT = httpx.Client(limits=limits, timeout=httpx.Timeout(60.0))
+    return _CLIENT
+
+
+def reset_engine_client() -> None:
+    """Drop the pooled client. For tests and for after a fork."""
+
+    global _CLIENT
+    with _CLIENT_LOCK:
+        if _CLIENT is not None:
+            _CLIENT.close()
+            _CLIENT = None
 
 
 def probe_gold_ready(base_url: str, *, timeout: float = 5.0) -> None:
@@ -90,14 +153,32 @@ def probe_gold_ready(base_url: str, *, timeout: float = 5.0) -> None:
         headers={"Accept": "application/json", "Content-Type": "application/json"},
         method="POST",
     )
+    rollout_id: str | None = None
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            response.read()
+            payload = json.loads(response.read().decode("utf-8"))
+            rollout_id = str(payload.get("rollout_id") or "") or None
+            if rollout_id is None:
+                raise RuntimeError("gold_not_ready:reset_omitted_rollout_id")
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace")[:200]
         raise RuntimeError(f"gold_not_ready:{exc.code}:{detail}") from exc
     except Exception as exc:  # noqa: BLE001 — normalise to the adapter's error text
+        if isinstance(exc, RuntimeError) and str(exc).startswith("gold_not_ready:"):
+            raise
         raise RuntimeError(f"gold_not_ready:{base_url.rstrip('/')}/reset") from exc
+    finally:
+        if rollout_id is not None:
+            cleanup = urllib.request.Request(
+                f"{base_url.rstrip('/')}/rollouts/{rollout_id}",
+                headers={"Accept": "application/json"},
+                method="DELETE",
+            )
+            try:
+                with urllib.request.urlopen(cleanup, timeout=timeout) as response:
+                    response.read()
+            except Exception as exc:  # noqa: BLE001 — a readiness probe may not leak
+                raise RuntimeError(f"gold_not_ready:cleanup_failed:{rollout_id}") from exc
 
 
 def facade_health_for(url_env: str, *, engine: str) -> Callable[[], dict[str, Any]]:
@@ -150,7 +231,10 @@ class GoldHttpWorld:
     engine: str = "gold"
     require_frames: bool = False
     frame_path: str = "/rollouts/{rollout_id}/frames/{env_steps}.png"
+    view_frame_path: str = ""
     request_timeout_seconds: float = 60.0
+    # Merged into POST /rollouts (e.g. DungeonGrid carried ``party``).
+    reset_extras: dict[str, Any] = field(default_factory=dict)
     rollout_id: str | None = field(default=None, init=False)
     previous_total_reward: float = field(default=0.0, init=False)
     _native_digests: list[str] = field(default_factory=list, init=False)
@@ -166,22 +250,55 @@ class GoldHttpWorld:
     # ---------------------------------------------------------------- lifecycle
 
     def reset(self, seed: int, *, max_steps: int | None = None) -> StepResult:
+        # A world object represents at most one live engine allocation. Reset is
+        # replacement, not accumulation.
+        self.close()
         self.max_steps = int(max_steps or self.max_steps)
+        body: dict[str, Any] = {
+            "task": self.task_payload(int(seed), self.max_steps),
+            "seed": int(seed),
+            "telemetry": {"enabled": True},
+        }
+        if self.reset_extras:
+            body.update(self.reset_extras)
         payload = self._request(
             "POST",
             "/rollouts",
-            {
-                "task": self.task_payload(int(seed), self.max_steps),
-                "seed": int(seed),
-                "telemetry": {"enabled": True},
-            },
+            body,
         )
         self.rollout_id = str(payload.get("rollout_id") or "")
         if not self.rollout_id:
             raise RuntimeError(f"{self.engine} gold reset omitted rollout_id")
         self.previous_total_reward = 0.0
         self._native_digests = []
-        return self._result(payload)
+        try:
+            return self._result(payload)
+        except Exception:
+            # Frame/readout validation can fail after the engine has allocated
+            # the rollout. Do not make that failure path a server-side leak.
+            try:
+                self.close()
+            except Exception:
+                pass
+            raise
+
+    def close(self) -> None:
+        """Delete this world's engine session, if any.
+
+        Idempotence matters because runtimes close in ``finally`` while callers
+        may also explicitly replace or close a world.
+        """
+
+        rollout_id = self.rollout_id
+        if rollout_id is None:
+            return
+        # Engines may reap a terminal rollout before the platform's finally
+        # block runs.  A missing session is already the desired postcondition;
+        # retain fail-closed handling for every other HTTP or transport error.
+        self._request("DELETE", f"/rollouts/{rollout_id}", allow_not_found=True)
+        self.rollout_id = None
+        self.previous_total_reward = 0.0
+        self._native_digests = []
 
     def step(self, action: str) -> StepResult:
         if self.rollout_id is None:
@@ -190,6 +307,11 @@ class GoldHttpWorld:
             "POST", f"/rollouts/{self.rollout_id}/step", {ACTION_KEY: action}
         )
         return self._result(payload)
+
+    def readout(self) -> dict[str, Any]:
+        if self.rollout_id is None:
+            raise RuntimeError(f"{self.engine} gold readout before reset")
+        return self._request("GET", f"/rollouts/{self.rollout_id}/readout")
 
     def checkpoint(self) -> dict[str, Any]:
         if self.rollout_id is None:
@@ -284,6 +406,9 @@ class GoldHttpWorld:
                 rollout_id=self.rollout_id, env_steps=env_steps
             )
             frame_bytes = self._request_frame(frame_url)
+        view_frames: dict[str, bytes] = {}
+        if self.view_frame_path and self.rollout_id is not None:
+            view_frames = self._request_view_frames(public, private, env_steps)
         return StepResult(
             observation=enriched,
             reward=reward,
@@ -294,39 +419,87 @@ class GoldHttpWorld:
             env_steps=env_steps,
             frame_url=frame_url,
             frame_bytes=frame_bytes,
+            view_frames=view_frames,
         )
 
-    def _request_frame(self, url: str) -> bytes | None:
+    def _hero_ids(self, public: dict[str, Any], private: dict[str, Any]) -> list[str]:
+        turn_order = public.get("turn_order")
+        if isinstance(turn_order, list):
+            return [str(item).strip() for item in turn_order if str(item).strip()]
+        views = private.get("views")
+        if isinstance(views, dict):
+            heroes = views.get("heroes")
+            if isinstance(heroes, dict):
+                return [str(key).strip() for key in heroes if str(key).strip()]
+        return []
+
+    def _request_view_frames(
+        self, public: dict[str, Any], private: dict[str, Any], env_steps: int
+    ) -> dict[str, bytes]:
+        """Best-effort per-hero ego PNGs. A missing viewer never fails the step."""
+
+        frames: dict[str, bytes] = {}
+        for agent_id in self._hero_ids(public, private):
+            url = self.base_url + self.view_frame_path.format(
+                rollout_id=self.rollout_id, env_steps=env_steps, agent_id=agent_id
+            )
+            if _is_omniscient_render(url):
+                continue
+            payload = self._request_frame(url, required=False)
+            if payload is not None:
+                frames[agent_id] = payload
+        return frames
+
+    def _request_frame(self, url: str, *, required: bool | None = None) -> bytes | None:
         """Copy the transient gold frame into the relay before the next step."""
 
+        must = self.require_frames if required is None else required
         try:
-            request = urllib.request.Request(url, headers={"Accept": "image/png"}, method="GET")
-            with urllib.request.urlopen(request, timeout=10) as response:  # noqa: S310
-                payload = response.read()
+            response = engine_client().get(url, headers={"Accept": "image/png"}, timeout=10.0)
+            response.raise_for_status()
+            payload = response.content
         except Exception as exc:  # noqa: BLE001
-            if self.require_frames:
+            if must:
                 raise GoldFrameMissing(f"{self.engine} gold frame missing at {url}") from exc
             return None
         if payload.startswith(PNG_MAGIC):
             return payload
-        if self.require_frames:
+        if must:
             raise GoldFrameMissing(f"{self.engine} gold frame at {url} is not a PNG")
         return None
 
-    def _request(self, method: str, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _request(
+        self,
+        method: str,
+        path: str,
+        body: dict[str, Any] | None = None,
+        *,
+        allow_not_found: bool = False,
+    ) -> dict[str, Any]:
         encoded = None if body is None else json.dumps(body).encode("utf-8")
         headers = {"Accept": "application/json"}
         if encoded is not None:
             headers["Content-Type"] = "application/json"
-        request = urllib.request.Request(
-            f"{self.base_url}{path}", data=encoded, headers=headers, method=method
-        )
+        import httpx
+
         try:
-            with urllib.request.urlopen(  # noqa: S310
-                request, timeout=self.request_timeout_seconds
-            ) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-        except urllib.error.URLError as exc:
+            response = engine_client().request(
+                method,
+                f"{self.base_url}{path}",
+                content=encoded,
+                headers=headers,
+                timeout=self.request_timeout_seconds,
+            )
+            # urlopen raised HTTPError for any non-2xx, and HTTPError is a
+            # URLError, so both transport failures and error statuses arrived
+            # here as one message. Keep that contract.
+            response.raise_for_status()
+            payload = json.loads(response.content.decode("utf-8"))
+        except httpx.HTTPStatusError as exc:
+            if allow_not_found and exc.response.status_code == 404:
+                return {}
+            raise RuntimeError(f"{self.engine} gold unreachable at {self.base_url}{path}") from exc
+        except httpx.HTTPError as exc:
             raise RuntimeError(f"{self.engine} gold unreachable at {self.base_url}{path}") from exc
         if not isinstance(payload, dict):
             raise RuntimeError(f"{self.engine} gold returned non-object JSON")

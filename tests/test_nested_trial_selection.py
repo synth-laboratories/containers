@@ -67,3 +67,21 @@ def test_no_name_and_no_default_refuses() -> None:
 def test_a_broken_default_names_itself_as_the_default() -> None:
     with pytest.raises(NestedError, match="nested_default_trial_unknown"):
         _runtime(default_trial="gb-cpo-missing")._trial_for(_Pin())
+
+
+def test_a_release_needing_prewarm_refuses_before_a_child_container_starts() -> None:
+    trial = TrialImage(
+        id="deepswe/anko",
+        image="agent@sha256:abc",
+        environment_release={
+            "status": "certified",
+            "runnable": False,
+            "prewarm": {"state": "required"},
+        },
+    )
+    runtime = NestedTrialRuntime(
+        environment_ref="env:test",
+        trial_images={trial.id: trial},
+    )
+    with pytest.raises(NestedError, match="harbor_environment_prewarm_required:deepswe/anko"):
+        runtime._trial_for(_Pin(task_instance_id=trial.id))

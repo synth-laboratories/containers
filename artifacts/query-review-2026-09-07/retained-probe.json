@@ -1,0 +1,75 @@
+{
+  "trace_events": 267,
+  "query_events": 267,
+  "query_error_events": 0,
+  "native_result_success_false_events": 24,
+  "action_indexed_events": 108,
+  "repeated_failed_action_results": 0,
+  "event_types": {
+    "model_call.completed": 40,
+    "tool.result": 40,
+    "model_call.started": 40,
+    "tool.called": 40,
+    "action.completed": 34,
+    "action.started": 34,
+    "policy.finished": 4,
+    "environment.reward": 23,
+    "eval.run.terminal": 1,
+    "coordination.message.observed": 4,
+    "media.started": 4,
+    "episode.frozen": 1,
+    "eval.started": 1,
+    "episode.started": 1
+  },
+  "example_action": [
+    {
+      "jobId": "20260907T214644Z-luna-low",
+      "trialId": "episode",
+      "traceDigest": "sha256:d764cf6640947370c6a94f539d718fc4645858aac1ed70451c1e6d5176bc78d0",
+      "reward": 575,
+      "model": "openai/gpt-5.6-luna",
+      "effort": "low",
+      "episodeId": "sha256:e46e5ac1a62c9b36da4499c1cd313e80a9ddc0400ab4f0ff81dc55bb5a7bef7d",
+      "rewardSemantics": "unknown:20260907T214644Z-luna-low",
+      "captureStatus": "partial",
+      "evidenceDigest": "sha256:e64a9c74a30758e698ad08dc76316712d15e431676ca3580d4af86b2e6df5096",
+      "traceId": "trace_a9d30000d994853a",
+      "traceAvailability": "available",
+      "analysisState": "not_requested",
+      "selector": {
+        "entity_id": "event_04e9b4af41229a4e",
+        "kind": "event",
+        "schema_version": "synth.trace-selector.v1",
+        "trace_digest": "sha256:d764cf6640947370c6a94f539d718fc4645858aac1ed70451c1e6d5176bc78d0",
+        "trace_id": "trace_a9d30000d994853a"
+      },
+      "action": "chop",
+      "actorId": "actor_697be3a76305465e",
+      "eventType": "tool.called",
+      "itemId": "event_04e9b4af41229a4e",
+      "kind": "event",
+      "links": [
+        {
+          "relation": "references_message",
+          "source_entity_id": "event_04e9b4af41229a4e",
+          "source_order": 195,
+          "target_entity_id": "message_6127ed321160fbf2",
+          "trace_digest": "sha256:d764cf6640947370c6a94f539d718fc4645858aac1ed70451c1e6d5176bc78d0"
+        },
+        {
+          "relation": "produced_message",
+          "source_entity_id": "event_04e9b4af41229a4e",
+          "source_order": 125,
+          "target_entity_id": "message_6127ed321160fbf2",
+          "trace_digest": "sha256:d764cf6640947370c6a94f539d718fc4645858aac1ed70451c1e6d5176bc78d0"
+        }
+      ],
+      "occurredAt": "2026-09-07T21:49:27.078532+00:00",
+      "recordedOrder": 195,
+      "sessionId": "session_f06220b9bca829a5",
+      "sourceOrder": 195,
+      "status": "ok",
+      "factsPreview": "{\"chronological_sequence\":195,\"event_type\":\"tool.called\",\"payload\":{\"action\":{\"decisionId\":\"mba-8\",\"reason\":\"A reachable normal tree is nearby and chopping can continue without interruption.\",\"type\":\"chop\",\"x\":3183,\"z\":3238},\"decisionId\":\"mba-8\",\"decision_id\":\"mba-8\",\"elapsedMs\":45948.532167007215,\"elapsed_ms\":45948.532167007215,\"evidence_kind\":\"provider-backed\",\"kind\":\"policy.action\",\"native_actor_id\":\"mba\",\"native_kind\":\"policy.action\",\"source\":{\"digest\":\"sha256:eeb524b99d8cc75bfcdf0e394df87a19b70051b44b59da7dc0079dc0a8133359\",\"file\":\"events.jsonl\",\"line\":127}},\"status\":\"ok\",\"trace_visibility\":\"private\"}"
+    }
+  ]
+}

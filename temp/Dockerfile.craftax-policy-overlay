@@ -1,0 +1,6 @@
+FROM evals-craftax-gamebench-rust:local
+
+COPY --from=wheel synth_containers-0.4.1.dev20260817-py3-none-any.whl /tmp/synth_containers-0.4.1.dev20260817-py3-none-any.whl
+RUN pip install --no-cache-dir --force-reinstall --no-deps /tmp/synth_containers-0.4.1.dev20260817-py3-none-any.whl \
+    && rm /tmp/synth_containers-0.4.1.dev20260817-py3-none-any.whl
+COPY --from=evalimage craftax_gold/targets.py /app/craftax_gold/targets.py

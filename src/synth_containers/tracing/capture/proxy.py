@@ -27,6 +27,7 @@ from ..adapters import provider_adapters
 from ..adapters.base import ProviderAdapterRegistry
 from ..adapters.sse import SSEDecoder, SSEEvent
 from ..canonical import bytes_digest, canonical_bytes, record_id, text_digest, utc_now
+from ...gen_ai import request_observation
 from ..models.capture_data import CapturedBodyRefV1, RawCaptureDisposition
 from ..models.identity import TraceContextV1
 from .binding import CaptureMode
@@ -569,6 +570,9 @@ class CaptureProxy:
                     "content_encodings": content_encodings,
                     "redaction": request_report.merged(header_report).to_dict(),
                     "started_at": started_at,
+                    **request_observation(
+                        request_payload if isinstance(request_payload, dict) else {},
+                    ),
                 },
                 call_id=call_id,
             )
@@ -706,6 +710,7 @@ class CaptureProxy:
         adapter_name: str,
     ) -> "ProxyResponse":
         proxy = self
+        failure_stage = ["upstream_stream"]
 
         def run(sink: Any) -> None:
             frames = 0
@@ -716,7 +721,6 @@ class CaptureProxy:
             wire_bytes = 0
             with proxy._client.stream("POST", url, content=body, headers=headers) as response:
                 status = response.status_code
-                sink.begin(status, _client_headers(response.headers))
                 content_decoder = _StreamingContentDecoder(response.headers)
                 response_headers, header_report = redact_headers(response.headers)
                 proxy.stats.add_redacted_headers(header_report.removed_headers)
@@ -730,10 +734,15 @@ class CaptureProxy:
                     call_id=call_id,
                     upstream_attempt_id=attempt_id,
                 )
+                failure_stage[0] = "downstream_stream"
+                sink.begin(status, _client_headers(response.headers))
+                failure_stage[0] = "upstream_stream"
                 for chunk in response.iter_raw():
                     if not chunk:
                         continue
-                    sink.write(chunk)
+                    # Retain bytes received from the provider before forwarding them.
+                    # A canceled downstream can reject this chunk even though its
+                    # generation ID/usage is already observable and potentially billed.
                     wire_chunks += 1
                     wire_bytes += len(chunk)
                     for event in decoder.feed(content_decoder.feed(chunk)):
@@ -745,6 +754,9 @@ class CaptureProxy:
                         )
                         if parsed is not None:
                             usage = parsed
+                    failure_stage[0] = "downstream_stream"
+                    sink.write(chunk)
+                    failure_stage[0] = "upstream_stream"
                 decoded_tail = content_decoder.finish()
                 if decoded_tail:
                     for event in decoder.feed(decoded_tail):
@@ -788,7 +800,7 @@ class CaptureProxy:
             except Exception as exc:
                 proxy._record_call_error(
                     call_id,
-                    stage="upstream_stream",
+                    stage=failure_stage[0],
                     error=exc,
                 )
                 raise

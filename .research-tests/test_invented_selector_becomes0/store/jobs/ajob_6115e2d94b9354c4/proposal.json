@@ -1,0 +1,79 @@
+{
+  "abstentions": [
+    {
+      "annotation_type": "belief",
+      "reason": "evidence_unavailable",
+      "requirement": "engine snapshot after step 4",
+      "target": {
+        "entity_id": "msg_b35e30593478ee3b",
+        "kind": "message"
+      }
+    }
+  ],
+  "findings": [
+    {
+      "annotation_type": "belief",
+      "confidence": 1.0,
+      "evidence": [
+        {
+          "entity_id": "msg_does_not_exist",
+          "kind": "message"
+        }
+      ],
+      "labels": [
+        "belief.contradicted"
+      ],
+      "payload": {},
+      "rationale": "test",
+      "target": {
+        "entity_id": "msg_b35e30593478ee3b",
+        "kind": "message"
+      }
+    },
+    {
+      "annotation_type": "belief",
+      "confidence": 1.0,
+      "evidence": [
+        {
+          "entity_id": "msg_b35e30593478ee3b",
+          "kind": "message",
+          "quote": "not in the text"
+        }
+      ],
+      "labels": [
+        "belief.contradicted"
+      ],
+      "payload": {},
+      "rationale": "test",
+      "target": {
+        "entity_id": "msg_b35e30593478ee3b",
+        "kind": "message"
+      }
+    },
+    {
+      "annotation_type": "belief",
+      "confidence": 1.0,
+      "evidence": [
+        {
+          "entity_id": "msg_b35e30593478ee3b",
+          "kind": "message",
+          "quote": "tree directly in front"
+        }
+      ],
+      "labels": [
+        "belief.correct"
+      ],
+      "payload": {},
+      "rationale": "test",
+      "target": {
+        "entity_id": "msg_b35e30593478ee3b",
+        "kind": "message"
+      }
+    }
+  ],
+  "judgments": [],
+  "schema_version": "synth.annotation-proposal.v1",
+  "source_trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+  "source_trace_id": "trace_db61f67b4e043a03",
+  "summary": ""
+}

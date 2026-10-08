@@ -57,6 +57,10 @@ class InspectedTraceV1(JsonDataclassMixin):
     binding_digest: str | None = None
     source_format: str | None = None
     producer: str | None = None
+    run_id: str | None = None
+    trial_id: str | None = None
+    episode_id: str | None = None
+    effort: str | None = None
     model: str | None = None
     provider: str | None = None
     harness: str | None = None
@@ -536,10 +540,19 @@ def _trace_summary(
         (item.model for item in document.actors if item.model),
         None,
     )
+    # Older RuneBench seals retain the evaluated model in the terminal result,
+    # not actor metadata. Project only an unambiguous recorded value.
+    if model is None and document.provenance.producer == "runebench-adapter":
+        models = {event.payload["result"].get("model") for event in document.events
+                  if event.event_type == "eval.run.terminal"
+                  and isinstance(event.payload.get("result"), dict)
+                  and isinstance(event.payload["result"].get("model"), str)}
+        model = next(iter(models)) if len(models) == 1 else None
     provider = document.provenance.provider or next(
         (item.provider for item in document.actors if item.provider),
         None,
     )
+    efforts = {s.detail.get("reasoning_effort") for s in document.spans if isinstance(s.detail.get("reasoning_effort"), str)}
     duration_ms = None
     if document.lifecycle.started_at and document.lifecycle.ended_at:
         started = datetime.fromisoformat(document.lifecycle.started_at.replace("Z", "+00:00"))
@@ -561,6 +574,10 @@ def _trace_summary(
         binding_digest=document.capture.binding_digest,
         source_format=document.provenance.source_format,
         producer=document.provenance.producer,
+        run_id=document.identity.run_id,
+        trial_id=document.identity.trial_id,
+        episode_id=document.identity.episode_id,
+        effort=next(iter(efforts)) if len(efforts) == 1 else None,
         model=model,
         provider=provider,
         harness=document.provenance.harness,

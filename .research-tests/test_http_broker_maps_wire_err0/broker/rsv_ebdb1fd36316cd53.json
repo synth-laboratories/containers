@@ -1,0 +1,22 @@
+{
+  "actual_cost_usd_micros": 1234,
+  "approver": "",
+  "binding": {
+    "annotator_id": "x",
+    "model": "m",
+    "session_id": "s",
+    "trace_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "cap_usd_micros": 100000,
+  "claimed_at": "2026-09-07T22:58:27.329784Z",
+  "claimed_by_job_id": "job-1",
+  "expires_at": null,
+  "issued_at": "2026-09-07T22:58:27.327750Z",
+  "metadata": {
+    "wildcard": false
+  },
+  "outcome": "sealed",
+  "reconciled_at": "2026-09-07T22:58:27.338606Z",
+  "reservation_id": "rsv_ebdb1fd36316cd53",
+  "schema_version": "synth.paid-compute-reservation.v1"
+}

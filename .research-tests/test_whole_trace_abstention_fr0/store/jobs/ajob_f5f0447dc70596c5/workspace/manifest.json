@@ -1,0 +1,50 @@
+{
+  "annotator_digest": "sha256:290b51fd328df8f3bec621b54d05e4a604f8f1c2fe424e8d9ff351f1636048b7",
+  "annotator_id": "test.partscoped",
+  "annotator_version": "v1",
+  "content_digest": "sha256:6cd8c90655529befa383242edd032c8c72f8662db1f3fcc88893017dfe9f4507",
+  "created_at": "2026-09-07T22:58:27.456767Z",
+  "files": [
+    "manifest.json",
+    "INSTRUCTIONS.md",
+    "annotator_definition.json",
+    "output_schema.json",
+    "tool_contract.json"
+  ],
+  "job_id": "ajob_f5f0447dc70596c5",
+  "limits": {
+    "max_tool_calls": 200,
+    "max_tool_response_bytes": 32000,
+    "max_total_tokens": 400000,
+    "max_total_tool_bytes": 2000000,
+    "timeout_seconds": 900.0
+  },
+  "mode": "annotate",
+  "output_schema_id": "synth.annotation-proposal.v1",
+  "program_digest": "sha256:db6b899fb265b27f8b502ac59f12395c3d84850715097abc013b67fb83a16bac",
+  "program_id": "test.partscoped.program",
+  "projections": [],
+  "reasoning_policy": "not_captured",
+  "runner_kind": "deterministic",
+  "schema_version": "synth.annotation-workspace.v1",
+  "scope_session_ids": [],
+  "source_annotation_ids": [],
+  "source_trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+  "source_trace_id": "trace_db61f67b4e043a03",
+  "source_trace_schema": "synth.trace.v5",
+  "tool_contract_digest": "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+  "tool_names": [
+    "trace_get_manifest",
+    "trace_list_entities",
+    "trace_get_turn",
+    "trace_get_span",
+    "trace_get_message",
+    "trace_get_tool_call",
+    "trace_get_environment_transition",
+    "trace_get_event",
+    "trace_resolve_selector",
+    "trace_compare_pre_post_state",
+    "trace_search_text",
+    "trace_get_projection_manifest"
+  ]
+}

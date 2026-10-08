@@ -1,0 +1,213 @@
+{
+  "annotations": [
+    {
+      "annotation_id": "ann_3a925a191955767f",
+      "annotation_type": "problem_model",
+      "annotator_digest": "sha256:49642338f168a648475c5d1004ba0ad7adb8bc894826471483131d8c7bd6a517",
+      "annotator_execution_trace_digest": "sha256:2175d3522a414a05ed73611792f0a3f489c4cfa8aff6eb1455355d4bddbd144f",
+      "annotator_execution_trace_id": "trace_610bdd3a66205e0b",
+      "annotator_id": "test.jesterky.problem_model",
+      "annotator_version": "v1",
+      "author_kind": "agentic",
+      "confidence": 0.7,
+      "content_digest": "sha256:ca86f092a9b8848a64d761e40a0e0e5987b4227e9b9c16d3e4e4f234f524d639",
+      "created_at": "2026-09-07T22:58:24.345074Z",
+      "evidence": [
+        {
+          "entity_id": "evt_049420e03659e201",
+          "kind": "event",
+          "schema_version": "synth.trace-selector.v1",
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        },
+        {
+          "entity_id": "evt_718283a6711531d9",
+          "kind": "event",
+          "schema_version": "synth.trace-selector.v1",
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        }
+      ],
+      "grounding": "grounded",
+      "inspection": {
+        "losses": [],
+        "source": "trace_authority",
+        "trace_body_read": true
+      },
+      "labels": [
+        "problem_model.matches_issue"
+      ],
+      "payload": {},
+      "producer": {
+        "config_digest": "sha256:3de93485cf999cdfa5d1019ff85b76d31cc9099c4a5d5f31bf2c0e5428d0d2aa",
+        "kind": "agentic",
+        "model": "gpt-5.6-luna",
+        "name": "jesterky",
+        "version": "synth.annotation-runner@1"
+      },
+      "rationale": "cli fake swarm worker",
+      "review_state": "unreviewed",
+      "revision": 1,
+      "schema_version": "synth.annotation.v1",
+      "status": "applied",
+      "target": {
+        "kind": "trace",
+        "schema_version": "synth.trace-selector.v1",
+        "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+        "trace_id": "trace_db61f67b4e043a03"
+      },
+      "visibility": "private"
+    }
+  ],
+  "annotator_definitions": [
+    {
+      "annotator_id": "test.jesterky.problem_model",
+      "confidence_semantics": "self_reported",
+      "content_digest": "sha256:49642338f168a648475c5d1004ba0ad7adb8bc894826471483131d8c7bd6a517",
+      "grounding_requirement": "exact_selector",
+      "metadata": {},
+      "minimum_evidence": 2,
+      "model": "gpt-5.6-luna",
+      "name": "Problem model",
+      "output_contract": {
+        "allowed_producer_kinds": [],
+        "annotation_types": [
+          "problem_model"
+        ],
+        "task_kind": "classify",
+        "taxonomy": [
+          {
+            "aliases": [],
+            "description": "",
+            "label": "problem_model.matches_issue"
+          },
+          {
+            "aliases": [],
+            "description": "",
+            "label": "problem_model.wrong"
+          }
+        ]
+      },
+      "purpose": "diagnosis vs issue",
+      "reasoning_policy": "not_captured",
+      "required_subject_scope": "trace",
+      "schema_version": "synth.trace-annotator.v1",
+      "supported_trace_schemas": [
+        "synth.trace.v5"
+      ],
+      "taxonomy": [
+        "problem_model.matches_issue",
+        "problem_model.wrong"
+      ],
+      "unavailable_evidence_behavior": "abstain",
+      "version": "v1"
+    }
+  ],
+  "artifacts": [],
+  "benchmark_verdicts": [],
+  "bundle_id": "evb_bece32a4ffd847f3",
+  "content_digest": "sha256:e06fc1440e3858209aab253578315955bd0c1f5d8c1cb36736d69adde59fbff9",
+  "created_at": "2026-09-07T22:58:24.351292Z",
+  "criteria": [],
+  "evaluation_results": [],
+  "metadata": {
+    "revision_records": [
+      {
+        "kind": "annotator_definition",
+        "record_digest": "sha256:49642338f168a648475c5d1004ba0ad7adb8bc894826471483131d8c7bd6a517",
+        "record_id": "test.jesterky.problem_model"
+      },
+      {
+        "kind": "annotation",
+        "record_digest": "sha256:ca86f092a9b8848a64d761e40a0e0e5987b4227e9b9c16d3e4e4f234f524d639",
+        "record_id": "ann_3a925a191955767f"
+      },
+      {
+        "kind": "receipt",
+        "record_digest": "sha256:7a16aebf52e4fe7919683a143789865456c0e1d2a284c4dd2c8733ca94a7b3e9",
+        "record_id": "rcpt_9f0b07aab535f197"
+      }
+    ],
+    "supersedes_bundle_digest": "sha256:a975597fb78b920a9e99db09b9120fcb851625445f0db2b6bac5078e6a77c596",
+    "supersedes_bundle_id": "evb_2881592baa64a026"
+  },
+  "receipts": [
+    {
+      "completeness": "complete",
+      "content_digest": "sha256:7a16aebf52e4fe7919683a143789865456c0e1d2a284c4dd2c8733ca94a7b3e9",
+      "detail": {
+        "abstained_count": 0,
+        "annotator_digest": "sha256:49642338f168a648475c5d1004ba0ad7adb8bc894826471483131d8c7bd6a517",
+        "annotator_id": "test.jesterky.problem_model",
+        "applied_count": 1,
+        "execution_trace_digest": "sha256:2175d3522a414a05ed73611792f0a3f489c4cfa8aff6eb1455355d4bddbd144f",
+        "execution_trace_id": "trace_610bdd3a66205e0b",
+        "global_abstentions": [],
+        "idempotency_key": "sha256:5fae9668e73ed2c3878dcdae74e009f60fc558c99c7e84c86bbf1dc88f4c146f",
+        "job_id": "ajob_d6ad3aa873bcb3b2",
+        "limits": {
+          "max_cost_usd": 0.5,
+          "max_tool_calls": 200,
+          "max_tool_response_bytes": 32000,
+          "max_total_tokens": 50000,
+          "max_total_tool_bytes": 2000000,
+          "timeout_seconds": 900.0
+        },
+        "mode": "annotate",
+        "model": "gpt-5.6-luna",
+        "program_digest": "sha256:3de93485cf999cdfa5d1019ff85b76d31cc9099c4a5d5f31bf2c0e5428d0d2aa",
+        "reasoning_effort": "medium",
+        "rejected": [],
+        "rejected_count": 0,
+        "repeat_index": 0,
+        "reservation_id": "rsv_aaa021a8fcd88376",
+        "runner_version": "synth.annotation-runner@1",
+        "source_trace_id": "trace_db61f67b4e043a03",
+        "tool_contract_digest": "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+        "usage": {
+          "cost_status": "unavailable",
+          "tool_bytes": 0,
+          "tool_calls": 0,
+          "wall_time_seconds": 0.05087954198825173
+        }
+      },
+      "ended_at": "2026-09-07T22:58:24.350021Z",
+      "errors": [],
+      "input_digests": [
+        "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+        "sha256:49642338f168a648475c5d1004ba0ad7adb8bc894826471483131d8c7bd6a517",
+        "sha256:3de93485cf999cdfa5d1019ff85b76d31cc9099c4a5d5f31bf2c0e5428d0d2aa",
+        "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+        "sha256:ce22148903074fe4a6010386ab492b794745245ec1d4496689a9008abd17bbc0"
+      ],
+      "new_state": "sealed",
+      "next_safe_action": "reuse_sealed_result",
+      "operation": "annotation.run",
+      "output_digests": [
+        "sha256:ca86f092a9b8848a64d761e40a0e0e5987b4227e9b9c16d3e4e4f234f524d639"
+      ],
+      "previous_state": "validating",
+      "receipt_id": "rcpt_9f0b07aab535f197",
+      "schema_version": "synth.receipt.v1",
+      "started_at": "2026-09-07T22:58:24.282885Z",
+      "status": "sealed",
+      "target_ids": [
+        "trace_db61f67b4e043a03",
+        "ajob_d6ad3aa873bcb3b2"
+      ],
+      "wall_time_seconds": 0.05087954198825173
+    }
+  ],
+  "reward_aggregations": [],
+  "reward_definitions": [],
+  "reward_records": [],
+  "rubrics": [],
+  "schema_version": "synth.trace-evidence-bundle.v5",
+  "trace_ref": {
+    "content_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+    "schema_version": "synth.trace.v5",
+    "trace_id": "trace_db61f67b4e043a03"
+  },
+  "verifier_definitions": [],
+  "verifier_results": []
+}

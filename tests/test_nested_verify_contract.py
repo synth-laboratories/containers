@@ -39,9 +39,9 @@ class _Workspace:
 
 
 class _Result:
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, exit_code: int = 0) -> None:
         self.name = name
-        self.exit_code = 0
+        self.exit_code = exit_code
 
 
 def _capture(monkeypatch: Any) -> list[dict[str, Any]]:
@@ -270,3 +270,67 @@ def test_the_receipt_names_what_actually_crossed(tmp_path: Path, monkeypatch) ->
     assert verified["workspace_mounted_into_verifier"] is False
     assert verified["staged_candidate_paths"] == ["candidates/rogue"]
     assert verified["candidate_paths_declared"] == ["candidates/rogue"]
+
+
+def test_logs_mount_reward_zero_survives_nonzero_verifier_exit(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """DeepSWE: reward.json lives on /logs, outside the agent tree.
+
+    A reporter that exits 1 after writing ``{"reward": 0}`` is a scored miss,
+    not an ungraded trial. Dropping that file made completed Harbor jobs look
+    like they never produced a score.
+    """
+
+    trial = _separate_verifier_trial()
+    rollout_dir = tmp_path / "r1"
+    (rollout_dir / "workspace").mkdir(parents=True)
+
+    class _FailingGrader:
+        def __init__(self, **kwargs: Any) -> None:
+            self.mounts = kwargs["mounts"]
+
+        def run(self) -> _Result:
+            host = next(h for h, c in self.mounts.items() if c == "/logs")
+            target = Path(host) / "verifier"
+            target.mkdir(parents=True, exist_ok=True)
+            (target / "reward.json").write_text(
+                json.dumps({"reward": 0, "f2p": 0.0, "f2p_passed": 0, "f2p_total": 2})
+            )
+            return _Result("fake-container", exit_code=1)
+
+    monkeypatch.setattr("synth_containers.nested_runtime.NestedTrial", _FailingGrader)
+    reward, payload = _runtime(trial)._verify(
+        trial, rollout_dir, _Workspace(), "r1", _Log()
+    )
+    assert reward == 0.0
+    assert payload["f2p_passed"] == 0
+    assert payload["exit_code"] == 1
+
+
+def test_workspace_reward_on_nonzero_exit_stays_ungraded(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """In-workspace reward.txt can be planted; a failed verifier must not use it."""
+
+    trial = TrialImage(id="gb-cpo-rogue", image="gb-cpo-rogue:local", allow_unpinned=True)
+    rollout_dir = tmp_path / "r1"
+    workspace = rollout_dir / "workspace"
+    workspace.mkdir(parents=True)
+
+    class _Planted:
+        def __init__(self, **kwargs: Any) -> None:
+            del kwargs
+
+        def run(self) -> _Result:
+            reward_dir = workspace / "logs" / "verifier"
+            reward_dir.mkdir(parents=True, exist_ok=True)
+            (reward_dir / "reward.txt").write_text("1.0\n")
+            return _Result("fake-container", exit_code=1)
+
+    monkeypatch.setattr("synth_containers.nested_runtime.NestedTrial", _Planted)
+    reward, payload = _runtime(trial)._verify(
+        trial, rollout_dir, _Workspace(), "r1", _Log()
+    )
+    assert reward is None
+    assert payload["reward_status"] == "verifier_failed"

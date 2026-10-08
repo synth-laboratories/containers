@@ -1,0 +1,50 @@
+{
+  "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+  "annotator_id": "synth.deterministic.environment_step_status",
+  "annotator_version": "v1",
+  "content_digest": "sha256:58eaaf22023c60122bf2cb871876888a64be09f9d45bf7dc23bc14855948b6fa",
+  "created_at": "2026-09-07T22:58:25.946029Z",
+  "files": [
+    "manifest.json",
+    "INSTRUCTIONS.md",
+    "annotator_definition.json",
+    "output_schema.json",
+    "tool_contract.json"
+  ],
+  "job_id": "ajob_7c0684ef52aa15d7",
+  "limits": {
+    "max_tool_calls": 200,
+    "max_tool_response_bytes": 32000,
+    "max_total_tokens": 400000,
+    "max_total_tool_bytes": 2000000,
+    "timeout_seconds": 900.0
+  },
+  "mode": "annotate",
+  "output_schema_id": "synth.annotation-proposal.v1",
+  "program_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+  "program_id": "synth.deterministic.environment_step_status.program",
+  "projections": [],
+  "reasoning_policy": "not_captured",
+  "runner_kind": "deterministic",
+  "schema_version": "synth.annotation-workspace.v1",
+  "scope_session_ids": [],
+  "source_annotation_ids": [],
+  "source_trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+  "source_trace_id": "trace_db61f67b4e043a03",
+  "source_trace_schema": "synth.trace.v5",
+  "tool_contract_digest": "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+  "tool_names": [
+    "trace_get_manifest",
+    "trace_list_entities",
+    "trace_get_turn",
+    "trace_get_span",
+    "trace_get_message",
+    "trace_get_tool_call",
+    "trace_get_environment_transition",
+    "trace_get_event",
+    "trace_resolve_selector",
+    "trace_compare_pre_post_state",
+    "trace_search_text",
+    "trace_get_projection_manifest"
+  ]
+}

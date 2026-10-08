@@ -1,0 +1,69 @@
+{
+  "completeness": "partial",
+  "content_digest": "sha256:9444d011d6db59eca21109e3ac528adad8a21b696bdd414a0470a45f18db20e6",
+  "detail": {
+    "annotator_digest": "sha256:6cfe8647f56034ce7afc945ecf83e940de467c29afba9e12db7138e81ef77bee",
+    "annotator_id": "test.bad",
+    "error": {
+      "code": "malformed_output",
+      "detail": {
+        "problems": [
+          "schema_version must be 'synth.annotation-proposal.v1'",
+          "source_trace_id: required string",
+          "source_trace_digest: required string",
+          "unknown top-level fields ['not']",
+          "findings: required array",
+          "abstentions: required array"
+        ]
+      },
+      "message": "annotator output is not a valid proposal"
+    },
+    "idempotency_key": "sha256:dfd47c1aa18d8ae0e0be0b23329e81d57503f0d8e3e1960f21f237dfec05be09",
+    "job_id": "ajob_e1a7e38ea976eb70",
+    "limits": {
+      "max_tool_calls": 200,
+      "max_tool_response_bytes": 32000,
+      "max_total_tokens": 400000,
+      "max_total_tool_bytes": 2000000,
+      "timeout_seconds": 900.0
+    },
+    "mode": "annotate",
+    "program_digest": "sha256:2132b339d58cc117ae84f4b8b88bfe3d0db3c0d1a653c86ba7762a6e8e0d3b9b",
+    "repeat_index": 0,
+    "runner_version": "synth.annotation-runner@1",
+    "source_trace_id": "trace_db61f67b4e043a03",
+    "tool_contract_digest": "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+    "usage": {
+      "cost_status": "free",
+      "cost_usd": 0.0,
+      "tool_bytes": 0,
+      "tool_calls": 0,
+      "wall_time_seconds": 1.0000017937272787e-05
+    }
+  },
+  "ended_at": "2026-09-07T22:58:25.304360Z",
+  "errors": [
+    "malformed_output: annotator output is not a valid proposal"
+  ],
+  "input_digests": [
+    "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+    "sha256:6cfe8647f56034ce7afc945ecf83e940de467c29afba9e12db7138e81ef77bee",
+    "sha256:2132b339d58cc117ae84f4b8b88bfe3d0db3c0d1a653c86ba7762a6e8e0d3b9b",
+    "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+    "sha256:307e7ad0201ef660c956a1febbc9a81837421ef2d8bf7b3a82236f9112d2e918"
+  ],
+  "new_state": "failed",
+  "next_safe_action": "inspect_error_then_resubmit",
+  "operation": "annotation.run",
+  "output_digests": [],
+  "previous_state": "validating",
+  "receipt_id": "rcpt_87895193590a2dc0",
+  "schema_version": "synth.receipt.v1",
+  "started_at": "2026-09-07T22:58:25.301338Z",
+  "status": "failed",
+  "target_ids": [
+    "trace_db61f67b4e043a03",
+    "ajob_e1a7e38ea976eb70"
+  ],
+  "wall_time_seconds": 1.0000017937272787e-05
+}

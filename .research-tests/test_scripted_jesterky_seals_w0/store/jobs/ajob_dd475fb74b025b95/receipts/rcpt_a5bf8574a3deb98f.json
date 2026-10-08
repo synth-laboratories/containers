@@ -1,0 +1,51 @@
+{
+  "completeness": "partial",
+  "content_digest": "sha256:4d699fc10bff79e068253bfd4c8c9286c61e33d5877733f91f77874ca1969fc4",
+  "detail": {
+    "annotator_digest": "sha256:49642338f168a648475c5d1004ba0ad7adb8bc894826471483131d8c7bd6a517",
+    "annotator_id": "test.jesterky.problem_model",
+    "idempotency_key": "sha256:5fae9668e73ed2c3878dcdae74e009f60fc558c99c7e84c86bbf1dc88f4c146f",
+    "job_id": "ajob_dd475fb74b025b95",
+    "limits": {
+      "max_cost_usd": 0.5,
+      "max_tool_calls": 200,
+      "max_tool_response_bytes": 32000,
+      "max_total_tokens": 50000,
+      "max_total_tool_bytes": 2000000,
+      "timeout_seconds": 900.0
+    },
+    "mode": "annotate",
+    "model": "gpt-5.6-luna",
+    "program_digest": "sha256:3de93485cf999cdfa5d1019ff85b76d31cc9099c4a5d5f31bf2c0e5428d0d2aa",
+    "reasoning_effort": "medium",
+    "repeat_index": 0,
+    "reservation_id": "rsv_e9f8664b030bf9c6",
+    "runner_version": "synth.annotation-runner@1",
+    "source_trace_id": "trace_db61f67b4e043a03",
+    "tool_contract_digest": "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+    "usage": {
+      "cost_status": "unavailable",
+      "tool_bytes": 0,
+      "tool_calls": 0
+    }
+  },
+  "ended_at": "2026-09-07T22:58:24.188549Z",
+  "errors": [],
+  "input_digests": [
+    "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+    "sha256:49642338f168a648475c5d1004ba0ad7adb8bc894826471483131d8c7bd6a517",
+    "sha256:3de93485cf999cdfa5d1019ff85b76d31cc9099c4a5d5f31bf2c0e5428d0d2aa",
+    "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123"
+  ],
+  "new_state": "prepared",
+  "operation": "annotation.prepare",
+  "output_digests": [],
+  "receipt_id": "rcpt_a5bf8574a3deb98f",
+  "schema_version": "synth.receipt.v1",
+  "started_at": "2026-09-07T22:58:24.181666Z",
+  "status": "prepared",
+  "target_ids": [
+    "trace_db61f67b4e043a03",
+    "ajob_dd475fb74b025b95"
+  ]
+}

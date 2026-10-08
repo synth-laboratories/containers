@@ -17,6 +17,7 @@ from .broker import (
     usd_to_micros,
 )
 from .builtin import register_builtin_annotators
+from .assembly import validate_assembly_graph
 from .campaign import AnnotationCampaign, AnnotatorPlan, CampaignEstimate, CampaignPlan, CampaignRun, plan_from_refs
 from .codex_app_server import CodexAppServerRunner, ScriptedAppServer, StdioAppServerTransport
 from .consensus import AgreementReportV1, adjudication_annotation, agreement, consensus_annotation
@@ -153,4 +154,5 @@ __all__ = [
     "tool_contract_digest",
     "usd_to_micros",
     "validate_appended_evidence",
+    "validate_assembly_graph",
 ]

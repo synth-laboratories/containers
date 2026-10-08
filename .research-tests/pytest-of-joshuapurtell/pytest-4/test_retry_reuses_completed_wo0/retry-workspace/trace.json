@@ -1,0 +1,2333 @@
+{
+  "trace_id": "trace_db61f67b4e043a03",
+  "trace_kind": "agent_rollout",
+  "identity": {
+    "rollout_id": "smoke-rollout",
+    "run_id": "smoke-run",
+    "trial_id": null,
+    "episode_id": null,
+    "correlation_id": "smoke",
+    "task_id": "gamebench/craftax-singleplayer",
+    "task_instance_id": null,
+    "benchmark": "craftax",
+    "seed": 0
+  },
+  "lifecycle": {
+    "status": "completed",
+    "started_at": "2026-08-31T00:00:00.000000Z",
+    "ended_at": "2026-08-31T00:00:50.000000Z",
+    "termination": {
+      "reason": "max_steps",
+      "exit_code": null,
+      "signal": null,
+      "detail": ""
+    }
+  },
+  "capture": {
+    "capture_id": "cap_47edf8d5a855d0a2",
+    "binding_id": "smoke",
+    "binding_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "capture_profile": "craftax_smoke_fixture",
+    "interception": "none",
+    "mode": "fixture",
+    "proxy_config_digest": null,
+    "coverage_receipt_id": null,
+    "segment_digests": [],
+    "segment_count": 0,
+    "raw_record_count": 0
+  },
+  "provenance": {
+    "producer": "synth_containers.tracing.annotation.fixtures",
+    "producer_version": "1",
+    "source_format": "craftax.react-native-events.v1",
+    "producer_commit": null,
+    "container_image_digest": null,
+    "runtime_version": null,
+    "model": "glm-5.3-flash",
+    "provider": "smoke",
+    "harness": "suites.nonproduct.craftax",
+    "prompt_digest": null,
+    "config_digest": null,
+    "execution_host": null,
+    "captured_at": "2026-08-31T00:00:50.000000Z",
+    "transformation_chain": [],
+    "aliases": [],
+    "extra": {}
+  },
+  "completeness": {
+    "capture_status": "complete",
+    "terminal_event_observed": true,
+    "model_calls": "complete",
+    "raw_provider": "unavailable",
+    "agent_events": "complete",
+    "environment_events": "complete",
+    "tool_events": "not_captured",
+    "usage": "aggregate_only",
+    "expected_record_count": null,
+    "captured_record_count": null,
+    "high_water_ordinal": null,
+    "missing_ranges": [],
+    "truncation_reasons": [],
+    "artifact_finalization": "complete",
+    "repair_receipt_ids": [],
+    "validator_result_id": null,
+    "digest_algorithm": "sha256",
+    "reasons": [],
+    "metadata": {}
+  },
+  "actors": [
+    {
+      "actor_id": "actor_62834dd3edc9d7a8",
+      "kind": "orchestrator",
+      "display_name": "Craftax evaluation",
+      "role": "orchestrator",
+      "subtype": "",
+      "parent_actor_id": null,
+      "actor_path": null,
+      "origin_interaction_id": null,
+      "harness": "suites.nonproduct.craftax",
+      "runtime": null,
+      "model": null,
+      "provider": null,
+      "policy_id": null,
+      "task_id": null,
+      "workflow_id": null,
+      "external_trace_refs": [],
+      "visibility": "private",
+      "aliases": [],
+      "metadata": {},
+      "content_digest": "sha256:cf554b9e941c7ae8a31bbe97d247ea84e2501354d97934047fdb9d3fad10f3be"
+    },
+    {
+      "actor_id": "actor_45c3b09bdc85f629",
+      "kind": "agent",
+      "display_name": "smoke/craftax#glm-5.3-flash:low#s0",
+      "role": "policy",
+      "subtype": "",
+      "parent_actor_id": "actor_62834dd3edc9d7a8",
+      "actor_path": null,
+      "origin_interaction_id": null,
+      "harness": "suites.nonproduct.craftax",
+      "runtime": null,
+      "model": "glm-5.3-flash",
+      "provider": "smoke",
+      "policy_id": null,
+      "task_id": "gamebench/craftax-singleplayer",
+      "workflow_id": null,
+      "external_trace_refs": [],
+      "visibility": "private",
+      "aliases": [
+        {
+          "namespace": "craftax.lane",
+          "value": "smoke/craftax#glm-5.3-flash:low#s0",
+          "target_id": "actor_45c3b09bdc85f629",
+          "target_kind": "actor",
+          "provenance": "observed",
+          "confidence": 1.0
+        }
+      ],
+      "metadata": {},
+      "content_digest": "sha256:fc4ff19e69f69a34f2b49e10a3c282b9ce38c5c91c38742a436e53bdab644f67"
+    }
+  ],
+  "sessions": [
+    {
+      "session_id": "sess_62834dd3edc9d7a8",
+      "actor_id": "actor_62834dd3edc9d7a8",
+      "started_at": "2026-08-31T00:00:00.000000Z",
+      "attempt_id": null,
+      "thread_id": null,
+      "workflow_id": null,
+      "capture_id": null,
+      "parent_session_id": null,
+      "branch_head_id": null,
+      "started_sequence": null,
+      "ended_sequence": null,
+      "status": "completed",
+      "ended_at": "2026-08-31T00:00:50.000000Z",
+      "harness": null,
+      "provider": null,
+      "coverage": {
+        "model_calls": "not_captured",
+        "agent_events": "complete",
+        "environment_events": "not_captured",
+        "tool_events": "not_captured",
+        "usage": "not_captured",
+        "raw_provider": "not_captured",
+        "reasons": []
+      },
+      "aliases": [],
+      "metadata": {},
+      "content_digest": "sha256:d59b1b6d174f77a1c7553a2fcd742bcd52524df99da80b6f014c613930f55478"
+    },
+    {
+      "session_id": "sess_82218dc5799986c8",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "started_at": "2026-08-31T00:00:00.000000Z",
+      "attempt_id": null,
+      "thread_id": null,
+      "workflow_id": null,
+      "capture_id": null,
+      "parent_session_id": "sess_62834dd3edc9d7a8",
+      "branch_head_id": null,
+      "started_sequence": null,
+      "ended_sequence": null,
+      "status": "completed",
+      "ended_at": "2026-08-31T00:00:50.000000Z",
+      "harness": "suites.nonproduct.craftax",
+      "provider": "smoke",
+      "coverage": {
+        "model_calls": "complete",
+        "agent_events": "complete",
+        "environment_events": "complete",
+        "tool_events": "not_captured",
+        "usage": "aggregate_only",
+        "raw_provider": "not_captured",
+        "reasons": []
+      },
+      "aliases": [],
+      "metadata": {},
+      "content_digest": "sha256:7e74b32cfc0eb4241042a327c6d6119e78f720615cc19166a18829997eafd3f4"
+    }
+  ],
+  "messages": [
+    {
+      "message_id": "msg_4bbc1f48e437ebaf",
+      "role": "system",
+      "parts": [
+        {
+          "part_id": "msg_4bbc1f48e437ebaf:0",
+          "type": "text",
+          "text": "You control a Craftax agent. Reply with THOUGHT: <one line> then ACTIONS: <comma list>.",
+          "reasoning_availability": null,
+          "tool_call_id": null,
+          "tool_name": null,
+          "arguments_json": null,
+          "is_error": null,
+          "structured": null,
+          "artifact_id": null,
+          "media_type": null,
+          "raw_kind": null,
+          "conversion_diagnostics": [],
+          "visibility": "private"
+        }
+      ],
+      "sender_actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "predecessor_message_ids": [],
+      "recipient_actor_ids": [],
+      "turn_id": null,
+      "thread_id": null,
+      "produced_by_span_id": null,
+      "produced_by_event_id": null,
+      "occurred_at": "2026-08-31T00:00:00.000000Z",
+      "visibility": "private",
+      "aliases": [],
+      "metadata": {
+        "prefix_digest": "smoke"
+      },
+      "content_digest": "sha256:5c758f6f3b4e200c2de354fea92f12907efff06c2054c3359b1269fd72d1d6dc"
+    },
+    {
+      "message_id": "msg_077666d3962fe330",
+      "role": "user",
+      "parts": [
+        {
+          "part_id": "msg_077666d3962fe330:0",
+          "type": "text",
+          "text": "level: 0\nposition: [24,24] direction=[0,1]\nfront_tile: grass\nlocal_map:\n.........\n....T....\n.........\n....P....\n.........\nVITALS: health=9  food=9  drink=9  energy=9\ninventory: coal=0, diamond=0, iron=0, pickaxe=0, sapling=0, stone=0, sword=0, wood=0\nachievements: \nnearby_entities: \nvalid_actions: noop, left, right, up, down, do, sleep, place_stone, place_table, place_furnace, place_plant, make_wood_pickaxe, make_stone_pickaxe, make_wood_sword, rest",
+          "reasoning_availability": null,
+          "tool_call_id": null,
+          "tool_name": null,
+          "arguments_json": null,
+          "is_error": null,
+          "structured": null,
+          "artifact_id": null,
+          "media_type": null,
+          "raw_kind": null,
+          "conversion_diagnostics": [],
+          "visibility": "private"
+        }
+      ],
+      "sender_actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "predecessor_message_ids": [
+        "msg_4bbc1f48e437ebaf"
+      ],
+      "recipient_actor_ids": [],
+      "turn_id": null,
+      "thread_id": null,
+      "produced_by_span_id": null,
+      "produced_by_event_id": null,
+      "occurred_at": "2026-08-31T00:00:00.000000Z",
+      "visibility": "private",
+      "aliases": [],
+      "metadata": {
+        "call_index": 0,
+        "observation": "text"
+      },
+      "content_digest": "sha256:3308defbe391240b67f26a2246e3c614268044a7fa19155498f38df0ad32e27f"
+    },
+    {
+      "message_id": "msg_b35e30593478ee3b",
+      "role": "assistant",
+      "parts": [
+        {
+          "part_id": "msg_b35e30593478ee3b:0",
+          "type": "text",
+          "text": "THOUGHT: There is a tree directly in front of me, so I will collect wood now.\nACTIONS: do, do",
+          "reasoning_availability": null,
+          "tool_call_id": null,
+          "tool_name": null,
+          "arguments_json": null,
+          "is_error": null,
+          "structured": null,
+          "artifact_id": null,
+          "media_type": null,
+          "raw_kind": null,
+          "conversion_diagnostics": [],
+          "visibility": "private"
+        }
+      ],
+      "sender_actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "predecessor_message_ids": [
+        "msg_077666d3962fe330"
+      ],
+      "recipient_actor_ids": [],
+      "turn_id": null,
+      "thread_id": null,
+      "produced_by_span_id": "span_befb26a97e861982",
+      "produced_by_event_id": null,
+      "occurred_at": "2026-08-31T00:00:00.000000Z",
+      "visibility": "private",
+      "aliases": [],
+      "metadata": {
+        "call_index": 0,
+        "finish_reason": "stop"
+      },
+      "content_digest": "sha256:c518991c0f77ff53c1aa3e148c1c17600b1f006479951b20a0934eb75080a855"
+    },
+    {
+      "message_id": "msg_5616ed2551bc028f",
+      "role": "user",
+      "parts": [
+        {
+          "part_id": "msg_5616ed2551bc028f:0",
+          "type": "text",
+          "text": "level: 0\nposition: [24,24] direction=[0,1]\nfront_tile: grass\nlocal_map:\n.........\n....T....\n.........\n....P....\n.........\nVITALS: health=9  food=9  drink=9  energy=9\ninventory: coal=0, diamond=0, iron=0, pickaxe=0, sapling=0, stone=0, sword=0, wood=0\nachievements: \nnearby_entities: \nvalid_actions: noop, left, right, up, down, do, sleep, place_stone, place_table, place_furnace, place_plant, make_wood_pickaxe, make_stone_pickaxe, make_wood_sword, rest",
+          "reasoning_availability": null,
+          "tool_call_id": null,
+          "tool_name": null,
+          "arguments_json": null,
+          "is_error": null,
+          "structured": null,
+          "artifact_id": null,
+          "media_type": null,
+          "raw_kind": null,
+          "conversion_diagnostics": [],
+          "visibility": "private"
+        }
+      ],
+      "sender_actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "predecessor_message_ids": [
+        "msg_b35e30593478ee3b"
+      ],
+      "recipient_actor_ids": [],
+      "turn_id": null,
+      "thread_id": null,
+      "produced_by_span_id": null,
+      "produced_by_event_id": null,
+      "occurred_at": "2026-08-31T00:00:10.000000Z",
+      "visibility": "private",
+      "aliases": [],
+      "metadata": {
+        "call_index": 1,
+        "observation": "text"
+      },
+      "content_digest": "sha256:2f7c52f43a89059d7a7544301b3f00ad001226d64c1bb224df8f10e635bd0ed4"
+    },
+    {
+      "message_id": "msg_1d27b4c4d9cbf51e",
+      "role": "assistant",
+      "parts": [
+        {
+          "part_id": "msg_1d27b4c4d9cbf51e:0",
+          "type": "text",
+          "text": "THOUGHT: The tree is two tiles up. I will move up until I face it, then harvest.\nACTIONS: up, up, do",
+          "reasoning_availability": null,
+          "tool_call_id": null,
+          "tool_name": null,
+          "arguments_json": null,
+          "is_error": null,
+          "structured": null,
+          "artifact_id": null,
+          "media_type": null,
+          "raw_kind": null,
+          "conversion_diagnostics": [],
+          "visibility": "private"
+        }
+      ],
+      "sender_actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "predecessor_message_ids": [
+        "msg_5616ed2551bc028f"
+      ],
+      "recipient_actor_ids": [],
+      "turn_id": null,
+      "thread_id": null,
+      "produced_by_span_id": "span_6dd205c3a5ee72e9",
+      "produced_by_event_id": null,
+      "occurred_at": "2026-08-31T00:00:10.000000Z",
+      "visibility": "private",
+      "aliases": [],
+      "metadata": {
+        "call_index": 1,
+        "finish_reason": "stop"
+      },
+      "content_digest": "sha256:0aefd1b8c0057ca9c296cc2b7d56e60c800c7d3e9e042a350660a05198772bec"
+    },
+    {
+      "message_id": "msg_5559c2d8a2d3dcf4",
+      "role": "user",
+      "parts": [
+        {
+          "part_id": "msg_5559c2d8a2d3dcf4:0",
+          "type": "text",
+          "text": "level: 0\nposition: [24,22] direction=[0,-1]\nfront_tile: tree\nlocal_map:\n.........\n....T....\n....P....\n.........\n.........\nVITALS: health=9  food=9  drink=9  energy=9\ninventory: coal=0, diamond=0, iron=0, pickaxe=0, sapling=0, stone=0, sword=0, wood=1\nachievements: collect_wood\nnearby_entities: \nvalid_actions: noop, left, right, up, down, do, sleep, place_stone, place_table, place_furnace, place_plant, make_wood_pickaxe, make_stone_pickaxe, make_wood_sword, rest",
+          "reasoning_availability": null,
+          "tool_call_id": null,
+          "tool_name": null,
+          "arguments_json": null,
+          "is_error": null,
+          "structured": null,
+          "artifact_id": null,
+          "media_type": null,
+          "raw_kind": null,
+          "conversion_diagnostics": [],
+          "visibility": "private"
+        }
+      ],
+      "sender_actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "predecessor_message_ids": [
+        "msg_1d27b4c4d9cbf51e"
+      ],
+      "recipient_actor_ids": [],
+      "turn_id": null,
+      "thread_id": null,
+      "produced_by_span_id": null,
+      "produced_by_event_id": null,
+      "occurred_at": "2026-08-31T00:00:20.000000Z",
+      "visibility": "private",
+      "aliases": [],
+      "metadata": {
+        "call_index": 2,
+        "observation": "text"
+      },
+      "content_digest": "sha256:1158bbe490340bc286088777b0654f4b0714fb88db1958a4ba7d710e617b09a8"
+    },
+    {
+      "message_id": "msg_39efabe4f6a9c1e2",
+      "role": "assistant",
+      "parts": [
+        {
+          "part_id": "msg_39efabe4f6a9c1e2:0",
+          "type": "text",
+          "text": "THOUGHT: I have enough wood to place a crafting table and craft a pickaxe.\nACTIONS: place_table, make_wood_pickaxe",
+          "reasoning_availability": null,
+          "tool_call_id": null,
+          "tool_name": null,
+          "arguments_json": null,
+          "is_error": null,
+          "structured": null,
+          "artifact_id": null,
+          "media_type": null,
+          "raw_kind": null,
+          "conversion_diagnostics": [],
+          "visibility": "private"
+        }
+      ],
+      "sender_actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "predecessor_message_ids": [
+        "msg_5559c2d8a2d3dcf4"
+      ],
+      "recipient_actor_ids": [],
+      "turn_id": null,
+      "thread_id": null,
+      "produced_by_span_id": "span_500733aa602937c3",
+      "produced_by_event_id": null,
+      "occurred_at": "2026-08-31T00:00:20.000000Z",
+      "visibility": "private",
+      "aliases": [],
+      "metadata": {
+        "call_index": 2,
+        "finish_reason": "stop"
+      },
+      "content_digest": "sha256:5bbe93abcb549fb30df4d399e362b7bcfba3b4a082805fc63d300f7125a6c3c0"
+    },
+    {
+      "message_id": "msg_18ca779a11b34cec",
+      "role": "user",
+      "parts": [
+        {
+          "part_id": "msg_18ca779a11b34cec:0",
+          "type": "text",
+          "text": "level: 0\nposition: [24,22] direction=[0,-1]\nfront_tile: tree\nlocal_map:\n.........\n....T....\n....P....\n.........\n.........\nVITALS: health=9  food=9  drink=9  energy=9\ninventory: coal=0, diamond=0, iron=0, pickaxe=0, sapling=0, stone=0, sword=0, wood=1\nachievements: collect_wood\nnearby_entities: \nvalid_actions: noop, left, right, up, down, do, sleep, place_stone, place_table, place_furnace, place_plant, make_wood_pickaxe, make_stone_pickaxe, make_wood_sword, rest",
+          "reasoning_availability": null,
+          "tool_call_id": null,
+          "tool_name": null,
+          "arguments_json": null,
+          "is_error": null,
+          "structured": null,
+          "artifact_id": null,
+          "media_type": null,
+          "raw_kind": null,
+          "conversion_diagnostics": [],
+          "visibility": "private"
+        }
+      ],
+      "sender_actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "predecessor_message_ids": [
+        "msg_39efabe4f6a9c1e2"
+      ],
+      "recipient_actor_ids": [],
+      "turn_id": null,
+      "thread_id": null,
+      "produced_by_span_id": null,
+      "produced_by_event_id": null,
+      "occurred_at": "2026-08-31T00:00:30.000000Z",
+      "visibility": "private",
+      "aliases": [],
+      "metadata": {
+        "call_index": 3,
+        "observation": "text"
+      },
+      "content_digest": "sha256:90206c92fbf09862161b8adc07e9c083b9f56c0c0f8b28c1f3136a43c988e4a5"
+    },
+    {
+      "message_id": "msg_71025b046cc98e10",
+      "role": "assistant",
+      "parts": [
+        {
+          "part_id": "msg_71025b046cc98e10:0",
+          "type": "text",
+          "text": "ACTIONS: do, do, do",
+          "reasoning_availability": null,
+          "tool_call_id": null,
+          "tool_name": null,
+          "arguments_json": null,
+          "is_error": null,
+          "structured": null,
+          "artifact_id": null,
+          "media_type": null,
+          "raw_kind": null,
+          "conversion_diagnostics": [],
+          "visibility": "private"
+        }
+      ],
+      "sender_actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "predecessor_message_ids": [
+        "msg_18ca779a11b34cec"
+      ],
+      "recipient_actor_ids": [],
+      "turn_id": null,
+      "thread_id": null,
+      "produced_by_span_id": "span_4dedd9b32e176213",
+      "produced_by_event_id": null,
+      "occurred_at": "2026-08-31T00:00:30.000000Z",
+      "visibility": "private",
+      "aliases": [],
+      "metadata": {
+        "call_index": 3,
+        "finish_reason": "stop"
+      },
+      "content_digest": "sha256:5b923d42bef19bd71d97b4c1b9f9e1e954f208c259c9db504542f45ef9f043ae"
+    },
+    {
+      "message_id": "msg_8f3204af594535c0",
+      "role": "user",
+      "parts": [
+        {
+          "part_id": "msg_8f3204af594535c0:0",
+          "type": "text",
+          "text": "level: 0\nposition: [24,22] direction=[0,-1]\nfront_tile: tree\nlocal_map:\n.........\n....T....\n....P....\n.........\n.........\nVITALS: health=9  food=9  drink=9  energy=9\ninventory: coal=0, diamond=0, iron=0, pickaxe=0, sapling=0, stone=0, sword=0, wood=4\nachievements: collect_wood\nnearby_entities: \nvalid_actions: noop, left, right, up, down, do, sleep, place_stone, place_table, place_furnace, place_plant, make_wood_pickaxe, make_stone_pickaxe, make_wood_sword, rest",
+          "reasoning_availability": null,
+          "tool_call_id": null,
+          "tool_name": null,
+          "arguments_json": null,
+          "is_error": null,
+          "structured": null,
+          "artifact_id": null,
+          "media_type": null,
+          "raw_kind": null,
+          "conversion_diagnostics": [],
+          "visibility": "private"
+        }
+      ],
+      "sender_actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "predecessor_message_ids": [
+        "msg_71025b046cc98e10"
+      ],
+      "recipient_actor_ids": [],
+      "turn_id": null,
+      "thread_id": null,
+      "produced_by_span_id": null,
+      "produced_by_event_id": null,
+      "occurred_at": "2026-08-31T00:00:40.000000Z",
+      "visibility": "private",
+      "aliases": [],
+      "metadata": {
+        "call_index": 4,
+        "observation": "text"
+      },
+      "content_digest": "sha256:893d029454c464148944ec730aca778f19dc3150491c7b33a25fa8479cb39196"
+    },
+    {
+      "message_id": "msg_a5192b6cb0442159",
+      "role": "assistant",
+      "parts": [
+        {
+          "part_id": "msg_a5192b6cb0442159:0",
+          "type": "text",
+          "text": "THOUGHT: Wood is 4 now, so the table placement will succeed.\nACTIONS: place_table",
+          "reasoning_availability": null,
+          "tool_call_id": null,
+          "tool_name": null,
+          "arguments_json": null,
+          "is_error": null,
+          "structured": null,
+          "artifact_id": null,
+          "media_type": null,
+          "raw_kind": null,
+          "conversion_diagnostics": [],
+          "visibility": "private"
+        }
+      ],
+      "sender_actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "predecessor_message_ids": [
+        "msg_8f3204af594535c0"
+      ],
+      "recipient_actor_ids": [],
+      "turn_id": null,
+      "thread_id": null,
+      "produced_by_span_id": "span_15a208836cb6afc4",
+      "produced_by_event_id": null,
+      "occurred_at": "2026-08-31T00:00:40.000000Z",
+      "visibility": "private",
+      "aliases": [],
+      "metadata": {
+        "call_index": 4,
+        "finish_reason": "stop"
+      },
+      "content_digest": "sha256:55b6965c8cbbe03425b5a220bc6ade75894cb31bde58d156743b5bbe4273ac54"
+    }
+  ],
+  "branches": [],
+  "spans": [
+    {
+      "span_id": "span_befb26a97e861982",
+      "span_kind": "model_call",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "started_at": "2026-08-31T00:00:00.000000Z",
+      "parent_span_id": null,
+      "turn_id": null,
+      "branch_id": null,
+      "workflow_address": null,
+      "context_epoch_id": null,
+      "caused_by_span_ids": [],
+      "ended_at": "2026-08-31T00:00:00.000000Z",
+      "status": "ok",
+      "error_id": null,
+      "detail": {
+        "call_index": 0,
+        "model": "glm-5.3-flash",
+        "reasoning_effort": "low",
+        "observation": "text",
+        "finish_reason": "stop"
+      },
+      "input_message_ids": [
+        "msg_4bbc1f48e437ebaf",
+        "msg_077666d3962fe330"
+      ],
+      "output_message_ids": [
+        "msg_b35e30593478ee3b"
+      ],
+      "artifact_ids": [],
+      "usage": {
+        "provenance": "observed_harness",
+        "prompt_tokens": 400,
+        "completion_tokens": 40,
+        "reasoning_tokens": null,
+        "cached_tokens": null,
+        "cache_write_tokens": null,
+        "total_tokens": 440,
+        "requests": 1,
+        "wall_time_seconds": null,
+        "cost_usd": null,
+        "unavailable_fields": [],
+        "source_refs": []
+      },
+      "token_capture": null,
+      "transformations": [],
+      "aliases": [
+        {
+          "namespace": "craftax.policy_call",
+          "value": "smoke/craftax#glm-5.3-flash:low#s0:0",
+          "target_id": "span_befb26a97e861982",
+          "target_kind": "span",
+          "provenance": "observed",
+          "confidence": 1.0
+        }
+      ],
+      "metadata": {},
+      "content_digest": "sha256:adab22371f77df1b808988d4a16eb8012bd003168d5de78501b0600b7b60d243"
+    },
+    {
+      "span_id": "span_14d671292e565d0d",
+      "span_kind": "environment_step",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "started_at": "2026-08-31T00:00:02.000000Z",
+      "parent_span_id": null,
+      "turn_id": "sess_82218dc5799986c8:step:0",
+      "branch_id": null,
+      "workflow_address": null,
+      "context_epoch_id": null,
+      "caused_by_span_ids": [],
+      "ended_at": "2026-08-31T00:00:02.000000Z",
+      "status": "ok",
+      "error_id": null,
+      "detail": {
+        "step_index": 0,
+        "action": "do",
+        "transition": "noop",
+        "reason": "nothing_to_do:grass"
+      },
+      "input_message_ids": [],
+      "output_message_ids": [],
+      "artifact_ids": [],
+      "usage": null,
+      "token_capture": null,
+      "transformations": [],
+      "aliases": [],
+      "metadata": {},
+      "content_digest": "sha256:455e3d0645b4c1f8b24db3306d4af2379a8b46a8e6f6107179a349551f3d710b"
+    },
+    {
+      "span_id": "span_98d27bf72ffd61bb",
+      "span_kind": "environment_step",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "started_at": "2026-08-31T00:00:03.000000Z",
+      "parent_span_id": null,
+      "turn_id": "sess_82218dc5799986c8:step:1",
+      "branch_id": null,
+      "workflow_address": null,
+      "context_epoch_id": null,
+      "caused_by_span_ids": [],
+      "ended_at": "2026-08-31T00:00:03.000000Z",
+      "status": "ok",
+      "error_id": null,
+      "detail": {
+        "step_index": 1,
+        "action": "do",
+        "transition": "noop",
+        "reason": "nothing_to_do:grass"
+      },
+      "input_message_ids": [],
+      "output_message_ids": [],
+      "artifact_ids": [],
+      "usage": null,
+      "token_capture": null,
+      "transformations": [],
+      "aliases": [],
+      "metadata": {},
+      "content_digest": "sha256:3a8157290557b49fb7d8a61122a87f6125b9b67af2104f6975e0e142bcc9a2d4"
+    },
+    {
+      "span_id": "span_6dd205c3a5ee72e9",
+      "span_kind": "model_call",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "started_at": "2026-08-31T00:00:10.000000Z",
+      "parent_span_id": null,
+      "turn_id": null,
+      "branch_id": null,
+      "workflow_address": null,
+      "context_epoch_id": null,
+      "caused_by_span_ids": [],
+      "ended_at": "2026-08-31T00:00:10.000000Z",
+      "status": "ok",
+      "error_id": null,
+      "detail": {
+        "call_index": 1,
+        "model": "glm-5.3-flash",
+        "reasoning_effort": "low",
+        "observation": "text",
+        "finish_reason": "stop"
+      },
+      "input_message_ids": [
+        "msg_5616ed2551bc028f"
+      ],
+      "output_message_ids": [
+        "msg_1d27b4c4d9cbf51e"
+      ],
+      "artifact_ids": [],
+      "usage": {
+        "provenance": "observed_harness",
+        "prompt_tokens": 400,
+        "completion_tokens": 40,
+        "reasoning_tokens": null,
+        "cached_tokens": null,
+        "cache_write_tokens": null,
+        "total_tokens": 440,
+        "requests": 1,
+        "wall_time_seconds": null,
+        "cost_usd": null,
+        "unavailable_fields": [],
+        "source_refs": []
+      },
+      "token_capture": null,
+      "transformations": [],
+      "aliases": [
+        {
+          "namespace": "craftax.policy_call",
+          "value": "smoke/craftax#glm-5.3-flash:low#s0:1",
+          "target_id": "span_6dd205c3a5ee72e9",
+          "target_kind": "span",
+          "provenance": "observed",
+          "confidence": 1.0
+        }
+      ],
+      "metadata": {},
+      "content_digest": "sha256:568424c7d149d5031782e2a1841c81da81d47352f11f1ab706a849fa8e7179d9"
+    },
+    {
+      "span_id": "span_4239c8556e2d2bf8",
+      "span_kind": "environment_step",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "started_at": "2026-08-31T00:00:12.000000Z",
+      "parent_span_id": null,
+      "turn_id": "sess_82218dc5799986c8:step:2",
+      "branch_id": null,
+      "workflow_address": null,
+      "context_epoch_id": null,
+      "caused_by_span_ids": [],
+      "ended_at": "2026-08-31T00:00:12.000000Z",
+      "status": "ok",
+      "error_id": null,
+      "detail": {
+        "step_index": 2,
+        "action": "up",
+        "transition": "move",
+        "reason": null
+      },
+      "input_message_ids": [],
+      "output_message_ids": [],
+      "artifact_ids": [],
+      "usage": null,
+      "token_capture": null,
+      "transformations": [],
+      "aliases": [],
+      "metadata": {},
+      "content_digest": "sha256:ddd2877bf9053c99fe9a4cdd436de9ef46c162f9099ba16b0df5df7aa83c3e3d"
+    },
+    {
+      "span_id": "span_1123f1680410078b",
+      "span_kind": "environment_step",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "started_at": "2026-08-31T00:00:13.000000Z",
+      "parent_span_id": null,
+      "turn_id": "sess_82218dc5799986c8:step:3",
+      "branch_id": null,
+      "workflow_address": null,
+      "context_epoch_id": null,
+      "caused_by_span_ids": [],
+      "ended_at": "2026-08-31T00:00:13.000000Z",
+      "status": "ok",
+      "error_id": null,
+      "detail": {
+        "step_index": 3,
+        "action": "up",
+        "transition": "blocked",
+        "reason": "blocked:tree"
+      },
+      "input_message_ids": [],
+      "output_message_ids": [],
+      "artifact_ids": [],
+      "usage": null,
+      "token_capture": null,
+      "transformations": [],
+      "aliases": [],
+      "metadata": {},
+      "content_digest": "sha256:53501c1eba01d813bd5d5e0887ba76a3e9baaee50181ba0efde68a9ca95ee232"
+    },
+    {
+      "span_id": "span_641a715deb44f1bf",
+      "span_kind": "environment_step",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "started_at": "2026-08-31T00:00:14.000000Z",
+      "parent_span_id": null,
+      "turn_id": "sess_82218dc5799986c8:step:4",
+      "branch_id": null,
+      "workflow_address": null,
+      "context_epoch_id": null,
+      "caused_by_span_ids": [],
+      "ended_at": "2026-08-31T00:00:14.000000Z",
+      "status": "ok",
+      "error_id": null,
+      "detail": {
+        "step_index": 4,
+        "action": "do",
+        "transition": "harvest",
+        "reason": null
+      },
+      "input_message_ids": [],
+      "output_message_ids": [],
+      "artifact_ids": [],
+      "usage": null,
+      "token_capture": null,
+      "transformations": [],
+      "aliases": [],
+      "metadata": {},
+      "content_digest": "sha256:07bdcc03a587dee0ae4b2d851378fb908d301bcec2b5f6bcbf2937c32e0cd6d8"
+    },
+    {
+      "span_id": "span_500733aa602937c3",
+      "span_kind": "model_call",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "started_at": "2026-08-31T00:00:20.000000Z",
+      "parent_span_id": null,
+      "turn_id": null,
+      "branch_id": null,
+      "workflow_address": null,
+      "context_epoch_id": null,
+      "caused_by_span_ids": [],
+      "ended_at": "2026-08-31T00:00:20.000000Z",
+      "status": "ok",
+      "error_id": null,
+      "detail": {
+        "call_index": 2,
+        "model": "glm-5.3-flash",
+        "reasoning_effort": "low",
+        "observation": "text",
+        "finish_reason": "stop"
+      },
+      "input_message_ids": [
+        "msg_5559c2d8a2d3dcf4"
+      ],
+      "output_message_ids": [
+        "msg_39efabe4f6a9c1e2"
+      ],
+      "artifact_ids": [],
+      "usage": {
+        "provenance": "observed_harness",
+        "prompt_tokens": 400,
+        "completion_tokens": 40,
+        "reasoning_tokens": null,
+        "cached_tokens": null,
+        "cache_write_tokens": null,
+        "total_tokens": 440,
+        "requests": 1,
+        "wall_time_seconds": null,
+        "cost_usd": null,
+        "unavailable_fields": [],
+        "source_refs": []
+      },
+      "token_capture": null,
+      "transformations": [],
+      "aliases": [
+        {
+          "namespace": "craftax.policy_call",
+          "value": "smoke/craftax#glm-5.3-flash:low#s0:2",
+          "target_id": "span_500733aa602937c3",
+          "target_kind": "span",
+          "provenance": "observed",
+          "confidence": 1.0
+        }
+      ],
+      "metadata": {},
+      "content_digest": "sha256:c52936d5e427f327e9ccc9bcc6eb51be0d0036523d0e1cffb73fe697c785b7e4"
+    },
+    {
+      "span_id": "span_81d9e583a7875d39",
+      "span_kind": "environment_step",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "started_at": "2026-08-31T00:00:22.000000Z",
+      "parent_span_id": null,
+      "turn_id": "sess_82218dc5799986c8:step:5",
+      "branch_id": null,
+      "workflow_address": null,
+      "context_epoch_id": null,
+      "caused_by_span_ids": [],
+      "ended_at": "2026-08-31T00:00:22.000000Z",
+      "status": "ok",
+      "error_id": null,
+      "detail": {
+        "step_index": 5,
+        "action": "place_table",
+        "transition": "noop",
+        "reason": "missing_resources"
+      },
+      "input_message_ids": [],
+      "output_message_ids": [],
+      "artifact_ids": [],
+      "usage": null,
+      "token_capture": null,
+      "transformations": [],
+      "aliases": [],
+      "metadata": {},
+      "content_digest": "sha256:874166f527c451a206a5e60b12f75e7220046b4a8194066b05b0118cd49b803c"
+    },
+    {
+      "span_id": "span_aeef0e222e21a2b4",
+      "span_kind": "environment_step",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "started_at": "2026-08-31T00:00:23.000000Z",
+      "parent_span_id": null,
+      "turn_id": "sess_82218dc5799986c8:step:6",
+      "branch_id": null,
+      "workflow_address": null,
+      "context_epoch_id": null,
+      "caused_by_span_ids": [],
+      "ended_at": "2026-08-31T00:00:23.000000Z",
+      "status": "ok",
+      "error_id": null,
+      "detail": {
+        "step_index": 6,
+        "action": "make_wood_pickaxe",
+        "transition": "noop",
+        "reason": "needs_crafting_table"
+      },
+      "input_message_ids": [],
+      "output_message_ids": [],
+      "artifact_ids": [],
+      "usage": null,
+      "token_capture": null,
+      "transformations": [],
+      "aliases": [],
+      "metadata": {},
+      "content_digest": "sha256:4f11b6e1299b4ab27478c78b80d25701fb75ac7350295fda7a7dc00e731f62da"
+    },
+    {
+      "span_id": "span_4dedd9b32e176213",
+      "span_kind": "model_call",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "started_at": "2026-08-31T00:00:30.000000Z",
+      "parent_span_id": null,
+      "turn_id": null,
+      "branch_id": null,
+      "workflow_address": null,
+      "context_epoch_id": null,
+      "caused_by_span_ids": [],
+      "ended_at": "2026-08-31T00:00:30.000000Z",
+      "status": "ok",
+      "error_id": null,
+      "detail": {
+        "call_index": 3,
+        "model": "glm-5.3-flash",
+        "reasoning_effort": "low",
+        "observation": "text",
+        "finish_reason": "stop"
+      },
+      "input_message_ids": [
+        "msg_18ca779a11b34cec"
+      ],
+      "output_message_ids": [
+        "msg_71025b046cc98e10"
+      ],
+      "artifact_ids": [],
+      "usage": {
+        "provenance": "observed_harness",
+        "prompt_tokens": 400,
+        "completion_tokens": 40,
+        "reasoning_tokens": null,
+        "cached_tokens": null,
+        "cache_write_tokens": null,
+        "total_tokens": 440,
+        "requests": 1,
+        "wall_time_seconds": null,
+        "cost_usd": null,
+        "unavailable_fields": [],
+        "source_refs": []
+      },
+      "token_capture": null,
+      "transformations": [],
+      "aliases": [
+        {
+          "namespace": "craftax.policy_call",
+          "value": "smoke/craftax#glm-5.3-flash:low#s0:3",
+          "target_id": "span_4dedd9b32e176213",
+          "target_kind": "span",
+          "provenance": "observed",
+          "confidence": 1.0
+        }
+      ],
+      "metadata": {},
+      "content_digest": "sha256:bf4d71f4c97aa75c2dc0e453f47ff05ddfa786d7aedcb52022d2b8343d7f44bf"
+    },
+    {
+      "span_id": "span_4c68119281f4614b",
+      "span_kind": "environment_step",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "started_at": "2026-08-31T00:00:32.000000Z",
+      "parent_span_id": null,
+      "turn_id": "sess_82218dc5799986c8:step:7",
+      "branch_id": null,
+      "workflow_address": null,
+      "context_epoch_id": null,
+      "caused_by_span_ids": [],
+      "ended_at": "2026-08-31T00:00:32.000000Z",
+      "status": "ok",
+      "error_id": null,
+      "detail": {
+        "step_index": 7,
+        "action": "do",
+        "transition": "harvest",
+        "reason": null
+      },
+      "input_message_ids": [],
+      "output_message_ids": [],
+      "artifact_ids": [],
+      "usage": null,
+      "token_capture": null,
+      "transformations": [],
+      "aliases": [],
+      "metadata": {},
+      "content_digest": "sha256:6a35a9137eb834b3ecfcddbcb0261ff4673bb307daf17f8b792f486b3ce78adf"
+    },
+    {
+      "span_id": "span_97881c448458b6b3",
+      "span_kind": "environment_step",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "started_at": "2026-08-31T00:00:33.000000Z",
+      "parent_span_id": null,
+      "turn_id": "sess_82218dc5799986c8:step:8",
+      "branch_id": null,
+      "workflow_address": null,
+      "context_epoch_id": null,
+      "caused_by_span_ids": [],
+      "ended_at": "2026-08-31T00:00:33.000000Z",
+      "status": "ok",
+      "error_id": null,
+      "detail": {
+        "step_index": 8,
+        "action": "do",
+        "transition": "harvest",
+        "reason": null
+      },
+      "input_message_ids": [],
+      "output_message_ids": [],
+      "artifact_ids": [],
+      "usage": null,
+      "token_capture": null,
+      "transformations": [],
+      "aliases": [],
+      "metadata": {},
+      "content_digest": "sha256:fc3f5e95c66ddfa8cdedebb9d0e559c4b75482962da12d19c659f05ee03fd377"
+    },
+    {
+      "span_id": "span_e7b1e64edd3312cc",
+      "span_kind": "environment_step",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "started_at": "2026-08-31T00:00:34.000000Z",
+      "parent_span_id": null,
+      "turn_id": "sess_82218dc5799986c8:step:9",
+      "branch_id": null,
+      "workflow_address": null,
+      "context_epoch_id": null,
+      "caused_by_span_ids": [],
+      "ended_at": "2026-08-31T00:00:34.000000Z",
+      "status": "ok",
+      "error_id": null,
+      "detail": {
+        "step_index": 9,
+        "action": "do",
+        "transition": "harvest",
+        "reason": null
+      },
+      "input_message_ids": [],
+      "output_message_ids": [],
+      "artifact_ids": [],
+      "usage": null,
+      "token_capture": null,
+      "transformations": [],
+      "aliases": [],
+      "metadata": {},
+      "content_digest": "sha256:2aa192335dfd5184b05fb631314b5eacee6e6b26d6d43899a45c055917eee121"
+    },
+    {
+      "span_id": "span_15a208836cb6afc4",
+      "span_kind": "model_call",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "started_at": "2026-08-31T00:00:40.000000Z",
+      "parent_span_id": null,
+      "turn_id": null,
+      "branch_id": null,
+      "workflow_address": null,
+      "context_epoch_id": null,
+      "caused_by_span_ids": [],
+      "ended_at": "2026-08-31T00:00:40.000000Z",
+      "status": "ok",
+      "error_id": null,
+      "detail": {
+        "call_index": 4,
+        "model": "glm-5.3-flash",
+        "reasoning_effort": "low",
+        "observation": "text",
+        "finish_reason": "stop"
+      },
+      "input_message_ids": [
+        "msg_8f3204af594535c0"
+      ],
+      "output_message_ids": [
+        "msg_a5192b6cb0442159"
+      ],
+      "artifact_ids": [],
+      "usage": {
+        "provenance": "observed_harness",
+        "prompt_tokens": 400,
+        "completion_tokens": 40,
+        "reasoning_tokens": null,
+        "cached_tokens": null,
+        "cache_write_tokens": null,
+        "total_tokens": 440,
+        "requests": 1,
+        "wall_time_seconds": null,
+        "cost_usd": null,
+        "unavailable_fields": [],
+        "source_refs": []
+      },
+      "token_capture": null,
+      "transformations": [],
+      "aliases": [
+        {
+          "namespace": "craftax.policy_call",
+          "value": "smoke/craftax#glm-5.3-flash:low#s0:4",
+          "target_id": "span_15a208836cb6afc4",
+          "target_kind": "span",
+          "provenance": "observed",
+          "confidence": 1.0
+        }
+      ],
+      "metadata": {},
+      "content_digest": "sha256:6aaaf1d564a342191c316f6b1926e0ba53de23cefc9bc52cd2ae3c8c610e1515"
+    },
+    {
+      "span_id": "span_a53f7ebb69adf828",
+      "span_kind": "environment_step",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "started_at": "2026-08-31T00:00:42.000000Z",
+      "parent_span_id": null,
+      "turn_id": "sess_82218dc5799986c8:step:10",
+      "branch_id": null,
+      "workflow_address": null,
+      "context_epoch_id": null,
+      "caused_by_span_ids": [],
+      "ended_at": "2026-08-31T00:00:42.000000Z",
+      "status": "ok",
+      "error_id": null,
+      "detail": {
+        "step_index": 10,
+        "action": "place_table",
+        "transition": "place",
+        "reason": null
+      },
+      "input_message_ids": [],
+      "output_message_ids": [],
+      "artifact_ids": [],
+      "usage": null,
+      "token_capture": null,
+      "transformations": [],
+      "aliases": [],
+      "metadata": {},
+      "content_digest": "sha256:da3f15dabc074a05ce3cf1efb4f9745aace4919746c669cd6b2d1057031f9b82"
+    }
+  ],
+  "events": [
+    {
+      "event_id": "evt_049420e03659e201",
+      "event_type": "craftax.eval.phase",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "occurred_at": "2026-08-31T00:00:00.000000Z",
+      "span_id": null,
+      "turn_id": null,
+      "message_id": null,
+      "order": {
+        "chronological_sequence": 1,
+        "actor_sequence": 1,
+        "source_order_id": null,
+        "structural": null
+      },
+      "caused_by_event_ids": [],
+      "payload": {
+        "lane": "smoke/craftax#glm-5.3-flash:low#s0",
+        "rollout_id": "smoke-rollout",
+        "task_id": "gamebench/craftax-singleplayer",
+        "phase": "rollout.opened",
+        "policy": {
+          "id": "react_committed_plan",
+          "model": "glm-5.3-flash",
+          "env_seed": 0,
+          "reasoning_effort": "low"
+        }
+      },
+      "status": "ok",
+      "error_id": null,
+      "raw_source_ref": null,
+      "artifact_ids": [],
+      "aliases": [],
+      "content_digest": "sha256:673ccb2ef75f72b8be8fe9f509807a16df536069557dd7c71265c5ed5a88a30d"
+    },
+    {
+      "event_id": "evt_ba49e76082a81b3e",
+      "event_type": "craftax.transcript",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "occurred_at": "2026-08-31T00:00:00.000000Z",
+      "span_id": "span_befb26a97e861982",
+      "turn_id": null,
+      "message_id": null,
+      "order": {
+        "chronological_sequence": 2,
+        "actor_sequence": 2,
+        "source_order_id": null,
+        "structural": null
+      },
+      "caused_by_event_ids": [],
+      "payload": {
+        "lane": "smoke/craftax#glm-5.3-flash:low#s0",
+        "rollout_id": "smoke-rollout",
+        "task_id": "gamebench/craftax-singleplayer",
+        "kind": "policy.call",
+        "call_index": 0,
+        "model": "glm-5.3-flash",
+        "reasoning_effort": "low",
+        "prompt_tokens": 400,
+        "completion_tokens": 40,
+        "finish_reason": "stop"
+      },
+      "status": "ok",
+      "error_id": null,
+      "raw_source_ref": null,
+      "artifact_ids": [],
+      "aliases": [],
+      "content_digest": "sha256:89e0baf1180f964d7c1895e41bd35a7519379fa13d936ccb4af92c98b8a652f0"
+    },
+    {
+      "event_id": "evt_cb312105793eeeac",
+      "event_type": "craftax.transcript",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "occurred_at": "2026-08-31T00:00:02.000000Z",
+      "span_id": "span_14d671292e565d0d",
+      "turn_id": null,
+      "message_id": null,
+      "order": {
+        "chronological_sequence": 3,
+        "actor_sequence": 3,
+        "source_order_id": null,
+        "structural": null
+      },
+      "caused_by_event_ids": [],
+      "payload": {
+        "lane": "smoke/craftax#glm-5.3-flash:low#s0",
+        "rollout_id": "smoke-rollout",
+        "task_id": "gamebench/craftax-singleplayer",
+        "kind": "action_applied",
+        "step_index": 0,
+        "tick": 0,
+        "action": "do",
+        "transition": "noop",
+        "payload": {
+          "reason": "nothing_to_do:grass"
+        },
+        "message": "ActionApplied(do,step=0)",
+        "severity": "info"
+      },
+      "status": "ok",
+      "error_id": null,
+      "raw_source_ref": null,
+      "artifact_ids": [],
+      "aliases": [],
+      "content_digest": "sha256:c3119ef5d421e5be9bd6476268df470f19030b1874b226b95e74c8f2ed8131b7"
+    },
+    {
+      "event_id": "evt_945b568f5fa0fbbf",
+      "event_type": "craftax.transcript",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "occurred_at": "2026-08-31T00:00:03.000000Z",
+      "span_id": "span_98d27bf72ffd61bb",
+      "turn_id": null,
+      "message_id": null,
+      "order": {
+        "chronological_sequence": 4,
+        "actor_sequence": 4,
+        "source_order_id": null,
+        "structural": null
+      },
+      "caused_by_event_ids": [],
+      "payload": {
+        "lane": "smoke/craftax#glm-5.3-flash:low#s0",
+        "rollout_id": "smoke-rollout",
+        "task_id": "gamebench/craftax-singleplayer",
+        "kind": "action_applied",
+        "step_index": 1,
+        "tick": 1,
+        "action": "do",
+        "transition": "noop",
+        "payload": {
+          "reason": "nothing_to_do:grass"
+        },
+        "message": "ActionApplied(do,step=1)",
+        "severity": "info"
+      },
+      "status": "ok",
+      "error_id": null,
+      "raw_source_ref": null,
+      "artifact_ids": [],
+      "aliases": [],
+      "content_digest": "sha256:1ba27ab7cc94dd9f921ffb4c46397286561dd81255ad56b0173b2ce12ae23cf8"
+    },
+    {
+      "event_id": "evt_9fa64bbbdd7a293d",
+      "event_type": "craftax.transcript",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "occurred_at": "2026-08-31T00:00:10.000000Z",
+      "span_id": "span_6dd205c3a5ee72e9",
+      "turn_id": null,
+      "message_id": null,
+      "order": {
+        "chronological_sequence": 5,
+        "actor_sequence": 5,
+        "source_order_id": null,
+        "structural": null
+      },
+      "caused_by_event_ids": [],
+      "payload": {
+        "lane": "smoke/craftax#glm-5.3-flash:low#s0",
+        "rollout_id": "smoke-rollout",
+        "task_id": "gamebench/craftax-singleplayer",
+        "kind": "policy.call",
+        "call_index": 1,
+        "model": "glm-5.3-flash",
+        "reasoning_effort": "low",
+        "prompt_tokens": 400,
+        "completion_tokens": 40,
+        "finish_reason": "stop"
+      },
+      "status": "ok",
+      "error_id": null,
+      "raw_source_ref": null,
+      "artifact_ids": [],
+      "aliases": [],
+      "content_digest": "sha256:4b3049a7dc8e67a48e4218e70ba1b6e6b5b57be7afee25a3f8a7e59115d9c559"
+    },
+    {
+      "event_id": "evt_2a6c547c90146aa0",
+      "event_type": "craftax.transcript",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "occurred_at": "2026-08-31T00:00:12.000000Z",
+      "span_id": "span_4239c8556e2d2bf8",
+      "turn_id": null,
+      "message_id": null,
+      "order": {
+        "chronological_sequence": 6,
+        "actor_sequence": 6,
+        "source_order_id": null,
+        "structural": null
+      },
+      "caused_by_event_ids": [],
+      "payload": {
+        "lane": "smoke/craftax#glm-5.3-flash:low#s0",
+        "rollout_id": "smoke-rollout",
+        "task_id": "gamebench/craftax-singleplayer",
+        "kind": "action_applied",
+        "step_index": 2,
+        "tick": 2,
+        "action": "up",
+        "transition": "move",
+        "payload": {},
+        "message": "ActionApplied(up,step=2)",
+        "severity": "info"
+      },
+      "status": "ok",
+      "error_id": null,
+      "raw_source_ref": null,
+      "artifact_ids": [],
+      "aliases": [],
+      "content_digest": "sha256:6b3f43916544bbbcf8aa9947478ebe336073e61fd47280a87aa97c58be8204fd"
+    },
+    {
+      "event_id": "evt_94a623cd35c746c5",
+      "event_type": "craftax.transcript",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "occurred_at": "2026-08-31T00:00:13.000000Z",
+      "span_id": "span_1123f1680410078b",
+      "turn_id": null,
+      "message_id": null,
+      "order": {
+        "chronological_sequence": 7,
+        "actor_sequence": 7,
+        "source_order_id": null,
+        "structural": null
+      },
+      "caused_by_event_ids": [],
+      "payload": {
+        "lane": "smoke/craftax#glm-5.3-flash:low#s0",
+        "rollout_id": "smoke-rollout",
+        "task_id": "gamebench/craftax-singleplayer",
+        "kind": "action_applied",
+        "step_index": 3,
+        "tick": 3,
+        "action": "up",
+        "transition": "blocked",
+        "payload": {
+          "reason": "blocked:tree"
+        },
+        "message": "ActionApplied(up,step=3)",
+        "severity": "info"
+      },
+      "status": "ok",
+      "error_id": null,
+      "raw_source_ref": null,
+      "artifact_ids": [],
+      "aliases": [],
+      "content_digest": "sha256:947b6193b61f4e8a1ccfa53f833088bbd21d80b8618bd3bdab2c16af4adffae1"
+    },
+    {
+      "event_id": "evt_4260585ae40a4845",
+      "event_type": "craftax.transcript",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "occurred_at": "2026-08-31T00:00:14.000000Z",
+      "span_id": "span_641a715deb44f1bf",
+      "turn_id": null,
+      "message_id": null,
+      "order": {
+        "chronological_sequence": 8,
+        "actor_sequence": 8,
+        "source_order_id": null,
+        "structural": null
+      },
+      "caused_by_event_ids": [],
+      "payload": {
+        "lane": "smoke/craftax#glm-5.3-flash:low#s0",
+        "rollout_id": "smoke-rollout",
+        "task_id": "gamebench/craftax-singleplayer",
+        "kind": "action_applied",
+        "step_index": 4,
+        "tick": 4,
+        "action": "do",
+        "transition": "harvest",
+        "payload": {},
+        "message": "ActionApplied(do,step=4)",
+        "severity": "info"
+      },
+      "status": "ok",
+      "error_id": null,
+      "raw_source_ref": null,
+      "artifact_ids": [],
+      "aliases": [],
+      "content_digest": "sha256:4076a6fadf6131660ba7b062b8b5bc7099d792d435414a1a652c4408044bc044"
+    },
+    {
+      "event_id": "evt_e92851cb6b704c43",
+      "event_type": "craftax.transcript",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "occurred_at": "2026-08-31T00:00:14.000000Z",
+      "span_id": "span_641a715deb44f1bf",
+      "turn_id": null,
+      "message_id": null,
+      "order": {
+        "chronological_sequence": 9,
+        "actor_sequence": 9,
+        "source_order_id": null,
+        "structural": null
+      },
+      "caused_by_event_ids": [],
+      "payload": {
+        "lane": "smoke/craftax#glm-5.3-flash:low#s0",
+        "rollout_id": "smoke-rollout",
+        "task_id": "gamebench/craftax-singleplayer",
+        "kind": "resource_delta",
+        "step_index": 4,
+        "action": "do",
+        "payload": {
+          "resource": "wood",
+          "delta": 1,
+          "after": 1
+        },
+        "message": "ResourceDelta(wood,+1)",
+        "severity": "info"
+      },
+      "status": "ok",
+      "error_id": null,
+      "raw_source_ref": null,
+      "artifact_ids": [],
+      "aliases": [],
+      "content_digest": "sha256:b1f4dab0bdb773921695ff9880af5e4f232ea2be6ae819e9de206ca40070ff1a"
+    },
+    {
+      "event_id": "evt_d54f4c23f1ca332d",
+      "event_type": "craftax.transcript",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "occurred_at": "2026-08-31T00:00:14.000000Z",
+      "span_id": "span_641a715deb44f1bf",
+      "turn_id": null,
+      "message_id": null,
+      "order": {
+        "chronological_sequence": 10,
+        "actor_sequence": 10,
+        "source_order_id": null,
+        "structural": null
+      },
+      "caused_by_event_ids": [],
+      "payload": {
+        "lane": "smoke/craftax#glm-5.3-flash:low#s0",
+        "rollout_id": "smoke-rollout",
+        "task_id": "gamebench/craftax-singleplayer",
+        "kind": "achievement_unlocked",
+        "step_index": 4,
+        "action": "do",
+        "payload": {
+          "achievement": "collect_wood"
+        },
+        "message": "AchievementUnlocked(collect_wood)",
+        "severity": "info"
+      },
+      "status": "ok",
+      "error_id": null,
+      "raw_source_ref": null,
+      "artifact_ids": [],
+      "aliases": [],
+      "content_digest": "sha256:1264bfb7a52d39b12690ea63a33b2e1449738134ea17ccad152eb3ccb17ea6f5"
+    },
+    {
+      "event_id": "evt_b6bffd02ba866769",
+      "event_type": "craftax.transcript",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "occurred_at": "2026-08-31T00:00:20.000000Z",
+      "span_id": "span_500733aa602937c3",
+      "turn_id": null,
+      "message_id": null,
+      "order": {
+        "chronological_sequence": 11,
+        "actor_sequence": 11,
+        "source_order_id": null,
+        "structural": null
+      },
+      "caused_by_event_ids": [],
+      "payload": {
+        "lane": "smoke/craftax#glm-5.3-flash:low#s0",
+        "rollout_id": "smoke-rollout",
+        "task_id": "gamebench/craftax-singleplayer",
+        "kind": "policy.call",
+        "call_index": 2,
+        "model": "glm-5.3-flash",
+        "reasoning_effort": "low",
+        "prompt_tokens": 400,
+        "completion_tokens": 40,
+        "finish_reason": "stop"
+      },
+      "status": "ok",
+      "error_id": null,
+      "raw_source_ref": null,
+      "artifact_ids": [],
+      "aliases": [],
+      "content_digest": "sha256:e212efbe65ecedcf2b0534e969e7d4a3abfc774e2bde9b3d3b77d9f2e6f93f38"
+    },
+    {
+      "event_id": "evt_f122d008961817d6",
+      "event_type": "craftax.transcript",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "occurred_at": "2026-08-31T00:00:22.000000Z",
+      "span_id": "span_81d9e583a7875d39",
+      "turn_id": null,
+      "message_id": null,
+      "order": {
+        "chronological_sequence": 12,
+        "actor_sequence": 12,
+        "source_order_id": null,
+        "structural": null
+      },
+      "caused_by_event_ids": [],
+      "payload": {
+        "lane": "smoke/craftax#glm-5.3-flash:low#s0",
+        "rollout_id": "smoke-rollout",
+        "task_id": "gamebench/craftax-singleplayer",
+        "kind": "action_applied",
+        "step_index": 5,
+        "tick": 5,
+        "action": "place_table",
+        "transition": "noop",
+        "payload": {
+          "reason": "missing_resources"
+        },
+        "message": "ActionApplied(place_table,step=5)",
+        "severity": "info"
+      },
+      "status": "ok",
+      "error_id": null,
+      "raw_source_ref": null,
+      "artifact_ids": [],
+      "aliases": [],
+      "content_digest": "sha256:9f3e737cc0430c89b48c2264bc16e38ad11c1d25a53f95563e0c5f1dc1230e29"
+    },
+    {
+      "event_id": "evt_31c4c72f9e3318c0",
+      "event_type": "craftax.transcript",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "occurred_at": "2026-08-31T00:00:23.000000Z",
+      "span_id": "span_aeef0e222e21a2b4",
+      "turn_id": null,
+      "message_id": null,
+      "order": {
+        "chronological_sequence": 13,
+        "actor_sequence": 13,
+        "source_order_id": null,
+        "structural": null
+      },
+      "caused_by_event_ids": [],
+      "payload": {
+        "lane": "smoke/craftax#glm-5.3-flash:low#s0",
+        "rollout_id": "smoke-rollout",
+        "task_id": "gamebench/craftax-singleplayer",
+        "kind": "action_applied",
+        "step_index": 6,
+        "tick": 6,
+        "action": "make_wood_pickaxe",
+        "transition": "noop",
+        "payload": {
+          "reason": "needs_crafting_table"
+        },
+        "message": "ActionApplied(make_wood_pickaxe,step=6)",
+        "severity": "info"
+      },
+      "status": "ok",
+      "error_id": null,
+      "raw_source_ref": null,
+      "artifact_ids": [],
+      "aliases": [],
+      "content_digest": "sha256:6283cd0c885f3815682eb9cfa560636ef28e797479519d28d2c7fe857f7b39cf"
+    },
+    {
+      "event_id": "evt_670ef8e4723a4b7b",
+      "event_type": "craftax.transcript",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "occurred_at": "2026-08-31T00:00:30.000000Z",
+      "span_id": "span_4dedd9b32e176213",
+      "turn_id": null,
+      "message_id": null,
+      "order": {
+        "chronological_sequence": 14,
+        "actor_sequence": 14,
+        "source_order_id": null,
+        "structural": null
+      },
+      "caused_by_event_ids": [],
+      "payload": {
+        "lane": "smoke/craftax#glm-5.3-flash:low#s0",
+        "rollout_id": "smoke-rollout",
+        "task_id": "gamebench/craftax-singleplayer",
+        "kind": "policy.call",
+        "call_index": 3,
+        "model": "glm-5.3-flash",
+        "reasoning_effort": "low",
+        "prompt_tokens": 400,
+        "completion_tokens": 40,
+        "finish_reason": "stop"
+      },
+      "status": "ok",
+      "error_id": null,
+      "raw_source_ref": null,
+      "artifact_ids": [],
+      "aliases": [],
+      "content_digest": "sha256:9052dfdfa6c1c751235f42fce149dee459579b41935f72e75a39da2781df9991"
+    },
+    {
+      "event_id": "evt_04ec167aad225e49",
+      "event_type": "craftax.transcript",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "occurred_at": "2026-08-31T00:00:32.000000Z",
+      "span_id": "span_4c68119281f4614b",
+      "turn_id": null,
+      "message_id": null,
+      "order": {
+        "chronological_sequence": 15,
+        "actor_sequence": 15,
+        "source_order_id": null,
+        "structural": null
+      },
+      "caused_by_event_ids": [],
+      "payload": {
+        "lane": "smoke/craftax#glm-5.3-flash:low#s0",
+        "rollout_id": "smoke-rollout",
+        "task_id": "gamebench/craftax-singleplayer",
+        "kind": "action_applied",
+        "step_index": 7,
+        "tick": 7,
+        "action": "do",
+        "transition": "harvest",
+        "payload": {},
+        "message": "ActionApplied(do,step=7)",
+        "severity": "info"
+      },
+      "status": "ok",
+      "error_id": null,
+      "raw_source_ref": null,
+      "artifact_ids": [],
+      "aliases": [],
+      "content_digest": "sha256:585afb2fbee95fe81a486d80bdec1af2ffe67e4dfd0141971042ff173def9458"
+    },
+    {
+      "event_id": "evt_78941fb110920089",
+      "event_type": "craftax.transcript",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "occurred_at": "2026-08-31T00:00:32.000000Z",
+      "span_id": "span_4c68119281f4614b",
+      "turn_id": null,
+      "message_id": null,
+      "order": {
+        "chronological_sequence": 16,
+        "actor_sequence": 16,
+        "source_order_id": null,
+        "structural": null
+      },
+      "caused_by_event_ids": [],
+      "payload": {
+        "lane": "smoke/craftax#glm-5.3-flash:low#s0",
+        "rollout_id": "smoke-rollout",
+        "task_id": "gamebench/craftax-singleplayer",
+        "kind": "resource_delta",
+        "step_index": 7,
+        "action": "do",
+        "payload": {
+          "resource": "wood",
+          "delta": 1,
+          "after": 2
+        },
+        "message": "ResourceDelta(wood,+1)",
+        "severity": "info"
+      },
+      "status": "ok",
+      "error_id": null,
+      "raw_source_ref": null,
+      "artifact_ids": [],
+      "aliases": [],
+      "content_digest": "sha256:a3c9d5b8ac1b3c692da1ba85d79502174cc5d546b93cb1479f1fe250726be712"
+    },
+    {
+      "event_id": "evt_df681c58da04facb",
+      "event_type": "craftax.transcript",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "occurred_at": "2026-08-31T00:00:33.000000Z",
+      "span_id": "span_97881c448458b6b3",
+      "turn_id": null,
+      "message_id": null,
+      "order": {
+        "chronological_sequence": 17,
+        "actor_sequence": 17,
+        "source_order_id": null,
+        "structural": null
+      },
+      "caused_by_event_ids": [],
+      "payload": {
+        "lane": "smoke/craftax#glm-5.3-flash:low#s0",
+        "rollout_id": "smoke-rollout",
+        "task_id": "gamebench/craftax-singleplayer",
+        "kind": "action_applied",
+        "step_index": 8,
+        "tick": 8,
+        "action": "do",
+        "transition": "harvest",
+        "payload": {},
+        "message": "ActionApplied(do,step=8)",
+        "severity": "info"
+      },
+      "status": "ok",
+      "error_id": null,
+      "raw_source_ref": null,
+      "artifact_ids": [],
+      "aliases": [],
+      "content_digest": "sha256:8c52569b6d7a388068bbcff53852d8b5ac805815585d576884a88cfd9fa989c8"
+    },
+    {
+      "event_id": "evt_852c1e33d9502c05",
+      "event_type": "craftax.transcript",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "occurred_at": "2026-08-31T00:00:33.000000Z",
+      "span_id": "span_97881c448458b6b3",
+      "turn_id": null,
+      "message_id": null,
+      "order": {
+        "chronological_sequence": 18,
+        "actor_sequence": 18,
+        "source_order_id": null,
+        "structural": null
+      },
+      "caused_by_event_ids": [],
+      "payload": {
+        "lane": "smoke/craftax#glm-5.3-flash:low#s0",
+        "rollout_id": "smoke-rollout",
+        "task_id": "gamebench/craftax-singleplayer",
+        "kind": "resource_delta",
+        "step_index": 8,
+        "action": "do",
+        "payload": {
+          "resource": "wood",
+          "delta": 1,
+          "after": 3
+        },
+        "message": "ResourceDelta(wood,+1)",
+        "severity": "info"
+      },
+      "status": "ok",
+      "error_id": null,
+      "raw_source_ref": null,
+      "artifact_ids": [],
+      "aliases": [],
+      "content_digest": "sha256:add5eb72b25b6633ab323d9cbf921d1479d268845a5b2766da4d453ad4a9417d"
+    },
+    {
+      "event_id": "evt_a52d8d2ade780909",
+      "event_type": "craftax.transcript",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "occurred_at": "2026-08-31T00:00:34.000000Z",
+      "span_id": "span_e7b1e64edd3312cc",
+      "turn_id": null,
+      "message_id": null,
+      "order": {
+        "chronological_sequence": 19,
+        "actor_sequence": 19,
+        "source_order_id": null,
+        "structural": null
+      },
+      "caused_by_event_ids": [],
+      "payload": {
+        "lane": "smoke/craftax#glm-5.3-flash:low#s0",
+        "rollout_id": "smoke-rollout",
+        "task_id": "gamebench/craftax-singleplayer",
+        "kind": "action_applied",
+        "step_index": 9,
+        "tick": 9,
+        "action": "do",
+        "transition": "harvest",
+        "payload": {},
+        "message": "ActionApplied(do,step=9)",
+        "severity": "info"
+      },
+      "status": "ok",
+      "error_id": null,
+      "raw_source_ref": null,
+      "artifact_ids": [],
+      "aliases": [],
+      "content_digest": "sha256:484a1cb2709126889d04318759ed5407f0122d16f040e93531bdb35f689005b3"
+    },
+    {
+      "event_id": "evt_e2550ddcc3f12e80",
+      "event_type": "craftax.transcript",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "occurred_at": "2026-08-31T00:00:34.000000Z",
+      "span_id": "span_e7b1e64edd3312cc",
+      "turn_id": null,
+      "message_id": null,
+      "order": {
+        "chronological_sequence": 20,
+        "actor_sequence": 20,
+        "source_order_id": null,
+        "structural": null
+      },
+      "caused_by_event_ids": [],
+      "payload": {
+        "lane": "smoke/craftax#glm-5.3-flash:low#s0",
+        "rollout_id": "smoke-rollout",
+        "task_id": "gamebench/craftax-singleplayer",
+        "kind": "resource_delta",
+        "step_index": 9,
+        "action": "do",
+        "payload": {
+          "resource": "wood",
+          "delta": 1,
+          "after": 4
+        },
+        "message": "ResourceDelta(wood,+1)",
+        "severity": "info"
+      },
+      "status": "ok",
+      "error_id": null,
+      "raw_source_ref": null,
+      "artifact_ids": [],
+      "aliases": [],
+      "content_digest": "sha256:618132bb70b6f4d0c0831f924eff998a64703eb10e4ac6da87709a098f773b2d"
+    },
+    {
+      "event_id": "evt_9c9da5b02f81f4bd",
+      "event_type": "craftax.transcript",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "occurred_at": "2026-08-31T00:00:40.000000Z",
+      "span_id": "span_15a208836cb6afc4",
+      "turn_id": null,
+      "message_id": null,
+      "order": {
+        "chronological_sequence": 21,
+        "actor_sequence": 21,
+        "source_order_id": null,
+        "structural": null
+      },
+      "caused_by_event_ids": [],
+      "payload": {
+        "lane": "smoke/craftax#glm-5.3-flash:low#s0",
+        "rollout_id": "smoke-rollout",
+        "task_id": "gamebench/craftax-singleplayer",
+        "kind": "policy.call",
+        "call_index": 4,
+        "model": "glm-5.3-flash",
+        "reasoning_effort": "low",
+        "prompt_tokens": 400,
+        "completion_tokens": 40,
+        "finish_reason": "stop"
+      },
+      "status": "ok",
+      "error_id": null,
+      "raw_source_ref": null,
+      "artifact_ids": [],
+      "aliases": [],
+      "content_digest": "sha256:3e05ede09cc8319ccdf98022f1ea07c6ba836fd757d10e7bc11e575e914ca39f"
+    },
+    {
+      "event_id": "evt_d82917de4f45ea8e",
+      "event_type": "craftax.transcript",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "occurred_at": "2026-08-31T00:00:42.000000Z",
+      "span_id": "span_a53f7ebb69adf828",
+      "turn_id": null,
+      "message_id": null,
+      "order": {
+        "chronological_sequence": 22,
+        "actor_sequence": 22,
+        "source_order_id": null,
+        "structural": null
+      },
+      "caused_by_event_ids": [],
+      "payload": {
+        "lane": "smoke/craftax#glm-5.3-flash:low#s0",
+        "rollout_id": "smoke-rollout",
+        "task_id": "gamebench/craftax-singleplayer",
+        "kind": "action_applied",
+        "step_index": 10,
+        "tick": 10,
+        "action": "place_table",
+        "transition": "place",
+        "payload": {},
+        "message": "ActionApplied(place_table,step=10)",
+        "severity": "info"
+      },
+      "status": "ok",
+      "error_id": null,
+      "raw_source_ref": null,
+      "artifact_ids": [],
+      "aliases": [],
+      "content_digest": "sha256:39f9eb89b67a93ec47d4caafefeefff3d969a46ae43bacf745e143389adaea43"
+    },
+    {
+      "event_id": "evt_0138136261ac0cc4",
+      "event_type": "craftax.transcript",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "occurred_at": "2026-08-31T00:00:42.000000Z",
+      "span_id": "span_a53f7ebb69adf828",
+      "turn_id": null,
+      "message_id": null,
+      "order": {
+        "chronological_sequence": 23,
+        "actor_sequence": 23,
+        "source_order_id": null,
+        "structural": null
+      },
+      "caused_by_event_ids": [],
+      "payload": {
+        "lane": "smoke/craftax#glm-5.3-flash:low#s0",
+        "rollout_id": "smoke-rollout",
+        "task_id": "gamebench/craftax-singleplayer",
+        "kind": "resource_delta",
+        "step_index": 10,
+        "action": "place_table",
+        "payload": {
+          "resource": "wood",
+          "delta": -1,
+          "after": 3
+        },
+        "message": "ResourceDelta(wood,-1)",
+        "severity": "info"
+      },
+      "status": "ok",
+      "error_id": null,
+      "raw_source_ref": null,
+      "artifact_ids": [],
+      "aliases": [],
+      "content_digest": "sha256:b7dd0f7f65ae19265f83055909056ed96dc6cd05f618301cd10f66c6e7a04cde"
+    },
+    {
+      "event_id": "evt_a4e82e7fa5f5b6a1",
+      "event_type": "craftax.transcript",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "occurred_at": "2026-08-31T00:00:42.000000Z",
+      "span_id": "span_a53f7ebb69adf828",
+      "turn_id": null,
+      "message_id": null,
+      "order": {
+        "chronological_sequence": 24,
+        "actor_sequence": 24,
+        "source_order_id": null,
+        "structural": null
+      },
+      "caused_by_event_ids": [],
+      "payload": {
+        "lane": "smoke/craftax#glm-5.3-flash:low#s0",
+        "rollout_id": "smoke-rollout",
+        "task_id": "gamebench/craftax-singleplayer",
+        "kind": "achievement_unlocked",
+        "step_index": 10,
+        "action": "place_table",
+        "payload": {
+          "achievement": "place_table"
+        },
+        "message": "AchievementUnlocked(place_table)",
+        "severity": "info"
+      },
+      "status": "ok",
+      "error_id": null,
+      "raw_source_ref": null,
+      "artifact_ids": [],
+      "aliases": [],
+      "content_digest": "sha256:c2f96b6ec4394a264ac9bde3a1c0ff81cbed09e4c993e57c388c4aad32174562"
+    },
+    {
+      "event_id": "evt_718283a6711531d9",
+      "event_type": "craftax.eval.run.terminal",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "occurred_at": "2026-08-31T00:00:50.000000Z",
+      "span_id": null,
+      "turn_id": null,
+      "message_id": null,
+      "order": {
+        "chronological_sequence": 25,
+        "actor_sequence": 25,
+        "source_order_id": null,
+        "structural": null
+      },
+      "caused_by_event_ids": [],
+      "payload": {
+        "lane": "smoke/craftax#glm-5.3-flash:low#s0",
+        "rollout_id": "smoke-rollout",
+        "task_id": "gamebench/craftax-singleplayer",
+        "reward": 2.0,
+        "env_steps": 11,
+        "stopped_on": "max_steps",
+        "terminated": false,
+        "truncated": true,
+        "usage": {
+          "calls": 5,
+          "prompt_tokens": 2000,
+          "completion_tokens": 200,
+          "actions_planned": 11,
+          "actions_taken": 11,
+          "actions_wasted": 4
+        }
+      },
+      "status": "ok",
+      "error_id": null,
+      "raw_source_ref": null,
+      "artifact_ids": [],
+      "aliases": [],
+      "content_digest": "sha256:678b719c310aa20c96580524b8ff7836c9ecfff015dae3309e8ec4056fcfa527"
+    }
+  ],
+  "artifacts": [],
+  "errors": [],
+  "usage": {
+    "provenance": "observed_harness",
+    "prompt_tokens": 2000,
+    "completion_tokens": 200,
+    "reasoning_tokens": null,
+    "cached_tokens": null,
+    "cache_write_tokens": null,
+    "total_tokens": 2200,
+    "requests": 5,
+    "wall_time_seconds": null,
+    "cost_usd": null,
+    "unavailable_fields": [],
+    "source_refs": []
+  },
+  "aliases": [],
+  "links": [],
+  "coordination": null,
+  "visibility": "private",
+  "extensions": {
+    "craftax": {
+      "rollouts": [
+        {
+          "lane": "smoke/craftax#glm-5.3-flash:low#s0",
+          "rollout_id": "smoke-rollout",
+          "actor_id": "actor_45c3b09bdc85f629",
+          "session_id": "sess_82218dc5799986c8",
+          "model": "glm-5.3-flash",
+          "provider": "smoke",
+          "task_id": "gamebench/craftax-singleplayer",
+          "reward": 2.0,
+          "env_steps": 11,
+          "stopped_on": "max_steps",
+          "achievements": [
+            {
+              "step": 4,
+              "name": "collect_wood"
+            },
+            {
+              "step": 10,
+              "name": "place_table"
+            }
+          ],
+          "actions": [
+            {
+              "step": 0,
+              "action": "do",
+              "transition": "noop",
+              "reason": "nothing_to_do:grass"
+            },
+            {
+              "step": 1,
+              "action": "do",
+              "transition": "noop",
+              "reason": "nothing_to_do:grass"
+            },
+            {
+              "step": 2,
+              "action": "up",
+              "transition": "move",
+              "reason": null
+            },
+            {
+              "step": 3,
+              "action": "up",
+              "transition": "blocked",
+              "reason": "blocked:tree"
+            },
+            {
+              "step": 4,
+              "action": "do",
+              "transition": "harvest",
+              "reason": null
+            },
+            {
+              "step": 5,
+              "action": "place_table",
+              "transition": "noop",
+              "reason": "missing_resources"
+            },
+            {
+              "step": 6,
+              "action": "make_wood_pickaxe",
+              "transition": "noop",
+              "reason": "needs_crafting_table"
+            },
+            {
+              "step": 7,
+              "action": "do",
+              "transition": "harvest",
+              "reason": null
+            },
+            {
+              "step": 8,
+              "action": "do",
+              "transition": "harvest",
+              "reason": null
+            },
+            {
+              "step": 9,
+              "action": "do",
+              "transition": "harvest",
+              "reason": null
+            },
+            {
+              "step": 10,
+              "action": "place_table",
+              "transition": "place",
+              "reason": null
+            }
+          ],
+          "calls": [
+            {
+              "call_index": 0,
+              "prompt_tokens": 400,
+              "completion_tokens": 40
+            },
+            {
+              "call_index": 1,
+              "prompt_tokens": 400,
+              "completion_tokens": 40
+            },
+            {
+              "call_index": 2,
+              "prompt_tokens": 400,
+              "completion_tokens": 40
+            },
+            {
+              "call_index": 3,
+              "prompt_tokens": 400,
+              "completion_tokens": 40
+            },
+            {
+              "call_index": 4,
+              "prompt_tokens": 400,
+              "completion_tokens": 40
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "schema_version": "synth.trace.v5",
+  "content_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf"
+}

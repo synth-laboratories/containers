@@ -1,0 +1,312 @@
+{
+  "actors": [
+    {
+      "actor_id": "actor_0f5dbf5d9e03509b",
+      "aliases": [],
+      "content_digest": "sha256:c1479274849a58ff0a520d79672e1d42e46174013b4738ed585c3e2e32c9f19c",
+      "display_name": "annotator test.jesterky.problem_model",
+      "external_trace_refs": [],
+      "harness": "synth.annotation",
+      "kind": "evaluator",
+      "metadata": {
+        "annotator_digest": "sha256:49642338f168a648475c5d1004ba0ad7adb8bc894826471483131d8c7bd6a517",
+        "annotator_id": "test.jesterky.problem_model",
+        "program_digest": "sha256:3de93485cf999cdfa5d1019ff85b76d31cc9099c4a5d5f31bf2c0e5428d0d2aa",
+        "reasoning_effort": "medium"
+      },
+      "model": "gpt-5.6-luna",
+      "role": "annotator",
+      "runtime": "jesterky",
+      "subtype": "jesterky",
+      "visibility": "private"
+    }
+  ],
+  "aliases": [],
+  "artifacts": [],
+  "branches": [],
+  "capture": {
+    "binding_digest": "sha256:005e2562a50218bf4844a632623f8633637e994a154d06e251d06b6759b5315e",
+    "binding_id": "annotation_job",
+    "capture_id": "cap_f332057ec62a3eb5",
+    "capture_profile": "annotator_execution",
+    "interception": "in_process",
+    "mode": "structured",
+    "raw_record_count": 0,
+    "segment_count": 0,
+    "segment_digests": []
+  },
+  "completeness": {
+    "agent_events": "complete",
+    "artifact_finalization": "complete",
+    "capture_status": "complete",
+    "digest_algorithm": "sha256",
+    "environment_events": "not_captured",
+    "metadata": {},
+    "missing_ranges": [],
+    "model_calls": "aggregate_only",
+    "raw_provider": "unavailable",
+    "reasons": [
+      "annotator hidden reasoning is not captured by policy"
+    ],
+    "repair_receipt_ids": [],
+    "terminal_event_observed": true,
+    "tool_events": "complete",
+    "truncation_reasons": [],
+    "usage": "unavailable"
+  },
+  "content_digest": "sha256:af1f9f83ad3b957c7acddf6a7260c41bff88156c0e0f442dadc7a3d961e2640e",
+  "errors": [],
+  "events": [
+    {
+      "actor_id": "actor_0f5dbf5d9e03509b",
+      "aliases": [],
+      "artifact_ids": [],
+      "caused_by_event_ids": [],
+      "content_digest": "sha256:8c69afad2bb7e3eeae7b0ef03b44e93486c8185f2e87e02b9572a32f76b38b03",
+      "event_id": "evt_248c71e4bedf9454",
+      "event_type": "tool.call_executed",
+      "occurred_at": "2026-09-07T22:58:24.198887Z",
+      "order": {
+        "actor_sequence": 1,
+        "chronological_sequence": 1
+      },
+      "payload": {
+        "ok": true,
+        "response_bytes": 10554,
+        "tool": "trace_list_entities"
+      },
+      "session_id": "sess_5e51c5cb3961c9e3",
+      "span_id": "span_3dc8b681a7326b69",
+      "status": "ok"
+    }
+  ],
+  "extensions": {},
+  "identity": {
+    "correlation_id": "ajob_dd475fb74b025b95"
+  },
+  "lifecycle": {
+    "ended_at": "2026-09-07T22:58:24.200101Z",
+    "started_at": "2026-09-07T22:58:24.197418Z",
+    "status": "completed",
+    "termination": {
+      "detail": "",
+      "reason": "completed"
+    }
+  },
+  "links": [
+    {
+      "detail": {
+        "job_id": "ajob_dd475fb74b025b95"
+      },
+      "relation": "annotates",
+      "target_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+      "target_id": "trace_db61f67b4e043a03",
+      "target_kind": "trace"
+    }
+  ],
+  "messages": [
+    {
+      "aliases": [],
+      "content_digest": "sha256:bcfd37a4c059713f08c5c1bcbd06816bc6b510866087426d9cba09a63352d444",
+      "message_id": "msg_031b1b3e8a87805f",
+      "metadata": {
+        "instructions_digest": "sha256:48955aed562dbb74b9d048421b90a53349a09c781ec0882dcedc90de11ce18b0"
+      },
+      "occurred_at": "2026-09-07T22:58:24.197418Z",
+      "parts": [
+        {
+          "conversion_diagnostics": [],
+          "part_id": "msg_031b1b3e8a87805f:0",
+          "text": "# Trace V5 annotation task — Problem model\n\nJudge whether the diagnosis matches the issue.\n\n## Non-negotiable rules\n\n- You are inspecting one immutable, sealed Trace V5. You cannot change it, and nothing you say changes the recorded run, its reward, or its engine state.\n- Use only the trace inspection tools you were given. There is no shell, no network, and no file access. Do not attempt them.\n- Every applied finding must cite evidence selectors you verified with `trace_resolve_selector`. Uncited or unresolvable findings are discarded.\n- Cite at least 2 distinct evidence selector(s) per finding. Prefer `part` or `message` selectors with a `quote` for text, `span` selectors for environment steps, and `event` selectors for engine facts.\n- A `quote` must be a verbatim substring of the entity text exactly as the tools render it (`trace_get_message` / `trace_get_event` / `trace_resolve_selector`): copy it character for character, including spacing and punctuation. Quote short scalar phrases — a sentence fragment, one `key: value` pair as rendered — and never re-type, reflow, or summarise JSON (`{\"actions\": …}` retyped from memory is a `quote_mismatch`). If you are not sure of the exact text, fetch the entity with `trace_get_message` / `trace_get_event` and copy from it; a selector without a `quote` is always valid when the whole part or event is the evidence.\n- If the evidence you need is absent, emit an abstention with a typed reason. Never guess, never complete a finding from memory or from summaries.\n- `rationale` is a concise, retained explanation (under 2000 characters). Do not include hidden or step-by-step reasoning; it is neither requested nor stored.\n- Engine facts (reward, achievements, actions, inventory, termination) are authoritative; annotations never override them.\n- Labels must come from the taxonomy below; unknown labels invalidate the finding.\n\n## Taxonomy\n\nAnnotation types: problem_model\n\n- `problem_model.matches_issue`: \n- `problem_model.wrong`: \n## Output\n\nReply with a single JSON object conforming to `synth.annotation-proposal.v1` (see output_schema.json). Set `source_trace_id` and `source_trace_digest` to:\n\n- source_trace_id: `trace_db61f67b4e043a03`\n- source_trace_digest: `sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf`\n\nStrict output format: every field is present (use null for unknown optionals); `payload_json` is the payload object JSON-encoded as a string; `rationale` stays under 2000 characters.\n\n## Limits\n\n- tool calls: 200\n- bytes per tool response: 32000\n- cumulative tool bytes: 2000000\n- total tokens: 50000\n\n",
+          "type": "text",
+          "visibility": "private"
+        }
+      ],
+      "predecessor_message_ids": [],
+      "recipient_actor_ids": [],
+      "role": "user",
+      "sender_actor_id": "actor_0f5dbf5d9e03509b",
+      "session_id": "sess_5e51c5cb3961c9e3",
+      "visibility": "private"
+    },
+    {
+      "aliases": [],
+      "content_digest": "sha256:1ede1eb41443f6375250f33e9c5272846c3c181e04c42e6dfade86f4e300df15",
+      "message_id": "msg_ce2bda67528b8823",
+      "metadata": {},
+      "occurred_at": "2026-09-07T22:58:24.200101Z",
+      "parts": [
+        {
+          "conversion_diagnostics": [],
+          "part_id": "msg_ce2bda67528b8823:0",
+          "structured": {
+            "abstentions": [],
+            "findings": [
+              {
+                "annotation_type": "problem_model",
+                "confidence": 0.8,
+                "evidence": [
+                  {
+                    "entity_id": "evt_049420e03659e201",
+                    "kind": "event"
+                  },
+                  {
+                    "entity_id": "evt_718283a6711531d9",
+                    "kind": "event"
+                  }
+                ],
+                "labels": [
+                  "problem_model.matches_issue"
+                ],
+                "payload": {},
+                "rationale": "scripted jesterky swarm worker cited two events",
+                "target": {
+                  "entity_id": "trace_db61f67b4e043a03",
+                  "kind": "trace"
+                }
+              }
+            ],
+            "judgments": [],
+            "schema_version": "synth.annotation-proposal.v1",
+            "source_trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+            "source_trace_id": "trace_db61f67b4e043a03",
+            "summary": "scripted jesterky swarm worker"
+          },
+          "type": "structured",
+          "visibility": "private"
+        }
+      ],
+      "predecessor_message_ids": [
+        "msg_031b1b3e8a87805f"
+      ],
+      "produced_by_span_id": "span_9b6f8ceadf12d351",
+      "recipient_actor_ids": [],
+      "role": "assistant",
+      "sender_actor_id": "actor_0f5dbf5d9e03509b",
+      "session_id": "sess_5e51c5cb3961c9e3",
+      "visibility": "private"
+    }
+  ],
+  "provenance": {
+    "aliases": [],
+    "captured_at": "2026-09-07T22:58:24.201494Z",
+    "extra": {
+      "annotator_id": "test.jesterky.problem_model",
+      "job_id": "ajob_dd475fb74b025b95",
+      "reasoning_policy": "not_captured",
+      "transport_events": [
+        {
+          "at": "2026-09-07T22:58:24.197429Z",
+          "kind": "scripted_jesterky"
+        }
+      ]
+    },
+    "harness": "synth.annotation",
+    "model": "gpt-5.6-luna",
+    "producer": "synth_containers.tracing.annotation.execution_trace",
+    "producer_version": "1",
+    "source_format": "synth.annotation-execution.v1",
+    "transformation_chain": []
+  },
+  "schema_version": "synth.trace.v5",
+  "sessions": [
+    {
+      "actor_id": "actor_0f5dbf5d9e03509b",
+      "aliases": [],
+      "content_digest": "sha256:7e8431483c1c220369f4076ec8626ac6644271fc197b9c936913d4ed32c4879a",
+      "coverage": {
+        "agent_events": "complete",
+        "environment_events": "not_captured",
+        "model_calls": "aggregate_only",
+        "raw_provider": "unavailable",
+        "reasons": [
+          "app-server exposes turn-level usage, not per-call provider payloads"
+        ],
+        "tool_events": "complete",
+        "usage": "unavailable"
+      },
+      "ended_at": "2026-09-07T22:58:24.200101Z",
+      "harness": "synth.annotation",
+      "metadata": {},
+      "session_id": "sess_5e51c5cb3961c9e3",
+      "started_at": "2026-09-07T22:58:24.197418Z",
+      "status": "completed"
+    }
+  ],
+  "spans": [
+    {
+      "actor_id": "actor_0f5dbf5d9e03509b",
+      "aliases": [],
+      "artifact_ids": [],
+      "caused_by_span_ids": [],
+      "content_digest": "sha256:5f1e17a7d86939684b13b6f893816e4a458c8d005b9791c5922812770c19e7c9",
+      "detail": {
+        "model": "gpt-5.6-luna",
+        "reasoning_effort": "medium",
+        "runner_kind": "jesterky",
+        "tool_call_count": 1,
+        "transport_event_count": 1
+      },
+      "ended_at": "2026-09-07T22:58:24.200101Z",
+      "input_message_ids": [
+        "msg_031b1b3e8a87805f"
+      ],
+      "metadata": {},
+      "output_message_ids": [
+        "msg_ce2bda67528b8823"
+      ],
+      "session_id": "sess_5e51c5cb3961c9e3",
+      "span_id": "span_9b6f8ceadf12d351",
+      "span_kind": "evaluator_execution",
+      "started_at": "2026-09-07T22:58:24.197418Z",
+      "status": "ok",
+      "transformations": [],
+      "usage": {
+        "cost_usd": 0.0,
+        "provenance": "unavailable",
+        "source_refs": [],
+        "unavailable_fields": [],
+        "wall_time_seconds": 0.0026653329841792583
+      }
+    },
+    {
+      "actor_id": "actor_0f5dbf5d9e03509b",
+      "aliases": [],
+      "artifact_ids": [],
+      "caused_by_span_ids": [],
+      "content_digest": "sha256:5ff1be4df8797c8c95a392f903000e976183a0e6f85c7a1cb9f43c6864cbef76",
+      "detail": {
+        "arguments": {
+          "kind": "event",
+          "limit": 80
+        },
+        "call_index": 0,
+        "response_bytes": 10554,
+        "response_digest": "sha256:9b7dc452efceb809754d1db7e1a59be99c734630b7f874a1e42e75a0a0bf1438",
+        "tool": "trace_list_entities",
+        "truncated": false
+      },
+      "ended_at": "2026-09-07T22:58:24.198887Z",
+      "input_message_ids": [],
+      "metadata": {},
+      "output_message_ids": [],
+      "parent_span_id": "span_9b6f8ceadf12d351",
+      "session_id": "sess_5e51c5cb3961c9e3",
+      "span_id": "span_3dc8b681a7326b69",
+      "span_kind": "tool_execution",
+      "started_at": "2026-09-07T22:58:24.197433Z",
+      "status": "ok",
+      "transformations": []
+    }
+  ],
+  "trace_id": "trace_85c2d969e828f902",
+  "trace_kind": "evaluation_attempt",
+  "usage": {
+    "cost_usd": 0.0,
+    "provenance": "unavailable",
+    "source_refs": [],
+    "unavailable_fields": [],
+    "wall_time_seconds": 0.0026653329841792583
+  },
+  "visibility": "private"
+}

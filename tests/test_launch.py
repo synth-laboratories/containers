@@ -101,6 +101,9 @@ class FakeDocker:
     def exists(self, name: str) -> bool:
         return name in self.containers
 
+    def is_running(self, name: str) -> bool:
+        return self.exists(name)
+
     def spawn_child(self, name: str, parent: str) -> None:
         self.containers[name] = ("--label", f"{PARENT_LABEL}={parent}")
 
@@ -139,6 +142,34 @@ def test_latest_tag_is_refused(tmp_path: Path) -> None:
     spec = load_catalog(tmp_path)["banking77"]
     with pytest.raises(LaunchError, match="latest_forbidden"):
         resolve_local_digest(spec, image="evals-banking77:latest", build=False, backend=FakeDocker())
+
+
+def test_a_tagged_image_name_is_refused_at_catalog_load(tmp_path: Path) -> None:
+    # `image_name` is a repository; every build site appends its own `:local`.
+    # A baked-in tag produced `evals-banking77:local:local`, an invalid
+    # reference that made `synth-containers build` unusable for that image.
+    _write_catalog(tmp_path)
+    image_toml = tmp_path / "banking77" / "image.toml"
+    image_toml.write_text(
+        image_toml.read_text(encoding="utf-8").replace(
+            'image_name = "evals-banking77"', 'image_name = "evals-banking77:local"'
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(LaunchError, match="container_image_name_tagged"):
+        load_catalog(tmp_path)
+
+
+def test_a_registry_port_is_not_mistaken_for_a_tag(tmp_path: Path) -> None:
+    _write_catalog(tmp_path)
+    image_toml = tmp_path / "banking77" / "image.toml"
+    image_toml.write_text(
+        image_toml.read_text(encoding="utf-8").replace(
+            'image_name = "evals-banking77"', 'image_name = "registry:5000/evals-banking77"'
+        ),
+        encoding="utf-8",
+    )
+    assert load_catalog(tmp_path)["banking77"].image_name == "registry:5000/evals-banking77"
 
 
 def test_resolve_builds_when_missing(tmp_path: Path) -> None:
@@ -183,6 +214,25 @@ def test_second_up_on_same_pair_refuses_without_replace(tmp_path: Path, healthy:
     replaced = up_image("banking77", catalog=tmp_path, backend=backend, port=8124, replace=True)
     assert replaced.container_name == "synth-banking77-8124"
     assert len(list_run_records("banking77")) == 1
+
+
+def test_up_recovers_a_stopped_record_without_replace(tmp_path: Path, healthy: None) -> None:
+    _write_catalog(tmp_path)
+
+    class StoppedDocker(FakeDocker):
+        stopped_name: str | None = None
+
+        def is_running(self, name: str) -> bool:
+            return self.exists(name) and name != self.stopped_name
+
+    backend = StoppedDocker()
+    first = up_image("banking77", catalog=tmp_path, backend=backend, port=8127)
+    backend.stopped_name = first.container_name
+
+    restarted = up_image("banking77", catalog=tmp_path, backend=backend, port=8127)
+
+    assert restarted.container_name == first.container_name
+    assert first.container_name in backend.removed
 
 
 def test_down_reaps_labelled_siblings_first(tmp_path: Path, healthy: None) -> None:
@@ -231,8 +281,8 @@ def test_nested_platform_mounts_socket_and_host_workspace(
     record = up_image("banking77", catalog=tmp_path, backend=backend, port=8128)
     args = backend.ran[-1][1]
     assert any(arg.endswith("docker.sock") for arg in args)
-    assert record.workspace_host_root == str(tmp_path / "work" / "banking77")
-    assert f"SYNTH_WORKSPACE_HOST_ROOT={tmp_path / 'work' / 'banking77'}" in args
+    assert record.workspace_host_root == str(tmp_path / "work" / "banking77-8128")
+    assert f"SYNTH_WORKSPACE_HOST_ROOT={tmp_path / 'work' / 'banking77-8128'}" in args
     assert "SYNTH_WORKSPACE_ROOT=/work" in args
 
 
@@ -312,3 +362,42 @@ def test_volume_variable_expands(tmp_path: Path, monkeypatch, healthy: None) -> 
     backend = FakeDocker()
     up_image("banking77", catalog=tmp_path, backend=backend, port=8132)
     assert f"{corpus}:/corpus:ro" in backend.ran[-1][1]
+
+
+def test_annotation_storage_volume_is_created(tmp_path: Path, monkeypatch, healthy: None) -> None:
+    monkeypatch.delenv("HARBOR_DEEPSWE_STORAGE", raising=False)
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    _write_catalog(
+        tmp_path,
+        extra=(
+            '[[volumes]]\n'
+            'source = "$HARBOR_DEEPSWE_STORAGE"\n'
+            'target = "/var/lib/synth/storage"\n'
+            "read_only = false"
+        ),
+    )
+    backend = FakeDocker()
+    up_image("banking77", catalog=tmp_path, backend=backend, port=8133)
+    storage = home / ".synth-containers" / "storage" / "harbor-deepswe"
+    assert storage.is_dir()
+    assert f"{storage}:/var/lib/synth/storage" in backend.ran[-1][1]
+
+
+def test_annotation_storage_volume_uses_env(tmp_path: Path, monkeypatch, healthy: None) -> None:
+    storage = tmp_path / "ann-store"
+    monkeypatch.setenv("HARBOR_DEEPSWE_STORAGE", str(storage))
+    _write_catalog(
+        tmp_path,
+        extra=(
+            '[[volumes]]\n'
+            'source = "$HARBOR_DEEPSWE_STORAGE"\n'
+            'target = "/var/lib/synth/storage"\n'
+            "read_only = false"
+        ),
+    )
+    backend = FakeDocker()
+    up_image("banking77", catalog=tmp_path, backend=backend, port=8134)
+    assert storage.is_dir()
+    assert f"{storage}:/var/lib/synth/storage" in backend.ran[-1][1]

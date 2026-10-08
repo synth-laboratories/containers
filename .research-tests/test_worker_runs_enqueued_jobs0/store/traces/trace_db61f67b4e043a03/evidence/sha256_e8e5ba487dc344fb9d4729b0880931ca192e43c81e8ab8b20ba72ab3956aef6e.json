@@ -1,0 +1,1510 @@
+{
+  "annotations": [
+    {
+      "annotation_id": "ann_3e0a68c81dd8ffec",
+      "annotation_type": "environment_step",
+      "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+      "annotator_id": "synth.deterministic.environment_step_status",
+      "annotator_version": "v1",
+      "author_kind": "deterministic",
+      "confidence": 1.0,
+      "content_digest": "sha256:3afa3a61b4e3fab2090c7f270cc49a2a0192874847224dd77a8273274363069b",
+      "created_at": "2026-09-07T22:58:26.326997Z",
+      "evidence": [
+        {
+          "entity_id": "span_14d671292e565d0d",
+          "kind": "span",
+          "schema_version": "synth.trace-selector.v1",
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        }
+      ],
+      "grounding": "grounded",
+      "inspection": {
+        "losses": [],
+        "source": "trace_authority",
+        "trace_body_read": true
+      },
+      "labels": [
+        "environment_step.ok",
+        "environment_step.no_effect"
+      ],
+      "payload": {
+        "action": "do",
+        "reason": "nothing_to_do:grass",
+        "step_index": 0,
+        "transition": "noop"
+      },
+      "producer": {
+        "config_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+        "kind": "deterministic",
+        "name": "synth.deterministic.environment_step_status.program",
+        "version": "v1"
+      },
+      "rationale": "deterministic span status read",
+      "review_state": "unreviewed",
+      "revision": 1,
+      "schema_version": "synth.annotation.v1",
+      "status": "applied",
+      "target": {
+        "entity_id": "span_14d671292e565d0d",
+        "kind": "span",
+        "schema_version": "synth.trace-selector.v1",
+        "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+        "trace_id": "trace_db61f67b4e043a03"
+      },
+      "visibility": "private"
+    },
+    {
+      "annotation_id": "ann_b6371e401a1ce7ef",
+      "annotation_type": "environment_step",
+      "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+      "annotator_id": "synth.deterministic.environment_step_status",
+      "annotator_version": "v1",
+      "author_kind": "deterministic",
+      "confidence": 1.0,
+      "content_digest": "sha256:6b2a5daff4dd0d2272416efc5d0bfebc656e97dd88eb5a35ddf44fb5baf59e7a",
+      "created_at": "2026-09-07T22:58:26.326997Z",
+      "evidence": [
+        {
+          "entity_id": "span_98d27bf72ffd61bb",
+          "kind": "span",
+          "schema_version": "synth.trace-selector.v1",
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        }
+      ],
+      "grounding": "grounded",
+      "inspection": {
+        "losses": [],
+        "source": "trace_authority",
+        "trace_body_read": true
+      },
+      "labels": [
+        "environment_step.ok",
+        "environment_step.no_effect"
+      ],
+      "payload": {
+        "action": "do",
+        "reason": "nothing_to_do:grass",
+        "step_index": 1,
+        "transition": "noop"
+      },
+      "producer": {
+        "config_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+        "kind": "deterministic",
+        "name": "synth.deterministic.environment_step_status.program",
+        "version": "v1"
+      },
+      "rationale": "deterministic span status read",
+      "review_state": "unreviewed",
+      "revision": 1,
+      "schema_version": "synth.annotation.v1",
+      "status": "applied",
+      "target": {
+        "entity_id": "span_98d27bf72ffd61bb",
+        "kind": "span",
+        "schema_version": "synth.trace-selector.v1",
+        "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+        "trace_id": "trace_db61f67b4e043a03"
+      },
+      "visibility": "private"
+    },
+    {
+      "annotation_id": "ann_2e84b0411e0db18f",
+      "annotation_type": "environment_step",
+      "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+      "annotator_id": "synth.deterministic.environment_step_status",
+      "annotator_version": "v1",
+      "author_kind": "deterministic",
+      "confidence": 1.0,
+      "content_digest": "sha256:0af7a09b200e03b82d6ce11417f67e2807d8a8ffc635a144645eaa3f2a1d606d",
+      "created_at": "2026-09-07T22:58:26.326997Z",
+      "evidence": [
+        {
+          "entity_id": "span_4239c8556e2d2bf8",
+          "kind": "span",
+          "schema_version": "synth.trace-selector.v1",
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        }
+      ],
+      "grounding": "grounded",
+      "inspection": {
+        "losses": [],
+        "source": "trace_authority",
+        "trace_body_read": true
+      },
+      "labels": [
+        "environment_step.ok"
+      ],
+      "payload": {
+        "action": "up",
+        "step_index": 2,
+        "transition": "move"
+      },
+      "producer": {
+        "config_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+        "kind": "deterministic",
+        "name": "synth.deterministic.environment_step_status.program",
+        "version": "v1"
+      },
+      "rationale": "deterministic span status read",
+      "review_state": "unreviewed",
+      "revision": 1,
+      "schema_version": "synth.annotation.v1",
+      "status": "applied",
+      "target": {
+        "entity_id": "span_4239c8556e2d2bf8",
+        "kind": "span",
+        "schema_version": "synth.trace-selector.v1",
+        "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+        "trace_id": "trace_db61f67b4e043a03"
+      },
+      "visibility": "private"
+    },
+    {
+      "annotation_id": "ann_d6ad4ae9b30d06a8",
+      "annotation_type": "environment_step",
+      "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+      "annotator_id": "synth.deterministic.environment_step_status",
+      "annotator_version": "v1",
+      "author_kind": "deterministic",
+      "confidence": 1.0,
+      "content_digest": "sha256:17d263001f53d750bdfaabcb2b7aef90215de12082882f94cae73523d70d3df1",
+      "created_at": "2026-09-07T22:58:26.326997Z",
+      "evidence": [
+        {
+          "entity_id": "span_1123f1680410078b",
+          "kind": "span",
+          "schema_version": "synth.trace-selector.v1",
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        }
+      ],
+      "grounding": "grounded",
+      "inspection": {
+        "losses": [],
+        "source": "trace_authority",
+        "trace_body_read": true
+      },
+      "labels": [
+        "environment_step.ok",
+        "environment_step.blocked"
+      ],
+      "payload": {
+        "action": "up",
+        "reason": "blocked:tree",
+        "step_index": 3,
+        "transition": "blocked"
+      },
+      "producer": {
+        "config_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+        "kind": "deterministic",
+        "name": "synth.deterministic.environment_step_status.program",
+        "version": "v1"
+      },
+      "rationale": "deterministic span status read",
+      "review_state": "unreviewed",
+      "revision": 1,
+      "schema_version": "synth.annotation.v1",
+      "status": "applied",
+      "target": {
+        "entity_id": "span_1123f1680410078b",
+        "kind": "span",
+        "schema_version": "synth.trace-selector.v1",
+        "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+        "trace_id": "trace_db61f67b4e043a03"
+      },
+      "visibility": "private"
+    },
+    {
+      "annotation_id": "ann_34913a007d782ea0",
+      "annotation_type": "environment_step",
+      "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+      "annotator_id": "synth.deterministic.environment_step_status",
+      "annotator_version": "v1",
+      "author_kind": "deterministic",
+      "confidence": 1.0,
+      "content_digest": "sha256:49dbeff51140862cfedb3b93ec10519d8fbace5eeec0a775a99bbf025dbb6f61",
+      "created_at": "2026-09-07T22:58:26.326997Z",
+      "evidence": [
+        {
+          "entity_id": "span_641a715deb44f1bf",
+          "kind": "span",
+          "schema_version": "synth.trace-selector.v1",
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        }
+      ],
+      "grounding": "grounded",
+      "inspection": {
+        "losses": [],
+        "source": "trace_authority",
+        "trace_body_read": true
+      },
+      "labels": [
+        "environment_step.ok"
+      ],
+      "payload": {
+        "action": "do",
+        "step_index": 4,
+        "transition": "harvest"
+      },
+      "producer": {
+        "config_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+        "kind": "deterministic",
+        "name": "synth.deterministic.environment_step_status.program",
+        "version": "v1"
+      },
+      "rationale": "deterministic span status read",
+      "review_state": "unreviewed",
+      "revision": 1,
+      "schema_version": "synth.annotation.v1",
+      "status": "applied",
+      "target": {
+        "entity_id": "span_641a715deb44f1bf",
+        "kind": "span",
+        "schema_version": "synth.trace-selector.v1",
+        "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+        "trace_id": "trace_db61f67b4e043a03"
+      },
+      "visibility": "private"
+    },
+    {
+      "annotation_id": "ann_145717138dffb503",
+      "annotation_type": "environment_step",
+      "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+      "annotator_id": "synth.deterministic.environment_step_status",
+      "annotator_version": "v1",
+      "author_kind": "deterministic",
+      "confidence": 1.0,
+      "content_digest": "sha256:07fed7e030add3795d7655bdf6a0ee49875e02825c6a87508fbda1bc5fb02c73",
+      "created_at": "2026-09-07T22:58:26.326997Z",
+      "evidence": [
+        {
+          "entity_id": "span_81d9e583a7875d39",
+          "kind": "span",
+          "schema_version": "synth.trace-selector.v1",
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        }
+      ],
+      "grounding": "grounded",
+      "inspection": {
+        "losses": [],
+        "source": "trace_authority",
+        "trace_body_read": true
+      },
+      "labels": [
+        "environment_step.ok",
+        "environment_step.no_effect"
+      ],
+      "payload": {
+        "action": "place_table",
+        "reason": "missing_resources",
+        "step_index": 5,
+        "transition": "noop"
+      },
+      "producer": {
+        "config_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+        "kind": "deterministic",
+        "name": "synth.deterministic.environment_step_status.program",
+        "version": "v1"
+      },
+      "rationale": "deterministic span status read",
+      "review_state": "unreviewed",
+      "revision": 1,
+      "schema_version": "synth.annotation.v1",
+      "status": "applied",
+      "target": {
+        "entity_id": "span_81d9e583a7875d39",
+        "kind": "span",
+        "schema_version": "synth.trace-selector.v1",
+        "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+        "trace_id": "trace_db61f67b4e043a03"
+      },
+      "visibility": "private"
+    },
+    {
+      "annotation_id": "ann_551546e63388f429",
+      "annotation_type": "environment_step",
+      "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+      "annotator_id": "synth.deterministic.environment_step_status",
+      "annotator_version": "v1",
+      "author_kind": "deterministic",
+      "confidence": 1.0,
+      "content_digest": "sha256:93ac8d8f02ec6d5f21e1d57ce1fc87a119e4ab8895cb4a4809b51e1c4ff194f2",
+      "created_at": "2026-09-07T22:58:26.326997Z",
+      "evidence": [
+        {
+          "entity_id": "span_aeef0e222e21a2b4",
+          "kind": "span",
+          "schema_version": "synth.trace-selector.v1",
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        }
+      ],
+      "grounding": "grounded",
+      "inspection": {
+        "losses": [],
+        "source": "trace_authority",
+        "trace_body_read": true
+      },
+      "labels": [
+        "environment_step.ok",
+        "environment_step.no_effect"
+      ],
+      "payload": {
+        "action": "make_wood_pickaxe",
+        "reason": "needs_crafting_table",
+        "step_index": 6,
+        "transition": "noop"
+      },
+      "producer": {
+        "config_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+        "kind": "deterministic",
+        "name": "synth.deterministic.environment_step_status.program",
+        "version": "v1"
+      },
+      "rationale": "deterministic span status read",
+      "review_state": "unreviewed",
+      "revision": 1,
+      "schema_version": "synth.annotation.v1",
+      "status": "applied",
+      "target": {
+        "entity_id": "span_aeef0e222e21a2b4",
+        "kind": "span",
+        "schema_version": "synth.trace-selector.v1",
+        "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+        "trace_id": "trace_db61f67b4e043a03"
+      },
+      "visibility": "private"
+    },
+    {
+      "annotation_id": "ann_20794d1685524b95",
+      "annotation_type": "environment_step",
+      "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+      "annotator_id": "synth.deterministic.environment_step_status",
+      "annotator_version": "v1",
+      "author_kind": "deterministic",
+      "confidence": 1.0,
+      "content_digest": "sha256:f50fe3500ef7c9cf39917e615efbcd970b5e3e03d8a7c43830619140250e7df2",
+      "created_at": "2026-09-07T22:58:26.326997Z",
+      "evidence": [
+        {
+          "entity_id": "span_4c68119281f4614b",
+          "kind": "span",
+          "schema_version": "synth.trace-selector.v1",
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        }
+      ],
+      "grounding": "grounded",
+      "inspection": {
+        "losses": [],
+        "source": "trace_authority",
+        "trace_body_read": true
+      },
+      "labels": [
+        "environment_step.ok"
+      ],
+      "payload": {
+        "action": "do",
+        "step_index": 7,
+        "transition": "harvest"
+      },
+      "producer": {
+        "config_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+        "kind": "deterministic",
+        "name": "synth.deterministic.environment_step_status.program",
+        "version": "v1"
+      },
+      "rationale": "deterministic span status read",
+      "review_state": "unreviewed",
+      "revision": 1,
+      "schema_version": "synth.annotation.v1",
+      "status": "applied",
+      "target": {
+        "entity_id": "span_4c68119281f4614b",
+        "kind": "span",
+        "schema_version": "synth.trace-selector.v1",
+        "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+        "trace_id": "trace_db61f67b4e043a03"
+      },
+      "visibility": "private"
+    },
+    {
+      "annotation_id": "ann_09e1cc1cde43d0cf",
+      "annotation_type": "environment_step",
+      "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+      "annotator_id": "synth.deterministic.environment_step_status",
+      "annotator_version": "v1",
+      "author_kind": "deterministic",
+      "confidence": 1.0,
+      "content_digest": "sha256:5a934fd6999d3801b18f26adca3104dd976e786c89b29cbc225f9c39be4f7d34",
+      "created_at": "2026-09-07T22:58:26.326997Z",
+      "evidence": [
+        {
+          "entity_id": "span_97881c448458b6b3",
+          "kind": "span",
+          "schema_version": "synth.trace-selector.v1",
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        }
+      ],
+      "grounding": "grounded",
+      "inspection": {
+        "losses": [],
+        "source": "trace_authority",
+        "trace_body_read": true
+      },
+      "labels": [
+        "environment_step.ok"
+      ],
+      "payload": {
+        "action": "do",
+        "step_index": 8,
+        "transition": "harvest"
+      },
+      "producer": {
+        "config_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+        "kind": "deterministic",
+        "name": "synth.deterministic.environment_step_status.program",
+        "version": "v1"
+      },
+      "rationale": "deterministic span status read",
+      "review_state": "unreviewed",
+      "revision": 1,
+      "schema_version": "synth.annotation.v1",
+      "status": "applied",
+      "target": {
+        "entity_id": "span_97881c448458b6b3",
+        "kind": "span",
+        "schema_version": "synth.trace-selector.v1",
+        "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+        "trace_id": "trace_db61f67b4e043a03"
+      },
+      "visibility": "private"
+    },
+    {
+      "annotation_id": "ann_a310b8e314508ea7",
+      "annotation_type": "environment_step",
+      "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+      "annotator_id": "synth.deterministic.environment_step_status",
+      "annotator_version": "v1",
+      "author_kind": "deterministic",
+      "confidence": 1.0,
+      "content_digest": "sha256:001c8210a19d8bbb0c6b0531a954bd78a30971dd4c7b9ba147e2b738c1d07e96",
+      "created_at": "2026-09-07T22:58:26.326997Z",
+      "evidence": [
+        {
+          "entity_id": "span_e7b1e64edd3312cc",
+          "kind": "span",
+          "schema_version": "synth.trace-selector.v1",
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        }
+      ],
+      "grounding": "grounded",
+      "inspection": {
+        "losses": [],
+        "source": "trace_authority",
+        "trace_body_read": true
+      },
+      "labels": [
+        "environment_step.ok"
+      ],
+      "payload": {
+        "action": "do",
+        "step_index": 9,
+        "transition": "harvest"
+      },
+      "producer": {
+        "config_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+        "kind": "deterministic",
+        "name": "synth.deterministic.environment_step_status.program",
+        "version": "v1"
+      },
+      "rationale": "deterministic span status read",
+      "review_state": "unreviewed",
+      "revision": 1,
+      "schema_version": "synth.annotation.v1",
+      "status": "applied",
+      "target": {
+        "entity_id": "span_e7b1e64edd3312cc",
+        "kind": "span",
+        "schema_version": "synth.trace-selector.v1",
+        "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+        "trace_id": "trace_db61f67b4e043a03"
+      },
+      "visibility": "private"
+    },
+    {
+      "annotation_id": "ann_52dd8c5f8fa43e1f",
+      "annotation_type": "environment_step",
+      "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+      "annotator_id": "synth.deterministic.environment_step_status",
+      "annotator_version": "v1",
+      "author_kind": "deterministic",
+      "confidence": 1.0,
+      "content_digest": "sha256:90cddcf3c41111181baa257ea6d619d48f3ccb5cfcefd8def703d5efa84e1274",
+      "created_at": "2026-09-07T22:58:26.326997Z",
+      "evidence": [
+        {
+          "entity_id": "span_a53f7ebb69adf828",
+          "kind": "span",
+          "schema_version": "synth.trace-selector.v1",
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        }
+      ],
+      "grounding": "grounded",
+      "inspection": {
+        "losses": [],
+        "source": "trace_authority",
+        "trace_body_read": true
+      },
+      "labels": [
+        "environment_step.ok"
+      ],
+      "payload": {
+        "action": "place_table",
+        "step_index": 10,
+        "transition": "place"
+      },
+      "producer": {
+        "config_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+        "kind": "deterministic",
+        "name": "synth.deterministic.environment_step_status.program",
+        "version": "v1"
+      },
+      "rationale": "deterministic span status read",
+      "review_state": "unreviewed",
+      "revision": 1,
+      "schema_version": "synth.annotation.v1",
+      "status": "applied",
+      "target": {
+        "entity_id": "span_a53f7ebb69adf828",
+        "kind": "span",
+        "schema_version": "synth.trace-selector.v1",
+        "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+        "trace_id": "trace_db61f67b4e043a03"
+      },
+      "visibility": "private"
+    },
+    {
+      "annotation_id": "ann_c77ea215801d7c1b",
+      "annotation_type": "environment_step",
+      "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+      "annotator_id": "synth.deterministic.environment_step_status",
+      "annotator_version": "v1",
+      "author_kind": "deterministic",
+      "confidence": 1.0,
+      "content_digest": "sha256:f5dda010984202de75926a18d9afe0222cf2d3da6632ee96f29833a3390fa05f",
+      "created_at": "2026-09-07T22:58:26.383594Z",
+      "evidence": [
+        {
+          "entity_id": "span_14d671292e565d0d",
+          "kind": "span",
+          "schema_version": "synth.trace-selector.v1",
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        }
+      ],
+      "grounding": "grounded",
+      "inspection": {
+        "losses": [],
+        "source": "trace_authority",
+        "trace_body_read": true
+      },
+      "labels": [
+        "environment_step.ok",
+        "environment_step.no_effect"
+      ],
+      "payload": {
+        "action": "do",
+        "reason": "nothing_to_do:grass",
+        "step_index": 0,
+        "transition": "noop"
+      },
+      "producer": {
+        "config_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+        "kind": "deterministic",
+        "name": "synth.deterministic.environment_step_status.program",
+        "version": "v1"
+      },
+      "rationale": "deterministic span status read",
+      "review_state": "unreviewed",
+      "revision": 1,
+      "schema_version": "synth.annotation.v1",
+      "status": "applied",
+      "target": {
+        "entity_id": "span_14d671292e565d0d",
+        "kind": "span",
+        "schema_version": "synth.trace-selector.v1",
+        "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+        "trace_id": "trace_db61f67b4e043a03"
+      },
+      "visibility": "private"
+    },
+    {
+      "annotation_id": "ann_52657cbadd27eb3d",
+      "annotation_type": "environment_step",
+      "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+      "annotator_id": "synth.deterministic.environment_step_status",
+      "annotator_version": "v1",
+      "author_kind": "deterministic",
+      "confidence": 1.0,
+      "content_digest": "sha256:82ce6e767b138af498a2ad09eb0190a13943ee9261682a04adaf00532c9d07ee",
+      "created_at": "2026-09-07T22:58:26.383594Z",
+      "evidence": [
+        {
+          "entity_id": "span_98d27bf72ffd61bb",
+          "kind": "span",
+          "schema_version": "synth.trace-selector.v1",
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        }
+      ],
+      "grounding": "grounded",
+      "inspection": {
+        "losses": [],
+        "source": "trace_authority",
+        "trace_body_read": true
+      },
+      "labels": [
+        "environment_step.ok",
+        "environment_step.no_effect"
+      ],
+      "payload": {
+        "action": "do",
+        "reason": "nothing_to_do:grass",
+        "step_index": 1,
+        "transition": "noop"
+      },
+      "producer": {
+        "config_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+        "kind": "deterministic",
+        "name": "synth.deterministic.environment_step_status.program",
+        "version": "v1"
+      },
+      "rationale": "deterministic span status read",
+      "review_state": "unreviewed",
+      "revision": 1,
+      "schema_version": "synth.annotation.v1",
+      "status": "applied",
+      "target": {
+        "entity_id": "span_98d27bf72ffd61bb",
+        "kind": "span",
+        "schema_version": "synth.trace-selector.v1",
+        "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+        "trace_id": "trace_db61f67b4e043a03"
+      },
+      "visibility": "private"
+    },
+    {
+      "annotation_id": "ann_02b45077cb03cc87",
+      "annotation_type": "environment_step",
+      "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+      "annotator_id": "synth.deterministic.environment_step_status",
+      "annotator_version": "v1",
+      "author_kind": "deterministic",
+      "confidence": 1.0,
+      "content_digest": "sha256:cc38cfac260ca4b05ab2a12db4c622e6309a92d2d501fd628f610bf5c0152895",
+      "created_at": "2026-09-07T22:58:26.383594Z",
+      "evidence": [
+        {
+          "entity_id": "span_4239c8556e2d2bf8",
+          "kind": "span",
+          "schema_version": "synth.trace-selector.v1",
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        }
+      ],
+      "grounding": "grounded",
+      "inspection": {
+        "losses": [],
+        "source": "trace_authority",
+        "trace_body_read": true
+      },
+      "labels": [
+        "environment_step.ok"
+      ],
+      "payload": {
+        "action": "up",
+        "step_index": 2,
+        "transition": "move"
+      },
+      "producer": {
+        "config_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+        "kind": "deterministic",
+        "name": "synth.deterministic.environment_step_status.program",
+        "version": "v1"
+      },
+      "rationale": "deterministic span status read",
+      "review_state": "unreviewed",
+      "revision": 1,
+      "schema_version": "synth.annotation.v1",
+      "status": "applied",
+      "target": {
+        "entity_id": "span_4239c8556e2d2bf8",
+        "kind": "span",
+        "schema_version": "synth.trace-selector.v1",
+        "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+        "trace_id": "trace_db61f67b4e043a03"
+      },
+      "visibility": "private"
+    },
+    {
+      "annotation_id": "ann_1c1f59e0812bec15",
+      "annotation_type": "environment_step",
+      "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+      "annotator_id": "synth.deterministic.environment_step_status",
+      "annotator_version": "v1",
+      "author_kind": "deterministic",
+      "confidence": 1.0,
+      "content_digest": "sha256:261fbbf2fd2320ef75a2f8f6b1014ddf4148bfbff923232f0e111b52c5995459",
+      "created_at": "2026-09-07T22:58:26.383594Z",
+      "evidence": [
+        {
+          "entity_id": "span_1123f1680410078b",
+          "kind": "span",
+          "schema_version": "synth.trace-selector.v1",
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        }
+      ],
+      "grounding": "grounded",
+      "inspection": {
+        "losses": [],
+        "source": "trace_authority",
+        "trace_body_read": true
+      },
+      "labels": [
+        "environment_step.ok",
+        "environment_step.blocked"
+      ],
+      "payload": {
+        "action": "up",
+        "reason": "blocked:tree",
+        "step_index": 3,
+        "transition": "blocked"
+      },
+      "producer": {
+        "config_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+        "kind": "deterministic",
+        "name": "synth.deterministic.environment_step_status.program",
+        "version": "v1"
+      },
+      "rationale": "deterministic span status read",
+      "review_state": "unreviewed",
+      "revision": 1,
+      "schema_version": "synth.annotation.v1",
+      "status": "applied",
+      "target": {
+        "entity_id": "span_1123f1680410078b",
+        "kind": "span",
+        "schema_version": "synth.trace-selector.v1",
+        "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+        "trace_id": "trace_db61f67b4e043a03"
+      },
+      "visibility": "private"
+    },
+    {
+      "annotation_id": "ann_9d121367155805e6",
+      "annotation_type": "environment_step",
+      "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+      "annotator_id": "synth.deterministic.environment_step_status",
+      "annotator_version": "v1",
+      "author_kind": "deterministic",
+      "confidence": 1.0,
+      "content_digest": "sha256:50f4c79fb0152c24d32cb6360967410d7870d07c5b9551f720d8e07a781155cf",
+      "created_at": "2026-09-07T22:58:26.383594Z",
+      "evidence": [
+        {
+          "entity_id": "span_641a715deb44f1bf",
+          "kind": "span",
+          "schema_version": "synth.trace-selector.v1",
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        }
+      ],
+      "grounding": "grounded",
+      "inspection": {
+        "losses": [],
+        "source": "trace_authority",
+        "trace_body_read": true
+      },
+      "labels": [
+        "environment_step.ok"
+      ],
+      "payload": {
+        "action": "do",
+        "step_index": 4,
+        "transition": "harvest"
+      },
+      "producer": {
+        "config_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+        "kind": "deterministic",
+        "name": "synth.deterministic.environment_step_status.program",
+        "version": "v1"
+      },
+      "rationale": "deterministic span status read",
+      "review_state": "unreviewed",
+      "revision": 1,
+      "schema_version": "synth.annotation.v1",
+      "status": "applied",
+      "target": {
+        "entity_id": "span_641a715deb44f1bf",
+        "kind": "span",
+        "schema_version": "synth.trace-selector.v1",
+        "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+        "trace_id": "trace_db61f67b4e043a03"
+      },
+      "visibility": "private"
+    },
+    {
+      "annotation_id": "ann_43d16dc597f17a7b",
+      "annotation_type": "environment_step",
+      "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+      "annotator_id": "synth.deterministic.environment_step_status",
+      "annotator_version": "v1",
+      "author_kind": "deterministic",
+      "confidence": 1.0,
+      "content_digest": "sha256:3ff183250e9e25f14733765db9ce18c28e86ef573da7c965874222f4425ad7cb",
+      "created_at": "2026-09-07T22:58:26.383594Z",
+      "evidence": [
+        {
+          "entity_id": "span_81d9e583a7875d39",
+          "kind": "span",
+          "schema_version": "synth.trace-selector.v1",
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        }
+      ],
+      "grounding": "grounded",
+      "inspection": {
+        "losses": [],
+        "source": "trace_authority",
+        "trace_body_read": true
+      },
+      "labels": [
+        "environment_step.ok",
+        "environment_step.no_effect"
+      ],
+      "payload": {
+        "action": "place_table",
+        "reason": "missing_resources",
+        "step_index": 5,
+        "transition": "noop"
+      },
+      "producer": {
+        "config_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+        "kind": "deterministic",
+        "name": "synth.deterministic.environment_step_status.program",
+        "version": "v1"
+      },
+      "rationale": "deterministic span status read",
+      "review_state": "unreviewed",
+      "revision": 1,
+      "schema_version": "synth.annotation.v1",
+      "status": "applied",
+      "target": {
+        "entity_id": "span_81d9e583a7875d39",
+        "kind": "span",
+        "schema_version": "synth.trace-selector.v1",
+        "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+        "trace_id": "trace_db61f67b4e043a03"
+      },
+      "visibility": "private"
+    },
+    {
+      "annotation_id": "ann_f71f69085aaf3854",
+      "annotation_type": "environment_step",
+      "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+      "annotator_id": "synth.deterministic.environment_step_status",
+      "annotator_version": "v1",
+      "author_kind": "deterministic",
+      "confidence": 1.0,
+      "content_digest": "sha256:6bcef9d0bef89997bd3fef9b6762bc2efa92bf87d0d6c1280946977dd452b3d0",
+      "created_at": "2026-09-07T22:58:26.383594Z",
+      "evidence": [
+        {
+          "entity_id": "span_aeef0e222e21a2b4",
+          "kind": "span",
+          "schema_version": "synth.trace-selector.v1",
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        }
+      ],
+      "grounding": "grounded",
+      "inspection": {
+        "losses": [],
+        "source": "trace_authority",
+        "trace_body_read": true
+      },
+      "labels": [
+        "environment_step.ok",
+        "environment_step.no_effect"
+      ],
+      "payload": {
+        "action": "make_wood_pickaxe",
+        "reason": "needs_crafting_table",
+        "step_index": 6,
+        "transition": "noop"
+      },
+      "producer": {
+        "config_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+        "kind": "deterministic",
+        "name": "synth.deterministic.environment_step_status.program",
+        "version": "v1"
+      },
+      "rationale": "deterministic span status read",
+      "review_state": "unreviewed",
+      "revision": 1,
+      "schema_version": "synth.annotation.v1",
+      "status": "applied",
+      "target": {
+        "entity_id": "span_aeef0e222e21a2b4",
+        "kind": "span",
+        "schema_version": "synth.trace-selector.v1",
+        "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+        "trace_id": "trace_db61f67b4e043a03"
+      },
+      "visibility": "private"
+    },
+    {
+      "annotation_id": "ann_72a94462fb056bdd",
+      "annotation_type": "environment_step",
+      "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+      "annotator_id": "synth.deterministic.environment_step_status",
+      "annotator_version": "v1",
+      "author_kind": "deterministic",
+      "confidence": 1.0,
+      "content_digest": "sha256:6ec151ef258a88217a43c3c012035b7d6a36f92b928004363b33c64a54852746",
+      "created_at": "2026-09-07T22:58:26.383594Z",
+      "evidence": [
+        {
+          "entity_id": "span_4c68119281f4614b",
+          "kind": "span",
+          "schema_version": "synth.trace-selector.v1",
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        }
+      ],
+      "grounding": "grounded",
+      "inspection": {
+        "losses": [],
+        "source": "trace_authority",
+        "trace_body_read": true
+      },
+      "labels": [
+        "environment_step.ok"
+      ],
+      "payload": {
+        "action": "do",
+        "step_index": 7,
+        "transition": "harvest"
+      },
+      "producer": {
+        "config_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+        "kind": "deterministic",
+        "name": "synth.deterministic.environment_step_status.program",
+        "version": "v1"
+      },
+      "rationale": "deterministic span status read",
+      "review_state": "unreviewed",
+      "revision": 1,
+      "schema_version": "synth.annotation.v1",
+      "status": "applied",
+      "target": {
+        "entity_id": "span_4c68119281f4614b",
+        "kind": "span",
+        "schema_version": "synth.trace-selector.v1",
+        "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+        "trace_id": "trace_db61f67b4e043a03"
+      },
+      "visibility": "private"
+    },
+    {
+      "annotation_id": "ann_1ca7bd4b22baa9aa",
+      "annotation_type": "environment_step",
+      "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+      "annotator_id": "synth.deterministic.environment_step_status",
+      "annotator_version": "v1",
+      "author_kind": "deterministic",
+      "confidence": 1.0,
+      "content_digest": "sha256:654b795e2849994f21b0ab3da13240384e2e2a95955f6cfc726e9d162a27487c",
+      "created_at": "2026-09-07T22:58:26.383594Z",
+      "evidence": [
+        {
+          "entity_id": "span_97881c448458b6b3",
+          "kind": "span",
+          "schema_version": "synth.trace-selector.v1",
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        }
+      ],
+      "grounding": "grounded",
+      "inspection": {
+        "losses": [],
+        "source": "trace_authority",
+        "trace_body_read": true
+      },
+      "labels": [
+        "environment_step.ok"
+      ],
+      "payload": {
+        "action": "do",
+        "step_index": 8,
+        "transition": "harvest"
+      },
+      "producer": {
+        "config_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+        "kind": "deterministic",
+        "name": "synth.deterministic.environment_step_status.program",
+        "version": "v1"
+      },
+      "rationale": "deterministic span status read",
+      "review_state": "unreviewed",
+      "revision": 1,
+      "schema_version": "synth.annotation.v1",
+      "status": "applied",
+      "target": {
+        "entity_id": "span_97881c448458b6b3",
+        "kind": "span",
+        "schema_version": "synth.trace-selector.v1",
+        "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+        "trace_id": "trace_db61f67b4e043a03"
+      },
+      "visibility": "private"
+    },
+    {
+      "annotation_id": "ann_e75c217e2306b225",
+      "annotation_type": "environment_step",
+      "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+      "annotator_id": "synth.deterministic.environment_step_status",
+      "annotator_version": "v1",
+      "author_kind": "deterministic",
+      "confidence": 1.0,
+      "content_digest": "sha256:b64bcbaa2373154f9f3a575d642f19153b29cf09142bd640b819803ec5472281",
+      "created_at": "2026-09-07T22:58:26.383594Z",
+      "evidence": [
+        {
+          "entity_id": "span_e7b1e64edd3312cc",
+          "kind": "span",
+          "schema_version": "synth.trace-selector.v1",
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        }
+      ],
+      "grounding": "grounded",
+      "inspection": {
+        "losses": [],
+        "source": "trace_authority",
+        "trace_body_read": true
+      },
+      "labels": [
+        "environment_step.ok"
+      ],
+      "payload": {
+        "action": "do",
+        "step_index": 9,
+        "transition": "harvest"
+      },
+      "producer": {
+        "config_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+        "kind": "deterministic",
+        "name": "synth.deterministic.environment_step_status.program",
+        "version": "v1"
+      },
+      "rationale": "deterministic span status read",
+      "review_state": "unreviewed",
+      "revision": 1,
+      "schema_version": "synth.annotation.v1",
+      "status": "applied",
+      "target": {
+        "entity_id": "span_e7b1e64edd3312cc",
+        "kind": "span",
+        "schema_version": "synth.trace-selector.v1",
+        "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+        "trace_id": "trace_db61f67b4e043a03"
+      },
+      "visibility": "private"
+    },
+    {
+      "annotation_id": "ann_f62b2ae370076f03",
+      "annotation_type": "environment_step",
+      "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+      "annotator_id": "synth.deterministic.environment_step_status",
+      "annotator_version": "v1",
+      "author_kind": "deterministic",
+      "confidence": 1.0,
+      "content_digest": "sha256:da174b2dbfae06a2b4559b8772d082ae8d960293348bc25473958375b6c0d08d",
+      "created_at": "2026-09-07T22:58:26.383594Z",
+      "evidence": [
+        {
+          "entity_id": "span_a53f7ebb69adf828",
+          "kind": "span",
+          "schema_version": "synth.trace-selector.v1",
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        }
+      ],
+      "grounding": "grounded",
+      "inspection": {
+        "losses": [],
+        "source": "trace_authority",
+        "trace_body_read": true
+      },
+      "labels": [
+        "environment_step.ok"
+      ],
+      "payload": {
+        "action": "place_table",
+        "step_index": 10,
+        "transition": "place"
+      },
+      "producer": {
+        "config_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+        "kind": "deterministic",
+        "name": "synth.deterministic.environment_step_status.program",
+        "version": "v1"
+      },
+      "rationale": "deterministic span status read",
+      "review_state": "unreviewed",
+      "revision": 1,
+      "schema_version": "synth.annotation.v1",
+      "status": "applied",
+      "target": {
+        "entity_id": "span_a53f7ebb69adf828",
+        "kind": "span",
+        "schema_version": "synth.trace-selector.v1",
+        "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+        "trace_id": "trace_db61f67b4e043a03"
+      },
+      "visibility": "private"
+    }
+  ],
+  "annotator_definitions": [
+    {
+      "annotator_id": "synth.deterministic.environment_step_status",
+      "confidence_semantics": "deterministic",
+      "content_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+      "grounding_requirement": "exact_selector",
+      "metadata": {},
+      "minimum_evidence": 1,
+      "name": "Environment step status",
+      "output_contract": {
+        "allowed_producer_kinds": [
+          "deterministic",
+          "composite"
+        ],
+        "annotation_types": [
+          "environment_step"
+        ],
+        "payload_schema": {
+          "additional_fields_allowed": false,
+          "fields": [
+            {
+              "allowed_values": [],
+              "description": "",
+              "field_name": "action",
+              "required": false,
+              "value_kind": "string"
+            },
+            {
+              "allowed_values": [],
+              "description": "",
+              "field_name": "transition",
+              "required": false,
+              "value_kind": "string"
+            },
+            {
+              "allowed_values": [],
+              "description": "",
+              "field_name": "reason",
+              "required": false,
+              "value_kind": "string"
+            },
+            {
+              "allowed_values": [],
+              "description": "",
+              "field_name": "step_index",
+              "required": false,
+              "value_kind": "integer"
+            }
+          ],
+          "schema_id": "synth.environment_step_status.payload",
+          "version": "v1"
+        },
+        "task_kind": "classify",
+        "taxonomy": [
+          {
+            "aliases": [],
+            "description": "span status ok",
+            "label": "environment_step.ok"
+          },
+          {
+            "aliases": [],
+            "description": "span status error",
+            "label": "environment_step.error"
+          },
+          {
+            "aliases": [],
+            "description": "the engine reported a no-op transition",
+            "label": "environment_step.no_effect"
+          },
+          {
+            "aliases": [],
+            "description": "the engine reported a blocked transition",
+            "label": "environment_step.blocked"
+          }
+        ]
+      },
+      "purpose": "Label each environment_step span by its recorded outcome.",
+      "reasoning_policy": "not_captured",
+      "required_subject_scope": "span",
+      "schema_version": "synth.trace-annotator.v1",
+      "supported_trace_schemas": [
+        "synth.trace.v5"
+      ],
+      "taxonomy": [
+        "environment_step.ok",
+        "environment_step.error",
+        "environment_step.no_effect",
+        "environment_step.blocked"
+      ],
+      "unavailable_evidence_behavior": "abstain",
+      "version": "v1"
+    }
+  ],
+  "artifacts": [],
+  "benchmark_verdicts": [],
+  "bundle_id": "evb_144bffb20906ab11",
+  "content_digest": "sha256:e8e5ba487dc344fb9d4729b0880931ca192e43c81e8ab8b20ba72ab3956aef6e",
+  "created_at": "2026-09-07T22:58:26.389977Z",
+  "criteria": [],
+  "evaluation_results": [],
+  "metadata": {
+    "revision_records": [
+      {
+        "kind": "annotation",
+        "record_digest": "sha256:f5dda010984202de75926a18d9afe0222cf2d3da6632ee96f29833a3390fa05f",
+        "record_id": "ann_c77ea215801d7c1b"
+      },
+      {
+        "kind": "annotation",
+        "record_digest": "sha256:82ce6e767b138af498a2ad09eb0190a13943ee9261682a04adaf00532c9d07ee",
+        "record_id": "ann_52657cbadd27eb3d"
+      },
+      {
+        "kind": "annotation",
+        "record_digest": "sha256:cc38cfac260ca4b05ab2a12db4c622e6309a92d2d501fd628f610bf5c0152895",
+        "record_id": "ann_02b45077cb03cc87"
+      },
+      {
+        "kind": "annotation",
+        "record_digest": "sha256:261fbbf2fd2320ef75a2f8f6b1014ddf4148bfbff923232f0e111b52c5995459",
+        "record_id": "ann_1c1f59e0812bec15"
+      },
+      {
+        "kind": "annotation",
+        "record_digest": "sha256:50f4c79fb0152c24d32cb6360967410d7870d07c5b9551f720d8e07a781155cf",
+        "record_id": "ann_9d121367155805e6"
+      },
+      {
+        "kind": "annotation",
+        "record_digest": "sha256:3ff183250e9e25f14733765db9ce18c28e86ef573da7c965874222f4425ad7cb",
+        "record_id": "ann_43d16dc597f17a7b"
+      },
+      {
+        "kind": "annotation",
+        "record_digest": "sha256:6bcef9d0bef89997bd3fef9b6762bc2efa92bf87d0d6c1280946977dd452b3d0",
+        "record_id": "ann_f71f69085aaf3854"
+      },
+      {
+        "kind": "annotation",
+        "record_digest": "sha256:6ec151ef258a88217a43c3c012035b7d6a36f92b928004363b33c64a54852746",
+        "record_id": "ann_72a94462fb056bdd"
+      },
+      {
+        "kind": "annotation",
+        "record_digest": "sha256:654b795e2849994f21b0ab3da13240384e2e2a95955f6cfc726e9d162a27487c",
+        "record_id": "ann_1ca7bd4b22baa9aa"
+      },
+      {
+        "kind": "annotation",
+        "record_digest": "sha256:b64bcbaa2373154f9f3a575d642f19153b29cf09142bd640b819803ec5472281",
+        "record_id": "ann_e75c217e2306b225"
+      },
+      {
+        "kind": "annotation",
+        "record_digest": "sha256:da174b2dbfae06a2b4559b8772d082ae8d960293348bc25473958375b6c0d08d",
+        "record_id": "ann_f62b2ae370076f03"
+      },
+      {
+        "kind": "receipt",
+        "record_digest": "sha256:45fa606444488192f3999edc7cdfa3978afd120d185f8861c5a6cf626f1092eb",
+        "record_id": "rcpt_028e5e85bb084605"
+      }
+    ],
+    "supersedes_bundle_digest": "sha256:798ccb36440a2f364f1dab2dbe431c590b227ac4b5eeceb34f2fd671e80a9d49",
+    "supersedes_bundle_id": "evb_e562a65c442de4b7"
+  },
+  "receipts": [
+    {
+      "completeness": "complete",
+      "content_digest": "sha256:589fd94453c3a09d6bed42f9694cccb66bfb0c0622840ed11d93e5ab8272c52e",
+      "detail": {
+        "abstained_count": 0,
+        "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+        "annotator_id": "synth.deterministic.environment_step_status",
+        "applied_count": 11,
+        "global_abstentions": [],
+        "idempotency_key": "sha256:f751abee5a64e1ef6123a4e29de92a8c1279d3a86833431f29c243b31a2f087c",
+        "job_id": "ajob_28795208caf67753",
+        "limits": {
+          "max_tool_calls": 200,
+          "max_tool_response_bytes": 32000,
+          "max_total_tokens": 400000,
+          "max_total_tool_bytes": 2000000,
+          "timeout_seconds": 900.0
+        },
+        "mode": "annotate",
+        "program_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+        "rejected": [],
+        "rejected_count": 0,
+        "repeat_index": 0,
+        "runner_version": "synth.annotation-runner@1",
+        "source_trace_id": "trace_db61f67b4e043a03",
+        "tool_contract_digest": "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+        "usage": {
+          "cost_status": "free",
+          "cost_usd": 0.0,
+          "tool_bytes": 0,
+          "tool_calls": 0,
+          "wall_time_seconds": 3.7291989428922534e-05
+        }
+      },
+      "ended_at": "2026-09-07T22:58:26.336383Z",
+      "errors": [],
+      "input_digests": [
+        "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+        "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+        "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+        "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+        "sha256:b4c45c1b5ece29277d10080b5687950452b970f4a9c4f558e44f21c2f2adbaa2"
+      ],
+      "new_state": "sealed",
+      "next_safe_action": "reuse_sealed_result",
+      "operation": "annotation.run",
+      "output_digests": [
+        "sha256:3afa3a61b4e3fab2090c7f270cc49a2a0192874847224dd77a8273274363069b",
+        "sha256:6b2a5daff4dd0d2272416efc5d0bfebc656e97dd88eb5a35ddf44fb5baf59e7a",
+        "sha256:0af7a09b200e03b82d6ce11417f67e2807d8a8ffc635a144645eaa3f2a1d606d",
+        "sha256:17d263001f53d750bdfaabcb2b7aef90215de12082882f94cae73523d70d3df1",
+        "sha256:49dbeff51140862cfedb3b93ec10519d8fbace5eeec0a775a99bbf025dbb6f61",
+        "sha256:07fed7e030add3795d7655bdf6a0ee49875e02825c6a87508fbda1bc5fb02c73",
+        "sha256:93ac8d8f02ec6d5f21e1d57ce1fc87a119e4ab8895cb4a4809b51e1c4ff194f2",
+        "sha256:f50fe3500ef7c9cf39917e615efbcd970b5e3e03d8a7c43830619140250e7df2",
+        "sha256:5a934fd6999d3801b18f26adca3104dd976e786c89b29cbc225f9c39be4f7d34",
+        "sha256:001c8210a19d8bbb0c6b0531a954bd78a30971dd4c7b9ba147e2b738c1d07e96",
+        "sha256:90cddcf3c41111181baa257ea6d619d48f3ccb5cfcefd8def703d5efa84e1274"
+      ],
+      "previous_state": "validating",
+      "receipt_id": "rcpt_a5dce786a0634013",
+      "schema_version": "synth.receipt.v1",
+      "started_at": "2026-09-07T22:58:26.262493Z",
+      "status": "sealed",
+      "target_ids": [
+        "trace_db61f67b4e043a03",
+        "ajob_28795208caf67753"
+      ],
+      "wall_time_seconds": 3.7291989428922534e-05
+    },
+    {
+      "completeness": "complete",
+      "content_digest": "sha256:45fa606444488192f3999edc7cdfa3978afd120d185f8861c5a6cf626f1092eb",
+      "detail": {
+        "abstained_count": 0,
+        "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+        "annotator_id": "synth.deterministic.environment_step_status",
+        "applied_count": 11,
+        "global_abstentions": [],
+        "idempotency_key": "sha256:e929b9a2c071a26258e0ea3c2f205f2300f4ca65df19b92df71264c810dc4aad",
+        "job_id": "ajob_2384bf8e3006cb40",
+        "limits": {
+          "max_tool_calls": 200,
+          "max_tool_response_bytes": 32000,
+          "max_total_tokens": 400000,
+          "max_total_tool_bytes": 2000000,
+          "timeout_seconds": 900.0
+        },
+        "mode": "annotate",
+        "program_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+        "rejected": [],
+        "rejected_count": 0,
+        "repeat_index": 1,
+        "runner_version": "synth.annotation-runner@1",
+        "source_trace_id": "trace_db61f67b4e043a03",
+        "tool_contract_digest": "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+        "usage": {
+          "cost_status": "free",
+          "cost_usd": 0.0,
+          "tool_bytes": 0,
+          "tool_calls": 0,
+          "wall_time_seconds": 3.216697950847447e-05
+        }
+      },
+      "ended_at": "2026-09-07T22:58:26.385555Z",
+      "errors": [],
+      "input_digests": [
+        "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+        "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+        "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+        "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+        "sha256:e549eb86328d2901f4c36180efc77c76f2946f372c219e59c3a8d03d3acbb98c"
+      ],
+      "new_state": "sealed",
+      "next_safe_action": "reuse_sealed_result",
+      "operation": "annotation.run",
+      "output_digests": [
+        "sha256:f5dda010984202de75926a18d9afe0222cf2d3da6632ee96f29833a3390fa05f",
+        "sha256:82ce6e767b138af498a2ad09eb0190a13943ee9261682a04adaf00532c9d07ee",
+        "sha256:cc38cfac260ca4b05ab2a12db4c622e6309a92d2d501fd628f610bf5c0152895",
+        "sha256:261fbbf2fd2320ef75a2f8f6b1014ddf4148bfbff923232f0e111b52c5995459",
+        "sha256:50f4c79fb0152c24d32cb6360967410d7870d07c5b9551f720d8e07a781155cf",
+        "sha256:3ff183250e9e25f14733765db9ce18c28e86ef573da7c965874222f4425ad7cb",
+        "sha256:6bcef9d0bef89997bd3fef9b6762bc2efa92bf87d0d6c1280946977dd452b3d0",
+        "sha256:6ec151ef258a88217a43c3c012035b7d6a36f92b928004363b33c64a54852746",
+        "sha256:654b795e2849994f21b0ab3da13240384e2e2a95955f6cfc726e9d162a27487c",
+        "sha256:b64bcbaa2373154f9f3a575d642f19153b29cf09142bd640b819803ec5472281",
+        "sha256:da174b2dbfae06a2b4559b8772d082ae8d960293348bc25473958375b6c0d08d"
+      ],
+      "previous_state": "validating",
+      "receipt_id": "rcpt_028e5e85bb084605",
+      "schema_version": "synth.receipt.v1",
+      "started_at": "2026-09-07T22:58:26.376762Z",
+      "status": "sealed",
+      "target_ids": [
+        "trace_db61f67b4e043a03",
+        "ajob_2384bf8e3006cb40"
+      ],
+      "wall_time_seconds": 3.216697950847447e-05
+    }
+  ],
+  "reward_aggregations": [],
+  "reward_definitions": [],
+  "reward_records": [],
+  "rubrics": [],
+  "schema_version": "synth.trace-evidence-bundle.v5",
+  "trace_ref": {
+    "content_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+    "schema_version": "synth.trace.v5",
+    "trace_id": "trace_db61f67b4e043a03"
+  },
+  "verifier_definitions": [],
+  "verifier_results": []
+}

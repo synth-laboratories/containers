@@ -1,0 +1,148 @@
+{
+  "annotations": [],
+  "annotator_definitions": [
+    {
+      "annotator_id": "test.partscoped",
+      "confidence_semantics": "deterministic",
+      "content_digest": "sha256:290b51fd328df8f3bec621b54d05e4a604f8f1c2fe424e8d9ff351f1636048b7",
+      "grounding_requirement": "exact_selector",
+      "metadata": {},
+      "minimum_evidence": 1,
+      "name": "test.partscoped",
+      "output_contract": {
+        "allowed_producer_kinds": [],
+        "annotation_types": [
+          "belief"
+        ],
+        "task_kind": "classify",
+        "taxonomy": [
+          {
+            "aliases": [],
+            "description": "",
+            "label": "belief.contradicted"
+          },
+          {
+            "aliases": [],
+            "description": "",
+            "label": "belief.correct"
+          }
+        ]
+      },
+      "purpose": "test annotator",
+      "reasoning_policy": "not_captured",
+      "required_subject_scope": "part",
+      "schema_version": "synth.trace-annotator.v1",
+      "supported_trace_schemas": [
+        "synth.trace.v5"
+      ],
+      "taxonomy": [
+        "belief.contradicted",
+        "belief.correct"
+      ],
+      "unavailable_evidence_behavior": "abstain",
+      "version": "v1"
+    }
+  ],
+  "artifacts": [],
+  "benchmark_verdicts": [],
+  "bundle_id": "evb_41f3cab5ab43fce8",
+  "content_digest": "sha256:bd2eb8bdf797e3d680a8295439c07057c04db9f2e5220b69a1fe29f7dd5d37d2",
+  "created_at": "2026-09-07T22:58:27.466465Z",
+  "criteria": [],
+  "evaluation_results": [],
+  "metadata": {
+    "revision_records": [
+      {
+        "kind": "annotator_definition",
+        "record_digest": "sha256:290b51fd328df8f3bec621b54d05e4a604f8f1c2fe424e8d9ff351f1636048b7",
+        "record_id": "test.partscoped"
+      },
+      {
+        "kind": "receipt",
+        "record_digest": "sha256:27c952fe33090b55e7936bd19e69286815d2ecdf2d4840e652bad337b82583a7",
+        "record_id": "rcpt_3e62c8f61ad18e78"
+      }
+    ],
+    "supersedes_bundle_digest": "sha256:24b762c95a92b394e868bed0076a7c1f8317f7753b048e2966401ca072fd601f",
+    "supersedes_bundle_id": "evb_7304f5e3ce5ec4ae"
+  },
+  "receipts": [
+    {
+      "completeness": "complete",
+      "content_digest": "sha256:27c952fe33090b55e7936bd19e69286815d2ecdf2d4840e652bad337b82583a7",
+      "detail": {
+        "abstained_count": 1,
+        "annotator_digest": "sha256:290b51fd328df8f3bec621b54d05e4a604f8f1c2fe424e8d9ff351f1636048b7",
+        "annotator_id": "test.partscoped",
+        "applied_count": 0,
+        "global_abstentions": [
+          {
+            "annotation_type": "belief",
+            "index": 0,
+            "reason": "no_tool_calls",
+            "requirement": "tool_call parts"
+          }
+        ],
+        "idempotency_key": "sha256:0342b2fefffeab6ffada7259d30200c6efe85924c2539a0069178dc4cb445f0a",
+        "job_id": "ajob_f5f0447dc70596c5",
+        "limits": {
+          "max_tool_calls": 200,
+          "max_tool_response_bytes": 32000,
+          "max_total_tokens": 400000,
+          "max_total_tool_bytes": 2000000,
+          "timeout_seconds": 900.0
+        },
+        "mode": "annotate",
+        "program_digest": "sha256:db6b899fb265b27f8b502ac59f12395c3d84850715097abc013b67fb83a16bac",
+        "rejected": [],
+        "rejected_count": 0,
+        "repeat_index": 0,
+        "runner_version": "synth.annotation-runner@1",
+        "source_trace_id": "trace_db61f67b4e043a03",
+        "tool_contract_digest": "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+        "usage": {
+          "cost_status": "free",
+          "cost_usd": 0.0,
+          "tool_bytes": 0,
+          "tool_calls": 0,
+          "wall_time_seconds": 1.1209020158275962e-05
+        }
+      },
+      "ended_at": "2026-09-07T22:58:27.465633Z",
+      "errors": [],
+      "input_digests": [
+        "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+        "sha256:290b51fd328df8f3bec621b54d05e4a604f8f1c2fe424e8d9ff351f1636048b7",
+        "sha256:db6b899fb265b27f8b502ac59f12395c3d84850715097abc013b67fb83a16bac",
+        "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+        "sha256:6cd8c90655529befa383242edd032c8c72f8662db1f3fcc88893017dfe9f4507"
+      ],
+      "new_state": "abstained",
+      "next_safe_action": "reuse_sealed_result",
+      "operation": "annotation.run",
+      "output_digests": [],
+      "previous_state": "validating",
+      "receipt_id": "rcpt_3e62c8f61ad18e78",
+      "schema_version": "synth.receipt.v1",
+      "started_at": "2026-09-07T22:58:27.455258Z",
+      "status": "abstained",
+      "target_ids": [
+        "trace_db61f67b4e043a03",
+        "ajob_f5f0447dc70596c5"
+      ],
+      "wall_time_seconds": 1.1209020158275962e-05
+    }
+  ],
+  "reward_aggregations": [],
+  "reward_definitions": [],
+  "reward_records": [],
+  "rubrics": [],
+  "schema_version": "synth.trace-evidence-bundle.v5",
+  "trace_ref": {
+    "content_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+    "schema_version": "synth.trace.v5",
+    "trace_id": "trace_db61f67b4e043a03"
+  },
+  "verifier_definitions": [],
+  "verifier_results": []
+}

@@ -1,0 +1,93 @@
+{
+  "completeness": "complete",
+  "content_digest": "sha256:002da63fa9e1a1542a83d3ec6f914fa7fd44505e5b8939148c793d82c475871d",
+  "detail": {
+    "abstained_count": 3,
+    "annotator_digest": "sha256:5e3321ab5c64f72b9d67538cd1edf01d42cba01a02a3b00bebebe85666b43662",
+    "annotator_id": "test.belief",
+    "applied_count": 1,
+    "global_abstentions": [],
+    "idempotency_key": "sha256:00ef79c4fe42f83242681ff01eb2ef8e443453e719cf00183494b40d01b1087f",
+    "job_id": "ajob_6115e2d94b9354c4",
+    "limits": {
+      "max_tool_calls": 200,
+      "max_tool_response_bytes": 32000,
+      "max_total_tokens": 400000,
+      "max_total_tool_bytes": 2000000,
+      "timeout_seconds": 900.0
+    },
+    "mode": "annotate",
+    "program_digest": "sha256:6109dcdc97856a2dc8e80f9587637cdb54679db777f1df177e9464d6e08abffd",
+    "rejected": [
+      {
+        "detail": {
+          "evidence_index": 0,
+          "reason": "entity_not_found",
+          "requirement": "evidence selector",
+          "selector": {
+            "entity_id": "msg_does_not_exist",
+            "kind": "message"
+          }
+        },
+        "index": 0,
+        "kind": "finding",
+        "reason": "evidence_unresolved"
+      },
+      {
+        "detail": {
+          "evidence_index": 0,
+          "reason": "quote_mismatch",
+          "requirement": "evidence selector",
+          "selector": {
+            "entity_id": "msg_b35e30593478ee3b",
+            "kind": "message",
+            "quote": "not in the text"
+          }
+        },
+        "index": 1,
+        "kind": "finding",
+        "reason": "evidence_unresolved"
+      }
+    ],
+    "rejected_count": 2,
+    "repeat_index": 0,
+    "runner_version": "synth.annotation-runner@1",
+    "source_trace_id": "trace_db61f67b4e043a03",
+    "tool_contract_digest": "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+    "usage": {
+      "cost_status": "free",
+      "cost_usd": 0.0,
+      "tool_bytes": 0,
+      "tool_calls": 0,
+      "wall_time_seconds": 1.5916972188279033e-05
+    }
+  },
+  "ended_at": "2026-09-07T22:58:25.160981Z",
+  "errors": [],
+  "input_digests": [
+    "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+    "sha256:5e3321ab5c64f72b9d67538cd1edf01d42cba01a02a3b00bebebe85666b43662",
+    "sha256:6109dcdc97856a2dc8e80f9587637cdb54679db777f1df177e9464d6e08abffd",
+    "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+    "sha256:3308c3ebe5652a239c0fc2a6c55370cf36808312dc66b17431d6ad8b8211cddd"
+  ],
+  "new_state": "sealed",
+  "next_safe_action": "reuse_sealed_result",
+  "operation": "annotation.run",
+  "output_digests": [
+    "sha256:78bf1fe25df397373c9a15dc6c52ba77d4135fadcd56c691829972d27ddfec28",
+    "sha256:e16ac3b8ee022108425326f28365c9ca2bf1035ca62c51f742da44492034fb46",
+    "sha256:5fbddcf833e6ed00bb2344be29abfc908484f967621ecd1e38a633fbb23ba290",
+    "sha256:8851c39e7863f97b42516ab9859712ac3d965bc67ce5ff60bcee47c7de3db7ad"
+  ],
+  "previous_state": "validating",
+  "receipt_id": "rcpt_612f734640e72d21",
+  "schema_version": "synth.receipt.v1",
+  "started_at": "2026-09-07T22:58:25.150377Z",
+  "status": "sealed",
+  "target_ids": [
+    "trace_db61f67b4e043a03",
+    "ajob_6115e2d94b9354c4"
+  ],
+  "wall_time_seconds": 1.5916972188279033e-05
+}

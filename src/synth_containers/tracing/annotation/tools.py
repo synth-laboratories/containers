@@ -726,7 +726,21 @@ class TraceInspectionTools:
         if event is None:
             raise ToolArgumentError(f"event {event_id!r} not found")
         payload = self._event_summary(event)
-        payload["payload"] = jsonable(event.payload)
+        event_payload = jsonable(event.payload)
+        if (
+            str(event.event_type) == "model_call.finished"
+            and isinstance(event_payload, dict)
+            and event_payload.get("kind") == "policy.call"
+        ):
+            # Craftax policy.call retains the entire cumulative chat history.
+            # It can consume the complete tool-response budget and hide the
+            # call's actual reasoning/tool arguments. The exact input prompt is
+            # independently available through the call's message selector.
+            event_payload = dict(event_payload)
+            if "messages" in event_payload:
+                event_payload.pop("messages")
+                payload["omitted_payload_fields"] = ["messages (cumulative history; inspect input messages instead)"]
+        payload["payload"] = event_payload
         payload["status"] = str(event.status)
         payload["actor_id"] = event.actor_id
         payload["caused_by_event_ids"] = list(event.caused_by_event_ids)

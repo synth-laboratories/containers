@@ -44,6 +44,27 @@ _OUTPUT_SCHEMA = {
 }
 
 
+def _agent_prompt(*, env_name: str, objective: str, valid: list[str], plan_max: int) -> str:
+    workspace_task = valid == ["done"]
+    task_direction = ""
+    if workspace_task:
+        task_direction = (
+            "This is a workspace task, and `done` is only the terminal signal. "
+            "Before returning it, inspect the repository, implement the requested change, "
+            "run the relevant tests, and leave the workspace in the best state you can. "
+            "Do not treat the presence of only `done` as permission to skip the task.\n\n"
+        )
+    return (
+        f"You are the acting policy for a {env_name} environment.\n"
+        f"{objective}\n\n"
+        f"{task_direction}"
+        "The current observation is in observation.txt / observation.json and the "
+        "exact legal actions are in valid_actions.json. Inspect them, think, and "
+        f"reply with at most {plan_max} actions drawn ONLY from that legal list.\n"
+        "You may write scratch notes into this workspace; they persist across turns."
+    )
+
+
 def _failure_detail(completed: "subprocess.CompletedProcess[str]", events: list[dict[str, Any]]) -> str:
     """Why the run failed, in the order the answer is actually carried.
 
@@ -82,11 +103,22 @@ class CodexAgenticPolicy:
         self.api_key_env = str(config.get("api_key_env") or "OPENAI_API_KEY")
         self.provider_id = str(config.get("provider_id") or "tito")
         self.wire_api = str(config.get("wire_api") or "responses")
+        self.model_context_window = int(config.get("model_context_window") or 0)
+        self.model_max_output_tokens = int(config.get("model_max_output_tokens") or 0)
+        # Reasoning effort belongs to the policy pin, not to whatever default
+        # the installed Codex CLI happens to choose.  Without forwarding it,
+        # `*_med` does not identify the work actually run or captured.
+        self.reasoning_effort = str(
+            config.get("reasoning_effort") or config.get("effort") or "medium"
+        )
+        if self.reasoning_effort not in {"low", "medium", "high", "xhigh"}:
+            raise RuntimeError(f"codex_reasoning_effort_invalid:{self.reasoning_effort}")
         self.sandbox = str(config.get("sandbox") or "workspace-write")
         if self.sandbox not in {"read-only", "workspace-write", "danger-full-access"}:
             raise RuntimeError(f"codex_sandbox_invalid:{self.sandbox}")
         self.timeout_seconds = min(max(float(config.get("timeout_seconds") or 300.0), 10.0), 3600.0)
         self.plan_max = min(max(int(config.get("plan_max") or 5), 1), 64)
+        self.fallback_action = str(config.get("fallback_action") or "").strip()
         self.resume = bool(config.get("resume", True))
         self.workspace_root = config.get("workspace_root")
         self.calls = 0
@@ -110,6 +142,7 @@ class CodexAgenticPolicy:
             "provider_id": self.provider_id if self.base_url else None,
             "config": self.config_id,
             "model": self.model,
+            "reasoning_effort": self.reasoning_effort,
             "sandbox": self.sandbox,
             "runtime_family": "codex",
             "session_continuity": "codex_session" if self.resume else "none",
@@ -179,19 +212,17 @@ class CodexAgenticPolicy:
         last_message = workspace / "_last_message.json"
         last_message.unlink(missing_ok=True)
 
-        prompt = (
-            f"You are the acting policy for a {self.env_name} environment.\n"
-            f"{self.objective}\n\n"
-            "The current observation is in observation.txt / observation.json and the "
-            "exact legal actions are in valid_actions.json. Inspect them, think, and "
-            f"reply with at most {self.plan_max} actions drawn ONLY from that legal list.\n"
-            "You may write scratch notes into this workspace; they persist across turns."
+        prompt = _agent_prompt(
+            env_name=self.env_name,
+            objective=self.objective,
+            valid=valid,
+            plan_max=self.plan_max,
         )
 
         argv = [self.binary, "exec"]
         if self.resume and self._session_id:
             argv += ["resume", self._session_id]
-        argv += self._provider_overrides()
+        argv += self._exec_overrides()
         argv += [
             "--json",
             "--model",
@@ -239,6 +270,8 @@ class CodexAgenticPolicy:
             "exit_code": completed.returncode,
         }
         if not actions:
+            if self.fallback_action in valid:
+                return [self.fallback_action]
             raise RuntimeError("policy returned no valid actions")
         return actions
 
@@ -257,17 +290,23 @@ class CodexAgenticPolicy:
         self._workspace = workspace
         return workspace
 
-    def _provider_overrides(self) -> list[str]:
-        """`-c` overrides that bind this turn to a specific Responses endpoint.
+    def _exec_overrides(self) -> list[str]:
+        """`-c` overrides that pin effort and bind a Responses endpoint.
 
         Passed on the command line rather than written into `CODEX_HOME` so two
         rollouts sharing a container cannot read each other's origin.
         """
 
+        overrides = ["-c", f'model_reasoning_effort="{self.reasoning_effort}"']
+        if self.model_context_window > 0:
+            overrides += ["-c", f"model_context_window={self.model_context_window}"]
+        if self.model_max_output_tokens > 0:
+            overrides += ["-c", f"model_max_output_tokens={self.model_max_output_tokens}"]
         if not self.base_url:
-            return []
+            return overrides
         provider = f"model_providers.{self.provider_id}"
         return [
+            *overrides,
             "-c", f"model_provider={self.provider_id}",
             "-c", f'{provider}.name="{self.provider_id}"',
             "-c", f'{provider}.base_url="{self.base_url}"',

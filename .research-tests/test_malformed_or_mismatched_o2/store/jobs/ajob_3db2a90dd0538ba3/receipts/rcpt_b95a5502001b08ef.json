@@ -1,0 +1,64 @@
+{
+  "completeness": "partial",
+  "content_digest": "sha256:acaec51cb9ab536ce6f6ed9f5e762d4486adbd67291de081b0832f80b623ed4d",
+  "detail": {
+    "annotator_digest": "sha256:6cfe8647f56034ce7afc945ecf83e940de467c29afba9e12db7138e81ef77bee",
+    "annotator_id": "test.bad",
+    "error": {
+      "code": "malformed_output",
+      "detail": {
+        "problems": [
+          "findings[0].evidence: required array"
+        ]
+      },
+      "message": "annotator output is not a valid proposal"
+    },
+    "idempotency_key": "sha256:dfd47c1aa18d8ae0e0be0b23329e81d57503f0d8e3e1960f21f237dfec05be09",
+    "job_id": "ajob_3db2a90dd0538ba3",
+    "limits": {
+      "max_tool_calls": 200,
+      "max_tool_response_bytes": 32000,
+      "max_total_tokens": 400000,
+      "max_total_tool_bytes": 2000000,
+      "timeout_seconds": 900.0
+    },
+    "mode": "annotate",
+    "program_digest": "sha256:2132b339d58cc117ae84f4b8b88bfe3d0db3c0d1a653c86ba7762a6e8e0d3b9b",
+    "repeat_index": 0,
+    "runner_version": "synth.annotation-runner@1",
+    "source_trace_id": "trace_db61f67b4e043a03",
+    "tool_contract_digest": "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+    "usage": {
+      "cost_status": "free",
+      "cost_usd": 0.0,
+      "tool_bytes": 0,
+      "tool_calls": 0,
+      "wall_time_seconds": 1.0833988199010491e-05
+    }
+  },
+  "ended_at": "2026-09-07T22:58:25.398454Z",
+  "errors": [
+    "malformed_output: annotator output is not a valid proposal"
+  ],
+  "input_digests": [
+    "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+    "sha256:6cfe8647f56034ce7afc945ecf83e940de467c29afba9e12db7138e81ef77bee",
+    "sha256:2132b339d58cc117ae84f4b8b88bfe3d0db3c0d1a653c86ba7762a6e8e0d3b9b",
+    "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+    "sha256:090f8cc4a4cb16fc050da23c64c05e65d0cb09286798a03124921a2c4588554e"
+  ],
+  "new_state": "failed",
+  "next_safe_action": "inspect_error_then_resubmit",
+  "operation": "annotation.run",
+  "output_digests": [],
+  "previous_state": "validating",
+  "receipt_id": "rcpt_b95a5502001b08ef",
+  "schema_version": "synth.receipt.v1",
+  "started_at": "2026-09-07T22:58:25.396017Z",
+  "status": "failed",
+  "target_ids": [
+    "trace_db61f67b4e043a03",
+    "ajob_3db2a90dd0538ba3"
+  ],
+  "wall_time_seconds": 1.0833988199010491e-05
+}

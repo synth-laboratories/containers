@@ -1,0 +1,1 @@
+{"events":[{"digest":"d661bf8d92269bb5","kind":"status","occurred_at":"2026-09-08T00:20:59.735978Z","payload":{"status":"cancelled"},"sequence":1}],"high_water":1,"pin":{},"rollout_id":"cancelled-rollout","schema_version":"synth.containers.harbor-trace-promotion.v1","status":"cancelled","stream_id":"stream:cancelled-rollout","target_id":"harbor_public"}

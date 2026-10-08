@@ -27,12 +27,14 @@ class AnnotatorPlan:
     annotator_id: str
     mode: AnnotationJobMode | str = AnnotationJobMode.ANNOTATE
     repeats: int = 1
+    repeat_start: int = 0
     model: str | None = None
     reasoning_effort: str | None = None
     runner_kind: str | None = None
     rubric_id: str | None = None
     limits: AnnotationJobLimitsV1 | None = None
     scope_session_ids: tuple[str, ...] = ()
+    scope_span_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,7 +114,7 @@ class AnnotationCampaign:
         for trace_id, digest in plan.traces:
             document = (documents or {}).get(trace_id) or self.service.resolve_trace(trace_id, digest)
             for item in plan.annotators:
-                for repeat in range(max(1, item.repeats)):
+                for repeat in range(item.repeat_start, item.repeat_start + max(1, item.repeats)):
                     requests.append(
                         (
                             item,
@@ -128,6 +130,7 @@ class AnnotationCampaign:
                                 limits=item.limits,
                                 metadata={"campaign_label": plan.label},
                                 scope_session_ids=item.scope_session_ids,
+                                scope_span_ids=item.scope_span_ids,
                             ),
                         )
                     )

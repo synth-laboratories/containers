@@ -1,0 +1,53 @@
+{
+  "annotator_digest": "sha256:26532780f854ceec2e989afd65da91d4e8e272a34b7fc4f8fad8261d0998bc5a",
+  "annotator_id": "test.verifier.findings",
+  "annotator_version": "v1",
+  "content_digest": "sha256:116c336d1abcc410e7f8c9ea7aa5ff0a153b4c118fda07dd52ee410c4242f385",
+  "created_at": "2026-09-07T22:58:26.540807Z",
+  "files": [
+    "manifest.json",
+    "INSTRUCTIONS.md",
+    "annotator_definition.json",
+    "output_schema.json",
+    "tool_contract.json",
+    "rubric.json"
+  ],
+  "job_id": "ajob_f3bd4d77d9198a06",
+  "limits": {
+    "max_tool_calls": 200,
+    "max_tool_response_bytes": 32000,
+    "max_total_tokens": 400000,
+    "max_total_tool_bytes": 2000000,
+    "timeout_seconds": 900.0
+  },
+  "mode": "verify",
+  "output_schema_id": "synth.annotation-proposal.v1",
+  "program_digest": "sha256:8e6dd9a7a0ecff5f6831332c56f78b0ad647369cf4e0a1613c1bf14837953ffa",
+  "program_id": "test.verifier.findings.program",
+  "projections": [],
+  "reasoning_policy": "not_captured",
+  "rubric_digest": "sha256:6881937439c267b14fff056872bdb617e2f26fbb3378b9981c7d6fedfed31ae1",
+  "rubric_id": "test.rubric",
+  "runner_kind": "deterministic",
+  "schema_version": "synth.annotation-workspace.v1",
+  "scope_session_ids": [],
+  "source_annotation_ids": [],
+  "source_trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+  "source_trace_id": "trace_db61f67b4e043a03",
+  "source_trace_schema": "synth.trace.v5",
+  "tool_contract_digest": "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+  "tool_names": [
+    "trace_get_manifest",
+    "trace_list_entities",
+    "trace_get_turn",
+    "trace_get_span",
+    "trace_get_message",
+    "trace_get_tool_call",
+    "trace_get_environment_transition",
+    "trace_get_event",
+    "trace_resolve_selector",
+    "trace_compare_pre_post_state",
+    "trace_search_text",
+    "trace_get_projection_manifest"
+  ]
+}

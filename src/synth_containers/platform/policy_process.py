@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+import select
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -74,7 +76,7 @@ def choose_actions(*, observation_text, session, valid_actions, engine, seed, pl
         if "T" in row:
             tx, ty = row.index("T"), y
     if px is None:
-        return {"actions": ["noop"], "policy_reason": "no_player"}
+        return {"actions": [valid_actions[0] if valid_actions else "noop"], "policy_reason": "first_legal_action_without_craftax_map"}
     if tx is None:
         chosen = "do" if "do" in valid_actions else "noop"
         return {"actions": [chosen], "policy_reason": "collect"}
@@ -126,7 +128,27 @@ class IsolatedPolicyProcess:
         self._stdout = self._proc.stdout
         self._lock = threading.Lock()
         self._request_id = 0
-        ready = self._stdout.readline()
+        self._read_buffer = b""
+        try:
+            timeout = float(os.environ.get("SYNTH_POLICY_IO_TIMEOUT_SECONDS", "30"))
+        except ValueError as exc:
+            self._proc.kill()
+            self._proc.wait()
+            self._sandbox.cleanup()
+            raise ValueError("invalid_policy_io_timeout") from exc
+        if not 0 < timeout <= 3600:
+            self._proc.kill()
+            self._proc.wait()
+            self._sandbox.cleanup()
+            raise ValueError("invalid_policy_io_timeout")
+        self._io_timeout = timeout
+        try:
+            ready = self._readline("startup")
+        except BaseException:
+            self._proc.kill()
+            self._proc.wait()
+            self._sandbox.cleanup()
+            raise
         if not ready:
             raise RuntimeError(f"isolated_policy_startup_failed:rc={self._proc.poll()}")
         payload = json.loads(ready)
@@ -137,21 +159,35 @@ class IsolatedPolicyProcess:
             "platform": sys.platform,
             "sandbox": "process",
             "network": "shared_with_evaluator",
-            "filesystem": "process_cwd_policy_only",
+            "filesystem": "host_filesystem_visible",
             "suite_visible": False,
             "pid": self._proc.pid,
         }
 
     def choose(self, observation: dict[str, Any], *, ply: int) -> list[str]:
+        # GoldHTTP flattens the engine's symbolic observation into this mapping.
+        # A code policy needs those public fields, but not gold's private reward
+        # state or the image frame attached for model planners.
+        symbolic = {
+            key: value
+            for key, value in observation.items()
+            if key not in {
+                "_frame_png", "ascii", "valid_actions", "observation_text",
+                "public", "private", "env_steps",
+            }
+        }
         request = {
             "op": "choose_actions",
-            "observation_text": str(observation.get("ascii") or ""),
+            "observation_text": str(
+                observation.get("observation_text") or observation.get("ascii") or ""
+            ),
             "session": {"ply": ply},
             "valid_actions": list(observation.get("valid_actions") or []),
             "ply": ply,
             "readout": {
                 "ascii": observation.get("ascii"),
                 "valid_actions": observation.get("valid_actions"),
+                "observation": symbolic,
             },
         }
         with self._lock:
@@ -161,12 +197,33 @@ class IsolatedPolicyProcess:
             request["id"] = self._request_id
             self._stdin.write(json.dumps(request) + "\n")
             self._stdin.flush()
-            line = self._stdout.readline()
+            try:
+                line = self._readline("choose")
+            except TimeoutError:
+                self._proc.kill()
+                self._proc.wait()
+                raise
         response = json.loads(line)
         if response.get("ok") is not True:
             raise RuntimeError("isolated_policy_choose_failed")
         actions = list((response.get("decision") or {}).get("actions") or [])
         return [str(item) for item in actions] or ["noop"]
+
+    def _readline(self, phase: str) -> str:
+        deadline = time.monotonic() + self._io_timeout
+        while b"\n" not in self._read_buffer:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"isolated_policy_{phase}_timeout")
+            readable, _, _ = select.select([self._stdout.fileno()], [], [], remaining)
+            if not readable:
+                raise TimeoutError(f"isolated_policy_{phase}_timeout")
+            chunk = os.read(self._stdout.fileno(), 65536)
+            if not chunk:
+                raise RuntimeError(f"isolated_policy_{phase}_eof")
+            self._read_buffer += chunk
+        line, self._read_buffer = self._read_buffer.split(b"\n", 1)
+        return line.decode("utf-8")
 
     def close(self) -> None:
         with self._lock:

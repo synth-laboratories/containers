@@ -1,0 +1,58 @@
+{
+  "completeness": "complete",
+  "content_digest": "sha256:355b8f316cd587202ca5c80b7c9f4145bebbb508a286d3b285bbc14ce1db6a58",
+  "detail": {
+    "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+    "annotator_id": "synth.deterministic.environment_step_status",
+    "cache_hit": true,
+    "idempotency_key": "sha256:f751abee5a64e1ef6123a4e29de92a8c1279d3a86833431f29c243b31a2f087c",
+    "job_id": "ajob_ceb547d23e5cd102",
+    "limits": {
+      "max_tool_calls": 200,
+      "max_tool_response_bytes": 32000,
+      "max_total_tokens": 400000,
+      "max_total_tool_bytes": 2000000,
+      "timeout_seconds": 900.0
+    },
+    "mode": "annotate",
+    "program_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+    "repeat_index": 0,
+    "request_metadata": {
+      "display_name": "second",
+      "path": "/tmp/x"
+    },
+    "runner_version": "synth.annotation-runner@1",
+    "source_trace_id": "trace_db61f67b4e043a03",
+    "tool_contract_digest": "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+    "usage": {
+      "cost_status": "free",
+      "cost_usd": 0.0,
+      "tool_bytes": 0,
+      "tool_calls": 0,
+      "wall_time_seconds": 3.620798815973103e-05
+    }
+  },
+  "ended_at": "2026-09-07T22:58:25.051677Z",
+  "errors": [],
+  "input_digests": [
+    "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+    "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+    "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+    "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+    "sha256:9e20cceae223961209cb45641afb0bb0fd1517cf9b853c23d9e6425aaa4bb7ba"
+  ],
+  "next_safe_action": "reuse_sealed_result",
+  "operation": "annotation.cache_lookup",
+  "output_digests": [
+    "sha256:a26b03b30a1fdc2145c734cd062b47a049d9c155d0d2aee6b3deea7648b743ee"
+  ],
+  "receipt_id": "rcpt_4ff2b9705c16ea96",
+  "schema_version": "synth.receipt.v1",
+  "started_at": "2026-09-07T22:58:25.051667Z",
+  "status": "cached",
+  "target_ids": [
+    "trace_db61f67b4e043a03",
+    "ajob_ceb547d23e5cd102"
+  ],
+  "wall_time_seconds": 3.620798815973103e-05
+}

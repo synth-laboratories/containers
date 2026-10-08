@@ -126,6 +126,8 @@ class ProposalValidator:
         execution_trace_digest: str | None = None,
         existing_annotations: Sequence[AnnotationV1] = (),
         allowed_source_annotation_ids: Sequence[str] = (),
+        allowed_session_ids: Sequence[str] = (),
+        allowed_span_ids: Sequence[str] = (),
         index: SealedTraceIndex | None = None,
     ) -> None:
         if not document.content_digest:
@@ -148,6 +150,14 @@ class ProposalValidator:
         self.execution_trace_digest = execution_trace_digest
         self.existing = {item.annotation_id: item for item in existing_annotations}
         self.allowed_sources = set(allowed_source_annotation_ids)
+        self.allowed_session_ids = tuple(allowed_session_ids)
+        self.allowed_span_ids = tuple(allowed_span_ids)
+        if self.allowed_span_ids:
+            from .scope import scoped_tool_document
+
+            self.scope_document = scoped_tool_document(document, self.allowed_session_ids, self.allowed_span_ids)
+        else:
+            self.scope_document = document
         self.created_at = utc_now()
         self._counter = 0
 
@@ -472,6 +482,11 @@ class ProposalValidator:
                 attempted=target,
                 attempted_reason=target_reason if target is not None else "",
             )
+        if self.allowed_session_ids:
+            from .scope import selector_in_sessions
+
+            if not selector_in_sessions(self.scope_document, target, self.allowed_session_ids):
+                return reject("target_outside_session_scope", {"target": finding["target"]}, target=None)
         scope = str(definition.required_subject_scope).strip().lower()
         if scope and str(target.kind).lower() != scope:
             return reject(
@@ -491,6 +506,11 @@ class ProposalValidator:
                     attempted=selector,
                     attempted_reason=reason if selector is not None else "",
                 )
+            if self.allowed_session_ids:
+                from .scope import selector_in_sessions
+
+                if not selector_in_sessions(self.scope_document, selector, self.allowed_session_ids):
+                    return reject("evidence_outside_session_scope", {"evidence_index": eindex}, target=target)
             evidence.setdefault(self.index.selector_digest(selector), selector)
         if len(evidence) < definition.minimum_evidence:
             return reject(

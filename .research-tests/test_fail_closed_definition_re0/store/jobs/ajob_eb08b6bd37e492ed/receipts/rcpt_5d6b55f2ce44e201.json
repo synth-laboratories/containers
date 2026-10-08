@@ -1,0 +1,48 @@
+{
+  "completeness": "partial",
+  "content_digest": "sha256:7296e4090666438c16a8f4e6f1f38e51e71a403d0e8eff448c75615b3a239e21",
+  "detail": {
+    "annotator_digest": "sha256:69905774478d6d548b45be3ddbeb67670b435747265053b83a299ae363eea2c3",
+    "annotator_id": "test.strict",
+    "idempotency_key": "sha256:1f373d1948d7fbf368c9a49ba83a117c29a9db9451c8b6ccaa6ea32b1719c633",
+    "job_id": "ajob_eb08b6bd37e492ed",
+    "limits": {
+      "max_tool_calls": 200,
+      "max_tool_response_bytes": 32000,
+      "max_total_tokens": 400000,
+      "max_total_tool_bytes": 2000000,
+      "timeout_seconds": 900.0
+    },
+    "mode": "annotate",
+    "program_digest": "sha256:139a24db167f52ea337d9d49d3f7eaf915b2cb9885bc4f18f08bdff76198ff31",
+    "repeat_index": 0,
+    "runner_version": "synth.annotation-runner@1",
+    "source_trace_id": "trace_db61f67b4e043a03",
+    "tool_contract_digest": "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+    "usage": {
+      "cost_status": "unavailable",
+      "tool_bytes": 0,
+      "tool_calls": 0
+    }
+  },
+  "ended_at": "2026-09-07T22:58:25.232244Z",
+  "errors": [],
+  "input_digests": [
+    "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+    "sha256:69905774478d6d548b45be3ddbeb67670b435747265053b83a299ae363eea2c3",
+    "sha256:139a24db167f52ea337d9d49d3f7eaf915b2cb9885bc4f18f08bdff76198ff31",
+    "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123"
+  ],
+  "new_state": "running",
+  "operation": "annotation.start",
+  "output_digests": [],
+  "previous_state": "prepared",
+  "receipt_id": "rcpt_5d6b55f2ce44e201",
+  "schema_version": "synth.receipt.v1",
+  "started_at": "2026-09-07T22:58:25.231755Z",
+  "status": "running",
+  "target_ids": [
+    "trace_db61f67b4e043a03",
+    "ajob_eb08b6bd37e492ed"
+  ]
+}

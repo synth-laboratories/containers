@@ -1,0 +1,48 @@
+{
+  "completeness": "partial",
+  "content_digest": "sha256:55245f00f7e11bc600a48f3212b43599b21119efc752ccd66b5ecdc2011b6953",
+  "detail": {
+    "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+    "annotator_id": "synth.deterministic.environment_step_status",
+    "idempotency_key": "sha256:b963a6b005cf643cb2ac82563f07d99802ca30e0f58c5076e06152181866ab6c",
+    "job_id": "ajob_887d32065c0ee42a",
+    "limits": {
+      "max_tool_calls": 200,
+      "max_tool_response_bytes": 32000,
+      "max_total_tokens": 400000,
+      "max_total_tool_bytes": 2000000,
+      "timeout_seconds": 900.0
+    },
+    "mode": "annotate",
+    "program_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+    "repeat_index": 0,
+    "runner_version": "synth.annotation-runner@1",
+    "source_trace_id": "trace_db61f67b4e043a03",
+    "tool_contract_digest": "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+    "usage": {
+      "cost_status": "unavailable",
+      "tool_bytes": 0,
+      "tool_calls": 0
+    }
+  },
+  "ended_at": "2026-09-07T22:58:24.722269Z",
+  "errors": [],
+  "input_digests": [
+    "sha256:ff57a9b9fd19ee30bdc794241e1ec7f873426f1929bfc83ed5397c27436acc81",
+    "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+    "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+    "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123"
+  ],
+  "new_state": "running",
+  "operation": "annotation.start",
+  "output_digests": [],
+  "previous_state": "prepared",
+  "receipt_id": "rcpt_c0ba4e087c310083",
+  "schema_version": "synth.receipt.v1",
+  "started_at": "2026-09-07T22:58:24.721961Z",
+  "status": "running",
+  "target_ids": [
+    "trace_db61f67b4e043a03",
+    "ajob_887d32065c0ee42a"
+  ]
+}

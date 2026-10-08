@@ -1,0 +1,66 @@
+{
+  "completeness": "complete",
+  "content_digest": "sha256:5031346fc0e428657e25e0807ac095c2e67baf2f2cbdb16f710522d2094941e4",
+  "detail": {
+    "abstained_count": 0,
+    "annotator_digest": "sha256:49642338f168a648475c5d1004ba0ad7adb8bc894826471483131d8c7bd6a517",
+    "annotator_id": "test.jesterky.problem_model",
+    "applied_count": 1,
+    "execution_trace_digest": "sha256:7119a2b8d30ec947b5d76b0b80ffa375b68de94ea98a3f8b3790b16d13fc1271",
+    "execution_trace_id": "trace_e9e149d11912a860",
+    "global_abstentions": [],
+    "idempotency_key": "sha256:0e6071f1cc23ab28a58fdaef89178db402d520f7264f860d18ddb60b411fd18f",
+    "job_id": "ajob_e6bd94a45aaa2321",
+    "limits": {
+      "max_cost_usd": 0.5,
+      "max_tool_calls": 200,
+      "max_tool_response_bytes": 32000,
+      "max_total_tokens": 50000,
+      "max_total_tool_bytes": 2000000,
+      "timeout_seconds": 900.0
+    },
+    "mode": "annotate",
+    "model": "gpt-5.6-luna",
+    "program_digest": "sha256:3de93485cf999cdfa5d1019ff85b76d31cc9099c4a5d5f31bf2c0e5428d0d2aa",
+    "reasoning_effort": "medium",
+    "rejected": [],
+    "rejected_count": 0,
+    "repeat_index": 0,
+    "reservation_id": "rsv_8bfe458023d4290e",
+    "runner_version": "synth.annotation-runner@1",
+    "source_trace_id": "trace_db61f67b4e043a03",
+    "tool_contract_digest": "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+    "usage": {
+      "cost_status": "free",
+      "cost_usd": 0.0,
+      "tool_bytes": 10554,
+      "tool_calls": 1,
+      "wall_time_seconds": 0.002394375012954697
+    }
+  },
+  "ended_at": "2026-09-07T23:27:25.535184Z",
+  "errors": [],
+  "input_digests": [
+    "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+    "sha256:49642338f168a648475c5d1004ba0ad7adb8bc894826471483131d8c7bd6a517",
+    "sha256:3de93485cf999cdfa5d1019ff85b76d31cc9099c4a5d5f31bf2c0e5428d0d2aa",
+    "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+    "sha256:79514375c5d9ce2722fb9f4ff89faa1460c36ff74dc43aa12c2942f210297984"
+  ],
+  "new_state": "sealed",
+  "next_safe_action": "reuse_sealed_result",
+  "operation": "annotation.run",
+  "output_digests": [
+    "sha256:ef4228be201a3acfb58de7704c513bae54732d62d4768a96b226a62ca35a042b"
+  ],
+  "previous_state": "validating",
+  "receipt_id": "rcpt_741661832c8c6ee4",
+  "schema_version": "synth.receipt.v1",
+  "started_at": "2026-09-07T23:27:25.516995Z",
+  "status": "sealed",
+  "target_ids": [
+    "trace_db61f67b4e043a03",
+    "ajob_e6bd94a45aaa2321"
+  ],
+  "wall_time_seconds": 0.002394375012954697
+}

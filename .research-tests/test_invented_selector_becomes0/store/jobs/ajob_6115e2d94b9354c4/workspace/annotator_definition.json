@@ -1,0 +1,41 @@
+{
+  "annotator_id": "test.belief",
+  "confidence_semantics": "deterministic",
+  "content_digest": "sha256:5e3321ab5c64f72b9d67538cd1edf01d42cba01a02a3b00bebebe85666b43662",
+  "grounding_requirement": "exact_selector",
+  "metadata": {},
+  "minimum_evidence": 1,
+  "name": "test.belief",
+  "output_contract": {
+    "allowed_producer_kinds": [],
+    "annotation_types": [
+      "belief"
+    ],
+    "task_kind": "classify",
+    "taxonomy": [
+      {
+        "aliases": [],
+        "description": "",
+        "label": "belief.contradicted"
+      },
+      {
+        "aliases": [],
+        "description": "",
+        "label": "belief.correct"
+      }
+    ]
+  },
+  "purpose": "test annotator",
+  "reasoning_policy": "not_captured",
+  "required_subject_scope": "message",
+  "schema_version": "synth.trace-annotator.v1",
+  "supported_trace_schemas": [
+    "synth.trace.v5"
+  ],
+  "taxonomy": [
+    "belief.contradicted",
+    "belief.correct"
+  ],
+  "unavailable_evidence_behavior": "abstain",
+  "version": "v1"
+}

@@ -1,0 +1,33 @@
+{
+  "abstentions": [],
+  "findings": [
+    {
+      "annotation_type": "problem_model",
+      "confidence": 0.8,
+      "evidence": [
+        {
+          "entity_id": "evt_049420e03659e201",
+          "kind": "event"
+        },
+        {
+          "entity_id": "evt_718283a6711531d9",
+          "kind": "event"
+        }
+      ],
+      "labels": [
+        "problem_model.matches_issue"
+      ],
+      "payload": {},
+      "rationale": "scripted jesterky swarm worker cited two events",
+      "target": {
+        "entity_id": "trace_db61f67b4e043a03",
+        "kind": "trace"
+      }
+    }
+  ],
+  "judgments": [],
+  "schema_version": "synth.annotation-proposal.v1",
+  "source_trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+  "source_trace_id": "trace_db61f67b4e043a03",
+  "summary": "scripted jesterky swarm worker"
+}

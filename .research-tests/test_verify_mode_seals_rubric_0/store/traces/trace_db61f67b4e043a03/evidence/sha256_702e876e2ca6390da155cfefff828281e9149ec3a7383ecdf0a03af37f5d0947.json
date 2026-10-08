@@ -1,0 +1,472 @@
+{
+  "annotations": [],
+  "annotator_definitions": [
+    {
+      "annotator_id": "test.verifier",
+      "confidence_semantics": "deterministic",
+      "content_digest": "sha256:3a59ab7866196a353516e98c998793ff5cbb9375bd111e321516854d00f57aca",
+      "grounding_requirement": "exact_selector",
+      "metadata": {},
+      "minimum_evidence": 1,
+      "name": "test.verifier",
+      "output_contract": {
+        "allowed_producer_kinds": [],
+        "annotation_types": [
+          "belief"
+        ],
+        "task_kind": "classify",
+        "taxonomy": [
+          {
+            "aliases": [],
+            "description": "",
+            "label": "belief.contradicted"
+          },
+          {
+            "aliases": [],
+            "description": "",
+            "label": "belief.correct"
+          }
+        ]
+      },
+      "purpose": "test annotator",
+      "reasoning_policy": "not_captured",
+      "required_subject_scope": "trace",
+      "schema_version": "synth.trace-annotator.v1",
+      "supported_trace_schemas": [
+        "synth.trace.v5"
+      ],
+      "taxonomy": [
+        "belief.contradicted",
+        "belief.correct"
+      ],
+      "unavailable_evidence_behavior": "abstain",
+      "version": "v1"
+    }
+  ],
+  "artifacts": [],
+  "benchmark_verdicts": [],
+  "bundle_id": "evb_86d561120915ece9",
+  "content_digest": "sha256:702e876e2ca6390da155cfefff828281e9149ec3a7383ecdf0a03af37f5d0947",
+  "created_at": "2026-09-07T22:58:26.476915Z",
+  "criteria": [
+    {
+      "aggregation_group": "default",
+      "allows_abstention": true,
+      "allows_not_applicable": false,
+      "content_digest": "sha256:c6d51857ce9b77a6291dc2bf16e5bfd1057c668363904a9e43453c2b93a13fc2",
+      "criterion_id": "grounding",
+      "dependencies": [],
+      "evaluator_instructions": "",
+      "expected_evidence": [],
+      "failure_modes": [],
+      "higher_is_better": true,
+      "intent": "",
+      "max_score": 4.0,
+      "metadata": {},
+      "min_score": 0.0,
+      "name": "State grounding",
+      "pass_threshold": 2.0,
+      "requirement": "decisions match visible state",
+      "requires_citation": true,
+      "role": "required",
+      "schema_version": "synth.criterion.v1",
+      "subject_scope": "trace",
+      "version": "v1",
+      "weight": 1.0
+    },
+    {
+      "aggregation_group": "default",
+      "allows_abstention": false,
+      "allows_not_applicable": false,
+      "content_digest": "sha256:11b7b099236b4cbe7dd3e388b5c6125f6ba65b68b935d96b02f0db62cacfed50",
+      "criterion_id": "tooling",
+      "dependencies": [],
+      "evaluator_instructions": "",
+      "expected_evidence": [],
+      "failure_modes": [],
+      "higher_is_better": true,
+      "intent": "",
+      "max_score": 4.0,
+      "metadata": {},
+      "min_score": 0.0,
+      "name": "Tool reliability",
+      "pass_threshold": 2.0,
+      "requirement": "calls are well formed",
+      "requires_citation": true,
+      "role": "gating",
+      "schema_version": "synth.criterion.v1",
+      "subject_scope": "trace",
+      "version": "v1",
+      "weight": 1.0
+    }
+  ],
+  "evaluation_results": [],
+  "metadata": {
+    "revision_records": [
+      {
+        "kind": "annotator_definition",
+        "record_digest": "sha256:3a59ab7866196a353516e98c998793ff5cbb9375bd111e321516854d00f57aca",
+        "record_id": "test.verifier"
+      },
+      {
+        "kind": "criterion",
+        "record_digest": "sha256:c6d51857ce9b77a6291dc2bf16e5bfd1057c668363904a9e43453c2b93a13fc2",
+        "record_id": "grounding"
+      },
+      {
+        "kind": "criterion",
+        "record_digest": "sha256:11b7b099236b4cbe7dd3e388b5c6125f6ba65b68b935d96b02f0db62cacfed50",
+        "record_id": "tooling"
+      },
+      {
+        "kind": "rubric",
+        "record_digest": "sha256:8dbd92d803fc1779acd41e66126d612385bddbe011244826e41c9603391ea92b",
+        "record_id": "test.rubric"
+      },
+      {
+        "kind": "verifier_definition",
+        "record_digest": "sha256:50f4d3c75a5c6f4dfecd893a48af830f29a847a68f3081b6f6fe5b5d1d79637d",
+        "record_id": "test.verifier.verifier"
+      },
+      {
+        "kind": "verifier_result",
+        "record_digest": "sha256:a0c99f45d2f5b5e0bb614d6d4ba5615f80303a685f4a834be825ee570bd9e6dc",
+        "record_id": "vres_0400ab8bc1944ff8"
+      },
+      {
+        "kind": "receipt",
+        "record_digest": "sha256:64ace11af2a5cf59fb7772d6e080d905004afb488f734dfefb5301a4b68dfcb3",
+        "record_id": "rcpt_b9289c3af8ab9322"
+      }
+    ],
+    "supersedes_bundle_digest": "sha256:fffe719ca2912af0572fba2a4afe6db166e08bda9a79b9361c288d47580f764a",
+    "supersedes_bundle_id": "evb_c96e7230f4f0ba8f"
+  },
+  "receipts": [
+    {
+      "completeness": "complete",
+      "content_digest": "sha256:64ace11af2a5cf59fb7772d6e080d905004afb488f734dfefb5301a4b68dfcb3",
+      "detail": {
+        "abstained_count": 0,
+        "annotator_digest": "sha256:3a59ab7866196a353516e98c998793ff5cbb9375bd111e321516854d00f57aca",
+        "annotator_id": "test.verifier",
+        "applied_count": 0,
+        "global_abstentions": [],
+        "idempotency_key": "sha256:aab263f407f51e2c5d6dd15ae4f596118db37d4bbaa7f7c7ca9635e65b8de5c1",
+        "job_id": "ajob_5bf913a1a538021d",
+        "limits": {
+          "max_tool_calls": 200,
+          "max_tool_response_bytes": 32000,
+          "max_total_tokens": 400000,
+          "max_total_tool_bytes": 2000000,
+          "timeout_seconds": 900.0
+        },
+        "mode": "verify",
+        "program_digest": "sha256:9359df18dae1c2a0d7cca8e77b340564ada30ad6da1ce32494b4ed3f48c627ee",
+        "rejected": [
+          {
+            "detail": {
+              "criterion_id": "unknown"
+            },
+            "index": 2,
+            "kind": "judgment",
+            "reason": "unknown_criterion"
+          }
+        ],
+        "rejected_count": 1,
+        "repeat_index": 0,
+        "rubric_digest": "sha256:8dbd92d803fc1779acd41e66126d612385bddbe011244826e41c9603391ea92b",
+        "rubric_id": "test.rubric",
+        "runner_version": "synth.annotation-runner@1",
+        "source_trace_id": "trace_db61f67b4e043a03",
+        "tool_contract_digest": "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+        "usage": {
+          "cost_status": "free",
+          "cost_usd": 0.0,
+          "tool_bytes": 0,
+          "tool_calls": 0,
+          "wall_time_seconds": 1.4874996850267053e-05
+        },
+        "verifier_result_id": "vres_0400ab8bc1944ff8"
+      },
+      "ended_at": "2026-09-07T22:58:26.474756Z",
+      "errors": [],
+      "input_digests": [
+        "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+        "sha256:3a59ab7866196a353516e98c998793ff5cbb9375bd111e321516854d00f57aca",
+        "sha256:8dbd92d803fc1779acd41e66126d612385bddbe011244826e41c9603391ea92b",
+        "sha256:9359df18dae1c2a0d7cca8e77b340564ada30ad6da1ce32494b4ed3f48c627ee",
+        "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+        "sha256:9a014e631d84764af44c50a3780d5e062ee78f83a0b6692ae164c4721e435f9f"
+      ],
+      "new_state": "sealed",
+      "next_safe_action": "reuse_sealed_result",
+      "operation": "annotation.run",
+      "output_digests": [
+        "sha256:a0c99f45d2f5b5e0bb614d6d4ba5615f80303a685f4a834be825ee570bd9e6dc"
+      ],
+      "previous_state": "validating",
+      "receipt_id": "rcpt_b9289c3af8ab9322",
+      "schema_version": "synth.receipt.v1",
+      "started_at": "2026-09-07T22:58:26.464540Z",
+      "status": "sealed",
+      "target_ids": [
+        "trace_db61f67b4e043a03",
+        "ajob_5bf913a1a538021d"
+      ],
+      "wall_time_seconds": 1.4874996850267053e-05
+    }
+  ],
+  "reward_aggregations": [],
+  "reward_definitions": [],
+  "reward_records": [],
+  "rubrics": [
+    {
+      "aggregation": {
+        "gates_override_score": true,
+        "human_precedence": true,
+        "inconclusive_criterion": "treat_as_missing",
+        "invalid_criterion": "treat_as_missing",
+        "missing_criterion": "treat_as_missing",
+        "not_applicable_criterion": "exclude",
+        "pass_threshold": 0.5,
+        "rounding": "none",
+        "strategy": "weighted_mean",
+        "tie_break": "fail_closed"
+      },
+      "allowed_visibility": "private",
+      "content_digest": "sha256:8dbd92d803fc1779acd41e66126d612385bddbe011244826e41c9603391ea92b",
+      "criteria": [
+        {
+          "aggregation_group": "default",
+          "allows_abstention": true,
+          "allows_not_applicable": false,
+          "content_digest": "sha256:c6d51857ce9b77a6291dc2bf16e5bfd1057c668363904a9e43453c2b93a13fc2",
+          "criterion_id": "grounding",
+          "dependencies": [],
+          "evaluator_instructions": "",
+          "expected_evidence": [],
+          "failure_modes": [],
+          "higher_is_better": true,
+          "intent": "",
+          "max_score": 4.0,
+          "metadata": {},
+          "min_score": 0.0,
+          "name": "State grounding",
+          "pass_threshold": 2.0,
+          "requirement": "decisions match visible state",
+          "requires_citation": true,
+          "role": "required",
+          "schema_version": "synth.criterion.v1",
+          "subject_scope": "trace",
+          "version": "v1",
+          "weight": 1.0
+        },
+        {
+          "aggregation_group": "default",
+          "allows_abstention": false,
+          "allows_not_applicable": false,
+          "content_digest": "sha256:11b7b099236b4cbe7dd3e388b5c6125f6ba65b68b935d96b02f0db62cacfed50",
+          "criterion_id": "tooling",
+          "dependencies": [],
+          "evaluator_instructions": "",
+          "expected_evidence": [],
+          "failure_modes": [],
+          "higher_is_better": true,
+          "intent": "",
+          "max_score": 4.0,
+          "metadata": {},
+          "min_score": 0.0,
+          "name": "Tool reliability",
+          "pass_threshold": 2.0,
+          "requirement": "calls are well formed",
+          "requires_citation": true,
+          "role": "gating",
+          "schema_version": "synth.criterion.v1",
+          "subject_scope": "trace",
+          "version": "v1",
+          "weight": 1.0
+        }
+      ],
+      "evidence_expectations": [],
+      "metadata": {},
+      "name": "test rubric",
+      "rubric_id": "test.rubric",
+      "schema_version": "synth.rubric.v2",
+      "scoring_instructions": "",
+      "task_family": "craftax",
+      "version": "v1"
+    }
+  ],
+  "schema_version": "synth.trace-evidence-bundle.v5",
+  "trace_ref": {
+    "content_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+    "schema_version": "synth.trace.v5",
+    "trace_id": "trace_db61f67b4e043a03"
+  },
+  "verifier_definitions": [
+    {
+      "abstention_behavior": "inconclusive",
+      "aggregation_owner": "verifier",
+      "allowed_network": false,
+      "content_digest": "sha256:50f4d3c75a5c6f4dfecd893a48af830f29a847a68f3081b6f6fe5b5d1d79637d",
+      "criterion_dispatch": "all",
+      "deterministic": true,
+      "kind": "deterministic",
+      "metadata": {
+        "annotator_digest": "sha256:3a59ab7866196a353516e98c998793ff5cbb9375bd111e321516854d00f57aca",
+        "annotator_id": "test.verifier"
+      },
+      "name": "test.verifier verifier",
+      "output_schema": "synth.verifier-result.v2",
+      "program_ref": "sha256:9359df18dae1c2a0d7cca8e77b340564ada30ad6da1ce32494b4ed3f48c627ee",
+      "required_selectors": [
+        "trace"
+      ],
+      "requires_citation": true,
+      "rubric_digest": "sha256:8dbd92d803fc1779acd41e66126d612385bddbe011244826e41c9603391ea92b",
+      "rubric_id": "test.rubric",
+      "rubric_version": "v1",
+      "schema_version": "synth.verifier.v1",
+      "supported_subject_types": [
+        "synth.trace.v5"
+      ],
+      "verifier_id": "test.verifier.verifier",
+      "version": "v1"
+    }
+  ],
+  "verifier_results": [
+    {
+      "artifacts": [],
+      "content_digest": "sha256:a0c99f45d2f5b5e0bb614d6d4ba5615f80303a685f4a834be825ee570bd9e6dc",
+      "criterion_results": [
+        {
+          "confidence": 1.0,
+          "content_digest": "sha256:7b5bcc893c237b8c8f026834bb8d82918d6e72c112de48564f79f105f9033d5e",
+          "criterion_digest": "sha256:c6d51857ce9b77a6291dc2bf16e5bfd1057c668363904a9e43453c2b93a13fc2",
+          "criterion_id": "grounding",
+          "criterion_version": "v1",
+          "evidence": [
+            {
+              "entity_id": "msg_b35e30593478ee3b",
+              "kind": "message",
+              "quote": "tree directly in front",
+              "quote_digest": "sha256:8f3015f529971b0b73d4f3190aa83b18c5f4169fc40167155b3cdc2abfca213b",
+              "schema_version": "synth.trace-selector.v1",
+              "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+              "trace_id": "trace_db61f67b4e043a03"
+            }
+          ],
+          "failure_modes": [
+            "false_belief"
+          ],
+          "grounding": "grounded",
+          "judgment_id": "jdg_0f5b36b5ecd5026a",
+          "metadata": {
+            "reported_verdict": "weak"
+          },
+          "passed": false,
+          "produced_at": "2026-09-07T22:58:26.470222Z",
+          "producer": {
+            "config_digest": "sha256:9359df18dae1c2a0d7cca8e77b340564ada30ad6da1ce32494b4ed3f48c627ee",
+            "kind": "deterministic",
+            "name": "test.verifier.program",
+            "version": "v1"
+          },
+          "rationale": "claimed a tree in front of grass",
+          "revision": 1,
+          "schema_version": "synth.judgment.v1",
+          "score": 1.0,
+          "state": "current",
+          "status": "decisive",
+          "subject": {
+            "kind": "trace",
+            "schema_version": "synth.trace-selector.v1",
+            "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+            "trace_id": "trace_db61f67b4e043a03"
+          },
+          "verdict": "fail"
+        },
+        {
+          "confidence": 1.0,
+          "content_digest": "sha256:abb457e49c48ba24cfe9cd8c756e67cda7a7ef19905f2de867bf74895bbba5ea",
+          "criterion_digest": "sha256:11b7b099236b4cbe7dd3e388b5c6125f6ba65b68b935d96b02f0db62cacfed50",
+          "criterion_id": "tooling",
+          "criterion_version": "v1",
+          "evidence": [
+            {
+              "entity_id": "msg_b35e30593478ee3b",
+              "kind": "message",
+              "schema_version": "synth.trace-selector.v1",
+              "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+              "trace_id": "trace_db61f67b4e043a03"
+            }
+          ],
+          "failure_modes": [],
+          "grounding": "grounded",
+          "judgment_id": "jdg_b15679eee1b3900b",
+          "metadata": {
+            "reported_verdict": "pass"
+          },
+          "passed": true,
+          "produced_at": "2026-09-07T22:58:26.470222Z",
+          "producer": {
+            "config_digest": "sha256:9359df18dae1c2a0d7cca8e77b340564ada30ad6da1ce32494b4ed3f48c627ee",
+            "kind": "deterministic",
+            "name": "test.verifier.program",
+            "version": "v1"
+          },
+          "rationale": "always parsed",
+          "revision": 1,
+          "schema_version": "synth.judgment.v1",
+          "score": 4.0,
+          "state": "current",
+          "status": "decisive",
+          "subject": {
+            "kind": "trace",
+            "schema_version": "synth.trace-selector.v1",
+            "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+            "trace_id": "trace_db61f67b4e043a03"
+          },
+          "verdict": "pass"
+        }
+      ],
+      "evidence": [],
+      "execution_status": "completed",
+      "failure_modes": [
+        "required_failed:grounding"
+      ],
+      "grounding": "grounded",
+      "metadata": {
+        "annotator_id": "test.verifier",
+        "job_id": "ajob_5bf913a1a538021d",
+        "rejected_judgments": 1
+      },
+      "pass_threshold": 0.5,
+      "passed": false,
+      "produced_at": "2026-09-07T22:58:26.470222Z",
+      "producer": {
+        "config_digest": "sha256:9359df18dae1c2a0d7cca8e77b340564ada30ad6da1ce32494b4ed3f48c627ee",
+        "kind": "deterministic",
+        "name": "test.verifier.program",
+        "version": "v1"
+      },
+      "rubric_digest": "sha256:8dbd92d803fc1779acd41e66126d612385bddbe011244826e41c9603391ea92b",
+      "rubric_id": "test.rubric",
+      "schema_version": "synth.verifier-result.v2",
+      "score": 0.625,
+      "state": "current",
+      "subject": {
+        "kind": "trace",
+        "schema_version": "synth.trace-selector.v1",
+        "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+        "trace_id": "trace_db61f67b4e043a03"
+      },
+      "verdict": "fail",
+      "verification_status": "valid",
+      "verifier_id": "test.verifier.verifier",
+      "verifier_result_id": "vres_0400ab8bc1944ff8",
+      "verifier_version": "v1"
+    }
+  ]
+}

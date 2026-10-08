@@ -1,0 +1,15 @@
+{
+  "abstentions": [
+    {
+      "annotation_type": "belief",
+      "reason": "no_tool_calls",
+      "requirement": "tool_call parts"
+    }
+  ],
+  "findings": [],
+  "judgments": [],
+  "schema_version": "synth.annotation-proposal.v1",
+  "source_trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+  "source_trace_id": "trace_db61f67b4e043a03",
+  "summary": ""
+}

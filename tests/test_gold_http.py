@@ -10,14 +10,19 @@ import base64
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
+from synth_containers.event_log import RolloutEventLog
 from synth_containers.gold_http import (
     GoldEventLogCorrupt,
     GoldFrameMissing,
     GoldHttpWorld,
+    probe_gold_ready,
+    reset_engine_client,
 )
 
 
@@ -35,6 +40,18 @@ def _world(*, max_steps: int, base_url: str) -> GoldHttpWorld:
     )
 
 
+def _dungeon_world(*, max_steps: int, base_url: str) -> GoldHttpWorld:
+    return GoldHttpWorld(
+        max_steps=max_steps,
+        task_payload=_task_payload,
+        base_url=base_url,
+        engine="dungeongrid",
+        require_frames=True,
+        frame_path="/rollouts/{rollout_id}/observation.png",
+        view_frame_path="/rollouts/{rollout_id}/render.png?viewer={agent_id}",
+    )
+
+
 PNG_1X1 = bytes.fromhex(
     "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
     "0000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082"
@@ -48,6 +65,10 @@ class GoldState:
         self.mutate_prefix = False
         self.shrink_log = False
         self.omit_frames = False
+        self.omit_observation = False
+        self.heroes: list[str] | None = None
+        self.hero_views: dict[str, Any] | None = None
+        self.missing_viewers: set[str] = set()
         self.omit_events = False
         self.include_cursor = True
         self.next_rollout = 0
@@ -80,7 +101,7 @@ def _gold_handler(state: GoldState) -> type[BaseHTTPRequestHandler]:
         def do_POST(self) -> None:  # noqa: N802
             length = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
-            if self.path == "/rollouts":
+            if self.path in {"/rollouts", "/reset"}:
                 state.next_rollout += 1
                 rollout_id = f"gold_roll_{state.next_rollout}"
                 max_steps = int(((body.get("task") or {}).get("max_steps")) or 1)
@@ -91,7 +112,7 @@ def _gold_handler(state: GoldState) -> type[BaseHTTPRequestHandler]:
                         {"kind": "task_resolved", "task": "craftax", "seed": body.get("seed")}
                     ],
                 }
-                self._json(_readout(rollout_id, steps=0, terminated=False))
+                self._json(_readout(rollout_id, steps=0, terminated=False, state=state))
                 return
             if self.path.endswith("/step"):
                 rollout_id = self.path.split("/")[2]
@@ -107,7 +128,9 @@ def _gold_handler(state: GoldState) -> type[BaseHTTPRequestHandler]:
                 terminated = row["steps"] >= row["max_steps"]
                 if terminated:
                     row["events"].append({"kind": "terminal", "status": "completed"})
-                self._json(_readout(rollout_id, steps=row["steps"], terminated=terminated))
+                self._json(
+                    _readout(rollout_id, steps=row["steps"], terminated=terminated, state=state)
+                )
                 return
             if self.path.endswith("/checkpoint"):
                 rollout_id = self.path.split("/")[2]
@@ -135,6 +158,7 @@ def _gold_handler(state: GoldState) -> type[BaseHTTPRequestHandler]:
                             rollout_id,
                             steps=restored["steps"],
                             terminated=restored["steps"] >= restored["max_steps"],
+                            state=state,
                         ),
                     }
                 )
@@ -142,8 +166,36 @@ def _gold_handler(state: GoldState) -> type[BaseHTTPRequestHandler]:
             self.send_response(404)
             self.end_headers()
 
+        def do_DELETE(self) -> None:  # noqa: N802
+            if self.path.startswith("/rollouts/"):
+                rollout_id = self.path.split("/")[2]
+                if state.rollouts.pop(rollout_id, None) is None:
+                    self._json({"error": {"code": "rollout_not_found"}}, status=404)
+                    return
+                self._json({"rollout_id": rollout_id, "deleted": True})
+                return
+            self.send_response(404)
+            self.end_headers()
+
         def do_GET(self) -> None:  # noqa: N802
-            if "/frames/" in self.path:
+            raw_path = self.path
+            path = raw_path.split("?", 1)[0]
+            if path.endswith("/observation.png"):
+                if state.omit_observation or state.omit_frames:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                self._png()
+                return
+            if path.endswith("/render.png"):
+                viewer = (parse_qs(urlparse(raw_path).query).get("viewer") or [""])[0]
+                if not viewer or viewer in state.missing_viewers:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                self._png()
+                return
+            if "/frames/" in path:
                 self._png()
                 return
             if self.path.endswith("/event_log"):
@@ -169,7 +221,18 @@ def _gold_handler(state: GoldState) -> type[BaseHTTPRequestHandler]:
     return Handler
 
 
-def _readout(rollout_id: str, *, steps: int, terminated: bool) -> dict[str, Any]:
+def _readout(
+    rollout_id: str, *, steps: int, terminated: bool, state: GoldState | None = None
+) -> dict[str, Any]:
+    public: dict[str, Any] = {"done": terminated}
+    private: dict[str, Any] = {
+        "reward_last": 0.5 if steps else 0.0,
+        "total_reward": 0.5 if steps else 0.0,
+    }
+    if state is not None and state.heroes is not None:
+        public["turn_order"] = list(state.heroes)
+    if state is not None and state.hero_views is not None:
+        private["views"] = {"heroes": dict(state.hero_views)}
     return {
         "rollout_id": rollout_id,
         "terminated": terminated,
@@ -181,8 +244,8 @@ def _readout(rollout_id: str, *, steps: int, terminated: bool) -> dict[str, Any]
             "valid_actions": ["noop", "do"],
             "observation_text": "gold",
             "observation": {"x": 0, "y": 0},
-            "public": {"done": terminated},
-            "private": {"reward_last": 0.5 if steps else 0.0, "total_reward": 0.5 if steps else 0.0},
+            "public": public,
+            "private": private,
         },
     }
 
@@ -198,6 +261,7 @@ def gold_http():
     try:
         yield state, url
     finally:
+        reset_engine_client()
         server.shutdown()
         thread.join(timeout=2)
 
@@ -213,6 +277,7 @@ def test_gold_relays_nev_and_strips_producer_cursor(gold_http) -> None:
     world = _world(max_steps=1, base_url=url)
     reset = world.reset(0)
     assert reset.frame_bytes == PNG_1X1
+    assert reset.view_frames == {}
     first = world.drain_native_events()
     assert [event["kind"] for event in first] == ["task_resolved"]
     assert all("nev_cursor" not in event for event in first)
@@ -260,5 +325,108 @@ def test_gold_missing_frame_fails_closed(gold_http) -> None:
     world = _world(max_steps=1, base_url=url)
     with pytest.raises(GoldFrameMissing):
         world.reset(0)
+    assert state.rollouts == {}
 
 
+def test_gold_close_deletes_session_and_is_idempotent(gold_http) -> None:
+    state, url = gold_http
+    world = _world(max_steps=1, base_url=url)
+    world.reset(0)
+    rollout_id = world.rollout_id
+    assert rollout_id in state.rollouts
+
+    world.close()
+    world.close()
+
+    assert rollout_id not in state.rollouts
+    assert world.rollout_id is None
+
+
+def test_gold_close_accepts_engine_reaped_terminal_session(gold_http) -> None:
+    state, url = gold_http
+    world = _world(max_steps=1, base_url=url)
+    world.reset(0)
+    rollout_id = world.rollout_id
+    state.rollouts.pop(rollout_id)
+
+    world.close()
+
+    assert world.rollout_id is None
+
+
+def test_gold_reset_replaces_instead_of_accumulating(gold_http) -> None:
+    state, url = gold_http
+    world = _world(max_steps=1, base_url=url)
+    world.reset(0)
+    first = world.rollout_id
+    world.reset(1)
+
+    assert first not in state.rollouts
+    assert list(state.rollouts) == [world.rollout_id]
+
+
+def test_many_sequential_worlds_return_to_zero_sessions(gold_http) -> None:
+    state, url = gold_http
+    for seed in range(50):
+        world = _world(max_steps=1, base_url=url)
+        world.reset(seed)
+        world.close()
+    assert state.rollouts == {}
+
+
+def test_readiness_probe_deletes_throwaway_session(gold_http) -> None:
+    state, url = gold_http
+    probe_gold_ready(url)
+    assert state.rollouts == {}
+
+
+def test_view_frame_path_fetches_best_effort_hero_pngs(gold_http) -> None:
+    state, url = gold_http
+    state.heroes = ["agent_0", "agent_1", ""]
+    state.missing_viewers = {"agent_1"}
+    world = _dungeon_world(max_steps=1, base_url=url)
+    reset = world.reset(0)
+    assert reset.frame_bytes == PNG_1X1
+    assert reset.view_frames == {"agent_0": PNG_1X1}
+    world.close()
+
+    state.heroes = None
+    state.hero_views = {"agent_0": {}, "agent_2": {}}
+    state.missing_viewers = {"agent_2"}
+    world = _dungeon_world(max_steps=1, base_url=url)
+    reset = world.reset(1)
+    assert reset.frame_bytes == PNG_1X1
+    assert reset.view_frames == {"agent_0": PNG_1X1}
+
+
+def test_missing_primary_observation_fails_closed_when_require_frames(gold_http) -> None:
+    state, url = gold_http
+    state.heroes = ["agent_0"]
+    state.omit_observation = True
+    world = _dungeon_world(max_steps=1, base_url=url)
+    with pytest.raises(GoldFrameMissing):
+        world.reset(0)
+    assert state.rollouts == {}
+
+
+def test_persist_frame_named_path_writes_extra_file(tmp_path: Path) -> None:
+    rollout_id = "named-frame"
+    journal = tmp_path / "event_logs" / "events.jsonl"
+    log = RolloutEventLog(
+        rollout_id=rollout_id,
+        stream_id=f"stream:{rollout_id}",
+        journal_path=journal,
+    )
+    primary = log.persist_frame(4, PNG_1X1)
+    named = log.persist_frame(4, PNG_1X1, name="agent_0")
+    assert primary == f"/rollouts/{rollout_id}/frames/4.png"
+    assert named == f"/rollouts/{rollout_id}/frames/4/agent_0.png"
+    assert RolloutEventLog.frame_asset_path(tmp_path, rollout_id, 4).read_bytes() == PNG_1X1
+    assert (
+        RolloutEventLog.frame_asset_path(tmp_path, rollout_id, 4, "agent_0").read_bytes()
+        == PNG_1X1
+    )
+    with pytest.raises(ValueError, match="URL-safe token"):
+        log.persist_frame(4, PNG_1X1, name="../etc")
+    with pytest.raises(ValueError, match="URL-safe token"):
+        log.persist_frame(4, PNG_1X1, name="agent/0")

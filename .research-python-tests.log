@@ -1,0 +1,13 @@
+..........................................................               [100%]
+=============================== warnings summary ===============================
+tests/test_trace_v5_annotation_jobs.py::test_http_broker_maps_wire_errors_and_never_swallows
+tests/test_trace_v5_annotation_jobs.py::test_http_broker_maps_wire_errors_and_never_swallows
+tests/test_trace_v5_annotation_jobs.py::test_http_broker_maps_wire_errors_and_never_swallows
+tests/test_trace_v5_annotation_jobs.py::test_http_broker_maps_wire_errors_and_never_swallows
+tests/test_trace_v5_annotation_jobs.py::test_http_broker_maps_wire_errors_and_never_swallows
+tests/test_trace_v5_annotation_jobs.py::test_http_broker_maps_wire_errors_and_never_swallows
+  /Users/joshuapurtell/GitHub/containers/.venv/lib/python3.14/site-packages/starlette/testclient.py:439: DeprecationWarning: You should not use the 'timeout' argument with the TestClient. See https://github.com/Kludex/starlette/issues/1108 for more information.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+58 passed, 6 warnings in 10.52s

@@ -1,0 +1,42 @@
+{
+  "annotator_id": "test.jesterky.problem_model",
+  "confidence_semantics": "self_reported",
+  "content_digest": "sha256:49642338f168a648475c5d1004ba0ad7adb8bc894826471483131d8c7bd6a517",
+  "grounding_requirement": "exact_selector",
+  "metadata": {},
+  "minimum_evidence": 2,
+  "model": "gpt-5.6-luna",
+  "name": "Problem model",
+  "output_contract": {
+    "allowed_producer_kinds": [],
+    "annotation_types": [
+      "problem_model"
+    ],
+    "task_kind": "classify",
+    "taxonomy": [
+      {
+        "aliases": [],
+        "description": "",
+        "label": "problem_model.matches_issue"
+      },
+      {
+        "aliases": [],
+        "description": "",
+        "label": "problem_model.wrong"
+      }
+    ]
+  },
+  "purpose": "diagnosis vs issue",
+  "reasoning_policy": "not_captured",
+  "required_subject_scope": "trace",
+  "schema_version": "synth.trace-annotator.v1",
+  "supported_trace_schemas": [
+    "synth.trace.v5"
+  ],
+  "taxonomy": [
+    "problem_model.matches_issue",
+    "problem_model.wrong"
+  ],
+  "unavailable_evidence_behavior": "abstain",
+  "version": "v1"
+}

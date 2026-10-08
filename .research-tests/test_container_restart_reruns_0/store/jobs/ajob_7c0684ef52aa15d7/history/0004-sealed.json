@@ -1,0 +1,66 @@
+{
+  "abstained_count": 0,
+  "annotation_ids": [
+    "ann_21d618ef7a472eeb",
+    "ann_b0309eb09fd73f5e",
+    "ann_930fbbd20055b6c3",
+    "ann_19cd2d6039be701a",
+    "ann_0dd8b2fb03a74b83",
+    "ann_04d3b41248599073",
+    "ann_75a3d290a56290cd",
+    "ann_8ac7ebcf0c26ee50",
+    "ann_b42f12a27e9968d1",
+    "ann_e0b8fc5eaad6fd49",
+    "ann_0e2b6ec11f93aaff"
+  ],
+  "applied_count": 11,
+  "bundle_digest": "sha256:6a364b69128161e9bcb8358c21ed64fafcd2c5a128fd7de8e0f75499e2587b2b",
+  "bundle_id": "evb_adf0ab6f27c4a7de",
+  "content_digest": "sha256:f04ae827e74c4597f9740c58b0a0746844367fd1f48e06a1bfab7896d8060822",
+  "created_at": "2026-09-07T22:58:25.909022Z",
+  "idempotency_key": "sha256:f751abee5a64e1ef6123a4e29de92a8c1279d3a86833431f29c243b31a2f087c",
+  "job_id": "ajob_7c0684ef52aa15d7",
+  "metadata": {},
+  "program_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+  "receipt_ids": [
+    "rcpt_495c22f2ddcf5b55"
+  ],
+  "rejected_count": 0,
+  "request": {
+    "allowed_projection_digests": [],
+    "allowed_projection_ids": [],
+    "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+    "annotator_id": "synth.deterministic.environment_step_status",
+    "limits": {
+      "max_tool_calls": 200,
+      "max_tool_response_bytes": 32000,
+      "max_total_tokens": 400000,
+      "max_total_tool_bytes": 2000000,
+      "timeout_seconds": 900.0
+    },
+    "metadata": {},
+    "mode": "annotate",
+    "repeat_index": 0,
+    "runner_kind": "deterministic",
+    "runner_version": "synth.annotation-runner@1",
+    "schema_version": "synth.annotation-job-request.v1",
+    "source_annotation_ids": [],
+    "source_trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+    "source_trace_id": "trace_db61f67b4e043a03",
+    "target_selector_ids": []
+  },
+  "revision": 4,
+  "schema_version": "synth.annotation-job.v1",
+  "state": "sealed",
+  "tool_contract_digest": "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+  "updated_at": "2026-09-07T22:58:25.967133Z",
+  "usage": {
+    "cost_status": "free",
+    "cost_usd": 0.0,
+    "tool_bytes": 0,
+    "tool_calls": 0,
+    "wall_time_seconds": 3.545801155269146e-05
+  },
+  "verifier_result_ids": [],
+  "workspace_manifest_digest": "sha256:58eaaf22023c60122bf2cb871876888a64be09f9d45bf7dc23bc14855948b6fa"
+}

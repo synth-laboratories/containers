@@ -89,6 +89,7 @@ class RunContext:
     instructions_digest: str
     source_annotations: tuple[AnnotationV1, ...] = ()
     cancel_requested: Callable[[], bool] = lambda: False
+    shard_cache_dir: Path | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -255,6 +256,7 @@ class AnnotationService:
         limits: AnnotationJobLimitsV1 | None = None,
         metadata: dict[str, Any] | None = None,
         scope_session_ids: Sequence[str] = (),
+        scope_span_ids: Sequence[str] = (),
     ) -> AnnotationJobRequestV1:
         """Build a request whose digests are filled from the registry and the sealed trace.
 
@@ -277,7 +279,9 @@ class AnnotationService:
             source_trace_digest=document.content_digest,
             annotator_id=entry.annotator_id,
             annotator_digest=entry.definition.content_digest,
-            model=model if model is not None else entry.definition.model,
+            # Preserve whether the caller supplied a model. Each runner resolves
+            # its own default; Jesterky analysis is independent of eval models.
+            model=model,
             reasoning_effort=reasoning_effort,
             runner_kind=runner_kind,
             mode=_inferred_mode(entry, mode),
@@ -286,7 +290,10 @@ class AnnotationService:
             repeat_index=repeat_index,
             parent_job_id=parent_job_id,
             source_annotation_ids=tuple(source_annotation_ids),
-            target_selector_ids=tuple(f"session:{item}" for item in scope_session_ids),
+            target_selector_ids=(
+                *(f"session:{item}" for item in scope_session_ids),
+                *(f"span:{item}" for item in scope_span_ids),
+            ),
             limits=resolved_limits,
             runner_version=RUNNER_VERSION,
             metadata=dict(metadata or {}),
@@ -741,8 +748,20 @@ class AnnotationService:
 
         projections = self.projections(document.trace_id, document.content_digest) if self.projections else ()
         tool_names = entry.program.tool_names or None
+        from .scope import scoped_tool_document
+
+        scope_session_ids = tuple(
+            item.split(":", 1)[1]
+            for item in job.request.target_selector_ids
+            if item.startswith("session:")
+        )
+        scope_span_ids = tuple(
+            item.split(":", 1)[1]
+            for item in job.request.target_selector_ids
+            if item.startswith("span:")
+        )
         tools = TraceInspectionTools(
-            document,
+            scoped_tool_document(document, scope_session_ids, scope_span_ids),
             limits=job.request.limits,
             tool_names=tool_names,
             projections=projections,
@@ -789,6 +808,7 @@ class AnnotationService:
             instructions_digest=instructions_digest,
             source_annotations=source_annotations,
             cancel_requested=cancel_flag.exists,
+            shard_cache_dir=workspace_dir.parent.parent.parent / "jesterky_shards",
         )
         try:
             outcome = runner.run(context)
@@ -860,6 +880,16 @@ class AnnotationService:
             execution_trace_digest=job.execution_trace_digest,
             existing_annotations=existing,
             allowed_source_annotation_ids=job.request.source_annotation_ids,
+            allowed_session_ids=tuple(
+                item.split(":", 1)[1]
+                for item in job.request.target_selector_ids
+                if item.startswith("session:")
+            ),
+            allowed_span_ids=tuple(
+                item.split(":", 1)[1]
+                for item in job.request.target_selector_ids
+                if item.startswith("span:")
+            ),
             index=index,
         )
         result = validator.validate(outcome.proposal)

@@ -1,0 +1,67 @@
+{
+  "abstained_count": 0,
+  "annotation_ids": [
+    "ann_83fb15ba4f798945",
+    "ann_63e5dd19486c4e4b",
+    "ann_73f8546d16200493",
+    "ann_20e53b8592bb076e",
+    "ann_b8837df4ebf688ad",
+    "ann_a0c8c6f9ecae833f",
+    "ann_619a0d127dfbb59a",
+    "ann_7fece766c994d5e7",
+    "ann_afd7e343139cd599",
+    "ann_791c6e33addfe657",
+    "ann_b9fe7679caa89372"
+  ],
+  "applied_count": 11,
+  "bundle_digest": "sha256:e5dbf5277b3a04d5cacbecc927e6ca827df60426263e52caa7690f586b2e71d8",
+  "bundle_id": "evb_701f3c5cd429318e",
+  "content_digest": "sha256:1f43699062f628a61cbc1b608171a16c3ba466456e7531fba25db9c2c300a711",
+  "created_at": "2026-09-07T22:58:26.673404Z",
+  "idempotency_key": "sha256:99c5feaed7b5945350acda4d21a6bd0c8e6cd66f6fadbaa0fbbaad8faa819e5a",
+  "job_id": "ajob_751973afb476ac0a",
+  "metadata": {},
+  "prior_bundle_digest": "sha256:2c3a683af47325b4cc27f565b82395559429514975cef3ff4b6b9a7ecb6c6cb6",
+  "program_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+  "receipt_ids": [
+    "rcpt_93f76dc438dc5c0e"
+  ],
+  "rejected_count": 0,
+  "request": {
+    "allowed_projection_digests": [],
+    "allowed_projection_ids": [],
+    "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+    "annotator_id": "synth.deterministic.environment_step_status",
+    "limits": {
+      "max_tool_calls": 200,
+      "max_tool_response_bytes": 32000,
+      "max_total_tokens": 400000,
+      "max_total_tool_bytes": 2000000,
+      "timeout_seconds": 900.0
+    },
+    "metadata": {},
+    "mode": "annotate",
+    "repeat_index": 2,
+    "runner_kind": "deterministic",
+    "runner_version": "synth.annotation-runner@1",
+    "schema_version": "synth.annotation-job-request.v1",
+    "source_annotation_ids": [],
+    "source_trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+    "source_trace_id": "trace_db61f67b4e043a03",
+    "target_selector_ids": []
+  },
+  "revision": 4,
+  "schema_version": "synth.annotation-job.v1",
+  "state": "sealed",
+  "tool_contract_digest": "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+  "updated_at": "2026-09-07T22:58:26.703387Z",
+  "usage": {
+    "cost_status": "free",
+    "cost_usd": 0.0,
+    "tool_bytes": 0,
+    "tool_calls": 0,
+    "wall_time_seconds": 2.891701296903193e-05
+  },
+  "verifier_result_ids": [],
+  "workspace_manifest_digest": "sha256:2ef520e2b8f818859f3a0689409839d3af01737d9b1d1bccaa62b5266e66cff9"
+}

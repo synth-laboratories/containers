@@ -1,0 +1,47 @@
+{
+  "abstained_count": 0,
+  "annotation_ids": [],
+  "applied_count": 0,
+  "content_digest": "sha256:56addebec0a3efec51e49f1fd8bb88437de65aa76e56bc6ab73281a1d04fbb76",
+  "created_at": "2026-09-07T22:58:27.449554Z",
+  "idempotency_key": "sha256:0342b2fefffeab6ffada7259d30200c6efe85924c2539a0069178dc4cb445f0a",
+  "job_id": "ajob_f5f0447dc70596c5",
+  "metadata": {},
+  "program_digest": "sha256:db6b899fb265b27f8b502ac59f12395c3d84850715097abc013b67fb83a16bac",
+  "receipt_ids": [],
+  "rejected_count": 0,
+  "request": {
+    "allowed_projection_digests": [],
+    "allowed_projection_ids": [],
+    "annotator_digest": "sha256:290b51fd328df8f3bec621b54d05e4a604f8f1c2fe424e8d9ff351f1636048b7",
+    "annotator_id": "test.partscoped",
+    "limits": {
+      "max_tool_calls": 200,
+      "max_tool_response_bytes": 32000,
+      "max_total_tokens": 400000,
+      "max_total_tool_bytes": 2000000,
+      "timeout_seconds": 900.0
+    },
+    "metadata": {},
+    "mode": "annotate",
+    "repeat_index": 0,
+    "runner_kind": "deterministic",
+    "runner_version": "synth.annotation-runner@1",
+    "schema_version": "synth.annotation-job-request.v1",
+    "source_annotation_ids": [],
+    "source_trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+    "source_trace_id": "trace_db61f67b4e043a03",
+    "target_selector_ids": []
+  },
+  "revision": 2,
+  "schema_version": "synth.annotation-job.v1",
+  "state": "running",
+  "tool_contract_digest": "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+  "updated_at": "2026-09-07T22:58:27.453477Z",
+  "usage": {
+    "cost_status": "unavailable",
+    "tool_bytes": 0,
+    "tool_calls": 0
+  },
+  "verifier_result_ids": []
+}

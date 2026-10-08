@@ -34,6 +34,7 @@ from typing import Any, Iterator, TypeVar
 
 from ..canonical import content_digest, readable_json, utc_now
 from ..models.document import TraceDocumentV5
+from ..models.assembly import AnnotationAssemblyGraphV1
 from ..models.evidence import TraceEvidenceBundleV5
 from ..models.standards import AnnotationStatus, AnnotationV1, ReceiptV1
 from ..store.sqlite_catalog import SqliteCatalogStore
@@ -43,6 +44,7 @@ from ..validation.rehydrate import (
     trace_document_from_payload,
 )
 from .jobs import AnnotationJobState, AnnotationJobV1
+from .assembly import validate_assembly_graph
 from .ledger import PaidLedger
 
 CachedT = TypeVar("CachedT")
@@ -539,6 +541,69 @@ class AnnotationStore:
 
     def evidence_path(self, trace_id: str, bundle_digest: str) -> Path:
         return self._trace_dir(trace_id) / "evidence" / f"{_safe(bundle_digest)}.json"
+
+    def assembly_path(self, trace_id: str, graph_digest: str) -> Path:
+        return self._trace_dir(trace_id) / "assemblies" / f"{_safe(graph_digest)}.json"
+
+    def assembly_head(self, trace_id: str) -> AnnotationAssemblyGraphV1 | None:
+        pointer = self._trace_dir(trace_id) / "assembly_head.json"
+        if not pointer.exists():
+            return None
+        try:
+            digest = str(json.loads(pointer.read_text(encoding="utf-8"))["graph_digest"])
+        except (OSError, ValueError, KeyError) as error:
+            raise StoreCorruption(f"unreadable assembly head for {trace_id}") from error
+        return self.get_assembly(trace_id, digest)
+
+    def get_assembly(self, trace_id: str, graph_digest: str) -> AnnotationAssemblyGraphV1 | None:
+        path = self.assembly_path(trace_id, graph_digest)
+        if not path.exists():
+            return None
+        graph = build(AnnotationAssemblyGraphV1, _read_sealed_json(path, expected_digest=graph_digest))
+        if graph.trace_ref.trace_id != trace_id or content_digest(graph) != graph_digest:
+            raise StoreCorruption(f"assembly graph {graph_digest} does not re-seal")
+        source = self.get_source(trace_id, graph.trace_ref.content_digest)
+        evidence = self.get_evidence(trace_id, graph.source_evidence_digest)
+        if source is None or evidence is None:
+            raise StoreCorruption("assembly graph source or evidence is missing")
+        try:
+            validate_assembly_graph(graph, source, evidence)
+        except ValueError as error:
+            raise StoreCorruption(f"invalid assembly graph {graph_digest}: {error}") from error
+        return graph
+
+    def put_assembly(
+        self,
+        graph: AnnotationAssemblyGraphV1,
+        *,
+        expected_prior_digest: str | None,
+    ) -> AnnotationAssemblyGraphV1:
+        """Append a validated graph revision without mutating its source trace."""
+        if not graph.content_digest or content_digest(graph) != graph.content_digest:
+            raise ValueError("assembly graph must be sealed before saving")
+        trace_id = graph.trace_ref.trace_id
+        source = self.get_source(trace_id, graph.trace_ref.content_digest)
+        evidence = self.get_evidence(trace_id, graph.source_evidence_digest)
+        if source is None or evidence is None:
+            raise ValueError("assembly graph source or evidence is missing")
+        validate_assembly_graph(graph, source, evidence)
+        pointer = self._trace_dir(trace_id) / "assembly_head.json"
+        with self.lock():
+            current = None
+            if pointer.exists():
+                current = json.loads(pointer.read_text(encoding="utf-8")).get("graph_digest")
+            if current != expected_prior_digest:
+                raise RevisionConflict(f"assembly head is {current}, expected {expected_prior_digest}")
+            path = self.assembly_path(trace_id, graph.content_digest)
+            if not path.exists():
+                _write_immutable(path, readable_json(graph))
+            _write_mutable(pointer, json.dumps({
+                "trace_id": trace_id,
+                "trace_digest": graph.trace_ref.content_digest,
+                "graph_digest": graph.content_digest,
+                "updated_at": utc_now(),
+            }, indent=2, sort_keys=True))
+        return graph
 
     def evidence_head(self, trace_id: str) -> TraceEvidenceBundleV5 | None:
         pointer = self._trace_dir(trace_id) / "head.json"

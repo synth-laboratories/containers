@@ -1,0 +1,91 @@
+{
+  "annotator_id": "synth.deterministic.environment_step_status",
+  "confidence_semantics": "deterministic",
+  "content_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+  "grounding_requirement": "exact_selector",
+  "metadata": {},
+  "minimum_evidence": 1,
+  "name": "Environment step status",
+  "output_contract": {
+    "allowed_producer_kinds": [
+      "deterministic",
+      "composite"
+    ],
+    "annotation_types": [
+      "environment_step"
+    ],
+    "payload_schema": {
+      "additional_fields_allowed": false,
+      "fields": [
+        {
+          "allowed_values": [],
+          "description": "",
+          "field_name": "action",
+          "required": false,
+          "value_kind": "string"
+        },
+        {
+          "allowed_values": [],
+          "description": "",
+          "field_name": "transition",
+          "required": false,
+          "value_kind": "string"
+        },
+        {
+          "allowed_values": [],
+          "description": "",
+          "field_name": "reason",
+          "required": false,
+          "value_kind": "string"
+        },
+        {
+          "allowed_values": [],
+          "description": "",
+          "field_name": "step_index",
+          "required": false,
+          "value_kind": "integer"
+        }
+      ],
+      "schema_id": "synth.environment_step_status.payload",
+      "version": "v1"
+    },
+    "task_kind": "classify",
+    "taxonomy": [
+      {
+        "aliases": [],
+        "description": "span status ok",
+        "label": "environment_step.ok"
+      },
+      {
+        "aliases": [],
+        "description": "span status error",
+        "label": "environment_step.error"
+      },
+      {
+        "aliases": [],
+        "description": "the engine reported a no-op transition",
+        "label": "environment_step.no_effect"
+      },
+      {
+        "aliases": [],
+        "description": "the engine reported a blocked transition",
+        "label": "environment_step.blocked"
+      }
+    ]
+  },
+  "purpose": "Label each environment_step span by its recorded outcome.",
+  "reasoning_policy": "not_captured",
+  "required_subject_scope": "span",
+  "schema_version": "synth.trace-annotator.v1",
+  "supported_trace_schemas": [
+    "synth.trace.v5"
+  ],
+  "taxonomy": [
+    "environment_step.ok",
+    "environment_step.error",
+    "environment_step.no_effect",
+    "environment_step.blocked"
+  ],
+  "unavailable_evidence_behavior": "abstain",
+  "version": "v1"
+}

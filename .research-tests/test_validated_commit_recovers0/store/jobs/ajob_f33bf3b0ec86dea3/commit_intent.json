@@ -1,0 +1,1359 @@
+{
+  "bundle": {
+    "annotations": [
+      {
+        "abstention_reason": null,
+        "annotation_id": "ann_f6c46d1c34467a57",
+        "annotation_type": "environment_step",
+        "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+        "annotator_execution_trace_digest": null,
+        "annotator_execution_trace_id": null,
+        "annotator_id": "synth.deterministic.environment_step_status",
+        "annotator_version": "v1",
+        "author_kind": "deterministic",
+        "confidence": 1.0,
+        "content_digest": "sha256:c7b639ff5c4109d427c18665e6acaf47e397392e440e2193e0dc1864e0c7b522",
+        "created_at": "2026-09-07T22:58:24.810820Z",
+        "derivation": null,
+        "evidence": [
+          {
+            "entity_digest": null,
+            "entity_id": "span_14d671292e565d0d",
+            "json_pointer": null,
+            "kind": "span",
+            "part_id": null,
+            "quote": null,
+            "quote_digest": null,
+            "range": null,
+            "schema_version": "synth.trace-selector.v1",
+            "source_projection": null,
+            "token_sequence": null,
+            "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+            "trace_id": "trace_db61f67b4e043a03"
+          }
+        ],
+        "grounding": "grounded",
+        "inspected_projection": null,
+        "inspection": {
+          "losses": [],
+          "projection_digest": null,
+          "projection_id": null,
+          "projection_manifest_digest": null,
+          "source": "trace_authority",
+          "trace_body_read": true
+        },
+        "labels": [
+          "environment_step.ok",
+          "environment_step.no_effect"
+        ],
+        "payload": {
+          "action": "do",
+          "reason": "nothing_to_do:grass",
+          "step_index": 0,
+          "transition": "noop"
+        },
+        "producer": {
+          "config_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+          "credential_profile": null,
+          "kind": "deterministic",
+          "model": null,
+          "name": "synth.deterministic.environment_step_status.program",
+          "version": "v1"
+        },
+        "rationale": "deterministic span status read",
+        "review_state": "unreviewed",
+        "revision": 1,
+        "schema_version": "synth.annotation.v1",
+        "status": "applied",
+        "supersedes_id": null,
+        "target": {
+          "entity_digest": null,
+          "entity_id": "span_14d671292e565d0d",
+          "json_pointer": null,
+          "kind": "span",
+          "part_id": null,
+          "quote": null,
+          "quote_digest": null,
+          "range": null,
+          "schema_version": "synth.trace-selector.v1",
+          "source_projection": null,
+          "token_sequence": null,
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        },
+        "unavailable_evidence": null,
+        "visibility": "private"
+      },
+      {
+        "abstention_reason": null,
+        "annotation_id": "ann_95378e1a5e22bd40",
+        "annotation_type": "environment_step",
+        "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+        "annotator_execution_trace_digest": null,
+        "annotator_execution_trace_id": null,
+        "annotator_id": "synth.deterministic.environment_step_status",
+        "annotator_version": "v1",
+        "author_kind": "deterministic",
+        "confidence": 1.0,
+        "content_digest": "sha256:236509b96f80d14198df50351c8dd0988c926817c75b2535874d59ea1fbd57b7",
+        "created_at": "2026-09-07T22:58:24.810820Z",
+        "derivation": null,
+        "evidence": [
+          {
+            "entity_digest": null,
+            "entity_id": "span_98d27bf72ffd61bb",
+            "json_pointer": null,
+            "kind": "span",
+            "part_id": null,
+            "quote": null,
+            "quote_digest": null,
+            "range": null,
+            "schema_version": "synth.trace-selector.v1",
+            "source_projection": null,
+            "token_sequence": null,
+            "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+            "trace_id": "trace_db61f67b4e043a03"
+          }
+        ],
+        "grounding": "grounded",
+        "inspected_projection": null,
+        "inspection": {
+          "losses": [],
+          "projection_digest": null,
+          "projection_id": null,
+          "projection_manifest_digest": null,
+          "source": "trace_authority",
+          "trace_body_read": true
+        },
+        "labels": [
+          "environment_step.ok",
+          "environment_step.no_effect"
+        ],
+        "payload": {
+          "action": "do",
+          "reason": "nothing_to_do:grass",
+          "step_index": 1,
+          "transition": "noop"
+        },
+        "producer": {
+          "config_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+          "credential_profile": null,
+          "kind": "deterministic",
+          "model": null,
+          "name": "synth.deterministic.environment_step_status.program",
+          "version": "v1"
+        },
+        "rationale": "deterministic span status read",
+        "review_state": "unreviewed",
+        "revision": 1,
+        "schema_version": "synth.annotation.v1",
+        "status": "applied",
+        "supersedes_id": null,
+        "target": {
+          "entity_digest": null,
+          "entity_id": "span_98d27bf72ffd61bb",
+          "json_pointer": null,
+          "kind": "span",
+          "part_id": null,
+          "quote": null,
+          "quote_digest": null,
+          "range": null,
+          "schema_version": "synth.trace-selector.v1",
+          "source_projection": null,
+          "token_sequence": null,
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        },
+        "unavailable_evidence": null,
+        "visibility": "private"
+      },
+      {
+        "abstention_reason": null,
+        "annotation_id": "ann_2c28f89627717e14",
+        "annotation_type": "environment_step",
+        "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+        "annotator_execution_trace_digest": null,
+        "annotator_execution_trace_id": null,
+        "annotator_id": "synth.deterministic.environment_step_status",
+        "annotator_version": "v1",
+        "author_kind": "deterministic",
+        "confidence": 1.0,
+        "content_digest": "sha256:cca3ee31a5a475883d56b581f82ba957e86c1fdbafaac34feced8c9e1078def5",
+        "created_at": "2026-09-07T22:58:24.810820Z",
+        "derivation": null,
+        "evidence": [
+          {
+            "entity_digest": null,
+            "entity_id": "span_4239c8556e2d2bf8",
+            "json_pointer": null,
+            "kind": "span",
+            "part_id": null,
+            "quote": null,
+            "quote_digest": null,
+            "range": null,
+            "schema_version": "synth.trace-selector.v1",
+            "source_projection": null,
+            "token_sequence": null,
+            "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+            "trace_id": "trace_db61f67b4e043a03"
+          }
+        ],
+        "grounding": "grounded",
+        "inspected_projection": null,
+        "inspection": {
+          "losses": [],
+          "projection_digest": null,
+          "projection_id": null,
+          "projection_manifest_digest": null,
+          "source": "trace_authority",
+          "trace_body_read": true
+        },
+        "labels": [
+          "environment_step.ok"
+        ],
+        "payload": {
+          "action": "up",
+          "step_index": 2,
+          "transition": "move"
+        },
+        "producer": {
+          "config_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+          "credential_profile": null,
+          "kind": "deterministic",
+          "model": null,
+          "name": "synth.deterministic.environment_step_status.program",
+          "version": "v1"
+        },
+        "rationale": "deterministic span status read",
+        "review_state": "unreviewed",
+        "revision": 1,
+        "schema_version": "synth.annotation.v1",
+        "status": "applied",
+        "supersedes_id": null,
+        "target": {
+          "entity_digest": null,
+          "entity_id": "span_4239c8556e2d2bf8",
+          "json_pointer": null,
+          "kind": "span",
+          "part_id": null,
+          "quote": null,
+          "quote_digest": null,
+          "range": null,
+          "schema_version": "synth.trace-selector.v1",
+          "source_projection": null,
+          "token_sequence": null,
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        },
+        "unavailable_evidence": null,
+        "visibility": "private"
+      },
+      {
+        "abstention_reason": null,
+        "annotation_id": "ann_d81fa3ca6625240e",
+        "annotation_type": "environment_step",
+        "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+        "annotator_execution_trace_digest": null,
+        "annotator_execution_trace_id": null,
+        "annotator_id": "synth.deterministic.environment_step_status",
+        "annotator_version": "v1",
+        "author_kind": "deterministic",
+        "confidence": 1.0,
+        "content_digest": "sha256:9b77186bc130a4f52f0ee64b8abf39ef96eef3ed7b321fba881dffb692ca8cfb",
+        "created_at": "2026-09-07T22:58:24.810820Z",
+        "derivation": null,
+        "evidence": [
+          {
+            "entity_digest": null,
+            "entity_id": "span_1123f1680410078b",
+            "json_pointer": null,
+            "kind": "span",
+            "part_id": null,
+            "quote": null,
+            "quote_digest": null,
+            "range": null,
+            "schema_version": "synth.trace-selector.v1",
+            "source_projection": null,
+            "token_sequence": null,
+            "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+            "trace_id": "trace_db61f67b4e043a03"
+          }
+        ],
+        "grounding": "grounded",
+        "inspected_projection": null,
+        "inspection": {
+          "losses": [],
+          "projection_digest": null,
+          "projection_id": null,
+          "projection_manifest_digest": null,
+          "source": "trace_authority",
+          "trace_body_read": true
+        },
+        "labels": [
+          "environment_step.ok",
+          "environment_step.blocked"
+        ],
+        "payload": {
+          "action": "up",
+          "reason": "blocked:tree",
+          "step_index": 3,
+          "transition": "blocked"
+        },
+        "producer": {
+          "config_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+          "credential_profile": null,
+          "kind": "deterministic",
+          "model": null,
+          "name": "synth.deterministic.environment_step_status.program",
+          "version": "v1"
+        },
+        "rationale": "deterministic span status read",
+        "review_state": "unreviewed",
+        "revision": 1,
+        "schema_version": "synth.annotation.v1",
+        "status": "applied",
+        "supersedes_id": null,
+        "target": {
+          "entity_digest": null,
+          "entity_id": "span_1123f1680410078b",
+          "json_pointer": null,
+          "kind": "span",
+          "part_id": null,
+          "quote": null,
+          "quote_digest": null,
+          "range": null,
+          "schema_version": "synth.trace-selector.v1",
+          "source_projection": null,
+          "token_sequence": null,
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        },
+        "unavailable_evidence": null,
+        "visibility": "private"
+      },
+      {
+        "abstention_reason": null,
+        "annotation_id": "ann_9ee674ca24dc3e0b",
+        "annotation_type": "environment_step",
+        "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+        "annotator_execution_trace_digest": null,
+        "annotator_execution_trace_id": null,
+        "annotator_id": "synth.deterministic.environment_step_status",
+        "annotator_version": "v1",
+        "author_kind": "deterministic",
+        "confidence": 1.0,
+        "content_digest": "sha256:04170c9c06e1049c76eb0e7f693472006096d3e6680531126d9427fe48a550e5",
+        "created_at": "2026-09-07T22:58:24.810820Z",
+        "derivation": null,
+        "evidence": [
+          {
+            "entity_digest": null,
+            "entity_id": "span_641a715deb44f1bf",
+            "json_pointer": null,
+            "kind": "span",
+            "part_id": null,
+            "quote": null,
+            "quote_digest": null,
+            "range": null,
+            "schema_version": "synth.trace-selector.v1",
+            "source_projection": null,
+            "token_sequence": null,
+            "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+            "trace_id": "trace_db61f67b4e043a03"
+          }
+        ],
+        "grounding": "grounded",
+        "inspected_projection": null,
+        "inspection": {
+          "losses": [],
+          "projection_digest": null,
+          "projection_id": null,
+          "projection_manifest_digest": null,
+          "source": "trace_authority",
+          "trace_body_read": true
+        },
+        "labels": [
+          "environment_step.ok"
+        ],
+        "payload": {
+          "action": "do",
+          "step_index": 4,
+          "transition": "harvest"
+        },
+        "producer": {
+          "config_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+          "credential_profile": null,
+          "kind": "deterministic",
+          "model": null,
+          "name": "synth.deterministic.environment_step_status.program",
+          "version": "v1"
+        },
+        "rationale": "deterministic span status read",
+        "review_state": "unreviewed",
+        "revision": 1,
+        "schema_version": "synth.annotation.v1",
+        "status": "applied",
+        "supersedes_id": null,
+        "target": {
+          "entity_digest": null,
+          "entity_id": "span_641a715deb44f1bf",
+          "json_pointer": null,
+          "kind": "span",
+          "part_id": null,
+          "quote": null,
+          "quote_digest": null,
+          "range": null,
+          "schema_version": "synth.trace-selector.v1",
+          "source_projection": null,
+          "token_sequence": null,
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        },
+        "unavailable_evidence": null,
+        "visibility": "private"
+      },
+      {
+        "abstention_reason": null,
+        "annotation_id": "ann_530dd8c5977bf060",
+        "annotation_type": "environment_step",
+        "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+        "annotator_execution_trace_digest": null,
+        "annotator_execution_trace_id": null,
+        "annotator_id": "synth.deterministic.environment_step_status",
+        "annotator_version": "v1",
+        "author_kind": "deterministic",
+        "confidence": 1.0,
+        "content_digest": "sha256:04f04021039839ac29012d6c41469b2d991a4f72ecb2227e7701ddbea82fd306",
+        "created_at": "2026-09-07T22:58:24.810820Z",
+        "derivation": null,
+        "evidence": [
+          {
+            "entity_digest": null,
+            "entity_id": "span_81d9e583a7875d39",
+            "json_pointer": null,
+            "kind": "span",
+            "part_id": null,
+            "quote": null,
+            "quote_digest": null,
+            "range": null,
+            "schema_version": "synth.trace-selector.v1",
+            "source_projection": null,
+            "token_sequence": null,
+            "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+            "trace_id": "trace_db61f67b4e043a03"
+          }
+        ],
+        "grounding": "grounded",
+        "inspected_projection": null,
+        "inspection": {
+          "losses": [],
+          "projection_digest": null,
+          "projection_id": null,
+          "projection_manifest_digest": null,
+          "source": "trace_authority",
+          "trace_body_read": true
+        },
+        "labels": [
+          "environment_step.ok",
+          "environment_step.no_effect"
+        ],
+        "payload": {
+          "action": "place_table",
+          "reason": "missing_resources",
+          "step_index": 5,
+          "transition": "noop"
+        },
+        "producer": {
+          "config_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+          "credential_profile": null,
+          "kind": "deterministic",
+          "model": null,
+          "name": "synth.deterministic.environment_step_status.program",
+          "version": "v1"
+        },
+        "rationale": "deterministic span status read",
+        "review_state": "unreviewed",
+        "revision": 1,
+        "schema_version": "synth.annotation.v1",
+        "status": "applied",
+        "supersedes_id": null,
+        "target": {
+          "entity_digest": null,
+          "entity_id": "span_81d9e583a7875d39",
+          "json_pointer": null,
+          "kind": "span",
+          "part_id": null,
+          "quote": null,
+          "quote_digest": null,
+          "range": null,
+          "schema_version": "synth.trace-selector.v1",
+          "source_projection": null,
+          "token_sequence": null,
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        },
+        "unavailable_evidence": null,
+        "visibility": "private"
+      },
+      {
+        "abstention_reason": null,
+        "annotation_id": "ann_852098ce49e83448",
+        "annotation_type": "environment_step",
+        "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+        "annotator_execution_trace_digest": null,
+        "annotator_execution_trace_id": null,
+        "annotator_id": "synth.deterministic.environment_step_status",
+        "annotator_version": "v1",
+        "author_kind": "deterministic",
+        "confidence": 1.0,
+        "content_digest": "sha256:99807788d7c7e1dc7c7e9fe2b24f052a2ed48a0a956b46fc09a10959db8f6470",
+        "created_at": "2026-09-07T22:58:24.810820Z",
+        "derivation": null,
+        "evidence": [
+          {
+            "entity_digest": null,
+            "entity_id": "span_aeef0e222e21a2b4",
+            "json_pointer": null,
+            "kind": "span",
+            "part_id": null,
+            "quote": null,
+            "quote_digest": null,
+            "range": null,
+            "schema_version": "synth.trace-selector.v1",
+            "source_projection": null,
+            "token_sequence": null,
+            "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+            "trace_id": "trace_db61f67b4e043a03"
+          }
+        ],
+        "grounding": "grounded",
+        "inspected_projection": null,
+        "inspection": {
+          "losses": [],
+          "projection_digest": null,
+          "projection_id": null,
+          "projection_manifest_digest": null,
+          "source": "trace_authority",
+          "trace_body_read": true
+        },
+        "labels": [
+          "environment_step.ok",
+          "environment_step.no_effect"
+        ],
+        "payload": {
+          "action": "make_wood_pickaxe",
+          "reason": "needs_crafting_table",
+          "step_index": 6,
+          "transition": "noop"
+        },
+        "producer": {
+          "config_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+          "credential_profile": null,
+          "kind": "deterministic",
+          "model": null,
+          "name": "synth.deterministic.environment_step_status.program",
+          "version": "v1"
+        },
+        "rationale": "deterministic span status read",
+        "review_state": "unreviewed",
+        "revision": 1,
+        "schema_version": "synth.annotation.v1",
+        "status": "applied",
+        "supersedes_id": null,
+        "target": {
+          "entity_digest": null,
+          "entity_id": "span_aeef0e222e21a2b4",
+          "json_pointer": null,
+          "kind": "span",
+          "part_id": null,
+          "quote": null,
+          "quote_digest": null,
+          "range": null,
+          "schema_version": "synth.trace-selector.v1",
+          "source_projection": null,
+          "token_sequence": null,
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        },
+        "unavailable_evidence": null,
+        "visibility": "private"
+      },
+      {
+        "abstention_reason": null,
+        "annotation_id": "ann_93675ac53e847c37",
+        "annotation_type": "environment_step",
+        "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+        "annotator_execution_trace_digest": null,
+        "annotator_execution_trace_id": null,
+        "annotator_id": "synth.deterministic.environment_step_status",
+        "annotator_version": "v1",
+        "author_kind": "deterministic",
+        "confidence": 1.0,
+        "content_digest": "sha256:b162ccfd8b0fe6ee0d1d6e90d7044ed6a0106ef62f47b9b81c8119de529de2ae",
+        "created_at": "2026-09-07T22:58:24.810820Z",
+        "derivation": null,
+        "evidence": [
+          {
+            "entity_digest": null,
+            "entity_id": "span_4c68119281f4614b",
+            "json_pointer": null,
+            "kind": "span",
+            "part_id": null,
+            "quote": null,
+            "quote_digest": null,
+            "range": null,
+            "schema_version": "synth.trace-selector.v1",
+            "source_projection": null,
+            "token_sequence": null,
+            "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+            "trace_id": "trace_db61f67b4e043a03"
+          }
+        ],
+        "grounding": "grounded",
+        "inspected_projection": null,
+        "inspection": {
+          "losses": [],
+          "projection_digest": null,
+          "projection_id": null,
+          "projection_manifest_digest": null,
+          "source": "trace_authority",
+          "trace_body_read": true
+        },
+        "labels": [
+          "environment_step.ok"
+        ],
+        "payload": {
+          "action": "do",
+          "step_index": 7,
+          "transition": "harvest"
+        },
+        "producer": {
+          "config_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+          "credential_profile": null,
+          "kind": "deterministic",
+          "model": null,
+          "name": "synth.deterministic.environment_step_status.program",
+          "version": "v1"
+        },
+        "rationale": "deterministic span status read",
+        "review_state": "unreviewed",
+        "revision": 1,
+        "schema_version": "synth.annotation.v1",
+        "status": "applied",
+        "supersedes_id": null,
+        "target": {
+          "entity_digest": null,
+          "entity_id": "span_4c68119281f4614b",
+          "json_pointer": null,
+          "kind": "span",
+          "part_id": null,
+          "quote": null,
+          "quote_digest": null,
+          "range": null,
+          "schema_version": "synth.trace-selector.v1",
+          "source_projection": null,
+          "token_sequence": null,
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        },
+        "unavailable_evidence": null,
+        "visibility": "private"
+      },
+      {
+        "abstention_reason": null,
+        "annotation_id": "ann_af18260a0e1f502c",
+        "annotation_type": "environment_step",
+        "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+        "annotator_execution_trace_digest": null,
+        "annotator_execution_trace_id": null,
+        "annotator_id": "synth.deterministic.environment_step_status",
+        "annotator_version": "v1",
+        "author_kind": "deterministic",
+        "confidence": 1.0,
+        "content_digest": "sha256:085200c210a2e2f093be1bb28f2155faf8b704873443faa78d4e38f4ca939210",
+        "created_at": "2026-09-07T22:58:24.810820Z",
+        "derivation": null,
+        "evidence": [
+          {
+            "entity_digest": null,
+            "entity_id": "span_97881c448458b6b3",
+            "json_pointer": null,
+            "kind": "span",
+            "part_id": null,
+            "quote": null,
+            "quote_digest": null,
+            "range": null,
+            "schema_version": "synth.trace-selector.v1",
+            "source_projection": null,
+            "token_sequence": null,
+            "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+            "trace_id": "trace_db61f67b4e043a03"
+          }
+        ],
+        "grounding": "grounded",
+        "inspected_projection": null,
+        "inspection": {
+          "losses": [],
+          "projection_digest": null,
+          "projection_id": null,
+          "projection_manifest_digest": null,
+          "source": "trace_authority",
+          "trace_body_read": true
+        },
+        "labels": [
+          "environment_step.ok"
+        ],
+        "payload": {
+          "action": "do",
+          "step_index": 8,
+          "transition": "harvest"
+        },
+        "producer": {
+          "config_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+          "credential_profile": null,
+          "kind": "deterministic",
+          "model": null,
+          "name": "synth.deterministic.environment_step_status.program",
+          "version": "v1"
+        },
+        "rationale": "deterministic span status read",
+        "review_state": "unreviewed",
+        "revision": 1,
+        "schema_version": "synth.annotation.v1",
+        "status": "applied",
+        "supersedes_id": null,
+        "target": {
+          "entity_digest": null,
+          "entity_id": "span_97881c448458b6b3",
+          "json_pointer": null,
+          "kind": "span",
+          "part_id": null,
+          "quote": null,
+          "quote_digest": null,
+          "range": null,
+          "schema_version": "synth.trace-selector.v1",
+          "source_projection": null,
+          "token_sequence": null,
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        },
+        "unavailable_evidence": null,
+        "visibility": "private"
+      },
+      {
+        "abstention_reason": null,
+        "annotation_id": "ann_2c41625d9abf0faf",
+        "annotation_type": "environment_step",
+        "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+        "annotator_execution_trace_digest": null,
+        "annotator_execution_trace_id": null,
+        "annotator_id": "synth.deterministic.environment_step_status",
+        "annotator_version": "v1",
+        "author_kind": "deterministic",
+        "confidence": 1.0,
+        "content_digest": "sha256:b3256b055f7152e1ccabd2e54502ceb6ce279ad328f620da35f17308da42672a",
+        "created_at": "2026-09-07T22:58:24.810820Z",
+        "derivation": null,
+        "evidence": [
+          {
+            "entity_digest": null,
+            "entity_id": "span_e7b1e64edd3312cc",
+            "json_pointer": null,
+            "kind": "span",
+            "part_id": null,
+            "quote": null,
+            "quote_digest": null,
+            "range": null,
+            "schema_version": "synth.trace-selector.v1",
+            "source_projection": null,
+            "token_sequence": null,
+            "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+            "trace_id": "trace_db61f67b4e043a03"
+          }
+        ],
+        "grounding": "grounded",
+        "inspected_projection": null,
+        "inspection": {
+          "losses": [],
+          "projection_digest": null,
+          "projection_id": null,
+          "projection_manifest_digest": null,
+          "source": "trace_authority",
+          "trace_body_read": true
+        },
+        "labels": [
+          "environment_step.ok"
+        ],
+        "payload": {
+          "action": "do",
+          "step_index": 9,
+          "transition": "harvest"
+        },
+        "producer": {
+          "config_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+          "credential_profile": null,
+          "kind": "deterministic",
+          "model": null,
+          "name": "synth.deterministic.environment_step_status.program",
+          "version": "v1"
+        },
+        "rationale": "deterministic span status read",
+        "review_state": "unreviewed",
+        "revision": 1,
+        "schema_version": "synth.annotation.v1",
+        "status": "applied",
+        "supersedes_id": null,
+        "target": {
+          "entity_digest": null,
+          "entity_id": "span_e7b1e64edd3312cc",
+          "json_pointer": null,
+          "kind": "span",
+          "part_id": null,
+          "quote": null,
+          "quote_digest": null,
+          "range": null,
+          "schema_version": "synth.trace-selector.v1",
+          "source_projection": null,
+          "token_sequence": null,
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        },
+        "unavailable_evidence": null,
+        "visibility": "private"
+      },
+      {
+        "abstention_reason": null,
+        "annotation_id": "ann_aefee4c3ca687a1d",
+        "annotation_type": "environment_step",
+        "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+        "annotator_execution_trace_digest": null,
+        "annotator_execution_trace_id": null,
+        "annotator_id": "synth.deterministic.environment_step_status",
+        "annotator_version": "v1",
+        "author_kind": "deterministic",
+        "confidence": 1.0,
+        "content_digest": "sha256:2a06b8232e012d8b6b3ecf3ec2d81c2eac74e4f48b73b6401d5288f72dbd268e",
+        "created_at": "2026-09-07T22:58:24.810820Z",
+        "derivation": null,
+        "evidence": [
+          {
+            "entity_digest": null,
+            "entity_id": "span_a53f7ebb69adf828",
+            "json_pointer": null,
+            "kind": "span",
+            "part_id": null,
+            "quote": null,
+            "quote_digest": null,
+            "range": null,
+            "schema_version": "synth.trace-selector.v1",
+            "source_projection": null,
+            "token_sequence": null,
+            "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+            "trace_id": "trace_db61f67b4e043a03"
+          }
+        ],
+        "grounding": "grounded",
+        "inspected_projection": null,
+        "inspection": {
+          "losses": [],
+          "projection_digest": null,
+          "projection_id": null,
+          "projection_manifest_digest": null,
+          "source": "trace_authority",
+          "trace_body_read": true
+        },
+        "labels": [
+          "environment_step.ok"
+        ],
+        "payload": {
+          "action": "place_table",
+          "step_index": 10,
+          "transition": "place"
+        },
+        "producer": {
+          "config_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+          "credential_profile": null,
+          "kind": "deterministic",
+          "model": null,
+          "name": "synth.deterministic.environment_step_status.program",
+          "version": "v1"
+        },
+        "rationale": "deterministic span status read",
+        "review_state": "unreviewed",
+        "revision": 1,
+        "schema_version": "synth.annotation.v1",
+        "status": "applied",
+        "supersedes_id": null,
+        "target": {
+          "entity_digest": null,
+          "entity_id": "span_a53f7ebb69adf828",
+          "json_pointer": null,
+          "kind": "span",
+          "part_id": null,
+          "quote": null,
+          "quote_digest": null,
+          "range": null,
+          "schema_version": "synth.trace-selector.v1",
+          "source_projection": null,
+          "token_sequence": null,
+          "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "trace_id": "trace_db61f67b4e043a03"
+        },
+        "unavailable_evidence": null,
+        "visibility": "private"
+      }
+    ],
+    "annotator_definitions": [
+      {
+        "annotator_id": "synth.deterministic.environment_step_status",
+        "confidence_calibration_ref": null,
+        "confidence_semantics": "deterministic",
+        "content_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+        "grounding_requirement": "exact_selector",
+        "metadata": {},
+        "minimum_evidence": 1,
+        "model": null,
+        "name": "Environment step status",
+        "output_contract": {
+          "allowed_producer_kinds": [
+            "deterministic",
+            "composite"
+          ],
+          "annotation_types": [
+            "environment_step"
+          ],
+          "payload_schema": {
+            "additional_fields_allowed": false,
+            "fields": [
+              {
+                "allowed_values": [],
+                "description": "",
+                "field_name": "action",
+                "required": false,
+                "value_kind": "string"
+              },
+              {
+                "allowed_values": [],
+                "description": "",
+                "field_name": "transition",
+                "required": false,
+                "value_kind": "string"
+              },
+              {
+                "allowed_values": [],
+                "description": "",
+                "field_name": "reason",
+                "required": false,
+                "value_kind": "string"
+              },
+              {
+                "allowed_values": [],
+                "description": "",
+                "field_name": "step_index",
+                "required": false,
+                "value_kind": "integer"
+              }
+            ],
+            "schema_id": "synth.environment_step_status.payload",
+            "version": "v1"
+          },
+          "task_kind": "classify",
+          "taxonomy": [
+            {
+              "aliases": [],
+              "description": "span status ok",
+              "label": "environment_step.ok",
+              "parent_label": null
+            },
+            {
+              "aliases": [],
+              "description": "span status error",
+              "label": "environment_step.error",
+              "parent_label": null
+            },
+            {
+              "aliases": [],
+              "description": "the engine reported a no-op transition",
+              "label": "environment_step.no_effect",
+              "parent_label": null
+            },
+            {
+              "aliases": [],
+              "description": "the engine reported a blocked transition",
+              "label": "environment_step.blocked",
+              "parent_label": null
+            }
+          ]
+        },
+        "program_ref": null,
+        "purpose": "Label each environment_step span by its recorded outcome.",
+        "reasoning_policy": "not_captured",
+        "required_subject_scope": "span",
+        "schema_version": "synth.trace-annotator.v1",
+        "supported_trace_schemas": [
+          "synth.trace.v5"
+        ],
+        "taxonomy": [
+          "environment_step.ok",
+          "environment_step.error",
+          "environment_step.no_effect",
+          "environment_step.blocked"
+        ],
+        "unavailable_evidence_behavior": "abstain",
+        "version": "v1"
+      }
+    ],
+    "artifacts": [],
+    "benchmark_verdicts": [],
+    "bundle_id": "evb_c58e377d3f31a89d",
+    "content_digest": "sha256:7118129b32068de76bc5c234516ed67304e6e50bf8c6ecaa1984a399b15f1096",
+    "created_at": "2026-09-07T22:58:24.819427Z",
+    "criteria": [],
+    "evaluation_results": [],
+    "metadata": {
+      "revision_records": [
+        {
+          "kind": "annotator_definition",
+          "record_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+          "record_id": "synth.deterministic.environment_step_status"
+        },
+        {
+          "kind": "annotation",
+          "record_digest": "sha256:c7b639ff5c4109d427c18665e6acaf47e397392e440e2193e0dc1864e0c7b522",
+          "record_id": "ann_f6c46d1c34467a57"
+        },
+        {
+          "kind": "annotation",
+          "record_digest": "sha256:236509b96f80d14198df50351c8dd0988c926817c75b2535874d59ea1fbd57b7",
+          "record_id": "ann_95378e1a5e22bd40"
+        },
+        {
+          "kind": "annotation",
+          "record_digest": "sha256:cca3ee31a5a475883d56b581f82ba957e86c1fdbafaac34feced8c9e1078def5",
+          "record_id": "ann_2c28f89627717e14"
+        },
+        {
+          "kind": "annotation",
+          "record_digest": "sha256:9b77186bc130a4f52f0ee64b8abf39ef96eef3ed7b321fba881dffb692ca8cfb",
+          "record_id": "ann_d81fa3ca6625240e"
+        },
+        {
+          "kind": "annotation",
+          "record_digest": "sha256:04170c9c06e1049c76eb0e7f693472006096d3e6680531126d9427fe48a550e5",
+          "record_id": "ann_9ee674ca24dc3e0b"
+        },
+        {
+          "kind": "annotation",
+          "record_digest": "sha256:04f04021039839ac29012d6c41469b2d991a4f72ecb2227e7701ddbea82fd306",
+          "record_id": "ann_530dd8c5977bf060"
+        },
+        {
+          "kind": "annotation",
+          "record_digest": "sha256:99807788d7c7e1dc7c7e9fe2b24f052a2ed48a0a956b46fc09a10959db8f6470",
+          "record_id": "ann_852098ce49e83448"
+        },
+        {
+          "kind": "annotation",
+          "record_digest": "sha256:b162ccfd8b0fe6ee0d1d6e90d7044ed6a0106ef62f47b9b81c8119de529de2ae",
+          "record_id": "ann_93675ac53e847c37"
+        },
+        {
+          "kind": "annotation",
+          "record_digest": "sha256:085200c210a2e2f093be1bb28f2155faf8b704873443faa78d4e38f4ca939210",
+          "record_id": "ann_af18260a0e1f502c"
+        },
+        {
+          "kind": "annotation",
+          "record_digest": "sha256:b3256b055f7152e1ccabd2e54502ceb6ce279ad328f620da35f17308da42672a",
+          "record_id": "ann_2c41625d9abf0faf"
+        },
+        {
+          "kind": "annotation",
+          "record_digest": "sha256:2a06b8232e012d8b6b3ecf3ec2d81c2eac74e4f48b73b6401d5288f72dbd268e",
+          "record_id": "ann_aefee4c3ca687a1d"
+        },
+        {
+          "kind": "receipt",
+          "record_digest": "sha256:8051d4745f5b88b7ff206eebba66cd3bd527f91c2cb14d785c572d681139214d",
+          "record_id": "rcpt_764a665fc38be952"
+        }
+      ],
+      "supersedes_bundle_digest": "sha256:a59efc218c7b387b3552b64334963c67a310886d16abe6aa980b502fbf6a7fb7",
+      "supersedes_bundle_id": "evb_0cbf250af19b10c3"
+    },
+    "receipts": [
+      {
+        "completeness": "complete",
+        "content_digest": "sha256:8051d4745f5b88b7ff206eebba66cd3bd527f91c2cb14d785c572d681139214d",
+        "detail": {
+          "abstained_count": 0,
+          "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+          "annotator_id": "synth.deterministic.environment_step_status",
+          "applied_count": 11,
+          "cached_from_job_id": null,
+          "execution_trace_digest": null,
+          "execution_trace_id": null,
+          "global_abstentions": [],
+          "idempotency_key": "sha256:f751abee5a64e1ef6123a4e29de92a8c1279d3a86833431f29c243b31a2f087c",
+          "job_id": "ajob_f33bf3b0ec86dea3",
+          "limits": {
+            "max_cost_usd": null,
+            "max_tool_calls": 200,
+            "max_tool_response_bytes": 32000,
+            "max_total_tokens": 400000,
+            "max_total_tool_bytes": 2000000,
+            "timeout_seconds": 900.0
+          },
+          "mode": "annotate",
+          "model": null,
+          "parent_job_id": null,
+          "program_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+          "reasoning_effort": null,
+          "rejected": [],
+          "rejected_count": 0,
+          "repeat_index": 0,
+          "reservation_id": null,
+          "rubric_digest": null,
+          "rubric_id": null,
+          "runner_version": "synth.annotation-runner@1",
+          "source_trace_id": "trace_db61f67b4e043a03",
+          "tool_contract_digest": "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+          "usage": {
+            "cached_input_tokens": null,
+            "cost_status": "free",
+            "cost_usd": 0.0,
+            "input_tokens": null,
+            "output_tokens": null,
+            "reasoning_output_tokens": null,
+            "tool_bytes": 0,
+            "tool_calls": 0,
+            "total_tokens": null,
+            "wall_time_seconds": 2.9041984817013144e-05
+          },
+          "verifier_result_id": null
+        },
+        "ended_at": "2026-09-07T22:58:24.816316Z",
+        "errors": [],
+        "input_digests": [
+          "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+          "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+          "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+          "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+          "sha256:ab6ea12cec65d1de40029d8d03e76399fa865a58e16e132bfecdcd02d0a4cba3"
+        ],
+        "new_state": "sealed",
+        "next_safe_action": "reuse_sealed_result",
+        "operation": "annotation.run",
+        "output_digests": [
+          "sha256:c7b639ff5c4109d427c18665e6acaf47e397392e440e2193e0dc1864e0c7b522",
+          "sha256:236509b96f80d14198df50351c8dd0988c926817c75b2535874d59ea1fbd57b7",
+          "sha256:cca3ee31a5a475883d56b581f82ba957e86c1fdbafaac34feced8c9e1078def5",
+          "sha256:9b77186bc130a4f52f0ee64b8abf39ef96eef3ed7b321fba881dffb692ca8cfb",
+          "sha256:04170c9c06e1049c76eb0e7f693472006096d3e6680531126d9427fe48a550e5",
+          "sha256:04f04021039839ac29012d6c41469b2d991a4f72ecb2227e7701ddbea82fd306",
+          "sha256:99807788d7c7e1dc7c7e9fe2b24f052a2ed48a0a956b46fc09a10959db8f6470",
+          "sha256:b162ccfd8b0fe6ee0d1d6e90d7044ed6a0106ef62f47b9b81c8119de529de2ae",
+          "sha256:085200c210a2e2f093be1bb28f2155faf8b704873443faa78d4e38f4ca939210",
+          "sha256:b3256b055f7152e1ccabd2e54502ceb6ce279ad328f620da35f17308da42672a",
+          "sha256:2a06b8232e012d8b6b3ecf3ec2d81c2eac74e4f48b73b6401d5288f72dbd268e"
+        ],
+        "previous_state": "validating",
+        "producer": null,
+        "receipt_id": "rcpt_764a665fc38be952",
+        "return_code": null,
+        "schema_version": "synth.receipt.v1",
+        "started_at": "2026-09-07T22:58:24.805803Z",
+        "status": "sealed",
+        "target_ids": [
+          "trace_db61f67b4e043a03",
+          "ajob_f33bf3b0ec86dea3"
+        ],
+        "wall_time_seconds": 2.9041984817013144e-05
+      }
+    ],
+    "reward_aggregations": [],
+    "reward_definitions": [],
+    "reward_records": [],
+    "rubrics": [],
+    "schema_version": "synth.trace-evidence-bundle.v5",
+    "trace_ref": {
+      "content_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+      "schema_version": "synth.trace.v5",
+      "trace_id": "trace_db61f67b4e043a03"
+    },
+    "verifier_definitions": [],
+    "verifier_results": []
+  },
+  "expected_prior_digest": null,
+  "receipt": {
+    "completeness": "complete",
+    "content_digest": "sha256:8051d4745f5b88b7ff206eebba66cd3bd527f91c2cb14d785c572d681139214d",
+    "detail": {
+      "abstained_count": 0,
+      "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+      "annotator_id": "synth.deterministic.environment_step_status",
+      "applied_count": 11,
+      "cached_from_job_id": null,
+      "execution_trace_digest": null,
+      "execution_trace_id": null,
+      "global_abstentions": [],
+      "idempotency_key": "sha256:f751abee5a64e1ef6123a4e29de92a8c1279d3a86833431f29c243b31a2f087c",
+      "job_id": "ajob_f33bf3b0ec86dea3",
+      "limits": {
+        "max_cost_usd": null,
+        "max_tool_calls": 200,
+        "max_tool_response_bytes": 32000,
+        "max_total_tokens": 400000,
+        "max_total_tool_bytes": 2000000,
+        "timeout_seconds": 900.0
+      },
+      "mode": "annotate",
+      "model": null,
+      "parent_job_id": null,
+      "program_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+      "reasoning_effort": null,
+      "rejected": [],
+      "rejected_count": 0,
+      "repeat_index": 0,
+      "reservation_id": null,
+      "rubric_digest": null,
+      "rubric_id": null,
+      "runner_version": "synth.annotation-runner@1",
+      "source_trace_id": "trace_db61f67b4e043a03",
+      "tool_contract_digest": "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+      "usage": {
+        "cached_input_tokens": null,
+        "cost_status": "free",
+        "cost_usd": 0.0,
+        "input_tokens": null,
+        "output_tokens": null,
+        "reasoning_output_tokens": null,
+        "tool_bytes": 0,
+        "tool_calls": 0,
+        "total_tokens": null,
+        "wall_time_seconds": 2.9041984817013144e-05
+      },
+      "verifier_result_id": null
+    },
+    "ended_at": "2026-09-07T22:58:24.816316Z",
+    "errors": [],
+    "input_digests": [
+      "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+      "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+      "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+      "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+      "sha256:ab6ea12cec65d1de40029d8d03e76399fa865a58e16e132bfecdcd02d0a4cba3"
+    ],
+    "new_state": "sealed",
+    "next_safe_action": "reuse_sealed_result",
+    "operation": "annotation.run",
+    "output_digests": [
+      "sha256:c7b639ff5c4109d427c18665e6acaf47e397392e440e2193e0dc1864e0c7b522",
+      "sha256:236509b96f80d14198df50351c8dd0988c926817c75b2535874d59ea1fbd57b7",
+      "sha256:cca3ee31a5a475883d56b581f82ba957e86c1fdbafaac34feced8c9e1078def5",
+      "sha256:9b77186bc130a4f52f0ee64b8abf39ef96eef3ed7b321fba881dffb692ca8cfb",
+      "sha256:04170c9c06e1049c76eb0e7f693472006096d3e6680531126d9427fe48a550e5",
+      "sha256:04f04021039839ac29012d6c41469b2d991a4f72ecb2227e7701ddbea82fd306",
+      "sha256:99807788d7c7e1dc7c7e9fe2b24f052a2ed48a0a956b46fc09a10959db8f6470",
+      "sha256:b162ccfd8b0fe6ee0d1d6e90d7044ed6a0106ef62f47b9b81c8119de529de2ae",
+      "sha256:085200c210a2e2f093be1bb28f2155faf8b704873443faa78d4e38f4ca939210",
+      "sha256:b3256b055f7152e1ccabd2e54502ceb6ce279ad328f620da35f17308da42672a",
+      "sha256:2a06b8232e012d8b6b3ecf3ec2d81c2eac74e4f48b73b6401d5288f72dbd268e"
+    ],
+    "previous_state": "validating",
+    "producer": null,
+    "receipt_id": "rcpt_764a665fc38be952",
+    "return_code": null,
+    "schema_version": "synth.receipt.v1",
+    "started_at": "2026-09-07T22:58:24.805803Z",
+    "status": "sealed",
+    "target_ids": [
+      "trace_db61f67b4e043a03",
+      "ajob_f33bf3b0ec86dea3"
+    ],
+    "wall_time_seconds": 2.9041984817013144e-05
+  },
+  "terminal_job": {
+    "abstained_count": 0,
+    "annotation_ids": [
+      "ann_f6c46d1c34467a57",
+      "ann_95378e1a5e22bd40",
+      "ann_2c28f89627717e14",
+      "ann_d81fa3ca6625240e",
+      "ann_9ee674ca24dc3e0b",
+      "ann_530dd8c5977bf060",
+      "ann_852098ce49e83448",
+      "ann_93675ac53e847c37",
+      "ann_af18260a0e1f502c",
+      "ann_2c41625d9abf0faf",
+      "ann_aefee4c3ca687a1d"
+    ],
+    "applied_count": 11,
+    "bundle_digest": "sha256:7118129b32068de76bc5c234516ed67304e6e50bf8c6ecaa1984a399b15f1096",
+    "bundle_id": "evb_c58e377d3f31a89d",
+    "cached_from_job_id": null,
+    "content_digest": "sha256:96433ad3ef288862bed7853d224cb4b279f0ba153c7835779959822e7362c496",
+    "created_at": "2026-09-07T22:58:24.801113Z",
+    "error": null,
+    "execution_trace_digest": null,
+    "execution_trace_id": null,
+    "idempotency_key": "sha256:f751abee5a64e1ef6123a4e29de92a8c1279d3a86833431f29c243b31a2f087c",
+    "job_id": "ajob_f33bf3b0ec86dea3",
+    "metadata": {},
+    "prior_bundle_digest": null,
+    "program_digest": "sha256:6552f53c41f7afcd16f9de063d62e9c8a991f3bf846655a60f165ef7558ff248",
+    "receipt_ids": [
+      "rcpt_764a665fc38be952"
+    ],
+    "rejected_count": 0,
+    "request": {
+      "allowed_projection_digests": [],
+      "allowed_projection_ids": [],
+      "annotator_digest": "sha256:ef53520064e35c17dac602ed90d627c4db8242b5e160d3057dd26a5c9d3b515e",
+      "annotator_id": "synth.deterministic.environment_step_status",
+      "limits": {
+        "max_cost_usd": null,
+        "max_tool_calls": 200,
+        "max_tool_response_bytes": 32000,
+        "max_total_tokens": 400000,
+        "max_total_tool_bytes": 2000000,
+        "timeout_seconds": 900.0
+      },
+      "metadata": {},
+      "mode": "annotate",
+      "model": null,
+      "parent_job_id": null,
+      "reasoning_effort": null,
+      "repeat_index": 0,
+      "rubric_digest": null,
+      "rubric_id": null,
+      "runner_kind": "deterministic",
+      "runner_version": "synth.annotation-runner@1",
+      "schema_version": "synth.annotation-job-request.v1",
+      "source_annotation_ids": [],
+      "source_trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+      "source_trace_id": "trace_db61f67b4e043a03",
+      "target_selector_ids": []
+    },
+    "reservation_id": null,
+    "revision": 4,
+    "schema_version": "synth.annotation-job.v1",
+    "state": "sealed",
+    "tool_contract_digest": "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+    "updated_at": "2026-09-07T22:58:24.824633Z",
+    "usage": {
+      "cached_input_tokens": null,
+      "cost_status": "free",
+      "cost_usd": 0.0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "reasoning_output_tokens": null,
+      "tool_bytes": 0,
+      "tool_calls": 0,
+      "total_tokens": null,
+      "wall_time_seconds": 2.9041984817013144e-05
+    },
+    "verifier_result_ids": [],
+    "workspace_manifest_digest": "sha256:ab6ea12cec65d1de40029d8d03e76399fa865a58e16e132bfecdcd02d0a4cba3"
+  }
+}

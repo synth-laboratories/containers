@@ -1,0 +1,9 @@
+FROM python:3.12-slim-bookworm
+COPY dist/synth_containers-0.4.1.dev20260817-py3-none-any.whl /tmp/
+RUN pip install --no-cache-dir /tmp/synth_containers-0.4.1.dev20260817-py3-none-any.whl && rm /tmp/synth_containers-0.4.1.dev20260817-py3-none-any.whl
+ENV SYNTH_CONTAINER_TARGET=craftax_react
+ENV SYNTH_CONTAINER_PORT=8080
+ENV SYNTH_CONTAINER_STORAGE=/var/lib/synth/storage
+ENV SYNTH_CONTAINER_BIND_ANY=1
+EXPOSE 8080
+CMD ["python", "-m", "synth_containers.serve", "--host", "0.0.0.0", "--port", "8080", "--allow-non-loopback", "--target", "craftax_react"]

@@ -57,7 +57,9 @@ ROLLOUT_LABEL = "synth.rollout"
 # anything about the one that started it.
 DEADLINE_LABEL = "synth.deadline"
 
-_PINNED = re.compile(r"^[A-Za-z0-9._/:-]+@sha256:[0-9a-f]{64}$")
+_PINNED = re.compile(
+    r"^(?:[A-Za-z0-9._/:-]+@)?sha256:[0-9a-f]{64}$"
+)
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 

@@ -1,0 +1,22 @@
+{
+  "actual_cost_usd_micros": null,
+  "approver": "",
+  "binding": {
+    "annotator_id": "test.jesterky.problem_model",
+    "model": "gpt-5.6-luna",
+    "session_id": "sess-cli",
+    "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf"
+  },
+  "cap_usd_micros": 1000000,
+  "claimed_at": "2026-09-07T23:27:25.607729Z",
+  "claimed_by_job_id": "ajob_988700584e464489",
+  "expires_at": null,
+  "issued_at": "2026-09-07T23:27:25.604125Z",
+  "metadata": {
+    "wildcard": false
+  },
+  "outcome": "sealed",
+  "reconciled_at": "2026-09-07T23:27:26.186873Z",
+  "reservation_id": "rsv_d49775a747ae9362",
+  "schema_version": "synth.paid-compute-reservation.v1"
+}

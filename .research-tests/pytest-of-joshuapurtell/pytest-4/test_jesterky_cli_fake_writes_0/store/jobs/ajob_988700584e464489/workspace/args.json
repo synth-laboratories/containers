@@ -1,0 +1,43 @@
+{
+  "jobs": [
+    {
+      "shard_id": "d80647349cff20e9cf101703",
+      "trace_id": "trace_db61f67b4e043a03",
+      "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+      "path": "/Users/joshuapurtell/GitHub/containers/.research-tests/pytest-of-joshuapurtell/pytest-4/test_jesterky_cli_fake_writes_0/store/jobs/ajob_988700584e464489/workspace/trace.json",
+      "annotator_id": "test.jesterky.problem_model",
+      "model": "gpt-5.6-luna",
+      "reasoning_effort": "medium",
+      "actor_id": "actor_45c3b09bdc85f629",
+      "session_id": "sess_82218dc5799986c8",
+      "event_ids": [
+        "evt_049420e03659e201",
+        "evt_ba49e76082a81b3e",
+        "evt_cb312105793eeeac",
+        "evt_945b568f5fa0fbbf",
+        "evt_9fa64bbbdd7a293d",
+        "evt_2a6c547c90146aa0",
+        "evt_94a623cd35c746c5",
+        "evt_4260585ae40a4845",
+        "evt_e92851cb6b704c43",
+        "evt_d54f4c23f1ca332d",
+        "evt_b6bffd02ba866769",
+        "evt_f122d008961817d6",
+        "evt_31c4c72f9e3318c0",
+        "evt_670ef8e4723a4b7b",
+        "evt_04ec167aad225e49",
+        "evt_78941fb110920089",
+        "evt_df681c58da04facb",
+        "evt_852c1e33d9502c05",
+        "evt_a52d8d2ade780909",
+        "evt_e2550ddcc3f12e80",
+        "evt_9c9da5b02f81f4bd",
+        "evt_d82917de4f45ea8e",
+        "evt_0138136261ac0cc4",
+        "evt_a4e82e7fa5f5b6a1",
+        "evt_718283a6711531d9"
+      ],
+      "context_event_ids": []
+    }
+  ]
+}

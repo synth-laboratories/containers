@@ -1,0 +1,51 @@
+{
+  "aggregation": {
+    "gates_override_score": true,
+    "human_precedence": true,
+    "inconclusive_criterion": "treat_as_missing",
+    "invalid_criterion": "treat_as_missing",
+    "missing_criterion": "treat_as_missing",
+    "not_applicable_criterion": "exclude",
+    "pass_threshold": 0.5,
+    "rounding": "none",
+    "strategy": "weighted_mean",
+    "tie_break": "fail_closed"
+  },
+  "allowed_visibility": "private",
+  "content_digest": "sha256:6881937439c267b14fff056872bdb617e2f26fbb3378b9981c7d6fedfed31ae1",
+  "criteria": [
+    {
+      "aggregation_group": "default",
+      "allows_abstention": true,
+      "allows_not_applicable": false,
+      "content_digest": "sha256:c6d51857ce9b77a6291dc2bf16e5bfd1057c668363904a9e43453c2b93a13fc2",
+      "criterion_id": "grounding",
+      "dependencies": [],
+      "evaluator_instructions": "",
+      "expected_evidence": [],
+      "failure_modes": [],
+      "higher_is_better": true,
+      "intent": "",
+      "max_score": 4.0,
+      "metadata": {},
+      "min_score": 0.0,
+      "name": "State grounding",
+      "pass_threshold": 2.0,
+      "requirement": "decisions match visible state",
+      "requires_citation": true,
+      "role": "required",
+      "schema_version": "synth.criterion.v1",
+      "subject_scope": "trace",
+      "version": "v1",
+      "weight": 1.0
+    }
+  ],
+  "evidence_expectations": [],
+  "metadata": {},
+  "name": "test rubric",
+  "rubric_id": "test.rubric",
+  "schema_version": "synth.rubric.v2",
+  "scoring_instructions": "",
+  "task_family": "craftax",
+  "version": "v1"
+}

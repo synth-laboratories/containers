@@ -1,0 +1,49 @@
+{
+  "abstained_count": 0,
+  "annotation_ids": [],
+  "applied_count": 0,
+  "content_digest": "sha256:2f71bee67b1ddb930178ab30380f3d4f718480a0f1bf4d6aa54ac3b7927fa2f2",
+  "created_at": "2026-09-07T22:58:26.459597Z",
+  "idempotency_key": "sha256:aab263f407f51e2c5d6dd15ae4f596118db37d4bbaa7f7c7ca9635e65b8de5c1",
+  "job_id": "ajob_5bf913a1a538021d",
+  "metadata": {},
+  "program_digest": "sha256:9359df18dae1c2a0d7cca8e77b340564ada30ad6da1ce32494b4ed3f48c627ee",
+  "receipt_ids": [],
+  "rejected_count": 0,
+  "request": {
+    "allowed_projection_digests": [],
+    "allowed_projection_ids": [],
+    "annotator_digest": "sha256:3a59ab7866196a353516e98c998793ff5cbb9375bd111e321516854d00f57aca",
+    "annotator_id": "test.verifier",
+    "limits": {
+      "max_tool_calls": 200,
+      "max_tool_response_bytes": 32000,
+      "max_total_tokens": 400000,
+      "max_total_tool_bytes": 2000000,
+      "timeout_seconds": 900.0
+    },
+    "metadata": {},
+    "mode": "verify",
+    "repeat_index": 0,
+    "rubric_digest": "sha256:8dbd92d803fc1779acd41e66126d612385bddbe011244826e41c9603391ea92b",
+    "rubric_id": "test.rubric",
+    "runner_kind": "deterministic",
+    "runner_version": "synth.annotation-runner@1",
+    "schema_version": "synth.annotation-job-request.v1",
+    "source_annotation_ids": [],
+    "source_trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+    "source_trace_id": "trace_db61f67b4e043a03",
+    "target_selector_ids": []
+  },
+  "revision": 1,
+  "schema_version": "synth.annotation-job.v1",
+  "state": "prepared",
+  "tool_contract_digest": "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+  "updated_at": "2026-09-07T22:58:26.459597Z",
+  "usage": {
+    "cost_status": "unavailable",
+    "tool_bytes": 0,
+    "tool_calls": 0
+  },
+  "verifier_result_ids": []
+}

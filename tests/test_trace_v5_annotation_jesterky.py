@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from pathlib import Path
 from typing import Any
 
@@ -262,3 +264,105 @@ def test_cannot_override_deterministic_to_jesterky(tmp_path: Path) -> None:
         assert "deterministic" in str(error).lower() or "runner" in str(error).lower()
     else:
         raise AssertionError("expected runner override to fail")
+
+
+def test_every_worker_is_collected_without_erasing_disagreement():
+    from synth_containers.tracing.annotation.jesterky_runner import extract_proposals
+    base={"schema_version":PROPOSAL_SCHEMA_VERSION,"source_trace_id":"t","source_trace_digest":"sha256:t","findings":[{"labels":["loop"],"evidence":[{"entity_id":"e"}]}],"summary":"first"}
+    second={**base,"findings":[{"labels":["recovery"],"evidence":[{"entity_id":"e"}]}],"summary":"second"}
+    manifest={"args":{"echo":base},"recorded":[{"outputs":{"first":base}},{"outputs":{"second":second}},{"outputs":{"duplicate":base}}]}
+    assert len(extract_proposals(manifest))==3
+    result=extract_proposal(manifest)
+    assert len(result["findings"])==2
+    assert result["summary"]=="first\nsecond"
+
+
+def test_partitions_are_actor_scoped_bounded_and_stable():
+    from types import SimpleNamespace
+    from synth_containers.tracing.annotation.jesterky_runner import partition_jobs
+    events=[SimpleNamespace(actor_id=f"actor-{i%4}",session_id=f"session-{i%4}",event_id=f"event-{i}") for i in range(10000)]
+    document=SimpleNamespace(trace_id="t",content_digest="sha256:t",events=events)
+    jobs=partition_jobs(document,Path("trace.json"),"annotator",None,None)
+    assert len(jobs)==40
+    assert jobs==partition_jobs(document,Path("trace.json"),"annotator",None,None)
+    ids=[event for job in jobs for event in job['event_ids']]
+    assert len(ids)==len(set(ids))==10000
+    for job in jobs:
+        assert len(job['event_ids'])<=250
+        assert len({int(event.split('-')[1])%4 for event in job['event_ids']})==1
+
+
+def test_luna_low_is_analysis_default_and_cli_requires_real_cost_enforcement():
+    runner=JesterkyRunner()
+    assert runner.default_model=='gpt-5.6-luna'
+    assert runner.default_effort=='low'
+    assert runner.cost_enforcement() is None
+
+
+@pytest.mark.parametrize("journal_only", [False, True])
+@pytest.mark.parametrize("retained_long", [False, True])
+def test_retry_reuses_completed_workers_and_merges_every_output(tmp_path, monkeypatch, journal_only, retained_long):
+    import json
+    from types import SimpleNamespace
+    import pytest
+    from synth_containers.tracing.annotation.fixtures import build_craftax_smoke_trace
+    import synth_containers.tracing.annotation.jesterky_runner as module
+    trace=build_craftax_smoke_trace()
+    if retained_long:
+        import os
+        from synth_containers.tracing.store.bundle import LocalTraceBundle
+        from synth_containers.tracing.projections.inspector import load_bundle
+        archive=os.environ.get('SYNTH_RESEARCH_LONG_ARCHIVE')
+        if not archive:pytest.skip('opt-in retained 10,000-event four-actor archive')
+        bundle=LocalTraceBundle.extract_archive(Path(archive),tmp_path/'source-bundle')
+        trace=load_bundle(bundle.root)[0].trace
+        assert len(trace.events)>=10000
+        assert len({event.actor_id for event in trace.events if event.actor_id})>=4
+    request=SimpleNamespace(annotator_id='test',metadata={'jesterky_window_events':250 if retained_long else 1},limits=AnnotationJobLimitsV1())
+    context=SimpleNamespace(shard_cache_dir=tmp_path/'cache',workspace_dir=tmp_path/'workspace',document=trace,instructions_text='inspect',instructions_digest='sha256:instructions',entry=SimpleNamespace(program=SimpleNamespace(parameters={})),job=SimpleNamespace(job_id='job',request=request))
+    seen=[]
+    class Process:
+        def __init__(self,argv,**kw):
+            pending=json.loads(Path(argv[argv.index('--args-file')+1]).read_text())['jobs']
+            seen.append([j['shard_id'] for j in pending])
+            self.returncode=1 if len(seen)==1 else 0
+            selected=pending[:1] if self.returncode else pending
+            recorded=[]
+            for i, job in enumerate(selected):
+                proposal={'schema_version':PROPOSAL_SCHEMA_VERSION,'source_trace_id':trace.trace_id,'source_trace_digest':trace.content_digest,'findings':[],'abstentions':[],'judgments':[],'summary':job['shard_id']}
+                recorded.append({'addr':{'node_path':[{'node':'annotate_jobs'},{'index':i}]},'outputs':{'proposal':proposal}})
+            if journal_only and self.returncode:
+                rows=[{'addr':{**r['addr'],'run_id':'ann-job'},'kind':{'kind':'actor_invoked'},'payload':{'outputs':r['outputs']}} for r in recorded]
+                Path(argv[argv.index('--events-out')+1]).write_text('\n'.join(json.dumps(r) for r in rows)+'\n{')
+            else:
+                Path(argv[argv.index('--out')+1]).write_text(json.dumps({'recorded':recorded}))
+        def communicate(self,timeout): return ('','')
+    monkeypatch.setattr(module.subprocess,'Popen',Process)
+    runner=JesterkyRunner()
+    with pytest.raises(RuntimeError,match='successful proposals retained|without a manifest'):
+        runner._run_cli(context,model='gpt-5.6-luna',effort='low',events=[])
+    context.workspace_dir=tmp_path/'retry-workspace'
+    context.job.job_id='retry-job'
+    result=runner._run_cli(context,model='gpt-5.6-luna',effort='low',events=[])
+    if retained_long:assert len(seen[0])>=40
+    assert seen[0][0] not in seen[1]
+    assert len(seen[1])==len(seen[0])-1
+    assert len(result['summary'].splitlines())==len(seen[0])
+    runner._run_cli(context,model='gpt-5.6-luna',effort='low',events=[])
+    assert len(seen)==2  # completed receipt requires no third invocation
+
+
+def test_inspection_mcp_uses_shared_bounded_tools():
+    import json, urllib.request
+    from synth_containers.tracing.annotation.jesterky_tools import serve_inspection_tools
+    from synth_containers.tracing.annotation.tools import TraceInspectionTools
+    from synth_containers.tracing.annotation.fixtures import build_craftax_smoke_trace
+    tools = TraceInspectionTools(build_craftax_smoke_trace(), limits=AnnotationJobLimitsV1(max_tool_calls=1))
+    with serve_inspection_tools(tools) as url:
+        def call(method, params=None):
+            req = urllib.request.Request(url, data=json.dumps({"jsonrpc":"2.0","id":1,"method":method,"params":params or {}}).encode(), headers={"Content-Type":"application/json"})
+            return json.load(urllib.request.urlopen(req))["result"]
+        assert call("initialize")["capabilities"] == {"tools":{}}
+        assert any(t["name"] == "trace_resolve_selector" for t in call("tools/list")["tools"])
+        assert not call("tools/call", {"name":"trace_get_manifest"}).get("isError")
+        assert call("tools/call", {"name":"trace_get_manifest"})["isError"]

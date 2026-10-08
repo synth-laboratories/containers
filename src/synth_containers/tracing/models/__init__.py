@@ -10,6 +10,14 @@ from .actors import (
     Visibility,
 )
 from .artifacts import ArtifactCompleteness, ArtifactRefV5, ArtifactRole
+from .assembly import (
+    ASSEMBLY_SCHEMA_VERSION,
+    AnnotationAssemblyGraphV1,
+    AssemblyEdgeV1,
+    AssemblyKind,
+    AssemblyNodeV1,
+    AssemblyRelation,
+)
 from .completeness import (
     CaptureStatus,
     TerminationV5,
@@ -157,6 +165,12 @@ from .standards import (
 )
 
 __all__ = [
+    "ASSEMBLY_SCHEMA_VERSION",
+    "AnnotationAssemblyGraphV1",
+    "AssemblyEdgeV1",
+    "AssemblyKind",
+    "AssemblyNodeV1",
+    "AssemblyRelation",
     "BUNDLE_SCHEMA_VERSION",
     "EVIDENCE_BUNDLE_SCHEMA_VERSION",
     "TRACE_SCHEMA_VERSION",

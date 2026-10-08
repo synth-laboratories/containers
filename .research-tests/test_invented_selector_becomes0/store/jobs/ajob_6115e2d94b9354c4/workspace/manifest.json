@@ -1,0 +1,50 @@
+{
+  "annotator_digest": "sha256:5e3321ab5c64f72b9d67538cd1edf01d42cba01a02a3b00bebebe85666b43662",
+  "annotator_id": "test.belief",
+  "annotator_version": "v1",
+  "content_digest": "sha256:3308c3ebe5652a239c0fc2a6c55370cf36808312dc66b17431d6ad8b8211cddd",
+  "created_at": "2026-09-07T22:58:25.152075Z",
+  "files": [
+    "manifest.json",
+    "INSTRUCTIONS.md",
+    "annotator_definition.json",
+    "output_schema.json",
+    "tool_contract.json"
+  ],
+  "job_id": "ajob_6115e2d94b9354c4",
+  "limits": {
+    "max_tool_calls": 200,
+    "max_tool_response_bytes": 32000,
+    "max_total_tokens": 400000,
+    "max_total_tool_bytes": 2000000,
+    "timeout_seconds": 900.0
+  },
+  "mode": "annotate",
+  "output_schema_id": "synth.annotation-proposal.v1",
+  "program_digest": "sha256:6109dcdc97856a2dc8e80f9587637cdb54679db777f1df177e9464d6e08abffd",
+  "program_id": "test.belief.program",
+  "projections": [],
+  "reasoning_policy": "not_captured",
+  "runner_kind": "deterministic",
+  "schema_version": "synth.annotation-workspace.v1",
+  "scope_session_ids": [],
+  "source_annotation_ids": [],
+  "source_trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+  "source_trace_id": "trace_db61f67b4e043a03",
+  "source_trace_schema": "synth.trace.v5",
+  "tool_contract_digest": "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+  "tool_names": [
+    "trace_get_manifest",
+    "trace_list_entities",
+    "trace_get_turn",
+    "trace_get_span",
+    "trace_get_message",
+    "trace_get_tool_call",
+    "trace_get_environment_transition",
+    "trace_get_event",
+    "trace_resolve_selector",
+    "trace_compare_pre_post_state",
+    "trace_search_text",
+    "trace_get_projection_manifest"
+  ]
+}

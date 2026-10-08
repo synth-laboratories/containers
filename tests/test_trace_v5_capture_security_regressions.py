@@ -2547,3 +2547,42 @@ def test_v4_importers_produce_valid_completed_terminal_lifecycles() -> None:
         assert document.lifecycle.status == TraceStatus.COMPLETED
         assert document.completeness.terminal_event_observed is True
         assert validate_trace(document) == []
+
+
+@pytest.mark.parametrize("disconnect", [BrokenPipeError, ConnectionResetError])
+def test_capture_retains_received_generation_before_downstream_disconnect(tmp_path, disconnect):
+    session = _session(tmp_path)
+    proxy = CaptureProxy(session, upstream_base_url="https://provider.example/v1",
+                         provider_endpoints=(ProviderEndpointConfig(route="/v1/responses", adapter_name="openai_responses",
+                                                                   upstream_base_url="https://provider.example/v1", auth_kind=UpstreamAuthKind.NONE),))
+    frame = b'data: {"type":"response.created","response":{"id":"gen-observed-before-disconnect"}}\n\n'
+    consumed = []
+    class Upstream(httpx.SyncByteStream):
+        def __iter__(self):
+            consumed.append("first")
+            yield frame
+            consumed.append("second")
+            yield b'data: [DONE]\n\n'
+    proxy._client.close()
+    proxy._client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(
+        200, headers={"content-type":"text/event-stream"}, stream=Upstream())), trust_env=False)
+    class Downstream:
+        def begin(self, *_):
+            pass
+        def write(self, _):
+            raise disconnect("client canceled")
+    try:
+        response = proxy.handle_provider_request(path="/v1/responses", headers={"content-type":"application/json"},
+                                                  body=canonical_bytes({"model":"openai/gpt-6-luna","input":"test","stream":True}))
+        with pytest.raises(disconnect):
+            response.stream(Downstream())
+    finally:
+        proxy.stop(reason="test_complete")
+        session.spool.close()
+    records = list(session.spool.records())
+    frames = [r for r in records if r["record_type"] == str(RawRecordType.RESPONSE_FRAME)]
+    assert len(frames) == 1 and "gen-observed-before-disconnect" in frames[0]["payload"]["frame"]
+    errors = [r for r in records if r["record_type"] == str(RawRecordType.ERROR)]
+    assert errors[-1]["payload"]["stage"] == "downstream_stream"
+    assert consumed == ["first"]  # Do not drain a paid stream after cancellation.
+    assert not any(r["record_type"] == str(RawRecordType.MODEL_CALL_FINISHED) for r in records)

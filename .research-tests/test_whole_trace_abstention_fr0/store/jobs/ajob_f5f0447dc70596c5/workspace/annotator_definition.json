@@ -1,0 +1,41 @@
+{
+  "annotator_id": "test.partscoped",
+  "confidence_semantics": "deterministic",
+  "content_digest": "sha256:290b51fd328df8f3bec621b54d05e4a604f8f1c2fe424e8d9ff351f1636048b7",
+  "grounding_requirement": "exact_selector",
+  "metadata": {},
+  "minimum_evidence": 1,
+  "name": "test.partscoped",
+  "output_contract": {
+    "allowed_producer_kinds": [],
+    "annotation_types": [
+      "belief"
+    ],
+    "task_kind": "classify",
+    "taxonomy": [
+      {
+        "aliases": [],
+        "description": "",
+        "label": "belief.contradicted"
+      },
+      {
+        "aliases": [],
+        "description": "",
+        "label": "belief.correct"
+      }
+    ]
+  },
+  "purpose": "test annotator",
+  "reasoning_policy": "not_captured",
+  "required_subject_scope": "part",
+  "schema_version": "synth.trace-annotator.v1",
+  "supported_trace_schemas": [
+    "synth.trace.v5"
+  ],
+  "taxonomy": [
+    "belief.contradicted",
+    "belief.correct"
+  ],
+  "unavailable_evidence_behavior": "abstain",
+  "version": "v1"
+}

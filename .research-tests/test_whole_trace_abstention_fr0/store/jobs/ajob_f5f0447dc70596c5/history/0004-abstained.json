@@ -1,0 +1,54 @@
+{
+  "abstained_count": 1,
+  "annotation_ids": [],
+  "applied_count": 0,
+  "bundle_digest": "sha256:bd2eb8bdf797e3d680a8295439c07057c04db9f2e5220b69a1fe29f7dd5d37d2",
+  "bundle_id": "evb_41f3cab5ab43fce8",
+  "content_digest": "sha256:b4a69b336149d7f30df6b5f5cb89dce4a160c92853fa39db9aa355f45181677e",
+  "created_at": "2026-09-07T22:58:27.449554Z",
+  "idempotency_key": "sha256:0342b2fefffeab6ffada7259d30200c6efe85924c2539a0069178dc4cb445f0a",
+  "job_id": "ajob_f5f0447dc70596c5",
+  "metadata": {},
+  "program_digest": "sha256:db6b899fb265b27f8b502ac59f12395c3d84850715097abc013b67fb83a16bac",
+  "receipt_ids": [
+    "rcpt_3e62c8f61ad18e78"
+  ],
+  "rejected_count": 0,
+  "request": {
+    "allowed_projection_digests": [],
+    "allowed_projection_ids": [],
+    "annotator_digest": "sha256:290b51fd328df8f3bec621b54d05e4a604f8f1c2fe424e8d9ff351f1636048b7",
+    "annotator_id": "test.partscoped",
+    "limits": {
+      "max_tool_calls": 200,
+      "max_tool_response_bytes": 32000,
+      "max_total_tokens": 400000,
+      "max_total_tool_bytes": 2000000,
+      "timeout_seconds": 900.0
+    },
+    "metadata": {},
+    "mode": "annotate",
+    "repeat_index": 0,
+    "runner_kind": "deterministic",
+    "runner_version": "synth.annotation-runner@1",
+    "schema_version": "synth.annotation-job-request.v1",
+    "source_annotation_ids": [],
+    "source_trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+    "source_trace_id": "trace_db61f67b4e043a03",
+    "target_selector_ids": []
+  },
+  "revision": 4,
+  "schema_version": "synth.annotation-job.v1",
+  "state": "abstained",
+  "tool_contract_digest": "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+  "updated_at": "2026-09-07T22:58:27.467417Z",
+  "usage": {
+    "cost_status": "free",
+    "cost_usd": 0.0,
+    "tool_bytes": 0,
+    "tool_calls": 0,
+    "wall_time_seconds": 1.1209020158275962e-05
+  },
+  "verifier_result_ids": [],
+  "workspace_manifest_digest": "sha256:6cd8c90655529befa383242edd032c8c72f8662db1f3fcc88893017dfe9f4507"
+}

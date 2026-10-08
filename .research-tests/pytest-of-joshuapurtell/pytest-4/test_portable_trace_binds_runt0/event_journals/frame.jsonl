@@ -1,0 +1,2 @@
+{"envelope":{"control":false,"digest":"30559fe1bfd8d3ac","event_id":"1","kind":"frame","payload":{"format":"png","step":0,"url":"/rollouts/frame_bundle_rollout/frames/0.png"},"schema":"synth.trace-stream-event.v1","sequence":1,"ts":"2026-09-07T23:27:27.092944Z"},"record":"envelope"}
+{"high_water":1,"record":"closed"}

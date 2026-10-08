@@ -1,0 +1,261 @@
+{
+  "tool_contract_digest": "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+  "tools": [
+    {
+      "description": "Identity, lifecycle, entity counts, actors, sessions, and extension keys of the sealed source trace. Read-only. Start here.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "name": "trace_get_manifest"
+    },
+    {
+      "description": "Page through entities of one kind (message, span, event, actor, session, artifact) in trace order with their selectors. Read-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "event_type": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "enum": [
+              "message",
+              "span",
+              "event",
+              "actor",
+              "session",
+              "artifact"
+            ],
+            "type": "string"
+          },
+          "limit": {
+            "default": 50,
+            "maximum": 200,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "role": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "session_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "span_kind": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      "name": "trace_list_entities"
+    },
+    {
+      "description": "Every span and message that shares one turn_id, plus messages those spans consumed or produced. Read-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "turn_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "turn_id"
+        ],
+        "type": "object"
+      },
+      "name": "trace_get_turn"
+    },
+    {
+      "description": "One span with its detail, usage, and linked message summaries. Read-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "span_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "span_id"
+        ],
+        "type": "object"
+      },
+      "name": "trace_get_span"
+    },
+    {
+      "description": "One message: role, parts, metadata, and a bounded text window. Use offset to page through long text. Read-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "max_chars": {
+            "default": 6000,
+            "maximum": 20000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "message_id": {
+            "type": "string"
+          },
+          "offset": {
+            "default": 0,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "message_id"
+        ],
+        "type": "object"
+      },
+      "name": "trace_get_message"
+    },
+    {
+      "description": "A tool call part and its matching tool result part, located by tool_call_id. Read-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "tool_call_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool_call_id"
+        ],
+        "type": "object"
+      },
+      "name": "trace_get_tool_call"
+    },
+    {
+      "description": "One environment_step span with its detail, the previous and next environment steps in the same session, and the engine events attached to it. Read-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "span_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "span_id"
+        ],
+        "type": "object"
+      },
+      "name": "trace_get_environment_transition"
+    },
+    {
+      "description": "One event with its full payload (reward values, grader scores, achievements, terminal reasons live here). Read-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "event_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id"
+        ],
+        "type": "object"
+      },
+      "name": "trace_get_event"
+    },
+    {
+      "description": "Check that a selector resolves against the sealed trace and see the exact text it cites. Use before citing evidence. Read-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "selector": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "selector"
+        ],
+        "type": "object"
+      },
+      "name": "trace_resolve_selector"
+    },
+    {
+      "description": "Line-level diff between two messages' text (for example the observation before and after an action). Read-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "after_message_id": {
+            "type": "string"
+          },
+          "before_message_id": {
+            "type": "string"
+          },
+          "max_lines": {
+            "default": 120,
+            "maximum": 400,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "before_message_id",
+          "after_message_id"
+        ],
+        "type": "object"
+      },
+      "name": "trace_compare_pre_post_state"
+    },
+    {
+      "description": "Case-insensitive substring search over message text; returns message ids, roles, and character offsets suitable for range selectors. Read-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "default": 20,
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "query": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "role": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "name": "trace_search_text"
+    },
+    {
+      "description": "The lossy projections this job may cite, with their declared losses. Projections are never trace authority. Read-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "name": "trace_get_projection_manifest"
+    }
+  ]
+}

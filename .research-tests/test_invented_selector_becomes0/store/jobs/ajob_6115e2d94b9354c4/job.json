@@ -1,0 +1,59 @@
+{
+  "abstained_count": 3,
+  "annotation_ids": [
+    "ann_024c15f7a8a17815",
+    "ann_72cdd934cf06695a",
+    "ann_a7b8354cf0be8bb1",
+    "ann_2a1ad4f03d63c3d2"
+  ],
+  "applied_count": 1,
+  "bundle_digest": "sha256:aeb3ff329303011c8d1bc571c0b65a14f18b923f3cfcc3366df58e34dc99c8eb",
+  "bundle_id": "evb_07c7f7fc6bc3984c",
+  "content_digest": "sha256:c85ff9f0a05f39f8bcada7f0dd074eea9c3d6f2d2698db5a5db569eb30dab02d",
+  "created_at": "2026-09-07T22:58:25.145062Z",
+  "idempotency_key": "sha256:00ef79c4fe42f83242681ff01eb2ef8e443453e719cf00183494b40d01b1087f",
+  "job_id": "ajob_6115e2d94b9354c4",
+  "metadata": {},
+  "program_digest": "sha256:6109dcdc97856a2dc8e80f9587637cdb54679db777f1df177e9464d6e08abffd",
+  "receipt_ids": [
+    "rcpt_612f734640e72d21"
+  ],
+  "rejected_count": 2,
+  "request": {
+    "allowed_projection_digests": [],
+    "allowed_projection_ids": [],
+    "annotator_digest": "sha256:5e3321ab5c64f72b9d67538cd1edf01d42cba01a02a3b00bebebe85666b43662",
+    "annotator_id": "test.belief",
+    "limits": {
+      "max_tool_calls": 200,
+      "max_tool_response_bytes": 32000,
+      "max_total_tokens": 400000,
+      "max_total_tool_bytes": 2000000,
+      "timeout_seconds": 900.0
+    },
+    "metadata": {},
+    "mode": "annotate",
+    "repeat_index": 0,
+    "runner_kind": "deterministic",
+    "runner_version": "synth.annotation-runner@1",
+    "schema_version": "synth.annotation-job-request.v1",
+    "source_annotation_ids": [],
+    "source_trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf",
+    "source_trace_id": "trace_db61f67b4e043a03",
+    "target_selector_ids": []
+  },
+  "revision": 4,
+  "schema_version": "synth.annotation-job.v1",
+  "state": "sealed",
+  "tool_contract_digest": "sha256:fa597539e3166b596856d95b77a723c4ad534967c7f60c996503109343594123",
+  "updated_at": "2026-09-07T22:58:25.165223Z",
+  "usage": {
+    "cost_status": "free",
+    "cost_usd": 0.0,
+    "tool_bytes": 0,
+    "tool_calls": 0,
+    "wall_time_seconds": 1.5916972188279033e-05
+  },
+  "verifier_result_ids": [],
+  "workspace_manifest_digest": "sha256:3308c3ebe5652a239c0fc2a6c55370cf36808312dc66b17431d6ad8b8211cddd"
+}

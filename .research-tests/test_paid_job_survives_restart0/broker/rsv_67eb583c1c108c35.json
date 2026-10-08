@@ -1,0 +1,22 @@
+{
+  "actual_cost_usd_micros": null,
+  "approver": "",
+  "binding": {
+    "annotator_id": "test.paid",
+    "model": "gpt-5.6-luna",
+    "session_id": "sess-1",
+    "trace_digest": "sha256:0200fb51b48c94283b663531ff2fab26126237a4ed81a4eb2c7663be95fccdbf"
+  },
+  "cap_usd_micros": 300000,
+  "claimed_at": "2026-09-07T22:58:26.015459Z",
+  "claimed_by_job_id": "ajob_e435ca59abb59e8d",
+  "expires_at": null,
+  "issued_at": "2026-09-07T22:58:26.013329Z",
+  "metadata": {
+    "wildcard": false
+  },
+  "outcome": null,
+  "reconciled_at": null,
+  "reservation_id": "rsv_67eb583c1c108c35",
+  "schema_version": "synth.paid-compute-reservation.v1"
+}

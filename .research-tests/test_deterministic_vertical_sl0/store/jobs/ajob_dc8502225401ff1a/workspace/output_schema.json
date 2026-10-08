@@ -1,0 +1,672 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "abstentions": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "annotation_type": {
+            "type": "string"
+          },
+          "attempted_selector": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "entity_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "json_pointer": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "kind": {
+                    "enum": [
+                      "trace",
+                      "actor",
+                      "session",
+                      "branch",
+                      "span",
+                      "event",
+                      "message",
+                      "part",
+                      "artifact",
+                      "actor_group",
+                      "interaction",
+                      "context_epoch",
+                      "joint_turn"
+                    ],
+                    "type": "string"
+                  },
+                  "part_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "quote": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "range": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "end": {
+                            "type": "integer"
+                          },
+                          "start": {
+                            "type": "integer"
+                          },
+                          "unit": {
+                            "enum": [
+                              "character",
+                              "token"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "start",
+                          "end",
+                          "unit"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "token_sequence": {
+                    "enum": [
+                      "prompt",
+                      "completion",
+                      null
+                    ],
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "kind",
+                  "entity_id",
+                  "part_id",
+                  "json_pointer",
+                  "quote",
+                  "range",
+                  "token_sequence"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "requirement": {
+            "type": "string"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "entity_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "json_pointer": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "kind": {
+                    "enum": [
+                      "trace",
+                      "actor",
+                      "session",
+                      "branch",
+                      "span",
+                      "event",
+                      "message",
+                      "part",
+                      "artifact",
+                      "actor_group",
+                      "interaction",
+                      "context_epoch",
+                      "joint_turn"
+                    ],
+                    "type": "string"
+                  },
+                  "part_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "quote": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "range": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "end": {
+                            "type": "integer"
+                          },
+                          "start": {
+                            "type": "integer"
+                          },
+                          "unit": {
+                            "enum": [
+                              "character",
+                              "token"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "start",
+                          "end",
+                          "unit"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "token_sequence": {
+                    "enum": [
+                      "prompt",
+                      "completion",
+                      null
+                    ],
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "kind",
+                  "entity_id",
+                  "part_id",
+                  "json_pointer",
+                  "quote",
+                  "range",
+                  "token_sequence"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "target",
+          "annotation_type",
+          "reason",
+          "requirement",
+          "attempted_selector"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "findings": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "annotation_type": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "evidence": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "entity_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "json_pointer": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "kind": {
+                  "enum": [
+                    "trace",
+                    "actor",
+                    "session",
+                    "branch",
+                    "span",
+                    "event",
+                    "message",
+                    "part",
+                    "artifact",
+                    "actor_group",
+                    "interaction",
+                    "context_epoch",
+                    "joint_turn"
+                  ],
+                  "type": "string"
+                },
+                "part_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "quote": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "range": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "end": {
+                          "type": "integer"
+                        },
+                        "start": {
+                          "type": "integer"
+                        },
+                        "unit": {
+                          "enum": [
+                            "character",
+                            "token"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "start",
+                        "end",
+                        "unit"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "token_sequence": {
+                  "enum": [
+                    "prompt",
+                    "completion",
+                    null
+                  ],
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "kind",
+                "entity_id",
+                "part_id",
+                "json_pointer",
+                "quote",
+                "range",
+                "token_sequence"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "labels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "payload_json": {
+            "description": "JSON object encoded as a string; the payload fields the taxonomy declares",
+            "type": "string"
+          },
+          "rationale": {
+            "type": "string"
+          },
+          "source_annotation_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "target": {
+            "additionalProperties": false,
+            "properties": {
+              "entity_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "json_pointer": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "kind": {
+                "enum": [
+                  "trace",
+                  "actor",
+                  "session",
+                  "branch",
+                  "span",
+                  "event",
+                  "message",
+                  "part",
+                  "artifact",
+                  "actor_group",
+                  "interaction",
+                  "context_epoch",
+                  "joint_turn"
+                ],
+                "type": "string"
+              },
+              "part_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "quote": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "range": {
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "end": {
+                        "type": "integer"
+                      },
+                      "start": {
+                        "type": "integer"
+                      },
+                      "unit": {
+                        "enum": [
+                          "character",
+                          "token"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "start",
+                      "end",
+                      "unit"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "token_sequence": {
+                "enum": [
+                  "prompt",
+                  "completion",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "entity_id",
+              "part_id",
+              "json_pointer",
+              "quote",
+              "range",
+              "token_sequence"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "target",
+          "annotation_type",
+          "labels",
+          "payload_json",
+          "confidence",
+          "rationale",
+          "evidence",
+          "source_annotation_ids"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "judgments": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "confidence": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "criterion_id": {
+            "type": "string"
+          },
+          "evidence": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "entity_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "json_pointer": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "kind": {
+                  "enum": [
+                    "trace",
+                    "actor",
+                    "session",
+                    "branch",
+                    "span",
+                    "event",
+                    "message",
+                    "part",
+                    "artifact",
+                    "actor_group",
+                    "interaction",
+                    "context_epoch",
+                    "joint_turn"
+                  ],
+                  "type": "string"
+                },
+                "part_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "quote": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "range": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "end": {
+                          "type": "integer"
+                        },
+                        "start": {
+                          "type": "integer"
+                        },
+                        "unit": {
+                          "enum": [
+                            "character",
+                            "token"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "start",
+                        "end",
+                        "unit"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "token_sequence": {
+                  "enum": [
+                    "prompt",
+                    "completion",
+                    null
+                  ],
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "kind",
+                "entity_id",
+                "part_id",
+                "json_pointer",
+                "quote",
+                "range",
+                "token_sequence"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "failure_modes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "rationale": {
+            "type": "string"
+          },
+          "score": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "status": {
+            "enum": [
+              "decisive",
+              "abstained",
+              "not_applicable",
+              "inconclusive"
+            ],
+            "type": "string"
+          },
+          "verdict": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "criterion_id",
+          "status",
+          "score",
+          "verdict",
+          "rationale",
+          "failure_modes",
+          "evidence",
+          "confidence"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "schema_version": {
+      "enum": [
+        "synth.annotation-proposal.v1"
+      ],
+      "type": "string"
+    },
+    "source_trace_digest": {
+      "type": "string"
+    },
+    "source_trace_id": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "source_trace_id",
+    "source_trace_digest",
+    "findings",
+    "abstentions",
+    "judgments",
+    "summary"
+  ],
+  "type": "object"
+}

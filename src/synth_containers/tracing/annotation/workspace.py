@@ -59,6 +59,7 @@ class AnnotationWorkspaceManifestV1(JsonDataclassMixin):
     limits: AnnotationJobLimitsV1 = field(default_factory=AnnotationJobLimitsV1)
     source_annotation_ids: tuple[str, ...] = ()
     scope_session_ids: tuple[str, ...] = ()
+    scope_span_ids: tuple[str, ...] = ()
     files: tuple[str, ...] = ()
     reasoning_policy: str = "not_captured"
     schema_version: str = WORKSPACE_MANIFEST_SCHEMA_VERSION
@@ -113,6 +114,7 @@ def build_workspace_manifest(
         limits=request.limits,
         source_annotation_ids=tuple(request.source_annotation_ids),
         scope_session_ids=tuple(item.split(":", 1)[1] for item in request.target_selector_ids if item.startswith("session:")),
+        scope_span_ids=tuple(item.split(":", 1)[1] for item in request.target_selector_ids if item.startswith("span:")),
         files=(
             "manifest.json",
             "INSTRUCTIONS.md",
@@ -236,6 +238,12 @@ def render_instructions(
         lines.append("")
     if manifest.scope_session_ids:
         lines.append("## Scope")
+        lines.append("")
+    if manifest.scope_span_ids:
+        lines.append(
+            "This job is a bounded call window. The trace tools expose only the selected model-call "
+            "and environment-step spans. Annotate every visible model call and no others."
+        )
         lines.append("")
         lines.append(
             "Annotate ONLY these sessions (lanes); pass `session_id` to `trace_list_entities` and "
