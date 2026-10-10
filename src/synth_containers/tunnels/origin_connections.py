@@ -5,6 +5,7 @@ are never retried or returned. Pooling carries no credential or access policy.
 """
 
 import http.client
+import select
 import threading
 import time
 
@@ -31,7 +32,11 @@ class OriginConnections:
             epoch = self._epoch
             retained = []
             for entry_key, released, connection in self._idle:
-                if now - released >= self.idle_seconds or connection.sock is None:
+                if (
+                    now - released >= self.idle_seconds
+                    or connection.sock is None
+                    or select.select([connection.sock], [], [], 0)[0]
+                ):
                     connection.close()
                 elif selected is None and entry_key == key:
                     selected = connection

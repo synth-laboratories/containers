@@ -108,3 +108,23 @@ def test_expired_idle_connection_is_closed_before_next_borrow(origin):
     finally:
         fresh.close()
         pool.retire()
+
+
+def test_peer_closed_idle_connection_is_discarded_before_effect():
+    import http.client
+    import select
+    import socket
+
+    local, peer = socket.socketpair()
+    connection = http.client.HTTPConnection("127.0.0.1")
+    connection.sock = local
+    pool = OriginConnections()
+    key = (1, None, "http", "127.0.0.1", 80)
+    pool.release(key, connection, 0)
+    peer.close()
+    assert select.select([local], [], [], 1)[0]
+    fresh, _ = pool.borrow(key, timeout_seconds=2)
+    assert fresh is not connection
+    assert connection.sock is None
+    fresh.close()
+    pool.retire()
