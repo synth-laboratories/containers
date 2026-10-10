@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import signal
 import socket
+import sqlite3
 import subprocess
 import threading
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -26,6 +29,9 @@ from .metadata import (
 )
 from .ontology import CONTRACT_VERSION
 from .prompt_programs import gepa_optimizer_contract
+from .rollout_lifecycle import callback_cancelled, request_cancellation, request_identity
+from .rollout_operations import OriginOperationBinding
+from .rollout_journal import RolloutJournal, RolloutJournalError
 from .serde import JsonObject, jsonable
 from .wire import SubmissionMode
 
@@ -479,6 +485,7 @@ class Container:
         metadata: Mapping[str, Any] | None = None,
         policy_ready: bool = True,
         default_submission_mode: str = "async",
+        operation_directory: Path | None = None,
     ) -> None:
         if not name.strip():
             raise ValueError("Container.name is required")
@@ -488,6 +495,7 @@ class Container:
         self.metadata = {} if metadata is None else dict(metadata)
         self.policy_ready = policy_ready
         self.default_submission_mode = SubmissionMode(default_submission_mode)
+        self.operation_directory = operation_directory
         self._metadata: ContainerCallback | None = None
         self._task_info: ContainerCallback | None = None
         self._taskset: ContainerCallback | None = None
@@ -522,11 +530,49 @@ class Container:
     def beta_program(self, callback: ContainerCallback) -> ContainerCallback:
         return self.program(callback)
 
-    def fastapi(self, *, title: str | None = None) -> FastAPI:
-        app = FastAPI(title=title or self.name)
+    def fastapi(self, *, title: str | None = None, operation_directory: Path | None = None) -> FastAPI:
+        operation_directory = self.operation_directory if operation_directory is None else operation_directory
+        journal = None if operation_directory is None else RolloutJournal(operation_directory, self.runtime_id)
+        journal_closed = False
         records: dict[str, AsyncRolloutRecord] = {}
         tasks: dict[str, asyncio.Task[None]] = {}
+        request_digests: dict[str, str] = {}
         records_lock = asyncio.Lock()
+
+        def read_record(rollout_id: str) -> AsyncRolloutRecord | None:
+            if journal is None:
+                return records.get(rollout_id)
+            payload = journal.get(rollout_id)
+            return None if payload is None else AsyncRolloutRecord(payload=payload)
+
+        def save_record(rollout_id: str, record: AsyncRolloutRecord) -> None:
+            if journal is None:
+                records[rollout_id] = record
+            else:
+                journal.write(rollout_id, record.payload)
+
+        @asynccontextmanager
+        async def lifespan(_app: FastAPI):
+            nonlocal journal_closed
+            try:
+                yield
+            finally:
+                owned = list(tasks.values())
+                for task in owned:
+                    task.cancel()
+                if owned:
+                    await asyncio.wait(owned, timeout=5)
+                if journal is not None:
+                    try:
+                        for rollout_id in tuple(tasks):
+                            record = read_record(rollout_id)
+                            if record is not None:
+                                save_record(rollout_id, AsyncRolloutRecord(payload=callback_cancelled(record.payload, _now())))
+                    finally:
+                        journal_closed = True
+                        journal.close()
+
+        app = FastAPI(title=title or self.name, lifespan=lifespan)
 
         async def metadata_payload() -> dict[str, Any]:
             if self._metadata is not None:
@@ -548,6 +594,7 @@ class Container:
                         "runtime_id": self.runtime_id,
                         "name": self.name,
                         "description": self.description,
+                        "origin_instance": None if journal is None else journal.origin_instance,
                     },
                     "capabilities": {
                         "rollout_modes": ["blocking", "async"],
@@ -592,6 +639,10 @@ class Container:
                         parent["optimizer_contracts"] = contracts
                     else:
                         parent.pop("optimizer_contracts", None)
+            merged["capabilities"].setdefault("metadata", {}).update({
+                "durable_operation_lookup": journal is not None,
+                "origin_operation_contract": "rollout.v1" if journal is not None else None,
+            })
             return merged
 
         async def task_info_payload() -> dict[str, Any]:
@@ -633,16 +684,33 @@ class Container:
                 rollout_id
             )
             async with records_lock:
-                records[rollout_id] = result
+                save_record(rollout_id, result)
                 tasks.pop(rollout_id, None)
 
         def observe_async_task(rollout_id: str, task: asyncio.Task[None]) -> None:
+            if journal_closed:
+                if not task.cancelled():
+                    task.exception()
+                return
             if task.cancelled():
+                record = read_record(rollout_id)
+                assert record is not None
+                save_record(rollout_id, AsyncRolloutRecord(
+                    payload=callback_cancelled(record.payload, _now())
+                ))
+                tasks.pop(rollout_id, None)
                 return
             exc = task.exception()
             if exc is not None:
-                running = RolloutStatePayload.model_validate(records[rollout_id].payload)
-                records[rollout_id] = AsyncRolloutRecord(
+                # Storage failure cannot become an acknowledged origin failure.
+                # Keep the admitted identity for lookup/restart reconciliation.
+                if isinstance(exc, (RolloutJournalError, OSError, sqlite3.Error)):
+                    tasks.pop(rollout_id, None)
+                    return
+                record = read_record(rollout_id)
+                assert record is not None
+                running = RolloutStatePayload.model_validate(record.payload)
+                save_record(rollout_id, AsyncRolloutRecord(
                     payload={
                         "rollout_id": rollout_id,
                         "status": "failed",
@@ -652,11 +720,15 @@ class Container:
                         "updated_at": _now(),
                         "summary": {},
                         "metadata": {
+                            **dict(running.metadata),
                             "error_code": "async_rollout_execution_failed",
                             "error_type": type(exc).__name__,
+                            "callback_task": "failed",
+                            "origin_outcome": "unverified",
+                            "resource_cleanup": "unverified",
                         },
                     }
-                )
+                ))
                 tasks.pop(rollout_id, None)
 
         @app.get("/")
@@ -698,66 +770,128 @@ class Container:
         async def rollout(submission: RolloutSubmissionPayload) -> dict[str, Any]:
             payload = submission.to_payload()
             mode = submission.resolved_submission_mode(self.default_submission_mode)
-            if mode == SubmissionMode.SYNC:
-                return (
-                    CompletedRolloutPayload.model_validate(await run_rollout(payload))
-                    .record_for(submission.rollout_id)
-                    .payload
-                )
-            now = _now()
-            initial = AsyncRolloutRecord(
-                payload={
-                    "rollout_id": submission.rollout_id,
-                    "status": "running",
-                    "success_status": "running",
-                    "created_at": now,
-                    "updated_at": now,
-                    "summary": {},
-                    "metadata": {"submission_mode": "async"},
-                }
-            )
+            try:
+                digest = request_identity(payload)
+            except (TypeError, ValueError) as error:
+                raise HTTPException(status_code=400, detail="invalid_rollout_payload") from error
             async with records_lock:
-                records[submission.rollout_id] = initial
-                task = asyncio.create_task(complete_async_rollout(submission.rollout_id, payload))
-                task.add_done_callback(lambda done: observe_async_task(submission.rollout_id, done))
-                tasks[submission.rollout_id] = task
+                now = _now()
+                initial = AsyncRolloutRecord(payload={
+                    "rollout_id": submission.rollout_id, "status": "running",
+                    "success_status": "running", "created_at": now, "updated_at": now,
+                    "summary": {}, "metadata": {"submission_mode": mode.value},
+                })
+                if journal is not None:
+                    try:
+                        retained, dispatch = journal.admit(submission.rollout_id, digest, initial.payload)
+                    except RolloutJournalError as error:
+                        code = str(error)
+                        raise HTTPException(status_code=409 if code == "rollout_identity_conflict" else 503, detail=code) from error
+                    except sqlite3.Error as error:
+                        raise HTTPException(status_code=503, detail="rollout_journal_unavailable") from error
+                    initial = AsyncRolloutRecord(payload=retained)
+                else:
+                    previous = request_digests.get(submission.rollout_id)
+                    if previous is not None and previous != digest:
+                        raise HTTPException(status_code=409, detail="rollout_identity_conflict")
+                    dispatch = previous is None
+                    if not dispatch:
+                        initial = records[submission.rollout_id]
+                    else:
+                        records[submission.rollout_id] = initial
+                        request_digests[submission.rollout_id] = digest
+                if not dispatch:
+                    task = tasks.get(submission.rollout_id)
+                else:
+                    task = asyncio.create_task(complete_async_rollout(submission.rollout_id, payload))
+                    task.add_done_callback(lambda done: observe_async_task(submission.rollout_id, done))
+                    tasks[submission.rollout_id] = task
+            if mode == SubmissionMode.SYNC and task is not None:
+                # Observation owns neither the callback nor its external effects.
+                # A disconnected blocking observer leaves the origin task owned.
+                await asyncio.shield(task)
+                completed = read_record(submission.rollout_id)
+                assert completed is not None
+                return completed.payload
             return initial.payload
 
         @app.get("/rollouts/{rollout_id}")
         async def get_rollout(rollout_id: str) -> dict[str, Any]:
             async with records_lock:
-                if rollout_id not in records:
+                record = read_record(rollout_id)
+                if record is None:
                     raise HTTPException(status_code=404, detail=f"unknown_rollout:{rollout_id}")
-                record = records[rollout_id]
             return dict(record.payload)
 
         @app.get("/rollouts/{rollout_id}/state")
         async def get_rollout_state(rollout_id: str) -> dict[str, Any]:
             async with records_lock:
-                if rollout_id not in records:
+                record = read_record(rollout_id)
+                if record is None:
                     raise HTTPException(status_code=404, detail=f"unknown_rollout:{rollout_id}")
-                record = records[rollout_id]
             return record.state_payload()
 
         @app.post("/rollouts/{rollout_id}/terminate")
         async def terminate_rollout(rollout_id: str) -> dict[str, Any]:
             async with records_lock:
-                task = tasks.pop(rollout_id, None)
-                if rollout_id not in records:
+                record = read_record(rollout_id)
+                if record is None:
                     raise HTTPException(status_code=404, detail=f"unknown_rollout:{rollout_id}")
-                record = records[rollout_id]
-                if task is not None:
-                    task.cancel()
-                updated = {
-                    **record.payload,
-                    "status": "terminated",
-                    "success_status": "failed",
-                    "status_detail": "terminated",
-                    "updated_at": _now(),
-                }
+                updated, first_request = request_cancellation(record.payload, _now())
+                if record.payload["status"] == "in_doubt":
+                    updated = {**updated, "status": "in_doubt", "success_status": "unknown",
+                               "metadata": {**updated["metadata"], "callback_task": record.payload.get("metadata", {}).get("callback_task", "lost")}}
                 record = AsyncRolloutRecord(payload=updated)
-                records[rollout_id] = record
+                save_record(rollout_id, record)
+                # Keep custody until the task exits. A repeated request must not
+                # interrupt graceful cleanup or relabel a completed result.
+                task = tasks.get(rollout_id)
+                if first_request and task is not None:
+                    task.cancel()
             return record.state_payload()
+
+        async def bound_origin_receipt(rollout_id: str, binding: OriginOperationBinding) -> dict[str, Any]:
+            if journal is None:
+                raise HTTPException(status_code=503, detail="origin_operation_lookup_unsupported")
+            if str(binding.origin_instance) != journal.origin_instance:
+                raise HTTPException(status_code=409, detail="origin_operation_instance_conflict")
+            async with records_lock:
+                try:
+                    receipt = journal.receipt(rollout_id)
+                except (RolloutJournalError, OSError, sqlite3.Error, json.JSONDecodeError) as error:
+                    raise HTTPException(status_code=503, detail="origin_operation_store_unavailable") from error
+                if receipt is None:
+                    raise HTTPException(status_code=404, detail="origin_operation_unknown")
+                if receipt["input_sha256"] != binding.input_sha256:
+                    raise HTTPException(status_code=409, detail="origin_operation_input_conflict")
+                return receipt
+
+        @app.post("/operations/rollouts:prepare")
+        async def prepare_origin_operation(submission: RolloutSubmissionPayload) -> dict[str, Any]:
+            # Normalize exactly as admission does, without admitting or dispatching.
+            if journal is None:
+                raise HTTPException(status_code=503, detail="origin_operation_lookup_unsupported")
+            try:
+                digest = request_identity(submission.to_payload())
+            except (TypeError, ValueError) as error:
+                raise HTTPException(status_code=400, detail="invalid_rollout_payload") from error
+            return {"origin_instance": journal.origin_instance, "input_sha256": digest,
+                    "origin_operation_id": submission.rollout_id, "contract": "rollout.v1"}
+
+        @app.get("/operations/rollouts/{rollout_id}")
+        async def observe_origin_operation(rollout_id: str, origin_instance: uuid.UUID, input_sha256: str) -> dict[str, Any]:
+            try:
+                binding = OriginOperationBinding(origin_instance=origin_instance, input_sha256=input_sha256)
+            except ValueError as error:
+                raise HTTPException(status_code=422, detail="origin_operation_binding_invalid") from error
+            return await bound_origin_receipt(rollout_id, binding)
+
+        @app.post("/operations/rollouts/{rollout_id}/cancel")
+        async def cancel_origin_operation(rollout_id: str, binding: OriginOperationBinding) -> dict[str, Any]:
+            # Validate immutable identity before recording intent or touching a task.
+            await bound_origin_receipt(rollout_id, binding)
+            await terminate_rollout(rollout_id)
+            return await bound_origin_receipt(rollout_id, binding)
 
         return app
 

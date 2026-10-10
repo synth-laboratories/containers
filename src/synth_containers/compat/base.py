@@ -24,6 +24,7 @@ from ..nouns import (
 )
 from ..ontology import OutcomeKind, RuntimeKind
 from ..resources import ResourceKind, ResourceRef
+from ..rollout_lifecycle import TERMINAL_ROLLOUT_STATES
 from ..serde import JsonObject, jsonable
 
 ServiceResult: TypeAlias = ExecutionRecord | Mapping[str, Any]
@@ -386,10 +387,17 @@ class ThinCompatRuntime:
         request: JsonObject,
     ) -> ExecutionRecord | None:
         execution = await self.get_execution(rollout_id)
-        if execution is not None and execution.status not in {"completed", "failed", "cancelled"}:
-            execution.status = "cancelled"
-            execution.success_status = "cancelled"
-            execution.metadata["status_detail"] = str(request.get("reason") or "terminated")
+        if execution is not None and execution.status not in TERMINAL_ROLLOUT_STATES:
+            # This adapter has no origin termination/lookup port. Changing a
+            # local record cannot establish that production work stopped.
+            execution.status = "in_doubt"
+            execution.success_status = "unknown"
+            execution.metadata.update({
+                "status_detail": "origin_termination_unsupported",
+                "cancel_requested": True,
+                "origin_outcome": "unverified",
+                "resource_cleanup": "unverified",
+            })
         return execution
 
     async def create_checkpoint(
