@@ -1,6 +1,6 @@
 [project]
 name = "synth-containers"
-version = "0.4.4"
+version = "0.4.5.dev20261010"
 description = "Shared Synth container and environment runtime substrate"
 authors = [{name = "Synth Laboratories", email = "josh@usesynth.ai"}]
 readme = "README.md"
@@ -20,6 +20,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "pytest>=8.0.0",
+    "cryptography>=43.0.0",
     "build>=1.2.1",
     "cryptography>=50.0.0",
     "urllib3>=2.7.0",
@@ -31,6 +33,8 @@ dev = [
 
 [dependency-groups]
 dev = [
+    "pytest>=8.0.0",
+    "cryptography>=43.0.0",
     "build>=1.2.1",
     "cryptography>=50.0.0",
     "urllib3>=2.7.0",

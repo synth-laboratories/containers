@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import base64
+import http.client
+import logging
+import socket
 import json
 import queue
 import re
@@ -15,6 +18,18 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 from urllib.parse import urljoin, urlparse, urlunparse
+
+from .paths import confined_origin_url
+from .protocol import DataFrame, DataKind, SUBPROTOCOL, CHUNK_BYTES
+from .attachment import (
+    Attachment,
+    LeaseAttachment,
+    ConnectorAttachment,
+    LocalTarget as _LocalTarget,
+)
+from .connector_control import ConnectorAttachmentProvider, PreparedAttachment
+from .targets import LocalTargetRegistry, TargetError
+from .origin_connections import OriginConnections, OriginPoolScope
 
 
 _HOP_BY_HOP_HEADERS = {
@@ -90,13 +105,6 @@ class SynthTunnelControlPlane(Protocol):
     def close_synth_lease(self, lease_id: str) -> object: ...
 
 
-@dataclass(frozen=True, slots=True)
-class _LocalTarget:
-    base_url: str
-    host: str
-    port: int
-
-
 @dataclass(slots=True)
 class _PendingRequest:
     method: str
@@ -107,6 +115,9 @@ class _PendingRequest:
     connection_generation: int
     received_monotonic: float
     body: bytearray = field(default_factory=bytearray)
+    local_target: _LocalTarget | None = None
+    origin_pool_scope: OriginPoolScope = None
+    origin_headers: tuple[tuple[str, str], ...] = field(default=(), repr=False)
 
 
 class _OriginUpgradeRefused(Exception):
@@ -132,6 +143,8 @@ class _WebSocketStream:
     )
     lock: threading.Lock = field(default_factory=threading.Lock)
     origin: Any | None = None
+    local_target: _LocalTarget | None = None
+    origin_headers: tuple[tuple[str, str], ...] = field(default=(), repr=False)
     pending: bytearray = field(default_factory=bytearray)
     pending_opcode: str | None = None
     closed: bool = False
@@ -163,11 +176,7 @@ class AttachedSynthTunnelLease:
     _closed: bool = field(default=False, repr=False)
 
     def wait_ready(self, timeout_seconds: float | None = None) -> None:
-        ready_timeout = (
-            self._ready_timeout_seconds
-            if timeout_seconds is None
-            else timeout_seconds
-        )
+        ready_timeout = self._ready_timeout_seconds if timeout_seconds is None else timeout_seconds
         if ready_timeout <= 0:
             raise ValueError("SynthTunnel readiness timeout must be positive")
         attach_timeout = (
@@ -283,9 +292,7 @@ class SynthTunnelProvider:
         if max_websocket_streams <= 0:
             raise ValueError("max_websocket_streams must be positive")
         self._control_plane = control_plane
-        self._client_instance_id = (
-            client_instance_id or f"synth-containers-{uuid.uuid4().hex[:24]}"
-        )
+        self._client_instance_id = client_instance_id or f"synth-containers-{uuid.uuid4().hex[:24]}"
         self._attach_timeout_seconds = attach_timeout_seconds
         self._ready_timeout_seconds = ready_timeout_seconds
         self._max_in_flight_requests = max_in_flight_requests
@@ -322,9 +329,7 @@ class SynthTunnelProvider:
             worker_token = _required_text(response.get("worker_token"), "worker_token")
             agent_connect = response.get("agent_connect")
             if not isinstance(agent_connect, Mapping):
-                raise SynthTunnelRelayError(
-                    "SynthTunnel lease response omitted agent_connect"
-                )
+                raise SynthTunnelRelayError("SynthTunnel lease response omitted agent_connect")
             agent = SynthTunnelRelayAgent(
                 lease_id=lease_id,
                 local_target=target,
@@ -347,8 +352,7 @@ class SynthTunnelProvider:
             public_url=public_url,
             worker_token=worker_token,
             expires_at=_optional_text(response.get("expires_at")),
-            connector_mode=_optional_text(response.get("connector_mode"))
-            or "synth_tunnel_agent",
+            connector_mode=_optional_text(response.get("connector_mode")) or "synth_tunnel_agent",
             _local_health_url=local_health_url,
             _attach_timeout_seconds=self._attach_timeout_seconds,
             _ready_timeout_seconds=self._ready_timeout_seconds,
@@ -377,30 +381,64 @@ class _FatalAttachError(SynthTunnelRelayError):
     pass
 
 
-class SynthTunnelRelayAgent:
-    """Attach to the hosted relay and proxy requests into one local container."""
+class _RetryAttachError(SynthTunnelRelayError):
+    """A prepared owner was superseded; reacquire without admitting its socket."""
+
+
+class _SynthTunnelAgent:
+    """Physical byte engine shared by explicit attachment modes."""
 
     def __init__(
         self,
         *,
-        lease_id: str,
-        local_target: _LocalTarget,
-        agent_connect: Mapping[str, Any],
+        attachment: Attachment,
+        agent_connect: Mapping[str, Any] | None,
         max_in_flight_requests: int,
         max_request_body_bytes: int,
         max_websocket_streams: int = _DEFAULT_MAX_WEBSOCKET_STREAMS,
     ) -> None:
-        transport = _required_text(agent_connect.get("transport"), "agent transport")
+        transport = (
+            "ws"
+            if agent_connect is None
+            else _required_text(agent_connect.get("transport"), "agent transport")
+        )
         if transport != "ws":
-            raise SynthTunnelRelayError(
-                f"unsupported SynthTunnel agent transport {transport!r}"
-            )
-        self._lease_id = lease_id
-        self._local_target = local_target
-        self._url = _required_text(agent_connect.get("url"), "agent url")
-        self._agent_token = _required_text(agent_connect.get("agent_token"), "agent token")
+            raise SynthTunnelRelayError(f"unsupported SynthTunnel agent transport {transport!r}")
+        self._protocol = (
+            SUBPROTOCOL
+            if agent_connect is None
+            else str(agent_connect.get("protocol", "synthtunnel"))
+        )
+        if self._protocol not in {"synthtunnel", SUBPROTOCOL}:
+            raise SynthTunnelRelayError("unsupported agent protocol")
+        self._attachment_generation = 0
+        self._upload_lock = threading.RLock()
+        self._origin_connections = OriginConnections()
+        self._uploads: dict[
+            str,
+            tuple[
+                queue.Queue[bytes | None],
+                threading.Event,
+                http.client.HTTPConnection,
+                threading.Thread,
+            ],
+        ] = {}
+        self._attachment = attachment
+        if isinstance(attachment, ConnectorAttachment) and self._protocol != SUBPROTOCOL:
+            raise SynthTunnelRelayError("connector attachment requires the binary v2 protocol")
+        if agent_connect is not None:
+            self._url = _required_text(agent_connect.get("url"), "agent url")
+            self._agent_token = _required_text(agent_connect.get("agent_token"), "agent token")
+        self._attachment_provider: ConnectorAttachmentProvider | None = None
+        self._prepared: PreparedAttachment | None = None
+        self._prepare_operation = uuid.uuid4()
         self._max_in_flight_requests = max_in_flight_requests
         self._max_request_body_bytes = max_request_body_bytes
+        self._max_websocket_message_bytes = (
+            min(max_request_body_bytes, 2 * 1024 * 1024)
+            if isinstance(attachment, ConnectorAttachment)
+            else max_request_body_bytes
+        )
         if max_websocket_streams <= 0:
             raise ValueError("max_websocket_streams must be positive")
         self._max_websocket_streams = max_websocket_streams
@@ -430,6 +468,68 @@ class SynthTunnelRelayAgent:
         normalized = _required_text(token, "agent token")
         with self._lifecycle_lock:
             self._agent_token = normalized
+    def _identity_fields(self) -> dict[str, str]:
+        match self._attachment:
+            case LeaseAttachment(lease_id=lease):
+                return {"lease_id": lease}
+            case ConnectorAttachment(connector=connector):
+                return {"connector": str(connector)}
+        raise AssertionError("undeclared attachment scope")
+
+    def _attach_message(self) -> dict[str, Any]:
+        match self._attachment:
+            case LeaseAttachment(lease_id=lease):
+                return {
+                    "type": "ATTACH",
+                    "leases": [{"lease_id": lease}],
+                    "capabilities": {"websocket": True},
+                }
+            case ConnectorAttachment(connector=connector, client_instance=client):
+                return {
+                    "type": "CONNECTOR_ATTACH",
+                    "connector": str(connector),
+                    "client_instance": str(client),
+                    "capabilities": {"websocket": True},
+                }
+        raise AssertionError("undeclared attachment scope")
+
+    def _origin_target(self, snapshot: _LocalTarget | None) -> _LocalTarget:
+        if snapshot is not None:
+            return snapshot
+        match self._attachment:
+            case LeaseAttachment(target=target):
+                return target
+            case ConnectorAttachment():
+                raise TargetError("missing_origin_snapshot")
+        raise AssertionError("undeclared attachment scope")
+
+    def _bind_origin(
+        self, payload: Mapping[str, Any]
+    ) -> tuple[_LocalTarget, tuple[tuple[str, str], ...], OriginPoolScope]:
+        match self._attachment:
+            case LeaseAttachment(target=target):
+                return target, (), None
+            case ConnectorAttachment(connector=connector, targets=targets):
+                binding = payload.get("route_binding")
+                if not isinstance(binding, Mapping) or binding.get("connector") != str(connector):
+                    raise TargetError("missing_connector_route_binding")
+                if binding.get("attachment_generation") != self._attachment_generation:
+                    raise TargetError("stale_origin_binding")
+                lease = uuid.UUID(str(payload.get("lease_id", "")))
+                route = uuid.UUID(str(binding.get("route", "")))
+                if lease.int == 0 or route.int == 0:
+                    raise TargetError("nil_origin_binding")
+                key = binding.get("target_key")
+                service = binding.get("service_identity")
+                if not isinstance(key, str) or not isinstance(service, str):
+                    raise TargetError("invalid_origin_binding")
+                bound = targets.bind(key, service_identity=service)
+                return (
+                    _parse_local_target(bound.registration.origin.base_url),
+                    bound.headers,
+                    (key, service, bound.registration.generation),
+                )
+        raise AssertionError("undeclared attachment scope")
 
     def start(
         self,
@@ -439,18 +539,18 @@ class SynthTunnelRelayAgent:
     ) -> None:
         deadline = time.monotonic() + max(1.0, timeout_seconds)
         if not self._start_lock.acquire(timeout=max(0.0, deadline - time.monotonic())):
-            raise SynthTunnelRelayError(
-                "SynthTunnel agent attach wait exceeded its deadline"
-            )
+            raise SynthTunnelRelayError("SynthTunnel agent attach wait exceeded its deadline")
         try:
             if cancel_event is not None and cancel_event.is_set():
                 raise SynthTunnelRelayError("SynthTunnel agent attach was cancelled")
             with self._lifecycle_lock:
                 if cancel_event is not None and cancel_event.is_set():
-                    raise SynthTunnelRelayError(
-                        "SynthTunnel agent attach was cancelled"
-                    )
+                    raise SynthTunnelRelayError("SynthTunnel agent attach was cancelled")
                 if self._thread is None or not self._thread.is_alive():
+                    if self._attachment_provider is not None:
+                        reset = getattr(self._attachment_provider, "reset", None)
+                        if reset is not None:
+                            reset()
                     self._stop.clear()
                     self._ready.clear()
                     self._fatal.clear()
@@ -471,16 +571,29 @@ class SynthTunnelRelayAgent:
                     break
                 if self._thread is None or not self._thread.is_alive():
                     break
-            detail = (
-                self._startup_error
-                or "agent did not attach before the readiness deadline"
-            )
+            detail = self._startup_error or "agent did not attach before the readiness deadline"
             self.stop()
             raise SynthTunnelRelayError(f"SynthTunnel agent attach failed: {detail}")
         finally:
             self._start_lock.release()
 
     def stop(self) -> None:
+        # Retire admission before cleanup. A prepare/dial racing shutdown must
+        # never create another connector socket after this close began.
+        self._stop.set()
+        self._origin_connections.retire()
+        if self._attachment_provider is not None:
+            cancel = getattr(self._attachment_provider, "cancel", None)
+            if cancel is not None:
+                cancel()
+        with self._upload_lock:
+            uploads = list(self._uploads.items())
+        for rid, _ in uploads:
+            self._cancel_upload(rid)
+        for _, upload in uploads:
+            upload[3].join(timeout=5)
+            if upload[3].is_alive():
+                raise SynthTunnelRelayError("origin upload thread did not stop")
         # Deliberate lease teardown. Tell the relay 1001 while the agent socket
         # is still up; the 1012 path in _run() only covers unplanned loss.
         self._close_all_websocket_streams(
@@ -512,34 +625,96 @@ class SynthTunnelRelayAgent:
         with self._requests_lock:
             self._requests.clear()
 
+    def _cancel_upload(self, request_id: str) -> None:
+        with self._upload_lock:
+            upload = self._uploads.get(request_id)
+            if upload is not None:
+                _, stopped, connection, _ = upload
+                stopped.set()
+                if connection.sock is not None:
+                    try:
+                        connection.sock.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass  # shutdown may race a socket that has already closed
+                # Serialize retirement against returning this exact connection
+                # to the pool; a late cancel must not close a sibling's borrow.
+                connection.close()
+
     def _run(self) -> None:
         while not self._stop.is_set():
             websocket = None
             connection_generation = 0
+            retry_after_cleanup = False
             try:
+                if self._attachment_provider is not None:
+                    scope = self._attachment
+                    if not isinstance(scope, ConnectorAttachment):
+                        raise _FatalAttachError("provider requires connector scope")
+                    prepared = self._attachment_provider.prepare(
+                        connector=scope.connector,
+                        client_instance=scope.client_instance,
+                        operation=self._prepare_operation,
+                    )
+                    self._prepared = prepared
+                    self._url = prepared.url
+                    self._agent_token = prepared.token
+                if self._stop.is_set():
+                    break
+                connect_options = (
+                    {"subprotocols": [SUBPROTOCOL]} if self._protocol == SUBPROTOCOL else {}
+                )
                 websocket = _connect_websocket(
                     self._url,
                     headers={"Authorization": f"Bearer {self._agent_token}"},
-                    max_message_bytes=_websocket_message_limit(
-                        self._max_request_body_bytes
-                    ),
+                    max_message_bytes=_websocket_message_limit(self._max_request_body_bytes),
+                    **connect_options,
                 )
+                if self._stop.is_set():
+                    break
+                if self._protocol == SUBPROTOCOL and websocket.subprotocol != SUBPROTOCOL:
+                    raise _FatalAttachError("relay did not negotiate requested protocol")
                 with self._connection_lock:
                     self._connection_generation += 1
                     connection_generation = self._connection_generation
                     self._websocket = websocket
                 self._send_frame(
-                    {
-                        "type": "ATTACH",
-                        "leases": [{"lease_id": self._lease_id}],
-                        "capabilities": {"websocket": True},
-                    },
+                    self._attach_message(),
                     expected_generation=connection_generation,
                 )
                 while not self._stop.is_set():
                     raw = websocket.recv()
                     if raw in (None, b"", ""):
                         raise SynthTunnelRelayError("SynthTunnel websocket closed")
+                    if isinstance(raw, bytes) and self._protocol == SUBPROTOCOL:
+                        frame = DataFrame.decode(raw)
+                        if frame.generation != self._attachment_generation:
+                            raise _FatalAttachError("stale binary attachment generation")
+                        request_id = frame.stream.hex
+                        if frame.kind == DataKind.REQUEST_BODY:
+                            with self._upload_lock:
+                                upload = self._uploads.get(request_id)
+                            if upload is not None:
+                                try:
+                                    upload[0].put_nowait(frame.payload)
+                                except queue.Full:
+                                    self._cancel_upload(request_id)
+                                    self._send_request_error(
+                                        request_id, "UPLOAD_QUEUE_OVERFLOW", connection_generation
+                                    )
+                        elif frame.kind in {DataKind.WEBSOCKET_TEXT, DataKind.WEBSOCKET_BINARY}:
+                            self._accept_websocket_frame(
+                                request_id,
+                                {
+                                    "opcode": "text"
+                                    if frame.kind == DataKind.WEBSOCKET_TEXT
+                                    else "binary",
+                                    "data_b64": _encode_bytes(frame.payload),
+                                    "fin": frame.final_chunk,
+                                },
+                            )
+                        else:
+                            raise _FatalAttachError("unexpected binary frame direction")
+                        continue
                     payload = json.loads(raw.decode("utf-8") if isinstance(raw, bytes) else raw)
                     if isinstance(payload, Mapping):
                         self._handle_frame(payload, connection_generation)
@@ -550,14 +725,14 @@ class SynthTunnelRelayAgent:
             except Exception as error:
                 if not self._ready.is_set():
                     self._startup_error = _startup_error_detail(error)
-                if self._stop.wait(0.5):
-                    break
+                retry_after_cleanup = True
             finally:
-                if websocket is not None:
-                    try:
-                        websocket.close()
-                    except Exception:
-                        pass
+                self._ready.clear()
+                self._origin_connections.retire()
+                with self._upload_lock:
+                    upload_ids = list(self._uploads)
+                for rid in upload_ids:
+                    self._cancel_upload(rid)
                 with self._connection_lock:
                     if self._websocket is websocket:
                         self._websocket = None
@@ -582,6 +757,18 @@ class SynthTunnelRelayAgent:
                         "agent disconnected",
                         notify_relay=False,
                     )
+                # Retired origin transports must close before waiting for the
+                # shared connector's close handshake. That handshake can use
+                # its full timeout when the gateway disappeared.
+                if websocket is not None:
+                    try:
+                        websocket.close()
+                    except Exception:
+                        pass
+            # Reconnect pacing cannot keep retired origin sockets alive or
+            # leave readiness set after the attachment has already failed.
+            if retry_after_cleanup and self._stop.wait(0.5):
+                break
 
     def _handle_frame(
         self,
@@ -589,10 +776,42 @@ class SynthTunnelRelayAgent:
         connection_generation: int,
     ) -> None:
         message_type = str(payload.get("type") or "")
-        if message_type == "ATTACH_ACK":
-            accepted = payload.get("accepted_leases") or []
-            if self._lease_id not in {str(item) for item in accepted}:
-                raise _FatalAttachError("SynthTunnel relay rejected the lease")
+        if message_type in {"ATTACH_ACK", "CONNECTOR_ATTACH_ACK"}:
+            match self._attachment:
+                case LeaseAttachment(lease_id=lease):
+                    if message_type != "ATTACH_ACK" or lease not in {
+                        str(item) for item in payload.get("accepted_leases", [])
+                    }:
+                        raise _FatalAttachError("SynthTunnel relay rejected the lease")
+                case ConnectorAttachment(connector=connector):
+                    if message_type != "CONNECTOR_ATTACH_ACK" or payload.get("connector") != str(
+                        connector
+                    ):
+                        raise _FatalAttachError("SynthTunnel relay rejected connector identity")
+                    session = payload.get("session")
+                    if not isinstance(session, str) or uuid.UUID(session).int == 0:
+                        raise _FatalAttachError("invalid connector session identity")
+            if self._protocol == SUBPROTOCOL:
+                config = payload.get("server_config")
+                if not isinstance(config, Mapping) or config.get("protocol") != SUBPROTOCOL:
+                    raise _FatalAttachError("invalid negotiated server protocol")
+                generation = config.get("attachment_generation")
+                if not isinstance(generation, int) or generation <= 0:
+                    raise _FatalAttachError("missing attachment generation")
+                if self._prepared is not None:
+                    if payload.get("session") != str(self._prepared.session):
+                        raise _FatalAttachError("connector acknowledgement lineage mismatch")
+                    if generation < self._prepared.generation:
+                        raise _FatalAttachError("connector acknowledgement lineage mismatch")
+                    if generation > self._prepared.generation:
+                        # A lifecycle transition raced prepare -> WebSocket.
+                        # Never trust the unmatched ACK. Close this socket and
+                        # obtain a new independently bound control receipt.
+                        self._prepare_operation = uuid.uuid4()
+                        raise _RetryAttachError("connector preparation superseded")
+                self._attachment_generation = generation
+            self._prepare_operation = uuid.uuid4()
+            self._startup_error = None
             self._ready.set()
             return
 
@@ -600,6 +819,13 @@ class SynthTunnelRelayAgent:
         if not request_id:
             return
         if message_type == "REQ_HEADERS":
+            try:
+                local_target, origin_headers, origin_pool_scope = self._bind_origin(payload)
+            except (TargetError, ValueError):
+                self._send_request_error(
+                    request_id, "ORIGIN_BINDING_REJECTED", connection_generation
+                )
+                return
             with self._requests_lock:
                 if len(self._requests) >= self._max_in_flight_requests:
                     self._send_request_error(
@@ -616,7 +842,19 @@ class SynthTunnelRelayAgent:
                     deadline_ms=max(1000, int(payload.get("deadline_ms") or 120000)),
                     connection_generation=connection_generation,
                     received_monotonic=time.monotonic(),
+                    local_target=local_target,
+                    origin_headers=origin_headers,
+                    origin_pool_scope=origin_pool_scope,
                 )
+            if self._protocol == SUBPROTOCOL:
+                with self._requests_lock:
+                    request = self._requests.pop(request_id)
+                self._start_upload(request_id, request)
+            return
+        if message_type == "REQ_CANCEL":
+            self._cancel_upload(request_id)
+            with self._requests_lock:
+                self._requests.pop(request_id, None)
             return
         if message_type == "REQ_BODY":
             try:
@@ -645,6 +883,18 @@ class SynthTunnelRelayAgent:
                 request.body.extend(chunk)
             return
         if message_type == "REQ_END":
+            if self._protocol == SUBPROTOCOL:
+                with self._upload_lock:
+                    upload = self._uploads.get(request_id)
+                if upload is not None:
+                    try:
+                        upload[0].put_nowait(None)
+                    except queue.Full:
+                        self._cancel_upload(request_id)
+                        self._send_request_error(
+                            request_id, "UPLOAD_QUEUE_OVERFLOW", connection_generation
+                        )
+                return
             with self._requests_lock:
                 request = self._requests.pop(request_id, None)
             if request is not None:
@@ -698,6 +948,14 @@ class SynthTunnelRelayAgent:
                 b"synth-tunnel: too many open websocket streams",
             )
             return
+        try:
+            local_target, origin_headers, _origin_pool_scope = self._bind_origin(payload)
+        except (TargetError, ValueError):
+            self._websocket_slots.release()
+            self._send_websocket_open_reject(
+                request_id, connection_generation, 503, [], b"origin binding rejected"
+            )
+            return
         stream = _WebSocketStream(
             rid=request_id,
             path=_request_path(payload.get("path")),
@@ -705,6 +963,8 @@ class SynthTunnelRelayAgent:
             headers=_header_pairs(payload.get("headers")),
             deadline_ms=max(1000, int(payload.get("deadline_ms") or 120000)),
             connection_generation=connection_generation,
+            local_target=local_target,
+            origin_headers=origin_headers,
         )
         with self._streams_lock:
             if request_id in self._streams:
@@ -810,7 +1070,7 @@ class SynthTunnelRelayAgent:
                 self._send_frame(
                     {
                         "type": "WS_CLOSE",
-                        "lease_id": self._lease_id,
+                        **self._identity_fields(),
                         "rid": request_id,
                         "code": int(code),
                         "reason": _close_reason_text(reason),
@@ -879,14 +1139,12 @@ class SynthTunnelRelayAgent:
                 _close_origin(origin, _WS_CLOSE_GOING_AWAY, "stream closed")
                 return
             subprotocol = getattr(origin, "subprotocol", None)
-            ack_headers = (
-                [[_WEBSOCKET_SUBPROTOCOL_HEADER, str(subprotocol)]] if subprotocol else []
-            )
+            ack_headers = [[_WEBSOCKET_SUBPROTOCOL_HEADER, str(subprotocol)]] if subprotocol else []
             try:
                 self._send_frame(
                     {
                         "type": "WS_OPEN_ACK",
-                        "lease_id": self._lease_id,
+                        **self._identity_fields(),
                         "rid": stream.rid,
                         "headers": ack_headers,
                     },
@@ -968,7 +1226,7 @@ class SynthTunnelRelayAgent:
                 self._send_frame(
                     {
                         "type": "WS_FRAME",
-                        "lease_id": self._lease_id,
+                        **self._identity_fields(),
                         "rid": stream.rid,
                         "opcode": opcode,
                         "data_b64": _encode_bytes(data),
@@ -993,9 +1251,7 @@ class SynthTunnelRelayAgent:
         for key, value in stream.headers:
             name = key.strip().lower()
             if name == _WEBSOCKET_SUBPROTOCOL_HEADER:
-                subprotocols.extend(
-                    part.strip() for part in value.split(",") if part.strip()
-                )
+                subprotocols.extend(part.strip() for part in value.split(",") if part.strip())
                 continue
             if (
                 name in _HOP_BY_HOP_HEADERS
@@ -1004,12 +1260,15 @@ class SynthTunnelRelayAgent:
             ):
                 continue
             headers.append((key, value))
+        headers.extend(stream.origin_headers)
         try:
             return _connect_origin_websocket(
-                _local_websocket_url(self._local_target, stream.path, stream.query),
+                _local_websocket_url(
+                    self._origin_target(stream.local_target), stream.path, stream.query
+                ),
                 headers=headers,
                 subprotocols=subprotocols,
-                max_message_bytes=self._max_request_body_bytes,
+                max_message_bytes=self._max_websocket_message_bytes,
                 open_timeout=max(1.0, stream.deadline_ms / 1000.0),
             )
         except InvalidStatus as refused:
@@ -1032,7 +1291,7 @@ class SynthTunnelRelayAgent:
             self._send_frame(
                 {
                     "type": "WS_OPEN_REJECT",
-                    "lease_id": self._lease_id,
+                    **self._identity_fields(),
                     "rid": request_id,
                     "status": int(status),
                     "headers": headers,
@@ -1043,20 +1302,159 @@ class SynthTunnelRelayAgent:
         except SynthTunnelRelayError:
             return
 
+    def _start_upload(self, request_id: str, request: _PendingRequest) -> None:
+        try:
+            upstream = urlparse(_local_upstream_url(self._origin_target(request.local_target), request.path, request.query))
+        except ValueError:
+            self._send_request_error(request_id, "INVALID_ORIGIN_PATH", request.connection_generation)
+            return
+        if not self._request_slots.acquire(blocking=False):
+            self._send_request_error(
+                request_id, "TOO_MANY_ACTIVE_REQUESTS", request.connection_generation
+            )
+            return
+        connection_key = (
+            request.connection_generation,
+            request.origin_pool_scope,
+            upstream.scheme,
+            upstream.hostname,
+            upstream.port,
+        )
+        connection, pool_epoch = self._origin_connections.borrow(
+            connection_key, timeout_seconds=max(1, request.deadline_ms / 1000)
+        )
+        chunks: queue.Queue[bytes | None] = queue.Queue(maxsize=32)
+        stopped = threading.Event()
+        thread = threading.Thread(
+            target=self._serve_upload,
+            args=(request_id, request, upstream, chunks, stopped, connection, pool_epoch),
+            name="synth-tunnel-upload",
+            daemon=True,
+        )
+        with self._upload_lock:
+            self._uploads[request_id] = (chunks, stopped, connection, thread)
+        thread.start()
+
+    def _serve_upload(
+        self,
+        request_id: str,
+        request: _PendingRequest,
+        upstream: Any,
+        chunks: queue.Queue[bytes | None],
+        stopped: threading.Event,
+        connection: http.client.HTTPConnection,
+        pool_epoch: int,
+    ) -> None:
+        reusable = False
+        thread_started = time.monotonic()
+        try:
+            path = upstream.path or "/"
+            if upstream.query:
+                path += "?" + upstream.query
+            connection.putrequest(request.method, path)
+            for key, value in request.headers:
+                if key.lower() not in _HOP_BY_HOP_HEADERS | _LOCAL_ONLY_AUTH_HEADERS:
+                    connection.putheader(key, value)
+            for key, value in request.origin_headers:
+                connection.putheader(key, value)
+            connection.putheader("Transfer-Encoding", "chunked")
+            connection.endheaders()
+            self._send_frame(
+                {"type": "REQ_CREDIT", "rid": request_id, "slots": 31},
+                expected_generation=request.connection_generation,
+            )
+            uploaded = 0
+            deadline = request.received_monotonic + request.deadline_ms / 1000
+            while not stopped.is_set():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("origin upload deadline exceeded")
+                try:
+                    chunk = chunks.get(timeout=min(0.25, remaining))
+                except queue.Empty:
+                    continue
+                if chunk is None:
+                    connection.send(b"0\r\n\r\n")
+                    break
+                uploaded += len(chunk)
+                if uploaded > self._max_request_body_bytes:
+                    raise ValueError("origin upload exceeds body limit")
+                if connection.sock is not None:
+                    connection.sock.settimeout(max(0.001, deadline - time.monotonic()))
+                connection.send(f"{len(chunk):x}\r\n".encode() + chunk + b"\r\n")
+                self._send_frame(
+                    {"type": "REQ_CREDIT", "rid": request_id, "slots": 1},
+                    expected_generation=request.connection_generation,
+                )
+            if not stopped.is_set():
+                if connection.sock is not None:
+                    connection.sock.settimeout(max(0.001, deadline - time.monotonic()))
+                with connection.getresponse() as response:
+                    head_received = time.monotonic()
+                    if head_received - request.received_monotonic > .02:
+                        logging.getLogger(__name__).warning(
+                            "slow origin response head request_id=%s generation=%s queue_ms=%.3f origin_ms=%.3f",
+                            request_id, request.connection_generation,
+                            (thread_started - request.received_monotonic) * 1000,
+                            (head_received - thread_started) * 1000,
+                        )
+                    self._send_response(
+                        request_id, response.status, response.headers, response, request
+                    )
+                    reusable = not response.will_close
+        except Exception as error:
+            logging.getLogger(__name__).warning(
+                "origin stream failed request_id=%s error_kind=%s", request_id, type(error).__name__
+            )
+            if not stopped.is_set():
+                try:
+                    self._send_request_error(
+                        request_id, "LOCAL_REQUEST_FAILED", request.connection_generation
+                    )
+                except SynthTunnelRelayError:
+                    stopped.set()
+        finally:
+            with self._upload_lock:
+                current = self._uploads.get(request_id)
+                if current is not None and current[3] is threading.current_thread():
+                    self._uploads.pop(request_id, None)
+                if (
+                    reusable
+                    and not stopped.is_set()
+                    and not self._stop.is_set()
+                    and self._ready.is_set()
+                    and request.connection_generation == self._connection_generation
+                ):
+                    self._origin_connections.release(
+                        (
+                            request.connection_generation,
+                            request.origin_pool_scope,
+                            upstream.scheme,
+                            upstream.hostname,
+                            upstream.port,
+                        ),
+                        connection,
+                        pool_epoch,
+                    )
+                else:
+                    connection.close()
+            self._request_slots.release()
+
     def _serve_request(self, request_id: str, request: _PendingRequest) -> None:
         try:
             elapsed = time.monotonic() - request.received_monotonic
             timeout = max(1.0, request.deadline_ms / 1000.0 - elapsed)
-            upstream_url = _local_upstream_url(
-                self._local_target,
-                request.path,
-                request.query,
-            )
+            try:
+                upstream_url = _local_upstream_url(self._origin_target(request.local_target), request.path, request.query)
+            except ValueError:
+                self._send_request_error(request_id, "INVALID_ORIGIN_PATH", request.connection_generation)
+                return
             headers = {
                 key: value
                 for key, value in request.headers
                 if key.strip().lower() not in _HOP_BY_HOP_HEADERS | _LOCAL_ONLY_AUTH_HEADERS
             }
+            headers.update(request.origin_headers)
             try:
                 upstream_request = urllib.request.Request(
                     upstream_url,
@@ -1108,7 +1506,7 @@ class SynthTunnelRelayAgent:
         self._send_frame(
             {
                 "type": "RESP_HEADERS",
-                "lease_id": self._lease_id,
+                **self._identity_fields(),
                 "rid": request_id,
                 "status": int(status_code),
                 "headers": header_list,
@@ -1126,18 +1524,23 @@ class SynthTunnelRelayAgent:
             chunk = read_available(65536)
             if not chunk:
                 break
-            self._send_frame(
-                {
-                    "type": "RESP_BODY",
-                    "lease_id": self._lease_id,
-                    "rid": request_id,
-                    "chunk_b64": _encode_bytes(chunk),
-                    "eof": False,
-                },
-                expected_generation=request.connection_generation,
-            )
+            if self._protocol == SUBPROTOCOL:
+                self._send_binary(
+                    request_id, DataKind.RESPONSE_BODY, chunk, request.connection_generation
+                )
+            else:
+                self._send_frame(
+                    {
+                        "type": "RESP_BODY",
+                        **self._identity_fields(),
+                        "rid": request_id,
+                        "chunk_b64": _encode_bytes(chunk),
+                        "eof": False,
+                    },
+                    expected_generation=request.connection_generation,
+                )
         self._send_frame(
-            {"type": "RESP_END", "lease_id": self._lease_id, "rid": request_id},
+            {"type": "RESP_END", **self._identity_fields(), "rid": request_id},
             expected_generation=request.connection_generation,
         )
 
@@ -1150,13 +1553,33 @@ class SynthTunnelRelayAgent:
         self._send_frame(
             {
                 "type": "RESP_ERROR",
-                "lease_id": self._lease_id,
+                **self._identity_fields(),
                 "rid": request_id,
                 "code": code,
                 "message": code,
             },
             expected_generation=connection_generation,
         )
+
+    def _send_binary(
+        self, request_id: str, data_kind: DataKind, data: bytes, generation: int, final: bool = True
+    ) -> None:
+        with self._send_lock:
+            with self._connection_lock:
+                websocket = self._websocket
+                if websocket is None or generation != self._connection_generation:
+                    raise SynthTunnelRelayError("SynthTunnel websocket generation changed")
+            pieces = [data[i : i + CHUNK_BYTES] for i in range(0, len(data), CHUNK_BYTES)] or [b""]
+            for index, piece in enumerate(pieces):
+                websocket.send(
+                    DataFrame(
+                        data_kind,
+                        uuid.UUID(request_id),
+                        self._attachment_generation,
+                        final and index == len(pieces) - 1,
+                        piece,
+                    ).encode()
+                )
 
     def _send_frame(
         self,
@@ -1170,7 +1593,37 @@ class SynthTunnelRelayAgent:
                 current_generation = self._connection_generation
             if websocket is None or current_generation != expected_generation:
                 raise SynthTunnelRelayError("SynthTunnel websocket generation changed")
-            websocket.send(json.dumps(dict(payload)))
+            kind = payload.get("type")
+            if self._protocol == SUBPROTOCOL and kind in {"RESP_BODY", "WS_FRAME"}:
+                encoded = (
+                    payload.get("chunk_b64") if kind == "RESP_BODY" else payload.get("data_b64")
+                )
+                data = _decode_bytes(str(encoded or ""))
+                data_kind = (
+                    DataKind.RESPONSE_BODY
+                    if kind == "RESP_BODY"
+                    else (
+                        DataKind.WEBSOCKET_TEXT
+                        if payload.get("opcode") == "text"
+                        else DataKind.WEBSOCKET_BINARY
+                    )
+                )
+                pieces = [data[i : i + CHUNK_BYTES] for i in range(0, len(data), CHUNK_BYTES)] or [
+                    b""
+                ]
+                for index, piece in enumerate(pieces):
+                    final = bool(payload.get("fin", True)) and index == len(pieces) - 1
+                    websocket.send(
+                        DataFrame(
+                            data_kind,
+                            uuid.UUID(str(payload["rid"])),
+                            self._attachment_generation,
+                            final,
+                            piece,
+                        ).encode()
+                    )
+            else:
+                websocket.send(json.dumps(dict(payload)))
 
 
 def _connect_websocket(
@@ -1178,6 +1631,7 @@ def _connect_websocket(
     *,
     headers: Mapping[str, str],
     max_message_bytes: int,
+    subprotocols: Sequence[str] | None = None,
 ) -> Any:
     from websockets.sync.client import connect
 
@@ -1186,8 +1640,13 @@ def _connect_websocket(
     return connect(
         url,
         additional_headers=dict(headers),
-        open_timeout=10,
-        close_timeout=5,
+        subprotocols=subprotocols,
+        open_timeout=3,
+        # recv() reports remote closure only after the TCP closing handshake.
+        # A retired gateway may not finish that handshake while cancelling a
+        # backpressured stream. Leave at most 100ms before retiring origins;
+        # a socket close never asserts that application effects stopped.
+        close_timeout=0.1,
         max_size=max_message_bytes,
     )
 
@@ -1224,9 +1683,7 @@ def _connect_origin_websocket(
 def _local_websocket_url(target: _LocalTarget, path: str, query: str) -> str:
     parsed = urlparse(_local_upstream_url(target, path, query))
     scheme = "wss" if parsed.scheme == "https" else "ws"
-    return urlunparse(
-        (scheme, parsed.netloc, parsed.path, parsed.params, parsed.query, "")
-    )
+    return urlunparse((scheme, parsed.netloc, parsed.path, parsed.params, parsed.query, ""))
 
 
 def _reject_header_pairs(headers: Any) -> list[list[str]]:
@@ -1302,6 +1759,18 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
 
 
 _ALLOWED_UPSTREAM_SCHEMES = frozenset({"http", "https"})
+class _OriginHTTPSHandler(urllib.request.HTTPSHandler):
+    """Construct TLS authority only when an HTTPS connection is actually used."""
+
+    def __init__(self) -> None:
+        # HTTPSHandler eagerly parses the trust store even for HTTP origins.
+        # Parallel parsing contends inside OpenSSL and can stall plain HTTP
+        # requests for seconds. HTTPSConnection retains normal certificate and
+        # hostname verification when its default context is created on demand.
+        urllib.request.AbstractHTTPHandler.__init__(self)
+
+    def https_open(self, request: urllib.request.Request) -> Any:
+        return self.do_open(http.client.HTTPSConnection, request)
 
 
 def _open_upstream(
@@ -1321,7 +1790,7 @@ def _open_upstream(
     for handler in (
         urllib.request.ProxyHandler({}),
         urllib.request.HTTPHandler(),
-        urllib.request.HTTPSHandler(),
+        _OriginHTTPSHandler(),
         urllib.request.HTTPDefaultErrorHandler(),
         _NoRedirectHandler(),
         urllib.request.HTTPErrorProcessor(),
@@ -1338,13 +1807,9 @@ def _parse_local_target(local_url: str) -> _LocalTarget:
         raise ValueError("local_url cannot include credentials, query, or fragment")
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
     netloc = (
-        f"[{parsed.hostname}]:{port}"
-        if ":" in parsed.hostname
-        else f"{parsed.hostname}:{port}"
+        f"[{parsed.hostname}]:{port}" if ":" in parsed.hostname else f"{parsed.hostname}:{port}"
     )
-    base_url = urlunparse(
-        (parsed.scheme, netloc, parsed.path.rstrip("/"), "", "", "")
-    )
+    base_url = urlunparse((parsed.scheme, netloc, parsed.path.rstrip("/"), "", "", ""))
     return _LocalTarget(base_url=base_url, host=parsed.hostname, port=port)
 
 
@@ -1430,24 +1895,7 @@ def _confined_forward_path(path: str) -> str:
 
 
 def _local_upstream_url(target: _LocalTarget, path: str, query: str) -> str:
-    # Build the URL from the lease's own scheme/host/port. The forwarded path is
-    # confined to a relative path so it can never redirect the dial to another
-    # host, loopback port, or a non-http scheme.
-    base = urlparse(target.base_url)
-    prefix = base.path.rstrip("/")
-    safe_path = _confined_forward_path(path)
-    upstream_url = urlunparse(
-        (base.scheme, base.netloc, f"{prefix}{safe_path}", "", "", "")
-    )
-    # Fail closed: the resolved URL must stay on the leased host/port/scheme.
-    resolved = urlparse(upstream_url)
-    if (resolved.scheme, resolved.hostname, resolved.port) != (
-        base.scheme,
-        base.hostname,
-        base.port,
-    ):
-        upstream_url = urlunparse((base.scheme, base.netloc, f"{prefix}/", "", "", ""))
-    return f"{upstream_url}?{query}" if query else upstream_url
+    return confined_origin_url(target.base_url, path, query)
 
 
 def _request_path(value: object) -> str:
@@ -1471,9 +1919,7 @@ def _header_pairs(value: object) -> list[tuple[str, str]]:
 def _required_text(value: object, field_name: str) -> str:
     text = str(value or "").strip()
     if not text:
-        raise SynthTunnelRelayError(
-            f"SynthTunnel lease response omitted required {field_name}"
-        )
+        raise SynthTunnelRelayError(f"SynthTunnel lease response omitted required {field_name}")
     return text
 
 
@@ -1504,8 +1950,58 @@ def _startup_error_detail(error: Exception) -> str:
     if isinstance(error, ModuleNotFoundError):
         missing_module = str(error.name or "").strip()
         if missing_module and all(
-            character.isalnum() or character in {"_", ".", "-"}
-            for character in missing_module
+            character.isalnum() or character in {"_", ".", "-"} for character in missing_module
         ):
             return f"ModuleNotFoundError({missing_module})"
     return type(error).__name__
+
+
+class SynthTunnelRelayAgent(_SynthTunnelAgent):
+    """Explicit legacy lease attachment, including its negotiated v2 byte codec."""
+
+    def __init__(
+        self,
+        *,
+        lease_id: str,
+        local_target: _LocalTarget,
+        agent_connect: Mapping[str, Any],
+        max_in_flight_requests: int,
+        max_request_body_bytes: int,
+        max_websocket_streams: int = _DEFAULT_MAX_WEBSOCKET_STREAMS,
+    ) -> None:
+        super().__init__(
+            attachment=LeaseAttachment(lease_id, local_target),
+            agent_connect=agent_connect,
+            max_in_flight_requests=max_in_flight_requests,
+            max_request_body_bytes=max_request_body_bytes,
+            max_websocket_streams=max_websocket_streams,
+        )
+
+
+class SynthTunnelConnectorAgent(_SynthTunnelAgent):
+    """One physical connector attachment serving separately bound lease streams."""
+
+    def __init__(
+        self,
+        *,
+        connector_id: uuid.UUID,
+        client_instance_id: uuid.UUID,
+        targets: LocalTargetRegistry,
+        agent_connect: Mapping[str, Any] | None = None,
+        provider: ConnectorAttachmentProvider | None = None,
+        max_in_flight_requests: int,
+        max_request_body_bytes: int,
+        max_websocket_streams: int = _DEFAULT_MAX_WEBSOCKET_STREAMS,
+    ) -> None:
+        if (agent_connect is None) == (provider is None):
+            raise ValueError(
+                "declare exactly one connector attachment provider or static transport"
+            )
+        super().__init__(
+            attachment=ConnectorAttachment(connector_id, client_instance_id, targets),
+            agent_connect=agent_connect,
+            max_in_flight_requests=max_in_flight_requests,
+            max_request_body_bytes=max_request_body_bytes,
+            max_websocket_streams=max_websocket_streams,
+        )
+        self._attachment_provider = provider

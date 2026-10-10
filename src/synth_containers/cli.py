@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
 
 from .launch import (
@@ -34,6 +35,11 @@ def _env_pairs(items: list[str] | None) -> dict[str, str]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] == "tunnel":
+        from .tunnels.cli import main as tunnel_main
+
+        return tunnel_main(arguments[1:])
     parser = argparse.ArgumentParser(prog="synth-containers", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -49,7 +55,9 @@ def main(argv: list[str] | None = None) -> int:
     up.add_argument("--catalog", type=Path, default=None)
     up.add_argument("--host", default="127.0.0.1")
     up.add_argument("--port", type=int, default=None)
-    up.add_argument("--env", action="append", default=None, help="KEY=VALUE or KEY (forward from host)")
+    up.add_argument(
+        "--env", action="append", default=None, help="KEY=VALUE or KEY (forward from host)"
+    )
     up.add_argument("--replace", action="store_true")
     up.add_argument("--no-build", action="store_true")
     up.add_argument("--pull", action="store_true")
@@ -74,8 +82,15 @@ def main(argv: list[str] | None = None) -> int:
     logs.add_argument("--port", type=int, default=None)
     logs.add_argument("--tail", type=int, default=200)
 
+    tunnel = sub.add_parser("tunnel", help="shared connector lifecycle")
+    tunnel.add_argument("arguments", nargs=argparse.REMAINDER)
+
     args = parser.parse_args(argv)
     try:
+        if args.command == "tunnel":
+            from .tunnels.cli import main as tunnel_main
+
+            return tunnel_main(args.arguments)
         if args.command == "serve":
             serve_argv = ["--target", args.target, "--host", args.host, "--port", str(args.port)]
             if args.storage_root:
