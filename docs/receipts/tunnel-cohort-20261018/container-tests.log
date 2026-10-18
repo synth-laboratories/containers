@@ -1,0 +1,13 @@
+........................................................................ [ 86%]
+...........                                                              [100%]
+=============================== warnings summary ===============================
+tests/test_connector_reacquisition.py::test_remote_close_does_not_wait_for_backpressured_tcp_handshake
+  /Users/joshuapurtell/GitHub/workspaces/tunnel-cohort-integration-20261018/containers/tests/test_connector_reacquisition.py:151: DeprecationWarning: connect() must be used as a context manager: with connect(...) as websocket: ...; alternatively, use websocket = connect(..., legacy=True) to connect directly
+    connection.recv()
+
+tests/test_synth_tunnel_websocket.py: 10 warnings
+  /Users/joshuapurtell/GitHub/workspaces/tunnel-cohort-integration-20261018/containers/src/synth_containers/tunnels/relay.py:1203: DeprecationWarning: connect() must be used as a context manager: with connect(...) as websocket: ...; alternatively, use websocket = connect(..., legacy=True) to connect directly
+    message = origin.recv()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+83 passed, 11 warnings in 48.64s

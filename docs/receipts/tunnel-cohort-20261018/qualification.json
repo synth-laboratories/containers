@@ -1,0 +1,57 @@
+{
+  "date": "2026-10-18",
+  "target": "origin/dev",
+  "kind": "local unpublished integration candidate",
+  "base": "227dc37707e16f0b8e4b3be81a0fe9969526e1ce",
+  "selected_sources": [
+    "cae4d35f080c1a68e6bf88ed3f6b702112f5a5be",
+    "4e25fe3"
+  ],
+  "wheel": {
+    "version": "0.4.5.dev20261018",
+    "filename": "synth_containers-0.4.5.dev20261018-py3-none-any.whl",
+    "sha256": "6dfca1780f17c96daa5669030501ce94f817d46bd5e9136159b8ba380e775892",
+    "source_modules_matched": 252
+  },
+  "source_changes": [
+    "Shared connector v2; generation fencing and attachment reacquisition",
+    "Checkpoint/restore custody, durable origin rollout receipts, cancellation uncertainty",
+    "Closed keepalive socket removed from origin connection custody"
+  ],
+  "retained_from_current_dev": [
+    "Annotation session/span confinement",
+    "AnyIO 4.14.2 floor and current security dependency floors"
+  ],
+  "validation": {
+    "tunnel_and_checkpoint_tests": {
+      "passed": 83,
+      "failed": 0,
+      "log": "container-tests.log",
+      "command_file": "container-command.json"
+    },
+    "annotation_regressions": {
+      "passed": 18,
+      "failed": 0,
+      "skipped": 1,
+      "command": ".venv/bin/python -m pytest tests/test_trace_v5_annotation_app_server.py tests/test_trace_v5_annotation_skill_contract.py tests/test_trace_annotation_store.py -q --basetemp=.test-tmp-annotation",
+      "log": "annotation-regressions.log"
+    },
+    "sdk_source_overlay": {
+      "revision": "36192e1cb96a6690724566af4c502b59ec7129fa",
+      "PYTHONPATH": "../sdk-reference",
+      "reason": "Public synth-ai 0.23.1 lacks synth_ai.core.errors and synth_ai.sdk.tunnels.session_operations",
+      "scope": "Source-facade qualification only; no public SDK compatibility claim"
+    },
+    "wheel": "Built with uv build --wheel; every Python module in the wheel matched candidate source, and Optimizers tests used this wheel"
+  },
+  "not_run": [
+    "Public SDK compatibility",
+    "Live backend/Rivet/GEPA acceptance",
+    "Package publication or deployment"
+  ],
+  "feedback": [
+    "122357fd-85a0-464a-8921-5952d880b517",
+    "d49ee1cc-4577-42ad-8936-93d64ac00896"
+  ],
+  "upstream_integration": "PR #31 independently merged the same source cohort while qualification was in progress. Rebased only dated version and receipt commit onto that head; source modules are identical."
+}

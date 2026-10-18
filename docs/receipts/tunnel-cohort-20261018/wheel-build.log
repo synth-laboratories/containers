@@ -1,0 +1,560 @@
+Building wheel...
+running egg_info
+writing src/synth_containers.egg-info/PKG-INFO
+writing dependency_links to src/synth_containers.egg-info/dependency_links.txt
+writing entry points to src/synth_containers.egg-info/entry_points.txt
+writing requirements to src/synth_containers.egg-info/requires.txt
+writing top-level names to src/synth_containers.egg-info/top_level.txt
+reading manifest file 'src/synth_containers.egg-info/SOURCES.txt'
+writing manifest file 'src/synth_containers.egg-info/SOURCES.txt'
+running bdist_wheel
+running build
+running build_py
+running egg_info
+writing src/synth_containers.egg-info/PKG-INFO
+writing dependency_links to src/synth_containers.egg-info/dependency_links.txt
+writing entry points to src/synth_containers.egg-info/entry_points.txt
+writing requirements to src/synth_containers.egg-info/requires.txt
+writing top-level names to src/synth_containers.egg-info/top_level.txt
+reading manifest file 'src/synth_containers.egg-info/SOURCES.txt'
+writing manifest file 'src/synth_containers.egg-info/SOURCES.txt'
+installing to build/bdist.macosx-11.0-arm64/wheel
+running install
+running install_lib
+creating build/bdist.macosx-11.0-arm64/wheel
+creating build/bdist.macosx-11.0-arm64/wheel/synth_containers
+copying build/lib/synth_containers/checkpoint_schedule.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/nested_runtime.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/gold_runtime.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+creating build/bdist.macosx-11.0-arm64/wheel/synth_containers/tracing
+creating build/bdist.macosx-11.0-arm64/wheel/synth_containers/tracing/capture
+copying build/lib/synth_containers/tracing/capture/redaction.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/capture
+copying build/lib/synth_containers/tracing/capture/control_server.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/capture
+copying build/lib/synth_containers/tracing/capture/runner.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/capture
+copying build/lib/synth_containers/tracing/capture/egress.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/capture
+copying build/lib/synth_containers/tracing/capture/finalizer.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/capture
+copying build/lib/synth_containers/tracing/capture/supervisor.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/capture
+copying build/lib/synth_containers/tracing/capture/spool.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/capture
+copying build/lib/synth_containers/tracing/capture/proxy.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/capture
+copying build/lib/synth_containers/tracing/capture/collector_server.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/capture
+copying build/lib/synth_containers/tracing/capture/collector.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/capture
+copying build/lib/synth_containers/tracing/capture/session.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/capture
+copying build/lib/synth_containers/tracing/capture/__init__.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/capture
+copying build/lib/synth_containers/tracing/capture/mitm.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/capture
+copying build/lib/synth_containers/tracing/capture/coverage.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/capture
+copying build/lib/synth_containers/tracing/capture/mitmproxy_addon.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/capture
+copying build/lib/synth_containers/tracing/capture/live.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/capture
+copying build/lib/synth_containers/tracing/capture/coordination_reducer.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/capture
+copying build/lib/synth_containers/tracing/capture/binding.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/capture
+copying build/lib/synth_containers/tracing/capture/emitter.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/capture
+copying build/lib/synth_containers/tracing/capture/envelope.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/capture
+copying build/lib/synth_containers/tracing/capture/websocket.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/capture
+copying build/lib/synth_containers/tracing/capture/routes.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/capture
+copying build/lib/synth_containers/tracing/native_evaluation.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing
+copying build/lib/synth_containers/tracing/research.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing
+copying build/lib/synth_containers/tracing/__init__.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing
+creating build/bdist.macosx-11.0-arm64/wheel/synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/evidence_check.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/worker.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/service.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/persistence.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/receipts.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/streams.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/definitions.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/tools.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/ledger.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/execution_trace.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/__init__.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/proposal.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/signed_broker.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/container.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/campaign.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/jobs.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/api.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/operations.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/sources.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/model_api.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/consensus.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/pricing.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/jesterky_tools.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/http_broker.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/jesterky_runner.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/builtin.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/scheduler.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/workspace.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/broker.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/codex_app_server.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/endpoints.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/trace_index.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/scope.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/fixtures.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+copying build/lib/synth_containers/tracing/annotation/validation.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/annotation
+creating build/bdist.macosx-11.0-arm64/wheel/synth_containers/tracing/models
+copying build/lib/synth_containers/tracing/models/capture_data.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/models
+copying build/lib/synth_containers/tracing/models/rollout_inspector.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/models
+copying build/lib/synth_containers/tracing/models/reconciliation.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/models
+copying build/lib/synth_containers/tracing/models/events.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/models
+copying build/lib/synth_containers/tracing/models/__init__.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/models
+copying build/lib/synth_containers/tracing/models/standards.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/models
+copying build/lib/synth_containers/tracing/models/selectors.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/models
+copying build/lib/synth_containers/tracing/models/spans.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/models
+copying build/lib/synth_containers/tracing/models/tokens.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/models
+copying build/lib/synth_containers/tracing/models/completeness.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/models
+copying build/lib/synth_containers/tracing/models/document.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/models
+copying build/lib/synth_containers/tracing/models/messages.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/models
+copying build/lib/synth_containers/tracing/models/visual.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/models
+copying build/lib/synth_containers/tracing/models/artifacts.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/models
+copying build/lib/synth_containers/tracing/models/actors.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/models
+copying build/lib/synth_containers/tracing/models/projection.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/models
+copying build/lib/synth_containers/tracing/models/identity.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/models
+copying build/lib/synth_containers/tracing/models/coordination.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/models
+copying build/lib/synth_containers/tracing/models/evidence.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/models
+creating build/bdist.macosx-11.0-arm64/wheel/synth_containers/tracing/projections
+copying build/lib/synth_containers/tracing/projections/v4.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/projections
+copying build/lib/synth_containers/tracing/projections/rollout_inspector.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/projections
+copying build/lib/synth_containers/tracing/projections/reconciliation.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/projections
+copying build/lib/synth_containers/tracing/projections/inspector.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/projections
+copying build/lib/synth_containers/tracing/projections/__init__.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/projections
+copying build/lib/synth_containers/tracing/projections/visual.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/projections
+copying build/lib/synth_containers/tracing/projections/derived.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/projections
+creating build/bdist.macosx-11.0-arm64/wheel/synth_containers/tracing/streaming
+copying build/lib/synth_containers/tracing/streaming/__init__.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/streaming
+copying build/lib/synth_containers/tracing/streaming/lifecycle.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/streaming
+copying build/lib/synth_containers/tracing/inspection.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing
+creating build/bdist.macosx-11.0-arm64/wheel/synth_containers/tracing/adapters
+copying build/lib/synth_containers/tracing/adapters/v4.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/adapters
+copying build/lib/synth_containers/tracing/adapters/harbor.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/adapters
+copying build/lib/synth_containers/tracing/adapters/runebench.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/adapters
+copying build/lib/synth_containers/tracing/adapters/legacy.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/adapters
+copying build/lib/synth_containers/tracing/adapters/openai_responses.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/adapters
+copying build/lib/synth_containers/tracing/adapters/anthropic_messages.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/adapters
+copying build/lib/synth_containers/tracing/adapters/openai_chat.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/adapters
+copying build/lib/synth_containers/tracing/adapters/__init__.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/adapters
+copying build/lib/synth_containers/tracing/adapters/native.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/adapters
+copying build/lib/synth_containers/tracing/adapters/craftax.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/adapters
+copying build/lib/synth_containers/tracing/adapters/sse.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/adapters
+copying build/lib/synth_containers/tracing/adapters/application.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/adapters
+copying build/lib/synth_containers/tracing/adapters/optimizer_event_history.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/adapters
+copying build/lib/synth_containers/tracing/adapters/codex_jsonl.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/adapters
+copying build/lib/synth_containers/tracing/adapters/experiments_v4.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/adapters
+copying build/lib/synth_containers/tracing/adapters/atif.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/adapters
+copying build/lib/synth_containers/tracing/adapters/chat_container.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/adapters
+copying build/lib/synth_containers/tracing/adapters/craftax_container.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/adapters
+copying build/lib/synth_containers/tracing/adapters/base.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/adapters
+copying build/lib/synth_containers/tracing/cli.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing
+copying build/lib/synth_containers/tracing/canonical.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing
+copying build/lib/synth_containers/tracing/interchange.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing
+copying build/lib/synth_containers/tracing/evidence_ops.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing
+copying build/lib/synth_containers/tracing/annotation_store.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing
+copying build/lib/synth_containers/tracing/negotiation.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing
+creating build/bdist.macosx-11.0-arm64/wheel/synth_containers/tracing/validation
+copying build/lib/synth_containers/tracing/validation/validator.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/validation
+copying build/lib/synth_containers/tracing/validation/rehydrate.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/validation
+copying build/lib/synth_containers/tracing/validation/__init__.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/validation
+copying build/lib/synth_containers/tracing/validation/schema.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/validation
+creating build/bdist.macosx-11.0-arm64/wheel/synth_containers/tracing/store
+copying build/lib/synth_containers/tracing/store/bundle.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/store
+copying build/lib/synth_containers/tracing/store/filesystem.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/store
+copying build/lib/synth_containers/tracing/store/__init__.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/store
+copying build/lib/synth_containers/tracing/store/sqlite_catalog.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/store
+copying build/lib/synth_containers/tracing/store/projection.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/store
+copying build/lib/synth_containers/tracing/store/s3.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/store
+copying build/lib/synth_containers/tracing/store/base.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tracing/store
+copying build/lib/synth_containers/compatibility.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/vendored_gepa_contract.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/pid1.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+creating build/bdist.macosx-11.0-arm64/wheel/synth_containers/compat
+copying build/lib/synth_containers/compat/archipelago.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/compat
+copying build/lib/synth_containers/compat/harbor.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/compat
+copying build/lib/synth_containers/compat/__init__.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/compat
+copying build/lib/synth_containers/compat/service_http.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/compat
+copying build/lib/synth_containers/compat/openenv.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/compat
+copying build/lib/synth_containers/compat/base.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/compat
+copying build/lib/synth_containers/tasks.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+creating build/bdist.macosx-11.0-arm64/wheel/synth_containers/live_annotation
+copying build/lib/synth_containers/live_annotation/service.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/live_annotation
+copying build/lib/synth_containers/live_annotation/runner.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/live_annotation
+copying build/lib/synth_containers/live_annotation/__init__.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/live_annotation
+copying build/lib/synth_containers/live_annotation/model.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/live_annotation
+copying build/lib/synth_containers/live_annotation/api.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/live_annotation
+copying build/lib/synth_containers/live_annotation/process.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/live_annotation
+copying build/lib/synth_containers/live_annotation/contract.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/live_annotation
+copying build/lib/synth_containers/metadata.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/sdk.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/event_log.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/recovery.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/cispo_reward.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/pools.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/image_main.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/http_client.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/gold_http.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/protocols.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+creating build/bdist.macosx-11.0-arm64/wheel/synth_containers/tunnels
+copying build/lib/synth_containers/tunnels/service.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tunnels
+copying build/lib/synth_containers/tunnels/wire_generated.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tunnels
+copying build/lib/synth_containers/tunnels/targets.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tunnels
+copying build/lib/synth_containers/tunnels/paths.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tunnels
+copying build/lib/synth_containers/tunnels/supervisor.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tunnels
+copying build/lib/synth_containers/tunnels/protocol.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tunnels
+copying build/lib/synth_containers/tunnels/__init__.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tunnels
+copying build/lib/synth_containers/tunnels/origin_connections.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tunnels
+copying build/lib/synth_containers/tunnels/attachment.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tunnels
+copying build/lib/synth_containers/tunnels/cli.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tunnels
+copying build/lib/synth_containers/tunnels/relay.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tunnels
+copying build/lib/synth_containers/tunnels/connector_control.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tunnels
+copying build/lib/synth_containers/tunnels/profiles.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/tunnels
+copying build/lib/synth_containers/classify_runtime.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/cispo_target.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/reference_runtime.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+creating build/bdist.macosx-11.0-arm64/wheel/synth_containers/platform
+copying build/lib/synth_containers/platform/policy_process.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/platform
+copying build/lib/synth_containers/platform/trace_bundle.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/platform
+copying build/lib/synth_containers/platform/targets.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/platform
+copying build/lib/synth_containers/platform/seal.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/platform
+creating build/bdist.macosx-11.0-arm64/wheel/synth_containers/platform/runtimes
+copying build/lib/synth_containers/platform/runtimes/harbor.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/platform/runtimes
+copying build/lib/synth_containers/platform/runtimes/__init__.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/platform/runtimes
+copying build/lib/synth_containers/platform/runtimes/harbor_docker.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/platform/runtimes
+copying build/lib/synth_containers/platform/runtimes/openenv.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/platform/runtimes
+copying build/lib/synth_containers/platform/runtimes/digbench.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/platform/runtimes
+copying build/lib/synth_containers/platform/__init__.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/platform
+copying build/lib/synth_containers/platform/reducer.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/platform
+copying build/lib/synth_containers/platform/runtime.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/platform
+creating build/bdist.macosx-11.0-arm64/wheel/synth_containers/platform/extensions
+copying build/lib/synth_containers/platform/extensions/__init__.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/platform/extensions
+copying build/lib/synth_containers/platform/extensions/dock.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/platform/extensions
+copying build/lib/synth_containers/platform/echo_world.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/platform
+copying build/lib/synth_containers/platform/state_records.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/platform
+copying build/lib/synth_containers/platform/app.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/platform
+copying build/lib/synth_containers/platform/reward.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/platform
+copying build/lib/synth_containers/platform/terminal_projection.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/platform
+copying build/lib/synth_containers/platform/reward_plan.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/platform
+copying build/lib/synth_containers/platform/affordances.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/platform
+copying build/lib/synth_containers/platform/state.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/platform
+copying build/lib/synth_containers/platform/http_requests.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/platform
+copying build/lib/synth_containers/gold_episode.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/rollout_journal.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/http_models.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/serde.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+creating build/bdist.macosx-11.0-arm64/wheel/synth_containers/checkpoints
+copying build/lib/synth_containers/checkpoints/coordinator.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/checkpoints
+copying build/lib/synth_containers/checkpoints/journal.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/checkpoints
+copying build/lib/synth_containers/checkpoints/__init__.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/checkpoints
+copying build/lib/synth_containers/checkpoints/tunnel_authority.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/checkpoints
+copying build/lib/synth_containers/checkpoints/storage.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/checkpoints
+copying build/lib/synth_containers/checkpoints/contracts.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/checkpoints
+copying build/lib/synth_containers/checkpoints/restore.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/checkpoints
+copying build/lib/synth_containers/__init__.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/serve.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/cispo_harness.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+creating build/bdist.macosx-11.0-arm64/wheel/synth_containers/policies
+copying build/lib/synth_containers/policies/react.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/policies
+copying build/lib/synth_containers/policies/responses.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/policies
+copying build/lib/synth_containers/policies/__init__.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/policies
+copying build/lib/synth_containers/policies/nanohorizon.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/policies
+copying build/lib/synth_containers/policies/single_call.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/policies
+copying build/lib/synth_containers/policies/workshop_proxy.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/policies
+copying build/lib/synth_containers/policies/codex_agentic.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/policies
+copying build/lib/synth_containers/policies/mini_swe.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/policies
+copying build/lib/synth_containers/runtime_requests.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/tool_runtime.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/wire.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/cispo_policy.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+creating build/bdist.macosx-11.0-arm64/wheel/synth_containers/rubrics
+copying build/lib/synth_containers/rubrics/v1.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/rubrics
+copying build/lib/synth_containers/rubrics/__init__.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/rubrics
+copying build/lib/synth_containers/launch.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/cli.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/nouns.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/capabilities.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/formats.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/ontology.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/contracts.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/rewards.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/resources.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/cispo_evidence.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/harbor_environment.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/portable_candidates.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/proxying.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/cispo_handshake.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/cispo_rollout.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+creating build/bdist.macosx-11.0-arm64/wheel/synth_containers/rollout_tracing
+copying build/lib/synth_containers/rollout_tracing/v4.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/rollout_tracing
+copying build/lib/synth_containers/rollout_tracing/__init__.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers/rollout_tracing
+copying build/lib/synth_containers/gen_ai.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/prompt_programs.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/annotations.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/cispo_handshake_facts.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/profiles.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/__main__.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/rollout_lifecycle.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/http_adapter.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/adapters.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/cispo_probe.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/nested.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/cispo_contract.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+copying build/lib/synth_containers/rollout_operations.py -> build/bdist.macosx-11.0-arm64/wheel/./synth_containers
+running install_egg_info
+Copying src/synth_containers.egg-info to build/bdist.macosx-11.0-arm64/wheel/./synth_containers-0.4.5.dev20261018-py3.12.egg-info
+running install_scripts
+creating build/bdist.macosx-11.0-arm64/wheel/synth_containers-0.4.5.dev20261018.dist-info/WHEEL
+creating '/Users/joshuapurtell/GitHub/workspaces/tunnel-cohort-integration-20261018/containers/dist/.tmp-b2jgz15u/synth_containers-0.4.5.dev20261018-py3-none-any.whl' and adding 'build/bdist.macosx-11.0-arm64/wheel' to it
+adding 'synth_containers/__init__.py'
+adding 'synth_containers/__main__.py'
+adding 'synth_containers/adapters.py'
+adding 'synth_containers/annotations.py'
+adding 'synth_containers/capabilities.py'
+adding 'synth_containers/checkpoint_schedule.py'
+adding 'synth_containers/cispo_contract.py'
+adding 'synth_containers/cispo_evidence.py'
+adding 'synth_containers/cispo_handshake.py'
+adding 'synth_containers/cispo_handshake_facts.py'
+adding 'synth_containers/cispo_harness.py'
+adding 'synth_containers/cispo_policy.py'
+adding 'synth_containers/cispo_probe.py'
+adding 'synth_containers/cispo_reward.py'
+adding 'synth_containers/cispo_rollout.py'
+adding 'synth_containers/cispo_target.py'
+adding 'synth_containers/classify_runtime.py'
+adding 'synth_containers/cli.py'
+adding 'synth_containers/compatibility.py'
+adding 'synth_containers/contracts.py'
+adding 'synth_containers/event_log.py'
+adding 'synth_containers/formats.py'
+adding 'synth_containers/gen_ai.py'
+adding 'synth_containers/gold_episode.py'
+adding 'synth_containers/gold_http.py'
+adding 'synth_containers/gold_runtime.py'
+adding 'synth_containers/harbor_environment.py'
+adding 'synth_containers/http_adapter.py'
+adding 'synth_containers/http_client.py'
+adding 'synth_containers/http_models.py'
+adding 'synth_containers/image_main.py'
+adding 'synth_containers/launch.py'
+adding 'synth_containers/metadata.py'
+adding 'synth_containers/nested.py'
+adding 'synth_containers/nested_runtime.py'
+adding 'synth_containers/nouns.py'
+adding 'synth_containers/ontology.py'
+adding 'synth_containers/pid1.py'
+adding 'synth_containers/pools.py'
+adding 'synth_containers/portable_candidates.py'
+adding 'synth_containers/profiles.py'
+adding 'synth_containers/prompt_programs.py'
+adding 'synth_containers/protocols.py'
+adding 'synth_containers/proxying.py'
+adding 'synth_containers/recovery.py'
+adding 'synth_containers/reference_runtime.py'
+adding 'synth_containers/resources.py'
+adding 'synth_containers/rewards.py'
+adding 'synth_containers/rollout_journal.py'
+adding 'synth_containers/rollout_lifecycle.py'
+adding 'synth_containers/rollout_operations.py'
+adding 'synth_containers/runtime_requests.py'
+adding 'synth_containers/sdk.py'
+adding 'synth_containers/serde.py'
+adding 'synth_containers/serve.py'
+adding 'synth_containers/tasks.py'
+adding 'synth_containers/tool_runtime.py'
+adding 'synth_containers/vendored_gepa_contract.py'
+adding 'synth_containers/wire.py'
+adding 'synth_containers/checkpoints/__init__.py'
+adding 'synth_containers/checkpoints/contracts.py'
+adding 'synth_containers/checkpoints/coordinator.py'
+adding 'synth_containers/checkpoints/journal.py'
+adding 'synth_containers/checkpoints/restore.py'
+adding 'synth_containers/checkpoints/storage.py'
+adding 'synth_containers/checkpoints/tunnel_authority.py'
+adding 'synth_containers/compat/__init__.py'
+adding 'synth_containers/compat/archipelago.py'
+adding 'synth_containers/compat/base.py'
+adding 'synth_containers/compat/harbor.py'
+adding 'synth_containers/compat/openenv.py'
+adding 'synth_containers/compat/service_http.py'
+adding 'synth_containers/live_annotation/__init__.py'
+adding 'synth_containers/live_annotation/api.py'
+adding 'synth_containers/live_annotation/contract.py'
+adding 'synth_containers/live_annotation/model.py'
+adding 'synth_containers/live_annotation/process.py'
+adding 'synth_containers/live_annotation/runner.py'
+adding 'synth_containers/live_annotation/service.py'
+adding 'synth_containers/platform/__init__.py'
+adding 'synth_containers/platform/affordances.py'
+adding 'synth_containers/platform/app.py'
+adding 'synth_containers/platform/echo_world.py'
+adding 'synth_containers/platform/http_requests.py'
+adding 'synth_containers/platform/policy_process.py'
+adding 'synth_containers/platform/reducer.py'
+adding 'synth_containers/platform/reward.py'
+adding 'synth_containers/platform/reward_plan.py'
+adding 'synth_containers/platform/runtime.py'
+adding 'synth_containers/platform/seal.py'
+adding 'synth_containers/platform/state.py'
+adding 'synth_containers/platform/state_records.py'
+adding 'synth_containers/platform/targets.py'
+adding 'synth_containers/platform/terminal_projection.py'
+adding 'synth_containers/platform/trace_bundle.py'
+adding 'synth_containers/platform/extensions/__init__.py'
+adding 'synth_containers/platform/extensions/dock.py'
+adding 'synth_containers/platform/runtimes/__init__.py'
+adding 'synth_containers/platform/runtimes/digbench.py'
+adding 'synth_containers/platform/runtimes/harbor.py'
+adding 'synth_containers/platform/runtimes/harbor_docker.py'
+adding 'synth_containers/platform/runtimes/openenv.py'
+adding 'synth_containers/policies/__init__.py'
+adding 'synth_containers/policies/codex_agentic.py'
+adding 'synth_containers/policies/mini_swe.py'
+adding 'synth_containers/policies/nanohorizon.py'
+adding 'synth_containers/policies/react.py'
+adding 'synth_containers/policies/responses.py'
+adding 'synth_containers/policies/single_call.py'
+adding 'synth_containers/policies/workshop_proxy.py'
+adding 'synth_containers/rollout_tracing/__init__.py'
+adding 'synth_containers/rollout_tracing/v4.py'
+adding 'synth_containers/rubrics/__init__.py'
+adding 'synth_containers/rubrics/v1.py'
+adding 'synth_containers/tracing/__init__.py'
+adding 'synth_containers/tracing/annotation_store.py'
+adding 'synth_containers/tracing/canonical.py'
+adding 'synth_containers/tracing/cli.py'
+adding 'synth_containers/tracing/evidence_ops.py'
+adding 'synth_containers/tracing/inspection.py'
+adding 'synth_containers/tracing/interchange.py'
+adding 'synth_containers/tracing/native_evaluation.py'
+adding 'synth_containers/tracing/negotiation.py'
+adding 'synth_containers/tracing/research.py'
+adding 'synth_containers/tracing/adapters/__init__.py'
+adding 'synth_containers/tracing/adapters/anthropic_messages.py'
+adding 'synth_containers/tracing/adapters/application.py'
+adding 'synth_containers/tracing/adapters/atif.py'
+adding 'synth_containers/tracing/adapters/base.py'
+adding 'synth_containers/tracing/adapters/chat_container.py'
+adding 'synth_containers/tracing/adapters/codex_jsonl.py'
+adding 'synth_containers/tracing/adapters/craftax.py'
+adding 'synth_containers/tracing/adapters/craftax_container.py'
+adding 'synth_containers/tracing/adapters/experiments_v4.py'
+adding 'synth_containers/tracing/adapters/harbor.py'
+adding 'synth_containers/tracing/adapters/legacy.py'
+adding 'synth_containers/tracing/adapters/native.py'
+adding 'synth_containers/tracing/adapters/openai_chat.py'
+adding 'synth_containers/tracing/adapters/openai_responses.py'
+adding 'synth_containers/tracing/adapters/optimizer_event_history.py'
+adding 'synth_containers/tracing/adapters/runebench.py'
+adding 'synth_containers/tracing/adapters/sse.py'
+adding 'synth_containers/tracing/adapters/v4.py'
+adding 'synth_containers/tracing/annotation/__init__.py'
+adding 'synth_containers/tracing/annotation/api.py'
+adding 'synth_containers/tracing/annotation/broker.py'
+adding 'synth_containers/tracing/annotation/builtin.py'
+adding 'synth_containers/tracing/annotation/campaign.py'
+adding 'synth_containers/tracing/annotation/codex_app_server.py'
+adding 'synth_containers/tracing/annotation/consensus.py'
+adding 'synth_containers/tracing/annotation/container.py'
+adding 'synth_containers/tracing/annotation/definitions.py'
+adding 'synth_containers/tracing/annotation/endpoints.py'
+adding 'synth_containers/tracing/annotation/evidence_check.py'
+adding 'synth_containers/tracing/annotation/execution_trace.py'
+adding 'synth_containers/tracing/annotation/fixtures.py'
+adding 'synth_containers/tracing/annotation/http_broker.py'
+adding 'synth_containers/tracing/annotation/jesterky_runner.py'
+adding 'synth_containers/tracing/annotation/jesterky_tools.py'
+adding 'synth_containers/tracing/annotation/jobs.py'
+adding 'synth_containers/tracing/annotation/ledger.py'
+adding 'synth_containers/tracing/annotation/model_api.py'
+adding 'synth_containers/tracing/annotation/operations.py'
+adding 'synth_containers/tracing/annotation/persistence.py'
+adding 'synth_containers/tracing/annotation/pricing.py'
+adding 'synth_containers/tracing/annotation/proposal.py'
+adding 'synth_containers/tracing/annotation/receipts.py'
+adding 'synth_containers/tracing/annotation/scheduler.py'
+adding 'synth_containers/tracing/annotation/scope.py'
+adding 'synth_containers/tracing/annotation/service.py'
+adding 'synth_containers/tracing/annotation/signed_broker.py'
+adding 'synth_containers/tracing/annotation/sources.py'
+adding 'synth_containers/tracing/annotation/streams.py'
+adding 'synth_containers/tracing/annotation/tools.py'
+adding 'synth_containers/tracing/annotation/trace_index.py'
+adding 'synth_containers/tracing/annotation/validation.py'
+adding 'synth_containers/tracing/annotation/worker.py'
+adding 'synth_containers/tracing/annotation/workspace.py'
+adding 'synth_containers/tracing/capture/__init__.py'
+adding 'synth_containers/tracing/capture/binding.py'
+adding 'synth_containers/tracing/capture/collector.py'
+adding 'synth_containers/tracing/capture/collector_server.py'
+adding 'synth_containers/tracing/capture/control_server.py'
+adding 'synth_containers/tracing/capture/coordination_reducer.py'
+adding 'synth_containers/tracing/capture/coverage.py'
+adding 'synth_containers/tracing/capture/egress.py'
+adding 'synth_containers/tracing/capture/emitter.py'
+adding 'synth_containers/tracing/capture/envelope.py'
+adding 'synth_containers/tracing/capture/finalizer.py'
+adding 'synth_containers/tracing/capture/live.py'
+adding 'synth_containers/tracing/capture/mitm.py'
+adding 'synth_containers/tracing/capture/mitmproxy_addon.py'
+adding 'synth_containers/tracing/capture/proxy.py'
+adding 'synth_containers/tracing/capture/redaction.py'
+adding 'synth_containers/tracing/capture/routes.py'
+adding 'synth_containers/tracing/capture/runner.py'
+adding 'synth_containers/tracing/capture/session.py'
+adding 'synth_containers/tracing/capture/spool.py'
+adding 'synth_containers/tracing/capture/supervisor.py'
+adding 'synth_containers/tracing/capture/websocket.py'
+adding 'synth_containers/tracing/models/__init__.py'
+adding 'synth_containers/tracing/models/actors.py'
+adding 'synth_containers/tracing/models/artifacts.py'
+adding 'synth_containers/tracing/models/capture_data.py'
+adding 'synth_containers/tracing/models/completeness.py'
+adding 'synth_containers/tracing/models/coordination.py'
+adding 'synth_containers/tracing/models/document.py'
+adding 'synth_containers/tracing/models/events.py'
+adding 'synth_containers/tracing/models/evidence.py'
+adding 'synth_containers/tracing/models/identity.py'
+adding 'synth_containers/tracing/models/messages.py'
+adding 'synth_containers/tracing/models/projection.py'
+adding 'synth_containers/tracing/models/reconciliation.py'
+adding 'synth_containers/tracing/models/rollout_inspector.py'
+adding 'synth_containers/tracing/models/selectors.py'
+adding 'synth_containers/tracing/models/spans.py'
+adding 'synth_containers/tracing/models/standards.py'
+adding 'synth_containers/tracing/models/tokens.py'
+adding 'synth_containers/tracing/models/visual.py'
+adding 'synth_containers/tracing/projections/__init__.py'
+adding 'synth_containers/tracing/projections/derived.py'
+adding 'synth_containers/tracing/projections/inspector.py'
+adding 'synth_containers/tracing/projections/reconciliation.py'
+adding 'synth_containers/tracing/projections/rollout_inspector.py'
+adding 'synth_containers/tracing/projections/v4.py'
+adding 'synth_containers/tracing/projections/visual.py'
+adding 'synth_containers/tracing/store/__init__.py'
+adding 'synth_containers/tracing/store/base.py'
+adding 'synth_containers/tracing/store/bundle.py'
+adding 'synth_containers/tracing/store/filesystem.py'
+adding 'synth_containers/tracing/store/projection.py'
+adding 'synth_containers/tracing/store/s3.py'
+adding 'synth_containers/tracing/store/sqlite_catalog.py'
+adding 'synth_containers/tracing/streaming/__init__.py'
+adding 'synth_containers/tracing/streaming/lifecycle.py'
+adding 'synth_containers/tracing/validation/__init__.py'
+adding 'synth_containers/tracing/validation/rehydrate.py'
+adding 'synth_containers/tracing/validation/schema.py'
+adding 'synth_containers/tracing/validation/validator.py'
+adding 'synth_containers/tunnels/__init__.py'
+adding 'synth_containers/tunnels/attachment.py'
+adding 'synth_containers/tunnels/cli.py'
+adding 'synth_containers/tunnels/connector_control.py'
+adding 'synth_containers/tunnels/origin_connections.py'
+adding 'synth_containers/tunnels/paths.py'
+adding 'synth_containers/tunnels/profiles.py'
+adding 'synth_containers/tunnels/protocol.py'
+adding 'synth_containers/tunnels/relay.py'
+adding 'synth_containers/tunnels/service.py'
+adding 'synth_containers/tunnels/supervisor.py'
+adding 'synth_containers/tunnels/targets.py'
+adding 'synth_containers/tunnels/wire_generated.py'
+adding 'synth_containers-0.4.5.dev20261018.dist-info/METADATA'
+adding 'synth_containers-0.4.5.dev20261018.dist-info/WHEEL'
+adding 'synth_containers-0.4.5.dev20261018.dist-info/entry_points.txt'
+adding 'synth_containers-0.4.5.dev20261018.dist-info/top_level.txt'
+adding 'synth_containers-0.4.5.dev20261018.dist-info/RECORD'
+removing build/bdist.macosx-11.0-arm64/wheel
+Successfully built dist/synth_containers-0.4.5.dev20261018-py3-none-any.whl
