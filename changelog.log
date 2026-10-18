@@ -41,6 +41,10 @@
 
 * Prepared `0.4.1.dev20260814` as the Workshop v0.3 development-channel Containers substrate.
 * Included the merged platform, tunnel credential rotation, Harbor authoring, verifier, and immutable local-build registration work from `dev`.
+## 2026-10-09
+
+* Prepared unpublished `0.4.5.dev20261009` for Tunnel v2 consumer qualification.
+* Added scoped connector cleanup, durable origin operation custody and bounded origin connection reuse.
 
 ## 2026-08-13
 

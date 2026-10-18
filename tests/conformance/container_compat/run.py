@@ -550,6 +550,11 @@ class Runner:
             self.suite.fail("C2-04", f"{premature.status_code} {premature_body}")
         self.client.post(f"/rollouts/{live_id}/complete")
 
+        completed = self.client.post(f"/rollouts/{rid}/complete")
+        if completed.status_code != 200:
+            self.suite.fail("C2-01", f"completion {completed.status_code}")
+            return
+
         scored = self.client.post("/reward", json={"rollout_id": rid, "mode": "terminal"})
         first = _json(scored)
         if scored.status_code not in {200, 202} or "execution_id" not in first:
