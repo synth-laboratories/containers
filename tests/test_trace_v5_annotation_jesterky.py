@@ -174,7 +174,8 @@ def test_scripted_jesterky_seals_with_reservation(tmp_path: Path) -> None:
     assert head is not None and head.annotations[0].producer.model == "gpt-5.6-luna"
 
 
-def test_jesterky_cli_fake_writes_manifest(tmp_path: Path) -> None:
+@pytest.mark.parametrize("scoped", [False, True])
+def test_jesterky_cli_fake_writes_manifest(tmp_path: Path, scoped: bool) -> None:
     script = tmp_path / "fake_jesterky.py"
     script.write_text(
         "\n".join(
@@ -186,6 +187,7 @@ def test_jesterky_cli_fake_writes_manifest(tmp_path: Path) -> None:
                 "args = json.loads(Path(argv[argv.index('--args-file') + 1]).read_text())",
                 "job = args['jobs'][0]",
                 "trace = json.loads(Path(job['path']).read_text())",
+                "assert len(trace['sessions']) == 1 and not trace['extensions']" if scoped else "assert trace['extensions']",
                 "events = trace['events']",
                 "first, second = events[0], events[-1]",
                 "proposal = {",
@@ -233,6 +235,7 @@ def test_jesterky_cli_fake_writes_manifest(tmp_path: Path) -> None:
         model="gpt-5.6-luna",
         runner_kind=RunnerKind.JESTERKY,
         limits=LIMITS,
+        scope_session_ids=(trace.spans[0].session_id,) if scoped else (),
     )
     reservation = service.broker.issue(
         cap_usd_micros=1_000_000,

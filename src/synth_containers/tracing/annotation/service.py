@@ -256,11 +256,13 @@ class AnnotationService:
         limits: AnnotationJobLimitsV1 | None = None,
         metadata: dict[str, Any] | None = None,
         scope_session_ids: Sequence[str] = (),
+        scope_span_ids: Sequence[str] = (),
     ) -> AnnotationJobRequestV1:
         """Build a request whose digests are filled from the registry and the sealed trace.
 
         ``scope_session_ids`` restricts the annotator to those sessions (lanes) of a
         multi-lane trace; it is part of the idempotency key via ``target_selector_ids``.
+        ``scope_span_ids`` further limits the visible execution window.
         """
 
         entry = self._entry(annotator_id)
@@ -289,7 +291,10 @@ class AnnotationService:
             repeat_index=repeat_index,
             parent_job_id=parent_job_id,
             source_annotation_ids=tuple(source_annotation_ids),
-            target_selector_ids=tuple(f"session:{item}" for item in scope_session_ids),
+            target_selector_ids=(
+                *(f"session:{item}" for item in scope_session_ids),
+                *(f"span:{item}" for item in scope_span_ids),
+            ),
             limits=resolved_limits,
             runner_version=RUNNER_VERSION,
             metadata=dict(metadata or {}),
@@ -744,8 +749,41 @@ class AnnotationService:
 
         projections = self.projections(document.trace_id, document.content_digest) if self.projections else ()
         tool_names = entry.program.tool_names or None
+        from .scope import scoped_tool_document
+
+        scope_session_ids = tuple(
+            item.split(":", 1)[1]
+            for item in job.request.target_selector_ids
+            if item.startswith("session:")
+        )
+        scope_span_ids = tuple(
+            item.split(":", 1)[1]
+            for item in job.request.target_selector_ids
+            if item.startswith("span:")
+        )
+        try:
+            scoped_document = scoped_tool_document(document, scope_session_ids, scope_span_ids)
+        except ValueError as error:
+            return self._fail(job, AnnotationJobErrorV1(
+                code=AnnotationJobErrorCode.UNSUPPORTED_FINDING, message=str(error)
+            ))
+        if scope_session_ids or scope_span_ids:
+            # Whole-trace projections may contain evidence from another lane/window.
+            projections = ()
+            from .scope import selector_in_sessions
+
+            outside_scope = any(
+                not selector_in_sessions(document, selector, scope_session_ids, scope_span_ids)
+                for annotation in source_annotations
+                for selector in (annotation.target, *annotation.evidence)
+            )
+            if outside_scope:
+                return self._fail(job, AnnotationJobErrorV1(
+                    code=AnnotationJobErrorCode.UNSUPPORTED_FINDING,
+                    message="adjudication source is outside annotation scope",
+                ))
         tools = TraceInspectionTools(
-            document,
+            scoped_document,
             limits=job.request.limits,
             tool_names=tool_names,
             projections=projections,
@@ -783,7 +821,7 @@ class AnnotationService:
         cancel_flag = self.store.job_dir(job.job_id) / "cancel"
         context = RunContext(
             job=job,
-            document=document,
+            document=scoped_document,
             entry=entry,
             rubric=rubric,
             tools=tools,
@@ -864,6 +902,16 @@ class AnnotationService:
             execution_trace_digest=job.execution_trace_digest,
             existing_annotations=existing,
             allowed_source_annotation_ids=job.request.source_annotation_ids,
+            allowed_session_ids=tuple(
+                item.split(":", 1)[1]
+                for item in job.request.target_selector_ids
+                if item.startswith("session:")
+            ),
+            allowed_span_ids=tuple(
+                item.split(":", 1)[1]
+                for item in job.request.target_selector_ids
+                if item.startswith("span:")
+            ),
             index=index,
         )
         result = validator.validate(outcome.proposal)

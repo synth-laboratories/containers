@@ -247,6 +247,85 @@ def _finding(target: dict[str, Any], labels: list[str], evidence: list[dict[str,
     return {"target": target, "annotation_type": "belief", "labels": labels, "payload": {}, "confidence": 1.0, "rationale": "test", "evidence": evidence}
 
 
+@pytest.mark.parametrize("scope_kind", ["session", "span"])
+def test_scoped_runner_cannot_read_other_sessions_or_spans(tmp_path: Path, scope_kind: str) -> None:
+    observed = []
+
+    def program(document, context):
+        observed.append(document)
+        return empty_proposal(trace_id=document.trace_id, trace_digest=document.content_digest)
+
+    service, trace = _service(tmp_path, extra=[(
+        _definition("test.scoped"), _program("test.scoped.program"), program,
+    )])
+    selected = trace.spans_of_kind("model_call")[0]
+    other_session = next(s for s in trace.sessions if s.session_id != selected.session_id)
+    hidden_message = replace(trace.messages[0], message_id="hidden", session_id=other_session.session_id)
+    trace = replace(trace, messages=(*trace.messages, hidden_message), content_digest="").sealed()
+    service.register_trace(trace)
+    scope = {f"scope_{scope_kind}_ids": (selected.session_id if scope_kind == "session" else selected.span_id,)}
+    job = service.submit_and_run(service.request_for(trace, "test.scoped", **scope))
+    assert str(job.state) == AnnotationJobState.SEALED, job.error
+    assert len(observed) == 1
+    view = observed[0]
+    assert view.content_digest == trace.content_digest
+    assert {s.session_id for s in view.sessions} == {selected.session_id}
+    assert view.message("hidden") is None
+    assert not view.extensions and not view.artifacts and not view.links
+    if scope_kind == "span":
+        assert tuple(s.span_id for s in view.spans) == (selected.span_id,)
+        assert {m.message_id for m in view.messages} == {*selected.input_message_ids, *selected.output_message_ids}
+    assert service.store.get_source(trace.trace_id, trace.content_digest) == trace
+
+
+@pytest.mark.parametrize("scope_kind", ["session", "span"])
+def test_scoped_validator_rejects_outside_targets_and_evidence(scope_kind: str) -> None:
+    from synth_containers.tracing.annotation.validation import ProposalValidator
+    from synth_containers.tracing.models.standards import ProducerRefV1
+
+    trace = build_craftax_smoke_trace()
+    selected, outside = trace.spans_of_kind("model_call")[:2]
+    inside_id = selected.output_message_ids[0]
+    outside_message = trace.message(outside.output_message_ids[0])
+    assert outside_message is not None
+    if scope_kind == "session":
+        other_session = next(s for s in trace.sessions if s.session_id != selected.session_id)
+        trace = replace(trace, messages=tuple(
+            replace(m, session_id=other_session.session_id) if m.message_id == outside_message.message_id else m
+            for m in trace.messages
+        ), content_digest="").sealed()
+    scope = {f"allowed_{scope_kind}_ids": (selected.session_id if scope_kind == "session" else selected.span_id,)}
+    validator = ProposalValidator(
+        trace, definition=_definition("test.scope-output"),
+        producer=ProducerRefV1(kind="deterministic", name="test"), job_id="scope-output", **scope,
+    )
+    inside = {"kind": "message", "entity_id": inside_id}
+    hidden = {"kind": "message", "entity_id": outside_message.message_id}
+    proposal = empty_proposal(trace_id=trace.trace_id, trace_digest=trace.content_digest)
+    proposal["findings"] = [
+        _finding(inside, ["belief.correct"], [inside]),
+        _finding(hidden, ["belief.correct"], [inside]),
+        _finding(inside, ["belief.correct"], [hidden]),
+    ]
+    result = validator.validate(proposal)
+    assert result.applied_count == 1
+    assert {r.reason for r in result.rejected} == {
+        "target_outside_session_scope", "evidence_outside_session_scope",
+    }
+
+
+def test_unknown_annotation_scope_fails_without_invoking_runner(tmp_path: Path) -> None:
+    def program(document, context):
+        pytest.fail("invalid scope must fail before executing the annotator")
+
+    service, trace = _service(tmp_path, extra=[(
+        _definition("test.bad-scope"), _program("test.bad-scope.program"), program,
+    )])
+    job = service.submit_and_run(service.request_for(trace, "test.bad-scope", scope_span_ids=("missing",)))
+    assert str(job.state) == AnnotationJobState.FAILED
+    assert job.error is not None and "unknown annotation spans" in job.error.message
+
+
 def test_invented_selector_becomes_typed_abstention(tmp_path: Path) -> None:
     def program(document, context):
         proposal = empty_proposal(trace_id=document.trace_id, trace_digest=document.content_digest)
