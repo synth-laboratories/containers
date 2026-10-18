@@ -18,3 +18,4 @@ temp/_runs/
 
 # Project-scoped local publishing credentials
 .env.pypi
+/records/**/private/

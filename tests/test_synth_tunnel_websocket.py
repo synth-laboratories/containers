@@ -677,6 +677,42 @@ def test_agent_disconnect_closes_every_rid_with_1012(
         agent.stop()
 
 
+def test_origin_cleanup_precedes_blocked_reconnect_backoff(
+    monkeypatch: pytest.MonkeyPatch,
+    echo_origin: _EchoOrigin,
+) -> None:
+    port = echo_origin.start()
+    fake = _FakeRelaySocket()
+    agent = _make_agent(monkeypatch, fake, origin_port=port)
+    entered, release = threading.Event(), threading.Event()
+    original_wait = agent._stop.wait
+
+    def parked_backoff(seconds=None):
+        if seconds == .5:
+            entered.set()
+            if not release.wait(5):
+                raise AssertionError("owned backoff barrier not released")
+        return original_wait(seconds)
+
+    monkeypatch.setattr(agent._stop, "wait", parked_backoff)
+    try:
+        fake.push({"type": "WS_OPEN", "lease_id": "lease_test", "rid": "r1",
+                   "path": "/socket", "query": "", "headers": [], "deadline_ms": 10000})
+        fake.wait_for("WS_OPEN_ACK")
+        fake.close()
+        assert entered.wait(2), "disconnect did not enter reconnect backoff"
+        assert not agent._ready.is_set(), "reconnect backoff retained stale readiness"
+        assert agent._streams == {}, "reconnect backoff retained origin custody"
+        deadline = time.monotonic() + 1
+        while not echo_origin.closed_with and time.monotonic() < deadline:
+            time.sleep(.01)
+        assert echo_origin.closed_with and echo_origin.closed_with[0][0] == 1012
+        assert not release.is_set(), "origin cleanup depended on reconnect backoff completing"
+    finally:
+        release.set()
+        agent.stop()
+
+
 def test_open_sockets_have_their_own_ceiling(
     monkeypatch: pytest.MonkeyPatch,
     echo_origin: _EchoOrigin,
