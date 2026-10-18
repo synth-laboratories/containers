@@ -232,12 +232,12 @@ class HttpSessionAuthority:
         # settles independently proven durable receipts under the current fence.
         # A new completion command gets a bounded control budget; retries reuse
         # the canonical deadline, including after a lost registration reply.
-        from synth_ai.core.errors import HTTPError
+        from synth_ai.errors import NotFoundError
 
         try:
             previous = await self.catalog.session_operation(request.connector, operation)
-        except HTTPError as error:
-            if error.status != 404 or error.detail != {"detail": "unknown_session_operation"}:
+        except NotFoundError as error:
+            if error.status != 404 or error.code != "unknown_session_operation":
                 raise
             deadline = datetime.now(timezone.utc) + timedelta(seconds=60)
         else:

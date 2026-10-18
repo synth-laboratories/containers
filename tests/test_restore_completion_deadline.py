@@ -5,9 +5,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from synth_ai.core.errors import HTTPError
-from synth_ai.core.http.transport import raise_http_error
-import httpx
+from synth_ai.errors import NotFoundError, SynthError
 from synth_containers.checkpoints.tunnel_authority import HttpSessionAuthority
 
 
@@ -24,7 +22,7 @@ def test_expired_origin_completion_has_stable_control_custody(registered):
             requests = []
             async def session_operation(self, connector, operation):
                 if self.saved is None:
-                    raise_http_error(httpx.Response(404, json={"detail": "unknown_session_operation"}, request=httpx.Request("GET", "http://catalog/session-operations/operation")))
+                    raise NotFoundError("Unknown session operation", status=404, code="unknown_session_operation")
                 return self.saved
             async def register_session_operation(self, connector, request):
                 self.requests.append(request)
@@ -58,14 +56,14 @@ def test_unavailable_custody_cannot_create_completion(status, detail):
     async def run():
         class Catalog:
             async def session_operation(self, *args):
-                raise_http_error(httpx.Response(status, json={"detail": detail}, request=httpx.Request("GET", "http://catalog/session-operations/operation")))
+                raise (NotFoundError if status == 404 else SynthError)("Catalog unavailable", status=status, code=detail)
             async def register_session_operation(self, *args):
                 raise AssertionError("created command without authoritative absence")
         authority = HttpSessionAuthority(catalog=Catalog(), gateway_url="http://gateway", service_identity="fixture")
         try:
             request = SimpleNamespace(operation=uuid4(), connector=uuid4())
             result = SimpleNamespace(fence=SimpleNamespace(generation=4), receipts=[object()])
-            with pytest.raises(HTTPError):
+            with pytest.raises(SynthError):
                 await authority.complete_restore(request, result)
         finally:
             await authority.close()

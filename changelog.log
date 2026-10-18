@@ -1,5 +1,11 @@
 # synth-containers changelog
 
+## 2026-10-18 — current SDK Tunnel candidate (unpublished)
+
+* Prepare `0.4.5.dev2026101816` with typed current-SDK checkpoint recovery errors.
+* Preserve canonical completion deadlines and only create new completion custody after a verified `unknown_session_operation` refusal.
+* Qualify the installed package against modular Synth SDK `0.24.0.dev20261018`; no archived SDK source overlay or publication.
+
 ## 2026-09-29 — published 0.4.4
 
 * Require patched AnyIO >=4.14.2 for TLS hostname validation and process-pool handling.
