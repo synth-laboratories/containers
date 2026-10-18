@@ -1,0 +1,31 @@
+{
+  "schema": "eval-stream-prerequisite-qualification.v1",
+  "date": "2026-10-18",
+  "base": "8cceead52f2c2370f15438bcf90046c4edcef3fe",
+  "preservation_source": "3da988b9b7903303c25bf8241be112fb65095ba7",
+  "scope": "Extract session/span inspection and validation, constrain runner inputs and projections, preserve original sealed trace authority. Whole preservation branch not merged.",
+  "tests": {
+    "command": ".venv/bin/python -m pytest tests/test_trace_v5_annotation_jobs.py tests/test_trace_v5_annotation_jesterky.py tests/test_trace_v5_annotation_evidence_cache.py -q --basetemp=.test-tmp",
+    "passed": 65,
+    "skipped": 2,
+    "log": "annotations.log"
+  },
+  "checks": [
+    "git diff --check passed",
+    "scope.py Ruff passed",
+    "No additional Ruff findings in changed existing files versus base"
+  ],
+  "providers": "No real provider calls; Jesterky subprocess witness uses a fake CLI.",
+  "limitations": [
+    "No package publication or production deployment",
+    "Scoped document is an inspection view retaining source identity, not a new sealed trace",
+    "No live Craftax benchmark or full repository qualification"
+  ],
+  "source_sha256": {
+    "src/synth_containers/tracing/annotation/scope.py": "31a2cd28790a6f55ec0c818fedeb8090e97a796f81dd65a062b6e823a59b255e",
+    "src/synth_containers/tracing/annotation/service.py": "a4c820e0150b16281997ed8898d725e4aa6cf54b993e4b5edb13821dfef8359d",
+    "src/synth_containers/tracing/annotation/validation.py": "04b7770b0489a0b938e33ce71ea1320e500b3524d63a6aa57e46d34027d28b9d",
+    "tests/test_trace_v5_annotation_jobs.py": "2f7e4e69ff31705e6849bc82896127390dc299b016ae5cf0d6da4dd7b19ee8d4",
+    "tests/test_trace_v5_annotation_jesterky.py": "43e261dfafa15b5a74d76cd79652a99632dadfd926ab8c35c1dfee77712fc5eb"
+  }
+}
