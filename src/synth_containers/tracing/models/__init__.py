@@ -10,6 +10,8 @@ from .actors import (
     Visibility,
 )
 from .artifacts import ArtifactCompleteness, ArtifactRefV5, ArtifactRole
+from . import eval_view as _eval_view
+from .eval_view import *  # noqa: F401,F403
 from .completeness import (
     CaptureStatus,
     TerminationV5,
@@ -298,3 +300,9 @@ __all__ = [
     "resolve_selector",
     "selector_for",
 ]
+
+__all__ = [*__all__, *_eval_view.__all__]
+
+from .eval_view_validate import EvalViewError, validate_eval_index, validate_eval_view  # noqa: E402
+
+__all__ = [*__all__, "EvalViewError", "validate_eval_index", "validate_eval_view"]
