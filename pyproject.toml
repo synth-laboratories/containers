@@ -1,11 +1,12 @@
 [project]
 name = "synth-containers"
-version = "0.4.5.dev2026101816"
+version = "0.4.5.dev2026102023"
 description = "Shared Synth container and environment runtime substrate"
 authors = [{name = "Synth Laboratories", email = "josh@usesynth.ai"}]
 readme = "README.md"
 requires-python = ">=3.11"
-license = "MIT"
+license = "MIT AND Apache-2.0"
+license-files = ["LICENSES/*", "NOTICE"]
 dependencies = [
     "anyio>=4.14.2",
     "certifi>=2024.0.0",
@@ -20,6 +21,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+native-harbor = ["harbor==0.22.0; python_version >= '3.12'"]
+native-harbor-docker = [
+    "harbor==0.22.0; python_version >= '3.12'",
+    "docker==7.1.0; python_version >= '3.12'",
+]
+native-harbor-daytona = [
+    "harbor[daytona]==0.22.0; python_version >= '3.12'",
+    "daytona==0.210.0; python_version >= '3.12'",
+]
 dev = [
     "build>=1.2.1",
     "cryptography>=50.0.0",
@@ -55,7 +65,7 @@ Repository = "https://github.com/synth-laboratories/containers"
 Issues = "https://github.com/synth-laboratories/containers/issues"
 
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.uv]
