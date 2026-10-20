@@ -103,6 +103,103 @@ def test_material_policy_change_produces_new_revision() -> None:
     assert first["policy_revision_id"] != second["policy_revision_id"]
 
 
+def test_named_policy_config_retries_are_safe_but_rebinding_is_refused() -> None:
+    client = _client()
+    body = {"config_id": "sampler-1", "harness": "nanohorizon",
+            "config": {"temperature": 0.2}}
+    assert client.post("/policy-configs", json=body).status_code == 200
+    original = client.app.state.platform.policy_configs["sampler-1"]
+    assert client.post("/policy-configs/sampler-1", json=body).status_code == 200
+    assert client.app.state.platform.policy_configs["sampler-1"] is original
+    conflict = client.post("/policy-configs", json={**body, "config": {"temperature": 0.8}})
+    assert conflict.status_code == 409
+    assert conflict.json()["error"] == "policy_config_conflict"
+    assert original.config == {"temperature": 0.2}
+    assert client.post("/policy-configs", json={**body, "config_id": "sampler-2"}).status_code == 200
+
+
+def test_reselecting_revision_restores_restart_source_and_keeps_rollout_pins() -> None:
+    client = _client()
+    platform = client.app.state.platform
+    code_a = "def policy(observation):\n    return 'a'\n"
+    code_b = "def policy(observation):\n    return 'b'\n"
+    first = _install(client, code=code_a)
+    second = _install(client, code=code_b)
+    generation = platform.policy_generation
+    reselected = _install(client, code=code_a)
+    assert reselected["policy_revision_id"] == first["policy_revision_id"]
+    assert platform.policy_code == code_a.encode()
+    assert platform.policy_generation == generation + 1
+    _install(client, code=code_a)
+    assert platform.policy_generation == generation + 1
+    restarted = client.post("/policy/restart").json()
+    assert restarted["policy_revision_id"] == first["policy_revision_id"]
+    assert platform.policy_code == code_a.encode()
+    assert platform.policy_revisions[second["policy_revision_id"]].code == code_b.encode()
+    assert restarted["engine_generation"] == 1
+
+
+def test_policy_restart_uses_selected_harness_without_changing_engine(monkeypatch: MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    client = _client()  # default is nanohorizon; selected revision can be isolated
+    platform = client.app.state.platform
+    started = []
+
+    def ensure_process():
+        started.append(platform.policy_code)
+        platform.policy_process = SimpleNamespace(
+            close=lambda: None, isolation_receipt={"spawned": True}
+        )
+        return platform.policy_process
+
+    monkeypatch.setattr(platform, "_ensure_policy_process", ensure_process)
+    response = client.put("/policy", json={"namespace": "test", "name": "code",
+                          "harness": "isolated_policy_process", "code": "def act(x): return 'noop'"})
+    assert response.status_code == 200
+    restarted = client.post("/policy/restart").json()
+    assert len(started) == 2
+    assert started[0] == started[1]
+    assert restarted["engine_generation"] == 1
+    _install(client)
+    assert client.post("/policy/restart").json()["isolation_receipt"] is None
+    assert len(started) == 2
+
+
+def test_programmatic_update_and_rollback_change_the_real_policy_child(tmp_path, monkeypatch):
+    import tempfile
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    client = _client()
+    platform = client.app.state.platform
+
+    def install(action):
+        response = client.put("/policy", json={
+            "namespace": "test", "name": "code", "harness": "isolated_policy_process",
+            "code": f"def act(readout):\n    return {action!r}\n",
+        })
+        assert response.status_code == 200
+        return response.json()["policy_revision_id"]
+
+    def action():
+        return platform.policy_process.choose({"valid_actions": ["a", "b"]}, ply=1)
+
+    try:
+        first = install("a")
+        assert action() == ["a"]
+        second = install("b")
+        assert first != second
+        assert action() == ["b"]
+        assert install("a") == first
+        assert action() == ["a"]
+        restarted = client.post("/policy/restart").json()
+        assert restarted["policy_revision_id"] == first
+        assert restarted["engine_generation"] == 1
+        assert action() == ["a"]
+    finally:
+        platform._close_policy_process()
+
+
 def test_rollout_rejects_missing_unknown_and_mismatched_policy_revision() -> None:
     client = _client()
     client.post(
