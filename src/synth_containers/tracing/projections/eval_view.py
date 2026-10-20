@@ -11,20 +11,39 @@ payload ``call_index`` that matches a model-call span). Everything else becomes 
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from datetime import datetime
-from typing import Any, Iterable
+from typing import Any
 
 from ..models.document import TraceDocumentV5
 from ..models.eval_view import (
-    EvalActionV2, EvalArtifactV2, EvalCostV2, EvalEnvironmentV2, EvalEvaluatorV2,
-    EvalExecutedActionV2, EvalFrameV2, EvalIntegrityV2, EvalMediaV2, EvalRejectedActionV2,
-    EvalReproduceV2, EvalRunV2, EvalStepContentV2, EvalStepTokensV2, EvalStepV2, EvalTaskV2,
-    EvalToolCallV2, EvalTraceViewV2, EvalUsageV2, EvalIndexCostV1, EvalIndexRowV1,
-    EvalIndexTaskV1, EvalIndexTokensV1,
+    EvalActionV2,
+    EvalArtifactV2,
+    EvalCostV2,
+    EvalEnvironmentV2,
+    EvalEvaluatorV2,
+    EvalExecutedActionV2,
+    EvalFrameV2,
+    EvalIndexCostV1,
+    EvalIndexRowV1,
+    EvalIndexTaskV1,
+    EvalIndexTokensV1,
+    EvalIntegrityV2,
+    EvalMediaV2,
+    EvalRejectedActionV2,
+    EvalReproduceV2,
+    EvalRunV2,
+    EvalStepContentV2,
+    EvalStepTokensV2,
+    EvalStepV2,
+    EvalTaskV2,
+    EvalToolCallV2,
+    EvalTraceViewV2,
+    EvalUsageV2,
 )
 from ..models.events import EventType, EventV5
-from ..models.messages import MessageNodeV5, PartType
-from ..models.spans import SpanKind, SpanV5
+from ..models.messages import PartType
+from ..models.spans import SpanKind
 
 _STATUS = {
     "completed": "completed", "failed": "failed", "interrupted": "interrupted",
@@ -37,11 +56,11 @@ def _ms(a: str | None, b: str | None) -> int | None:
     if not a or not b:
         return None
     try:
-        da = datetime.fromisoformat(a.replace("Z", "+00:00"))
-        db = datetime.fromisoformat(b.replace("Z", "+00:00"))
+        da = datetime.fromisoformat(a)
+        db = datetime.fromisoformat(b)
     except ValueError:
         return None
-    return max(0, int(round((db - da).total_seconds() * 1000)))
+    return max(0, round((db - da).total_seconds() * 1000))
 
 
 def _kind(event: EventV5) -> str:
@@ -325,7 +344,7 @@ def project_eval_view(
     )
     duration = _ms(started, document.lifecycle.ended_at)
     if duration is None and u.wall_time_seconds is not None:
-        duration = int(round(u.wall_time_seconds * 1000))
+        duration = round(u.wall_time_seconds * 1000)
 
     if cost is None:
         cost = EvalCostV2(
@@ -418,15 +437,26 @@ def project_eval_index_row(
         )
     ev = view.evaluator
     usage = view.run.usage or EvalUsageV2()
+    # eval_index_v1 requires these facts. The detailed view can retain unknowns,
+    # but an index row must refuse them rather than invent experiment identity
+    # or claim a measured zero-call run.
+    if view.run.seed is None:
+        raise ValueError(
+            f"code=missing_seed stage=project_eval_index_row run_id={view.run_id}"
+        )
+    if usage.calls is None:
+        raise ValueError(
+            f"code=missing_calls stage=project_eval_index_row run_id={view.run_id}"
+        )
     success = {"pass": True, "fail": False}.get(ev.verdict) if ev else None
     row = EvalIndexRowV1(
         id=view.run_id,
         task=EvalIndexTaskV1(view.task.id, view.task.name, view.task.family),
         model=view.run.model, provider=view.run.provider, effort=view.run.effort,
-        seed=view.run.seed if view.run.seed is not None else 0,
+        seed=view.run.seed,
         protocol=protocol, status=view.run.status,
         score=ev.score if ev else None, reward=ev.reward if ev else None, success=success,
-        steps=len(view.steps), calls=usage.calls if usage.calls is not None else 0,
+        steps=len(view.steps), calls=usage.calls,
         duration_ms=view.run.duration_ms,
         tokens=EvalIndexTokensV1(usage.input_tokens, usage.output_tokens, usage.cache_read_tokens),
         cost=EvalIndexCostV1(view.cost.usd, view.cost.basis),

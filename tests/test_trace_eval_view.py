@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import copy
 import json
+from dataclasses import replace
 from pathlib import Path
+
+import pytest
 
 from synth_containers.tracing.cli import main as trace_cli_main
 from synth_containers.tracing.models import (
@@ -237,6 +240,29 @@ def test_projector_round_trip_and_rules() -> None:
     assert validate_eval_index(index) == []
 
 
+def test_index_refuses_unknown_required_facts_without_losing_view() -> None:
+    view = project_eval_view(synthetic_v5(), environment="none")
+    missing_seed = replace(view, run=replace(view.run, seed=None))
+    assert "seed" not in missing_seed.to_dict()["run"]
+    with pytest.raises(ValueError, match="code=missing_seed"):
+        project_eval_index_row(missing_seed, protocol="p")
+
+    missing_calls = replace(view, run=replace(view.run, usage=None))
+    assert "usage" not in missing_calls.to_dict()["run"]
+    with pytest.raises(ValueError, match="code=missing_calls"):
+        project_eval_index_row(missing_calls, protocol="p")
+
+
+def test_index_preserves_observed_zero_seed_and_call_count() -> None:
+    from synth_containers.tracing.models.eval_view import EvalUsageV2
+
+    view = project_eval_view(synthetic_v5(), environment="none")
+    view = replace(view, run=replace(view.run, seed=0, usage=EvalUsageV2(calls=0)))
+    row = project_eval_index_row(view, protocol="p")
+    assert row["seed"] == 0
+    assert row["calls"] == 0
+
+
 def test_atif_step_ids_sequential_and_paired() -> None:
     view = project_eval_view(synthetic_v5(), environment="none")
     atif = to_atif(view)
@@ -266,10 +292,10 @@ def test_cli_validate_eval_view(tmp_path: Path, capsys) -> None:
 
 
 def test_cli_project_eval_view_from_bundle(tmp_path: Path) -> None:
+    from synth_containers.tracing.adapters.atif import import_atif
     from synth_containers.tracing.adapters.native import write_imported_document
     from synth_containers.tracing.canonical import bytes_digest
     from synth_containers.tracing.store.bundle import LocalTraceBundle
-    from synth_containers.tracing.adapters.atif import import_atif
 
     trace = import_atif({
         "schema_version": "ATIF-v1.7", "trajectory_id": "ev-demo", "agent": {"name": "a", "version": "1"},

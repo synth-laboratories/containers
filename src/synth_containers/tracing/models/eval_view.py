@@ -8,11 +8,10 @@ names as nullable (``cost.usd``, index ``provider``/``effort`` and unknown token
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, fields, is_dataclass
+from dataclasses import dataclass, fields, is_dataclass
 from typing import Any
 
 from synth_containers.serde import JsonDataclassMixin, jsonable
-
 
 EVAL_VIEW_SCHEMA_VERSION = "eval_trace_view_v2"
 EVAL_VIEW_V1_SCHEMA_VERSION = "eval_trace_view_v1"
