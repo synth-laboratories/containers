@@ -3,6 +3,8 @@
     "contract_version": "2026-05-28",
     "live_frames": "unsupported",
     "metadata": {
+      "durable_operation_lookup": false,
+      "origin_operation_contract": null,
       "policy_ready": true,
       "program_ready": true
     },
@@ -67,6 +69,7 @@
   "runtime": {
     "description": "Golden fixture: authoring-SDK reference container",
     "name": "golden-sdk-container",
+    "origin_instance": null,
     "runtime_id": "golden-sdk-container"
   }
 }

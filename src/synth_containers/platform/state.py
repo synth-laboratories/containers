@@ -9,6 +9,7 @@ import tempfile
 import threading
 import time
 import uuid
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -1388,6 +1389,10 @@ class CompatPlatform:
             process.close()
 
     def put_policy(self, body: dict[str, Any]) -> dict[str, Any]:
+        with self._state_lock:
+            return self._put_policy(body)
+
+    def _put_policy(self, body: dict[str, Any]) -> dict[str, Any]:
         if self.spec.affordances.level("update_policy_code") == "unsupported":
             return {"error": "bind_refused", "status_code": 403, "affordance": "update_policy_code"}
         code = body.get("code")
@@ -1449,8 +1454,10 @@ class CompatPlatform:
         revision_id = f"polrev_{digest[:16]}"
         existing = self.policy_revisions.get(revision_id)
         if existing is not None:
-            self.current_policy_revision_id = revision_id
-            return {**self.policy_state_payload(), "idempotent": True}
+            if self.current_policy_revision_id == revision_id:
+                return {**self.policy_state_payload(), "idempotent": True}
+            receipt = self._activate_policy_revision(existing)
+            return {**self.policy_state_payload(), "idempotent": True, "isolation_receipt": receipt}
         configuration_digest = "sha256:" + hashlib.sha256(
             json.dumps(configuration, sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest()
@@ -1473,16 +1480,23 @@ class CompatPlatform:
             installed_at=installed_at,
         )
         self.policy_revisions[revision_id] = revision
-        self.current_policy_revision_id = revision_id
-        self.policy_generation += 1
-        self.policy_code = bytes(raw)
-        self._close_policy_process()
-        receipt = dict(revision.isolation_receipt)
-        spawn = harness == ISOLATED_POLICY_HARNESS or (
+        receipt = self._activate_policy_revision(revision)
+        return {**self.policy_state_payload(), "idempotent": False, "isolation_receipt": receipt}
+
+    def _policy_process_required(self, harness: str) -> bool:
+        return harness == ISOLATED_POLICY_HARNESS or (
             self.spec.default_policy_harness == ISOLATED_POLICY_HARNESS
             and harness != NANOHORIZON_HARNESS
         )
-        if spawn:
+
+    def _activate_policy_revision(self, revision: PolicyRevision) -> dict[str, Any]:
+        """Select immutable source and restart only the façade's policy child."""
+        self.current_policy_revision_id = revision.revision_id
+        self.policy_generation += 1
+        self.policy_code = revision.code
+        self._close_policy_process()
+        receipt = dict(revision.isolation_receipt)
+        if self._policy_process_required(revision.harness):
             try:
                 process = self._ensure_policy_process()
                 receipt.update(process.isolation_receipt)
@@ -1491,7 +1505,7 @@ class CompatPlatform:
                 receipt["spawn_error"] = str(exc)
         else:
             receipt["spawned"] = False
-        return {**self.policy_state_payload(), "idempotent": False, "isolation_receipt": receipt}
+        return receipt
 
     def policy_state_payload(self) -> dict[str, Any]:
         """Return the installed policy identity without source or credentials."""
@@ -1524,14 +1538,23 @@ class CompatPlatform:
             }
 
     def restart_policy(self) -> dict[str, Any]:
+        with self._state_lock:
+            return self._restart_policy()
+
+    def _restart_policy(self) -> dict[str, Any]:
         self._close_policy_process()
-        if self.spec.default_policy_harness == "isolated_policy_process":
+        revision = self.policy_revisions.get(str(self.current_policy_revision_id or ""))
+        if revision is not None:
+            self.policy_code = revision.code
+        harness = revision.harness if revision else self.spec.default_policy_harness
+        if self._policy_process_required(harness):
             self._ensure_policy_process()
         self.policy_generation += 1
         return {
             "restarted": True,
             "engine_generation": self.engine_generation,
             "policy_generation": self.policy_generation,
+            "policy_revision_id": self.current_policy_revision_id,
             "durable_logs": list(self.logs),
             "active_leases": self.active_leases,
             "isolation_receipt": (
@@ -1540,6 +1563,10 @@ class CompatPlatform:
         }
 
     def register_policy_config(self, config_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        with self._state_lock:
+            return self._register_policy_config(config_id, body)
+
+    def _register_policy_config(self, config_id: str, body: dict[str, Any]) -> dict[str, Any]:
         if self.spec.affordances.level("bind_policy_config") == "unsupported":
             return {"error": "bind_refused", "status_code": 403, "affordance": "bind_policy_config"}
         # Policy configs are immutable, named inputs. Registering a new config
@@ -1550,8 +1577,18 @@ class CompatPlatform:
         cfg = PolicyConfig(
             config_id=config_id,
             harness=str(body.get("harness") or self.spec.default_policy_harness),
-            config=dict(body.get("config") or body),
+            config=deepcopy(body.get("config", body)),
         )
+        existing = self.policy_configs.get(config_id)
+        if existing is not None:
+            if existing.harness != cfg.harness or existing.config != cfg.config:
+                return {
+                    "error": "policy_config_conflict",
+                    "status_code": 409,
+                    "config_id": config_id,
+                }
+            return {"config_id": config_id, "harness": existing.harness,
+                    "engine_generation": self.engine_generation}
         self.policy_configs[config_id] = cfg
         return {"config_id": config_id, "harness": cfg.harness, "engine_generation": self.engine_generation}
 
