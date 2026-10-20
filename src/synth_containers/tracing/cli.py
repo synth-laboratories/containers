@@ -56,7 +56,53 @@ from .capture.control_server import DetachedCaptureConfig, DetachedCaptureSuperv
 from .models.identity import TraceKind, TraceProvenanceV5
 
 
+def _eval_view_main(argv: list[str]) -> int:
+    """``project eval-view`` and ``validate-eval-view`` (typed eval trace viewer contract)."""
+
+    from .models.eval_view_validate import validate_eval_index, validate_eval_view
+    from .projections.eval_view import project_eval_view
+
+    parser = argparse.ArgumentParser(prog="synth-trace")
+    sub = parser.add_subparsers(dest="command", required=True)
+    pv = sub.add_parser("project", help="project a bundle into the eval trace view")
+    pv.add_argument("view", choices=["eval-view"])
+    pv.add_argument("bundle", type=Path)
+    pv.add_argument("--environment", required=True)
+    pv.add_argument("--output", type=Path)
+    vv = sub.add_parser("validate-eval-view", help="validate an eval_trace_view or eval_index file")
+    vv.add_argument("file", type=Path)
+    args = parser.parse_args(argv)
+    if args.command == "validate-eval-view":
+        doc = json.loads(args.file.read_text(encoding="utf-8"))
+        check = validate_eval_index if isinstance(doc, dict) and doc.get("schema") == "eval_index_v1" else validate_eval_view
+        errors = check(doc)
+        print(readable_json({"valid": not errors, "errors": [e.to_dict() for e in errors]}))
+        return 0 if not errors else 1
+    inspected = load_bundle(args.bundle)
+    if len(inspected) != 1 and args.output is not None:
+        print(f"code=ambiguous_bundle stage=project_eval_view traces={len(inspected)}: --output needs exactly one trace", file=sys.stderr)
+        return 2
+    views = []
+    for item in inspected:
+        view = project_eval_view(item.trace, environment=args.environment).to_dict()
+        errors = validate_eval_view(view)
+        if errors:
+            print(readable_json({"valid": False, "errors": [e.to_dict() for e in errors]}), file=sys.stderr)
+            return 1
+        views.append(view)
+    text = json.dumps(views[0] if len(views) == 1 else views, sort_keys=True, indent=2, ensure_ascii=False)
+    if args.output is not None:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(text + "\n", encoding="utf-8")
+    else:
+        print(text)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
+    raw = list(sys.argv[1:] if argv is None else argv)
+    if raw[:2] == ["project", "eval-view"] or raw[:1] == ["validate-eval-view"]:
+        return _eval_view_main(raw)
     parser = argparse.ArgumentParser(prog="synth-trace", description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
