@@ -7,7 +7,7 @@ import json
 import os
 import tempfile
 import threading
-import time
+import time as time
 import uuid
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -29,6 +29,7 @@ from ..metadata import (
 )
 from ..live_annotation.service import LiveAnnotationService, annotation_channel
 from .affordances import bind_recipe
+from .journal_retention import journal_retention, retention_ttl_seconds
 from .http_requests import CreateRolloutRequest, ISOLATED_POLICY_HARNESS, NANOHORIZON_HARNESS
 from .policy_process import DEFAULT_HEURISTIC, IsolatedPolicyProcess
 from .reward_plan import PlanOutcome, classify_plan_outcome
@@ -1965,48 +1966,12 @@ class CompatPlatform:
         return payload
 
     def _retention_ttl_seconds(self) -> int:
-        raw = (self.runtime_config or {}).get("journal_retention_ttl_seconds")
-        try:
-            ttl = int(raw) if raw is not None else 0
-        except (TypeError, ValueError):
-            ttl = 0
-        return ttl if ttl > 0 else 604_800
+        return retention_ttl_seconds(self.runtime_config)
 
     def _journal_retention(
         self, log: RolloutEventLog, *, now: float | None = None
     ) -> dict[str, Any]:
-        ttl = self._retention_ttl_seconds()
-        moment = time.time() if now is None else now
-        expires_at = None
-        released = False
-        reason = None
-        if log.closed:
-            if log.last_acked >= log.high_water:
-                released = True
-                reason = "acked"
-            if log.closed_at:
-                closed_epoch = datetime.fromisoformat(
-                    log.closed_at.replace("Z", "+00:00")
-                ).timestamp()
-                expires_epoch = closed_epoch + ttl
-                expires_at = (
-                    datetime.fromtimestamp(expires_epoch, tz=timezone.utc)
-                    .isoformat(timespec="seconds")
-                    .replace("+00:00", "Z")
-                )
-                if not released and moment >= expires_epoch:
-                    released = True
-                    reason = "ttl_expired"
-        return {
-            "policy": "until-acked-or-ttl",
-            "ttl_seconds": ttl,
-            "acked": log.last_acked,
-            "high_water": log.high_water,
-            "closed": log.closed,
-            "released": released,
-            "released_reason": reason,
-            "expires_at": expires_at,
-        }
+        return journal_retention(log, ttl_seconds=self._retention_ttl_seconds(), now=now)
 
     def release_retained_journals(
         self,

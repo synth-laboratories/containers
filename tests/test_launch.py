@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+import os
 from pathlib import Path
 
 import pytest
@@ -362,9 +363,13 @@ def test_socket_mount_without_nested_is_refused(tmp_path: Path) -> None:
 
 
 def test_evals_images_catalog_loads() -> None:
-    root = Path("/Users/joshuapurtell/GitHub/evals/containers/images")
-    if not (root / "catalog.toml").is_file():
-        pytest.skip("evals checkout images catalog is not present")
+    # An optional sibling source tree is not part of a clean Containers install.
+    # Explicit enrollment keeps the interop check strict without accidentally
+    # selecting another session's incomplete/dirty checkout on the owner's host.
+    catalog = os.environ.get("SYNTH_EVALS_IMAGE_CATALOG")
+    if not catalog:
+        pytest.skip("Evals source integration requires SYNTH_EVALS_IMAGE_CATALOG")
+    root = Path(catalog)
     specs = load_catalog(root)
     assert set(specs) >= {
         "banking77",
@@ -379,6 +384,13 @@ def test_evals_images_catalog_loads() -> None:
         assert spec.dockerfile.name != "http_task.Dockerfile" or spec.contract != HTTP_TASK, (
             f"{spec.id} still uses the generic serve stub"
         )
+
+
+def test_named_build_contexts_use_explicit_catalog_inputs(tmp_path: Path) -> None:
+    _write_catalog(tmp_path, extra='[build_contexts]\nengine = "../engine"')
+    (tmp_path / "engine").mkdir()
+    specs = load_catalog(tmp_path)
+    assert specs["banking77"].build_contexts == {"engine": tmp_path / "engine"}
 
 
 def test_declared_volume_is_mounted_read_only(tmp_path: Path, healthy: None) -> None:

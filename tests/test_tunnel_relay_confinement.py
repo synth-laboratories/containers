@@ -2,8 +2,8 @@
 
 The SSRF fix confines worker-supplied forward paths to the leased target. These
 cases pin that ordinary forwarding (paths, queries, path-prefixed and IPv6
-leases, trailing slashes) still resolves to the same URL, and that escapes fail
-closed to the lease root.
+leases, trailing slashes) still resolves to the same URL, and that escapes are
+refused before an origin request.
 """
 
 from __future__ import annotations
@@ -45,9 +45,10 @@ def test_legitimate_forwarding_is_preserved(
     ],
     ids=["absolute-url", "file-scheme", "ws-scheme", "dotdot"],
 )
-def test_escaping_paths_fail_closed_to_the_lease_root(path: str) -> None:
+def test_escaping_paths_are_refused_before_origin_request(path: str) -> None:
     target = relay._parse_local_target("http://127.0.0.1:8123/api")
-    assert relay._local_upstream_url(target, path, "") == "http://127.0.0.1:8123/api/"
+    with pytest.raises(ValueError, match="invalid_origin_path"):
+        relay._local_upstream_url(target, path, "")
 
 
 def test_authority_shaped_path_stays_on_the_leased_host() -> None:
