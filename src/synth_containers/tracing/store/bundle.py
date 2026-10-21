@@ -46,6 +46,7 @@ from ..canonical import (
     digest_hex,
     utc_now,
 )
+from ..atomic import durable_write, durable_mkdir
 from ..capture.binding import TraceCaptureBindingV1
 from ..capture.spool import TraceSegmentManifestV1
 from ..models.document import TraceDocumentV5
@@ -130,7 +131,7 @@ class LocalTraceBundle:
 
     def __init__(self, root: Path, *, bundle_id: str | None = None) -> None:
         self.root = Path(root)
-        self.root.mkdir(parents=True, exist_ok=True)
+        durable_mkdir(self.root)
         self.bundle_id = bundle_id or self.root.name
         self.blobs = FilesystemBlobStore(self.root / "blobs")
         self._traces: list[BundleTraceEntryV1] = []
@@ -167,7 +168,7 @@ class LocalTraceBundle:
 
     def capture_root(self, trace_id: str) -> Path:
         path = self.trace_root(trace_id)
-        path.mkdir(parents=True, exist_ok=True)
+        durable_mkdir(path)
         return path
 
     @property
@@ -193,7 +194,7 @@ class LocalTraceBundle:
         if not document.content_digest:
             raise ValueError("only a sealed trace document can be written to a bundle")
         sealed_dir = self.trace_root(document.trace_id) / "sealed"
-        sealed_dir.mkdir(parents=True, exist_ok=True)
+        durable_mkdir(sealed_dir)
         path = sealed_dir / f"{digest_hex(document.content_digest)}.json"
         _write_immutable(path, canonical_bytes(document))
         entry = BundleTraceEntryV1(
@@ -218,7 +219,7 @@ class LocalTraceBundle:
         if not bundle.content_digest:
             raise ValueError("only a sealed evidence bundle can be written")
         directory = self.root / "evidence"
-        directory.mkdir(parents=True, exist_ok=True)
+        durable_mkdir(directory)
         path = directory / f"{digest_hex(bundle.content_digest)}.json"
         _write_immutable(path, canonical_bytes(bundle))
         entry = BundleEvidenceEntryV1(
@@ -290,7 +291,7 @@ class LocalTraceBundle:
             metadata=dict(metadata or {}),
         ).sealed()
         manifests = self.root / "manifests"
-        manifests.mkdir(parents=True, exist_ok=True)
+        durable_mkdir(manifests)
         generation_path = manifests / (
             f"{self._generation:06d}-{digest_hex(manifest.content_digest)[:16]}.json"
         )
@@ -305,9 +306,7 @@ class LocalTraceBundle:
             updated_at=utc_now(),
             generation=self._generation,
         )
-        temp = self.manifest_path.with_suffix(".json.tmp")
-        temp.write_text(canonical_text(pointer) + "\n", encoding="utf-8")
-        temp.replace(self.manifest_path)
+        durable_write(self.manifest_path, (canonical_text(pointer) + "\n").encode(), replace=True)
         return manifest
 
     # -- reading -----------------------------------------------------------------
@@ -602,6 +601,9 @@ class LocalTraceBundle:
             trace_root = self.trace_root(entry.trace_id)
             for path in sorted((trace_root / "manifests").glob("*.json")):
                 add(path, kind="segment", role="capture_manifest")
+            for path in sorted((trace_root / "repairs").glob("*")):
+                if path.is_file():
+                    add(path, kind="receipt", role="spool_repair", media_type="application/octet-stream")
             latest = trace_root / "latest.json"
             if latest.exists():
                 add(
@@ -680,15 +682,7 @@ def _read_sealed(path: Path, expected_digest: str) -> dict[str, Any]:
 
 
 def _write_immutable(path: Path, payload: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists():
-        if path.read_bytes() != payload:
-            raise FileExistsError(f"immutable bundle object has different bytes: {path}")
-        return
-    temp = path.with_suffix(path.suffix + ".tmp")
-    temp.write_bytes(payload)
-    temp.replace(path)
-    path.chmod(0o444)
+    durable_write(path, payload)
 
 
 def _trace_entry_from_payload(payload: dict[str, Any]) -> BundleTraceEntryV1:

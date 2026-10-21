@@ -2440,11 +2440,10 @@ def test_raw_repair_does_not_promote_complete_logically_forged_envelope(
         encoding="utf-8",
     )
 
-    result = repair(root, capture_id="capture_forgery")
+    with pytest.raises(ValueError, match="corrupt complete record"):
+        repair(root, capture_id="capture_forgery")
 
-    assert result.repaired is True
-    assert result.recovered_records == 0
-    assert result.reason == "partial_had_no_complete_records"
+    assert (segments / "000001.partial").read_text() == canonical_text(forged) + "\n"
     assert not list(segments.glob("*.jsonl"))
 
 

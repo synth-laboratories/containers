@@ -253,6 +253,36 @@ def usage_from_responses(payload: Mapping[str, Any] | None) -> UsageV5:
     )
 
 
+def usage_observation_from_responses(
+    payload: Mapping[str, Any] | None, *, call_id: str, observation_id: str,
+    revision: int, source_ref: str,
+):
+    """Opt-in strict snapshot profile; legacy UsageV5 bytes remain unchanged.
+
+    Raw malformed numeric values refuse rather than being truncated/coerced by
+    the legacy importer. Missing fields remain absent and never imply zero.
+    """
+    from ..profiles import UsageFieldsV1, UsageObservationV1
+    values = payload or {}
+    raw_input = values.get("input_tokens_details")
+    raw_output = values.get("output_tokens_details")
+    inputs = raw_input if isinstance(raw_input, Mapping) else {}
+    outputs = raw_output if isinstance(raw_output, Mapping) else {}
+    fields = UsageFieldsV1.model_validate({
+        "input_tokens": values.get("input_tokens", values.get("prompt_tokens")),
+        "output_tokens": values.get("output_tokens", values.get("completion_tokens")),
+        "total_tokens": values.get("total_tokens"),
+        "cached_input_tokens": inputs.get("cached_tokens"),
+        "cache_write_input_tokens": inputs.get("cache_write_tokens", inputs.get("cache_creation_tokens")),
+        "reasoning_output_tokens": outputs.get("reasoning_tokens"),
+        "requests": 1,
+    })
+    return UsageObservationV1(observation_id=observation_id, call_id=call_id,
+        authority="provider:openai-responses", revision=revision, mode="snapshot",
+        provenance="observed_provider" if payload is not None else "unavailable",
+        fields=fields, source_refs=(source_ref,))
+
+
 class OpenAIResponsesStreamAssembler:
     """SSE/WS event assembler; event order is retained exactly as observed."""
 
