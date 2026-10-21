@@ -1,0 +1,16 @@
+{
+  "wheel_sha256": "79e39a305cee3695b8fd0c3240e59ffd2a96f6df1dcef4403d16f52a2e7e50f3",
+  "installed_module": "/Users/joshuapurtell/GitHub/workspaces/v024-rhodes-20261021/containers/.local/installed/lib/python3.13/site-packages/synth_containers/__init__.py",
+  "cwd": "/Users/joshuapurtell/GitHub/workspaces/v024-rhodes-20261021/containers",
+  "source_pythonpath": "unset",
+  "package_source_files_verified": 304,
+  "native_events_replayed_exactly": 13,
+  "poll_pages": 7,
+  "scoped_sse_and_poll_exchange": "pass",
+  "wrong_scope_and_invalid_header": "pass",
+  "journal_bytes_unchanged_by_reads": true,
+  "provider_calls": 0,
+  "journal_sha256": "a05ec1a0019fc9da9347fd8e8914ba75b4ab0b91eddbc4b4265e985cbe43a786",
+  "owned_server_stopped": true,
+  "server_exit_code": -15
+}

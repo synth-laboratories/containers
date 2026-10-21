@@ -1,0 +1,81 @@
+{
+  "schema_version": "synth.local-qualification.v1",
+  "qualified_source_commit": "990af1dd97545345d620a126b09b3228c48e629d",
+  "pinned_dev_base": "e8b14e82fcc419c097f86fed3e451e8ea3d7ed6e",
+  "containers_pr": "https://github.com/synth-laboratories/containers/pull/37",
+  "evals_pr": "https://github.com/synth-laboratories/evals/pull/329",
+  "evals_qualified_source": "8bef5f20c0977a8b97ee960024fcc99d73d2c71a",
+  "tickets": [
+    "SYN-4923",
+    "SYN-4918",
+    "SYN-4921",
+    "SYN-4922",
+    "SYN-4919"
+  ],
+  "tests": {
+    "passed": 1578,
+    "skipped": 12,
+    "deselected": 1,
+    "failures": 0,
+    "errors": 0,
+    "warnings": 17,
+    "elapsed_seconds": 136.64,
+    "native_live_test_excluded": "tests/test_harbor_docker.py::test_harbor_docker_live_agent_and_verifier_are_distinct",
+    "junit": "five-qualified-final-full-tests.xml"
+  },
+  "typing": {
+    "locked_profiles": [
+      "main",
+      "mitm"
+    ],
+    "zero_diagnostics": true,
+    "historical_baseline_changed": false,
+    "fresh_source_default_preparation": "pass at d451a3ed043581ee8157918b6b063ee9c2990b77 and prior sources",
+    "final_clean_source_export": "pass at 990af1d with explicit reuse of prepared locked profiles",
+    "negative_gate_probe": "deliberate invalid-assignment refused; retained release-types receipt"
+  },
+  "wheel": {
+    "sha256": "79e39a305cee3695b8fd0c3240e59ffd2a96f6df1dcef4403d16f52a2e7e50f3",
+    "packaged_python_sources": 304,
+    "all_source_bytes_match": true
+  },
+  "proofs": {
+    "installed_lifecycle": "installed_lifecycle.json",
+    "native_kill_restore": "native_kill_restore.json",
+    "native_cardcode": "native_cardcode.json",
+    "retained_cardcode_cli": "retained_cardcode_cli.json",
+    "evals_bridge": "evals_bridge.json",
+    "http_sse": "http_sse.json"
+  },
+  "host_check": {
+    "elapsed_seconds": 12.005,
+    "returncode": -15,
+    "timed_out": true,
+    "free_gib": 59.97,
+    "stdout": "",
+    "stderr": "",
+    "full_host_check_pass": false
+  },
+  "feedback": {
+    "typing_fix": "e2103752-bd2a-4c81-9a1a-7e700c5e678c",
+    "raw_spool_finding": "0af33c8b-8cea-4681-8a1e-65e5f615aa50",
+    "serialization_mistake": "3cb6581a-95fa-46f3-afcc-70a8af311534",
+    "installed_startup_mistake": "6eb99f26-9e2f-4066-a781-6f21d5b2109d",
+    "profiles_and_boundaries_decision": "90584a1a-0d65-4e27-a0a3-fedd113a2b49"
+  },
+  "provider_calls": 0,
+  "rust_builds": 0,
+  "owned_native_engines_running": 0,
+  "package_publication": false,
+  "dev_merge": false,
+  "deployment": false,
+  "evidence_directory": "/Users/joshuapurtell/GitHub/Pressure/artifacts/agent-runs/dec300d6-2d97-46dc-ad64-ebde3cd1420a/containers-multi-agent/five-ticket-completion-20261021",
+  "explicit_boundaries": [
+    "CardCodeBench proof regrades captured native dev-panel observations; no fresh compilation or heldout claim",
+    "native continuation proof uses scripted policy and an owned deterministic Gold world; no exactly-once provider billing claim",
+    "arbitrary untrusted graders/model judges require isolated admitted runner; local profile refuses",
+    "Rhodes service/org admission, hosted retention and Mnemosyne adoption remain separate service tickets",
+    "broader Evals Dock/CyberneticsBench/CardCodeBench migration remains separate from thin consumer bridge",
+    "Pressure full host scanner still times out; no host-invariant or production-readiness pass claimed"
+  ]
+}
