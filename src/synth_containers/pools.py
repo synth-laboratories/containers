@@ -526,12 +526,11 @@ class PoolClient:
         pool_config: Mapping[str, Any] | None = None,
         pool_metadata: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Create a pool. `pool_metadata` is free-form and round-trips intact.
+        """Create a pool using Rhodes' flat configuration and ``metadata`` wire fields.
 
-        Put anything an operator needs to recognise this pool later in
-        ``pool_metadata`` — image digest, source commit, owning experiment. The
-        platform does not interpret it, and it is the only field that survives
-        without a schema change.
+        ``pool_config`` supplies provider/runtime settings. Explicit pool fields
+        cannot be overridden through it. ``pool_metadata`` is returned under
+        ``metadata``; normal server credential redaction still applies.
         """
 
         payload: dict[str, Any] = {"name": name, "backend": backend}
@@ -540,24 +539,24 @@ class PoolClient:
             ("template", template),
             ("capacity", capacity),
             ("concurrency", concurrency),
-            ("pool_config", dict(pool_config) if pool_config else None),
-            ("pool_metadata", dict(pool_metadata) if pool_metadata else None),
+            ("pool_config", pool_config),
+            ("pool_metadata", pool_metadata),
         ):
             if value is not None:
                 payload[key] = value
-        return await self._request("POST", "/pools", payload=payload)
+        return await self._request("POST", "/pools", payload=_pool_write_payload(payload))
 
     async def update_pool(self, pool_id: str, **fields: Any) -> dict[str, Any]:
         """Partially update a pool (PATCH). Unset fields are left alone."""
 
         if not fields:
             raise PoolClientError("update_pool requires at least one field")
-        return await self._request("PATCH", f"/pools/{pool_id}", payload=fields)
+        return await self._request("PATCH", f"/pools/{pool_id}", payload=_pool_write_payload(fields))
 
     async def replace_pool(self, pool_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         """Full replace (PUT). Prefer `update_pool` unless you mean to reset."""
 
-        return await self._request("PUT", f"/pools/{pool_id}", payload=payload)
+        return await self._request("PUT", f"/pools/{pool_id}", payload=_pool_write_payload(payload))
 
     async def delete_pool(self, pool_id: str) -> dict[str, Any]:
         """Delete a pool.
@@ -1134,6 +1133,30 @@ def _archive_bytes(archive: bytes | str | Path) -> bytes:
     if not path.is_file():
         raise PoolClientError(f"archive is not a readable file: {path}")
     return path.read_bytes()
+
+
+def _pool_write_payload(fields: Mapping[str, Any]) -> dict[str, Any]:
+    """Translate SDK conveniences without silently dropping or overriding settings."""
+    payload = dict(fields)
+    config = payload.pop("pool_config", {})
+    if not isinstance(config, Mapping):
+        raise PoolClientError("pool_config must be an object")
+    reserved = {
+        "name", "backend", "pool_type", "template", "capacity", "concurrency",
+        "pool_config", "pool_metadata", "metadata", "tasks", "materialize_tasks",
+        "pool_id", "id", "status", "created_at", "updated_at",
+    }
+    if set(config) & (reserved | set(payload)):
+        raise PoolClientError("pool_config conflicts with explicit pool fields")
+    payload.update(config)
+    if "pool_metadata" in payload:
+        if "metadata" in payload:
+            raise PoolClientError("pool_metadata conflicts with metadata")
+        metadata = payload.pop("pool_metadata")
+        if not isinstance(metadata, Mapping):
+            raise PoolClientError("pool_metadata must be an object")
+        payload["metadata"] = dict(metadata)
+    return payload
 
 
 def _list_items(body: Mapping[str, Any], *legacy_keys: str) -> list[dict[str, Any]]:
