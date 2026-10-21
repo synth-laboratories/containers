@@ -279,7 +279,9 @@ def _retain_frame_artifacts(
     for item in list(source.get("events") or []):
         if str(item.get("kind") or "") != "frame":
             continue
-        payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+        payload = item.get("payload")
+        if not isinstance(payload, dict):
+            payload = {}
         if payload.get("format") != "png":
             continue
         sequence = item.get("sequence")
@@ -381,7 +383,9 @@ def _verify_frame_artifact_bindings(
     for event in trace.get("events") or []:
         if not isinstance(event, dict):
             continue
-        detail = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        detail = event.get("payload")
+        if not isinstance(detail, dict):
+            detail = {}
         if event.get("event_type") != "frame" or detail.get("format") != "png":
             continue
         artifact_ids = event.get("artifact_ids") or []
@@ -490,8 +494,12 @@ def _document_from_source(
     capture_id = record_id(
         "cap", kind="harbor_rollout_promotion", scope=(trace_id,), key=stored_source_digest
     )
-    pin = source.get("pin") if isinstance(source.get("pin"), dict) else {}
-    policy_ref = pin.get("policy_ref") if isinstance(pin.get("policy_ref"), dict) else {}
+    pin = source.get("pin")
+    if not isinstance(pin, dict):
+        pin = {}
+    policy_ref = pin.get("policy_ref")
+    if not isinstance(policy_ref, dict):
+        policy_ref = {}
     model = _first_string(policy_ref, "model", "model_id")
     provider = _first_string(policy_ref, "provider", "provider_id")
     started_at = str(events_source[0]["occurred_at"]) if events_source else "1970-01-01T00:00:00Z"

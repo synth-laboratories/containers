@@ -31,3 +31,12 @@ require_paths = ["tests/test_portable_checkpoint.py", ".venv/bin/python"]
 command = 'mkdir -p .local/tmp && TMPDIR="$PWD/.local/tmp" PYTHONPATH=src .venv/bin/python -m pytest -q tests/test_portable_checkpoint.py'
 command_timeout_seconds = 30
 remedy = "Restore complete portable closure, trusted-codec coverage, strict-position selection and explicit child funding. Compatibility must never grant execution authority or reset liabilities."
+
+[[checks]]
+id = "release_typing_profiles"
+description = "Every source checks against its actual locked core/native or MITM interfaces with zero diagnostics"
+severity = "error"
+require_paths = ["scripts/check-type-debt.py", ".local/release-types-main/bin/python", ".local/release-types-mitm/bin/python"]
+command = 'TMPDIR="$PWD/.local/tmp" .local/release-types-main/bin/python scripts/check-type-debt.py --check-only'
+command_timeout_seconds = 30
+remedy = "Prepare both locked release typing profiles and fix the source or dependency contract. Do not widen the historical baseline, suppress missing interfaces or lower application crypto requirements."

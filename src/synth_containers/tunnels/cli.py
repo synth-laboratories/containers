@@ -55,11 +55,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "close-lease":
             from synth_ai.sdk.tunnels import BorrowedLeaseHandle
 
-            result = (
-                BorrowedLeaseHandle(profile.connector, args.lease, client.tunnels)
-                .close()
-                .model_dump(mode="json")
-            )
+            receipt = BorrowedLeaseHandle(profile.connector, args.lease, client.tunnels).close()
+            result = receipt.model_dump(mode="json") if receipt is not None else {"status": "detached", "revocation_receipt": None}
         else:
             result = client.tunnels.status(profile.connector).model_dump(mode="json")
             if args.command == "doctor":

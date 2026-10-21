@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping
 import re
 from typing import Any
 
-from ..event_log import RolloutEventLog, poll_payload
+from ..event_log import RolloutEventLog, legacy_poll_cursor, poll_payload
 from ..stream_cursor import StreamCursorError
 
 
@@ -20,6 +20,7 @@ def journal_events_payload(
     *,
     ack: int | None,
     cursor: str | None,
+    scoped: bool = False,
 ) -> dict[str, Any]:
     log = logs.get(rollout_id)
     if log is None:
@@ -27,7 +28,7 @@ def journal_events_payload(
     try:
         # Read/validate first: a malformed cursor must never mutate acknowledgment.
         payload = poll_payload(
-            log, after=after, limit=limit, kinds=kinds, subject_id=rollout_id, cursor=cursor
+            log, after=after, limit=limit, kinds=kinds, subject_id=rollout_id, cursor=cursor, scoped=True
         )
     except StreamCursorError as error:
         return {
@@ -42,7 +43,7 @@ def journal_events_payload(
             with log._lock:
                 log.record_ack(ack)
                 payload = poll_payload(
-                    log, after=after, limit=limit, kinds=kinds, subject_id=rollout_id, cursor=cursor
+                    log, after=after, limit=limit, kinds=kinds, subject_id=rollout_id, cursor=cursor, scoped=True
                 )
         except StreamCursorError as error:
             return {"error": error.code, "status_code": error.status_code}
@@ -51,6 +52,8 @@ def journal_events_payload(
         except ValueError:
             return {"error": "invalid_ack", "status_code": 422}
         # Legacy ack remains stream-wide; it is not a per-view or per-client checkpoint.
+    if cursor is None and not scoped:
+        payload["cursor"] = legacy_poll_cursor(payload["cursor"], journal_state=True)
     payload["retention"] = retention(log)
     return payload
 

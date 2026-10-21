@@ -14,7 +14,7 @@ from synth_containers.event_log import (
     RolloutEventLog,
     format_sse,
     iter_sse,
-    poll_payload,
+    poll_payload as raw_poll_payload,
 )
 from synth_containers.platform import create_compat_app
 from synth_containers.tracing.adapters.sse import SSEDecoder
@@ -23,6 +23,10 @@ from synth_containers.stream_cursor import stream_scope
 VECTORS = json.loads(
     (Path(__file__).parents[1] / "contracts/fixtures/stream/cursor-v1.json").read_text()
 )
+
+
+def scoped_poll_payload(*args, **kwargs):
+    return raw_poll_payload(*args, **kwargs, scoped=True)
 
 
 @pytest.mark.parametrize("vector", VECTORS["vectors"], ids=lambda v: v["name"])
@@ -38,11 +42,29 @@ def log_at(path: Path | None = None, *, stream_id="stream:fixture") -> RolloutEv
     return RolloutEventLog(rollout_id="fixture", stream_id=stream_id, journal_path=path)
 
 
+def test_legacy_cursor_shape_and_explicit_scoped_profile(tmp_path: Path) -> None:
+    log = log_at()
+    log.append("wanted", {})
+    legacy = raw_poll_payload(log)["cursor"]
+    keys = {"kind", "after", "high_water", "closed", "next", "has_more"}
+    assert set(legacy) == keys
+    scoped = raw_poll_payload(log, scoped=True)["cursor"]
+    assert set(scoped) > keys and scoped["scanned_through"] == 1
+    assert raw_poll_payload(log, cursor=scoped["resume"])["cursor"]["scope"] == scoped["scope"]
+
+    app = create_compat_app("openenv_echo", storage_root=tmp_path)
+    app.state.platform.logs["fixture"] = log
+    with TestClient(app) as client:
+        assert set(client.get("/rollouts/fixture/events").json()["cursor"]) == keys | {"acked", "chain_head"}
+        page = client.get("/rollouts/fixture/events", params={"scoped": "true"}).json()
+        assert "resume" in page["cursor"] and "scope" in page["cursor"]
+
+
 def test_filtered_cursor_scans_excluded_tail_without_claiming_delivery() -> None:
     log = log_at()
     log.append("wanted", {"n": 1})
     log.append("excluded", {"n": 2})
-    first = poll_payload(log, kinds=["wanted"], limit=1)
+    first = scoped_poll_payload(log, kinds=["wanted"], limit=1)
     assert first["cursor"]["next"] == 1
     assert first["cursor"]["scanned_through"] == 2
     assert first["cursor"]["high_water"] == 2
@@ -50,7 +72,7 @@ def test_filtered_cursor_scans_excluded_tail_without_claiming_delivery() -> None
     assert token.after == 2 and token.chain_head == log.chain_head
     assert first["cursor"]["durability"] == "memory"
     log.append("wanted", {"n": 3})
-    second = poll_payload(log, cursor=token.encode(), kinds=["wanted"])
+    second = scoped_poll_payload(log, cursor=token.encode(), kinds=["wanted"])
     assert [row["sequence"] for row in second["events"]] == [3]
     assert second["cursor"]["scanned_through"] == 3
 
@@ -59,10 +81,10 @@ def test_filtered_page_limit_never_skips_an_undelivered_matching_event() -> None
     log = log_at()
     for kind in ("skip", "wanted", "skip", "wanted", "skip"):
         log.append(kind, {})
-    first = poll_payload(log, kinds=["wanted"], limit=1)
+    first = scoped_poll_payload(log, kinds=["wanted"], limit=1)
     assert first["cursor"]["scanned_through"] == 2
     assert first["cursor"]["has_more"]
-    second = poll_payload(log, kinds=["wanted"], limit=1, cursor=first["cursor"]["resume"])
+    second = scoped_poll_payload(log, kinds=["wanted"], limit=1, cursor=first["cursor"]["resume"])
     assert [row["sequence"] for row in second["events"]] == [4]
     assert second["cursor"]["scanned_through"] == 5
     assert not second["cursor"]["has_more"]
@@ -72,7 +94,7 @@ def test_filtered_page_limit_never_skips_an_undelivered_matching_event() -> None
 def test_cursor_refuses_another_scope(change: str) -> None:
     log = log_at()
     log.append("wanted", {})
-    token = poll_payload(log, kinds=["wanted"])["cursor"]["resume"]
+    token = scoped_poll_payload(log, kinds=["wanted"])["cursor"]["resume"]
     target = log_at(stream_id="other") if change == "stream" else log
     kwargs = {"kinds": ["wanted"]}
     if change == "filter":
@@ -82,25 +104,25 @@ def test_cursor_refuses_another_scope(change: str) -> None:
     if change == "subject-kind":
         kwargs["subject_id_field"] = "job_id"
     with pytest.raises(StreamCursorError, match="stream_cursor_scope_mismatch"):
-        poll_payload(target, cursor=token, **kwargs)
+        scoped_poll_payload(target, cursor=token, **kwargs)
 
 
 def test_cursor_refuses_changed_history_even_when_stream_names_match() -> None:
     original = log_at()
     original.append("wanted", {"n": 1})
-    token = poll_payload(original)["cursor"]["resume"]
+    token = scoped_poll_payload(original)["cursor"]["resume"]
     rewritten = log_at()
     rewritten.append("wanted", {"n": 2})
     with pytest.raises(StreamCursorError, match="stream_cursor_history_mismatch"):
-        poll_payload(rewritten, cursor=token)
+        scoped_poll_payload(rewritten, cursor=token)
     with pytest.raises(StreamCursorError, match="stream_cursor_ahead"):
-        poll_payload(log_at(), cursor=token)
+        scoped_poll_payload(log_at(), cursor=token)
 
 
 @pytest.mark.parametrize("after", [-1, True, False, 0.0, "0"])
 def test_after_is_a_nonnegative_integer(after) -> None:
     with pytest.raises(StreamCursorError):
-        poll_payload(log_at(), after=after)
+        scoped_poll_payload(log_at(), after=after)
 
 
 @pytest.mark.parametrize("token", ["bad", "sc1.", "sc1.====", "sc1." + "a" * 4096])
@@ -132,12 +154,12 @@ def test_page_and_chain_share_one_snapshot_during_a_writer_interleaving(monkeypa
         return original(envelope)
 
     monkeypatch.setattr(LogEnvelope, "to_dict", serialize)
-    page = poll_payload(log)
+    page = scoped_poll_payload(log)
     assert log.closed
     assert page["cursor"]["high_water"] == 1
     assert page["cursor"]["chain_head"] == first_head
     assert not page["cursor"]["closed"]
-    tail = poll_payload(log, cursor=page["cursor"]["resume"])
+    tail = scoped_poll_payload(log, cursor=page["cursor"]["resume"])
     assert [row["sequence"] for row in tail["events"]] == [2, 3, 4]
     assert tail["cursor"]["closed"]
 
@@ -195,7 +217,7 @@ def test_uncertain_append_is_fenced_until_exact_prefix_recovery(
     with pytest.raises(OSError):
         log.append("wanted", {"n": 1})
     assert log.high_water == 0
-    assert poll_payload(log)["cursor"]["writer_state"] == "recovery_required"
+    assert scoped_poll_payload(log)["cursor"]["writer_state"] == "recovery_required"
     with pytest.raises(RuntimeError, match="event_log_recovery_required"):
         log.append("wanted", {"n": 2})
     recovered = RolloutEventLog.recover(
@@ -231,7 +253,7 @@ def test_missing_released_history_is_explicit_and_memory_only_history_is_not_dis
     durable.release()
     path.unlink()
     with pytest.raises(StreamCursorError, match="stream_history_unavailable"):
-        poll_payload(durable)
+        scoped_poll_payload(durable)
 
 
 def test_public_envelopes_are_detached_from_durable_history(tmp_path: Path) -> None:
@@ -239,7 +261,7 @@ def test_public_envelopes_are_detached_from_durable_history(tmp_path: Path) -> N
     returned = log.append("wanted", {"nested": {"n": 1}})
     returned.payload["nested"]["n"] = 2
     log.after(0)[0].payload["nested"]["n"] = 3
-    assert poll_payload(log)["events"][0]["payload"]["nested"]["n"] == 1
+    assert scoped_poll_payload(log)["events"][0]["payload"]["nested"]["n"] == 1
 
 
 def test_corrupt_released_history_is_not_misreported_as_a_page_limit_error(tmp_path: Path) -> None:
@@ -260,7 +282,7 @@ def test_corrupt_released_history_is_not_misreported_as_a_page_limit_error(tmp_p
 
 def test_subject_metadata_cannot_overwrite_a_native_event_field() -> None:
     with pytest.raises(StreamCursorError, match="invalid_stream_scope"):
-        poll_payload(log_at(), subject_id_field="payload")
+        scoped_poll_payload(log_at(), subject_id_field="payload")
 
 
 def test_http_resume_filter_scope_and_invalid_cursor_does_not_ack(tmp_path: Path) -> None:
@@ -271,7 +293,7 @@ def test_http_resume_filter_scope_and_invalid_cursor_does_not_ack(tmp_path: Path
     log.append("wanted", {})
     log.append("excluded", {})
     with TestClient(app) as client:
-        page = client.get("/rollouts/fixture/events", params={"kinds": "wanted"}).json()
+        page = client.get("/rollouts/fixture/events", params={"kinds": "wanted", "scoped": "true"}).json()
         token = page["cursor"]["resume"]
         assert client.get("/rollouts/fixture/events", params={"cursor": token}).status_code == 409
         assert log.last_acked == 0
@@ -296,7 +318,7 @@ def test_scoped_sse_replays_filtered_history_and_emits_a_typed_watermark(tmp_pat
         assert prepared.status_code == 200
         log = app.state.platform.logs["fixture"]
         log.append("wanted", {"n": 1})
-        first = poll_payload(log, kinds=["wanted"])["cursor"]["resume"]
+        first = scoped_poll_payload(log, kinds=["wanted"])["cursor"]["resume"]
         log.append("excluded", {"n": 2})
         log.mark_closed()
         response = client.get(

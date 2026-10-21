@@ -74,7 +74,7 @@ def native_harbor_environment_flags(
         raise HarborEnvironmentError(
             "native Daytona requires explicit positive CPU, memory and storage requests"
         )
-    cpus, memory, storage = values
+    cpus, memory, storage = (int(value) for value in values if value is not None)
     memory_gib, storage_gib = (memory + 1023) // 1024, (storage + 1023) // 1024
     if cpus > 64 or memory_gib > 512 or storage_gib > 1024 or environment.get("gpus", 0):
         raise HarborEnvironmentError(
@@ -110,7 +110,7 @@ def native_harbor_resource_overrides(request: HarborResourceRequest | None) -> d
             )
     if type(request.gpus) is not int or request.gpus != 0:
         raise HarborEnvironmentError("native GPU resource overrides are not qualified")
-    return {field: int(values[field]) for field in maxima}
+    return {field: value for field in maxima if (value := values[field]) is not None}
 
 
 def _copy_bounded_file(source: Path, target: Path, remaining_bytes: int) -> int:

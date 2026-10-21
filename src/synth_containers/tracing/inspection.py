@@ -501,12 +501,7 @@ def _inspect_bundle_directory(
     trusted = compatibility in {"native", "legacy_native"}
     if not trusted:
         traces = [
-            InspectedTraceV1(
-                **{
-                    **item.to_dict(),
-                    "projectable": False,
-                }
-            )
+            replace(item, projectable=False)
             for item in traces
         ]
     return TraceInspectionV1(

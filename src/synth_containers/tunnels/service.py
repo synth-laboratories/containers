@@ -26,7 +26,7 @@ class ConnectorService:
                     await issuer.tunnels.attachment_capability(connector, client)
                 ).token.get_secret_value()
             finally:
-                await issuer.close()
+                await issuer.aclose()
 
         provider = HttpConnectorAttachmentProvider(
             gateway_url=profile.gateway_url,

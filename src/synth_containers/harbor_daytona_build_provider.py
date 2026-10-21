@@ -24,7 +24,7 @@ class DaytonaSnapshotProvider:
     # API resource fields apply to the resulting sandbox, not the builder.
     # Hard builder spend/resource/remote-context-expiry requests fail admission.
     build_capabilities = frozenset()
-    build_architectures = ()
+    build_architectures: tuple[str, ...] = ()
 
     def __init__(
         self,
@@ -65,6 +65,8 @@ class DaytonaSnapshotProvider:
         root = context.root.resolve()
         for item in image._context_list:
             path = Path(item.source_path).resolve()
+            if item.archive_path is None:
+                raise ValueError("Daytona build context reference has no archive path")
             archive = PurePosixPath(item.archive_path)
             if not path.is_relative_to(root) or archive.is_absolute() or ".." in archive.parts:
                 raise ValueError("Daytona build context reference escapes the frozen context")
@@ -82,7 +84,9 @@ class DaytonaSnapshotProvider:
     async def create(self, name: str, prepared: CreateBuildInfo):
         return await self.api.create_snapshot(
             CreateSnapshot(
-                name=name, build_info=prepared, region_id=self.region_id, **self.resources
+                name=name, build_info=prepared, region_id=self.region_id,
+                cpu=self.resources["cpu"], gpu=self.resources["gpu"],
+                memory=self.resources["memory"], disk=self.resources["disk"],
             ),
             _request_timeout=15,
         )

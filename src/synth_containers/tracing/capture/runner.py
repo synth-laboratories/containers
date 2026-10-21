@@ -156,8 +156,8 @@ def run_captured_command(
             }
             for item in projected
         ],
-        "coverage_receipt_id": supervisor.sealed.coverage.receipt_id,
-        "coverage_digest": supervisor.sealed.coverage.content_digest,
+        "coverage_receipt_id": sealed.coverage.receipt_id,
+        "coverage_digest": sealed.coverage.content_digest,
     }
     supervisor.bundle.write_receipt("supervisor-run", receipt)
     supervisor.bundle.write_manifest()

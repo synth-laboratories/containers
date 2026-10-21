@@ -415,7 +415,8 @@ class OpenRouterReAct:
                 message.get("reasoning") or message.get("reasoning_content")
             )
             tool_arguments = self._tool_arguments(message.get("tool_calls"))
-            usage = body.get("usage") if isinstance(body.get("usage"), dict) else {}
+            observed_usage = body.get("usage")
+            usage = observed_usage if isinstance(observed_usage, dict) else {}
             self._accumulate_usage(usage)
             policy_output = tool_arguments or assistant
             try:
@@ -799,8 +800,12 @@ class OpenRouterReAct:
             choice = (chunk.get("choices") or [{}])[0]
             if not isinstance(choice, dict):
                 continue
-            delta = choice.get("delta") if isinstance(choice.get("delta"), dict) else {}
-            message = choice.get("message") if isinstance(choice.get("message"), dict) else {}
+            delta = choice.get("delta")
+            if not isinstance(delta, dict):
+                delta = {}
+            message = choice.get("message")
+            if not isinstance(message, dict):
+                message = {}
             source = delta or message
             content_piece = self._message_text(source.get("content"))
             reasoning_piece = self._message_text(

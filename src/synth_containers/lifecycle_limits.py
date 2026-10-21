@@ -71,7 +71,7 @@ class DurableRolloutSupervisor:
                     raise ValueError("Recovered execution cannot reset identity or allowances")
             else:
                 now = datetime.now(UTC)
-                claim = {
+                claim: dict[str, Any] = {
                     "run_id": run_id,
                     "limits": asdict(limits),
                     "created_at": now.isoformat(),

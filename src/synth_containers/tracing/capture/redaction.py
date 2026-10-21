@@ -7,6 +7,8 @@ when the scan still finds a secret shape in a body that is about to be written.
 
 from __future__ import annotations
 
+from email.message import Message
+
 import json
 import re
 from dataclasses import dataclass, field
@@ -170,7 +172,7 @@ class RedactionReportV1(JsonDataclassMixin):
         )
 
 
-def redact_headers(headers: Mapping[str, str]) -> tuple[dict[str, str], RedactionReportV1]:
+def redact_headers(headers: Mapping[str, str] | Message) -> tuple[dict[str, str], RedactionReportV1]:
     """Keep only allowlisted headers; every denied header is dropped, never masked."""
 
     kept: dict[str, str] = {}

@@ -288,7 +288,9 @@ def extract_env_progress(
         obs = _observation_from_transition(data)
         if obs:
             last_obs = obs
-        inv = obs.get("inventory") if isinstance(obs.get("inventory"), Mapping) else {}
+        inv = obs.get("inventory")
+        if not isinstance(inv, Mapping):
+            inv = {}
         if isinstance(inv, Mapping) and inv:
             last_inv = dict(inv)
             health = _as_float(inv.get("health"))
@@ -297,7 +299,9 @@ def extract_env_progress(
             boss = _as_float(inv.get("boss_progress"))
             if boss is not None:
                 boss_points.append((step, boss))
-        player = obs.get("player") if isinstance(obs.get("player"), Mapping) else {}
+        player = obs.get("player")
+        if not isinstance(player, Mapping):
+            player = {}
         level = _as_int(player.get("level")) if isinstance(player, Mapping) else None
         if level is not None:
             floor_points.append((step, level))
@@ -334,7 +338,9 @@ def extract_env_progress(
     terminal_inventory = dict(precomputed.get("terminal_inventory") or {})
     if not terminal_inventory and last_inv:
         terminal_inventory = _inventory_snapshot(last_inv)
-        player = last_obs.get("player") if isinstance(last_obs.get("player"), Mapping) else {}
+        player = last_obs.get("player")
+        if not isinstance(player, Mapping):
+            player = {}
         if isinstance(player, Mapping):
             if player.get("level") is not None:
                 terminal_inventory["player_level"] = _as_int(player.get("level"))
@@ -354,11 +360,15 @@ def extract_env_progress(
             for item in reversed(last_native):
                 kind = str(item.get("kind") or "")
                 transition = str(item.get("transition") or "")
-                payload = item.get("payload") if isinstance(item.get("payload"), Mapping) else {}
+                payload = item.get("payload")
+                if not isinstance(payload, Mapping):
+                    payload = {}
                 if kind in {"death", "terminal"} or transition == "death":
                     death_reason = str(payload.get("reason") or transition or kind or death_reason)
                 if kind == "combat" or transition == "mob_attack":
-                    entity = payload.get("entity") if isinstance(payload.get("entity"), Mapping) else {}
+                    entity = payload.get("entity")
+                    if not isinstance(entity, Mapping):
+                        entity = {}
                     if entity.get("kind") is not None:
                         death_source = str(entity.get("kind"))
         survival = {
@@ -410,9 +420,9 @@ def extract_env_progress(
         if boss_final is None and last_inv.get("boss_progress") is not None:
             boss_final = _as_float(last_inv.get("boss_progress"))
             boss_max = boss_final if boss_max is None else boss_max
-        floor_state = (
-            last_obs.get("floor_state") if isinstance(last_obs.get("floor_state"), Mapping) else {}
-        )
+        floor_state = last_obs.get("floor_state")
+        if not isinstance(floor_state, Mapping):
+            floor_state = {}
         floor_proxies = {}
         if isinstance(floor_state, Mapping):
             for key in ("monsters_killed", "chests_opened", "down_ladders", "up_ladders"):
@@ -828,7 +838,9 @@ def _behavior_annotations(
         labels = []
         if batches.get("mean") is not None:
             labels.append(f"mean={float(batches['mean']):.2f}")
-        counts = batches.get("counts") if isinstance(batches.get("counts"), Mapping) else {}
+        counts = batches.get("counts")
+        if not isinstance(counts, Mapping):
+            counts = {}
         for size, count in list(counts.items())[:4]:
             labels.append(f"b{size}={count}")
         rows.append(
@@ -885,7 +897,9 @@ def _behavior_annotations(
 
     continuity = behavior.get("prompt_continuity")
     if isinstance(continuity, Mapping) and continuity:
-        rates = continuity.get("rates") if isinstance(continuity.get("rates"), Mapping) else {}
+        rates = continuity.get("rates")
+        if not isinstance(rates, Mapping):
+            rates = {}
         labels = [f"{key}={float(val):.2f}" for key, val in list(rates.items())[:4]]
         rows.append(
             make_annotation(
@@ -1195,7 +1209,8 @@ def derive_annotations_from_execution(execution: ExecutionRecord) -> RolloutAnno
 
     reward = None
     try:
-        reward = float(execution.outcome_reward())
+        observed_reward = execution.outcome_reward()
+        reward = float(observed_reward) if observed_reward is not None else None
     except (TypeError, ValueError):
         reward = None
     if reward is not None or summary.get("outcome_reward") is not None:

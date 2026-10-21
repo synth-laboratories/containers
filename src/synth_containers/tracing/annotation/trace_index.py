@@ -61,7 +61,7 @@ class IndexedTraceDocument(TraceDocumentV5):
 
     def _table(self, kind: str) -> dict[str, Any]:
         try:
-            tables = self._by_id
+            tables = getattr(self, "_by_id")
         except AttributeError:
             tables = {}
             object.__setattr__(self, "_by_id", tables)

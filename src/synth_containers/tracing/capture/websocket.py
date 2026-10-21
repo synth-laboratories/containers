@@ -387,7 +387,7 @@ class ResponsesWebSocketServer:
                 self.host,
                 self.requested_port,
             )
-            self.port = int(self._server.sockets[0].getsockname()[1])
+            self.port = int(tuple(self._server.sockets)[0].getsockname()[1])
             self._ready.set()
 
         try:

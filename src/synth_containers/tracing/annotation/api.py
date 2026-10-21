@@ -15,7 +15,8 @@ worker (``create_annotation_app`` does both).
 
 from __future__ import annotations
 
-from typing import Any
+from contextlib import asynccontextmanager
+from typing import Any, AsyncGenerator
 
 from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -245,21 +246,22 @@ def create_annotation_app(service: AnnotationService, *, start_worker: bool = Tr
 
     from .scheduler import AnnotationScheduler, ThroughputLimits
 
-    app = FastAPI(title="synth trace annotation")
     scheduler = AnnotationScheduler(service, limits=limits or ThroughputLimits())
-    app.include_router(build_annotation_router(service, scheduler=scheduler))
-    app.state.annotation_scheduler = scheduler
 
-    @app.on_event("startup")
-    async def _start() -> None:
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         if start_worker:
-            scheduler.start()  # recovers interrupted jobs and drains the reconciliation outbox first
+            scheduler.start()
         else:
             service.recover_interrupted()
+        try:
+            yield
+        finally:
+            scheduler.stop()
 
-    @app.on_event("shutdown")
-    async def _stop() -> None:
-        scheduler.stop()
+    app = FastAPI(title="synth trace annotation", lifespan=lifespan)
+    app.include_router(build_annotation_router(service, scheduler=scheduler))
+    app.state.annotation_scheduler = scheduler
 
     return app
 

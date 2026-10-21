@@ -72,9 +72,11 @@ class RuntimeCheckpointRequest:
         artifact_refs = payload["artifact_refs"] if "artifact_refs" in payload else []
         if not isinstance(artifact_refs, list):
             raise TypeError("artifact_refs must be a list")
+        validated_refs: list[JsonObject] = []
         for item in artifact_refs:
             if not isinstance(item, dict):
                 raise TypeError("artifact_refs entries must be objects")
+            validated_refs.append(dict(item))
         return cls(
             checkpoint_id=_optional_text(payload, "checkpoint_id"),
             checkpoint_uri=_optional_text(payload, "checkpoint_uri"),
@@ -85,7 +87,7 @@ class RuntimeCheckpointRequest:
             actor_ids=_string_list(payload, "actor_ids"),
             metadata=_json_object(payload, "metadata"),
             annotations=_json_object(payload, "annotations"),
-            artifact_refs=[dict(item) for item in artifact_refs],
+            artifact_refs=validated_refs,
             restore_eligible=bool(payload["restore_eligible"]) if "restore_eligible" in payload else True,
         )
 

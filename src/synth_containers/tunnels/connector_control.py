@@ -118,9 +118,10 @@ class HttpConnectorAttachmentProvider:
                 else:
                     # Legacy suppliers must bound their own synchronous I/O.
                     # ConnectorService uses the cancellable async issuer.
-                    token = await asyncio.to_thread(
-                        self._token_supplier, connector, client_instance
-                    )
+                    supplier = self._token_supplier
+                    if supplier is None:
+                        raise RuntimeError("connector_token_supplier_unavailable")
+                    token = await asyncio.to_thread(supplier, connector, client_instance)
                 async with httpx.AsyncClient(
                     timeout=self._timeout_seconds, follow_redirects=False
                 ) as client:

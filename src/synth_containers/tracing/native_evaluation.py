@@ -64,7 +64,7 @@ def attach_native_evaluation(
     source_digest = bytes_digest(body)
     blob_digest = bundle.blobs.put(body)
     existing = _existing_attachment(inspected.evidence, source_digest)
-    if existing is not None:
+    if existing is not None and inspected.evidence is not None:
         return {
             "trace_id": document.trace_id,
             "trace_digest": document.content_digest,

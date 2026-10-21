@@ -748,7 +748,7 @@ class CompatPlatform:
                 and pin.status == "running"
                 and not bool(result.get("replayed"))
             )
-        if not should_run:
+        if not should_run or pin is None or log is None:
             return result
         try:
             # Policy and evaluator calls can take minutes. They are isolated by
@@ -1941,10 +1941,11 @@ class CompatPlatform:
         *,
         ack: int | None = None,
         cursor: str | None = None,
+        scoped: bool = False,
     ) -> dict[str, Any]:
         return journal_events_payload(
             self.logs, self._journal_retention, rollout_id, after, limit, kinds,
-            ack=ack, cursor=cursor,
+            ack=ack, cursor=cursor, scoped=scoped,
         )
 
     def _retention_ttl_seconds(self) -> int:

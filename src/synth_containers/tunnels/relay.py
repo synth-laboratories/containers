@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from email.message import Message
+
 import base64
 import http.client
 import logging
@@ -1319,7 +1321,7 @@ class _SynthTunnelAgent:
             request.connection_generation,
             request.origin_pool_scope,
             upstream.scheme,
-            upstream.hostname,
+            upstream.hostname or "",
             upstream.port,
         )
         connection, pool_epoch = self._origin_connections.borrow(
@@ -1496,7 +1498,7 @@ class _SynthTunnelAgent:
         self,
         request_id: str,
         status_code: int,
-        headers: Mapping[str, Any],
+        headers: Mapping[str, Any] | Message,
         response: Any,
         request: _PendingRequest,
     ) -> None:
@@ -1636,13 +1638,14 @@ def _connect_websocket(
     subprotocols: Sequence[str] | None = None,
 ) -> Any:
     from websockets.sync.client import connect
+    from websockets.typing import Subprotocol
 
     if urlparse(url).scheme not in {"ws", "wss"}:
         raise SynthTunnelRelayError("SynthTunnel agent URL must use ws or wss")
     return connect(
         url,
         additional_headers=dict(headers),
-        subprotocols=subprotocols,
+        subprotocols=[Subprotocol(value) for value in subprotocols] if subprotocols is not None else None,
         open_timeout=3,
         # recv() reports remote closure only after the TCP closing handshake.
         # A retired gateway may not finish that handshake while cancelling a
@@ -1750,12 +1753,12 @@ def _close_origin(origin: Any, code: int, reason: str) -> None:
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(
         self,
-        request: urllib.request.Request,
-        file_pointer: Any,
+        req: urllib.request.Request,
+        fp: Any,
         code: int,
-        message: str,
-        headers: Mapping[str, str],
-        new_url: str,
+        msg: str,
+        headers: Any,
+        newurl: str,
     ) -> None:
         return None
 
@@ -1771,8 +1774,8 @@ class _OriginHTTPSHandler(urllib.request.HTTPSHandler):
         # hostname verification when its default context is created on demand.
         urllib.request.AbstractHTTPHandler.__init__(self)
 
-    def https_open(self, request: urllib.request.Request) -> Any:
-        return self.do_open(http.client.HTTPSConnection, request)
+    def https_open(self, req: urllib.request.Request) -> Any:
+        return self.do_open(http.client.HTTPSConnection, req)
 
 
 def _open_upstream(

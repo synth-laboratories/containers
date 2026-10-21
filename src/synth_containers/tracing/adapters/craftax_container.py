@@ -114,7 +114,9 @@ def container_rollout_to_native_events(document: TraceDocumentV5) -> dict[str, A
     records = policy_call_records(document)
     for event in ordered:
         kind = str(event.event_type)
-        payload = event.payload if isinstance(event.payload, dict) else {}
+        payload = event.payload
+        if not isinstance(payload, dict):
+            payload = {}
         if kind == "observation":
             readout = payload.get("readout") or {}
             latest_obs = (readout.get("observation_text") if isinstance(readout, dict) else None) or latest_obs
@@ -194,8 +196,12 @@ def policy_call_steps(document: TraceDocumentV5) -> dict[int, dict[str, Any]]:
     call_index = -1
     for event in ordered:
         kind = str(event.event_type)
-        payload = event.payload if isinstance(event.payload, dict) else {}
-        detail = payload.get("payload") if isinstance(payload.get("payload"), dict) else {}
+        payload = event.payload
+        if not isinstance(payload, dict):
+            payload = {}
+        detail = payload.get("payload")
+        if not isinstance(detail, dict):
+            detail = {}
         if kind == "span.policy.plan":
             call_index += 1
             batches[call_index] = {"planned": [str(item) for item in (payload.get("actions") or [])], "steps": [], "terminal": None}

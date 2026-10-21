@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from synth_containers.serde import JsonDataclassMixin, jsonable
+from synth_containers.serde import JsonDataclassMixin
 
 from ..canonical import readable_json, seal_record, utc_now
 from ..models.projection import ProjectionManifestV1
@@ -106,7 +106,7 @@ def build_workspace_manifest(
                 projection_digest=item.target_digest or "",
                 manifest_digest=item.content_digest,
                 format=item.format,
-                losses=tuple(jsonable(loss) for loss in item.losses),
+                losses=tuple(loss.to_dict() for loss in item.losses),
             )
             for item in projections
         ),

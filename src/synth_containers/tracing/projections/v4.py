@@ -12,6 +12,7 @@ from typing import Any
 from synth_containers.rollout_tracing.v4 import (
     CanonicalChoice,
     CanonicalMessage,
+    MessageRole,
     CanonicalRequest,
     CanonicalResponse,
     CanonicalUsage,
@@ -229,6 +230,16 @@ def _to_v4_message(node: MessageNodeV5) -> tuple[CanonicalMessage, list[Projecti
             )
         )
         role = "user"
+    # Membership above establishes the supported wire roles.
+    role_value: MessageRole
+    if role == "system":
+        role_value = "system"
+    elif role == "assistant":
+        role_value = "assistant"
+    elif role == "tool":
+        role_value = "tool"
+    else:
+        role_value = "user"
     parts: list[ContentPart] = []
     for part in node.parts:
         part_type = str(part.type)
@@ -268,7 +279,7 @@ def _to_v4_message(node: MessageNodeV5) -> tuple[CanonicalMessage, list[Projecti
         None,
     )
     return (
-        CanonicalMessage(role=role, parts=tuple(parts), tool_call_id=tool_call_id),  # type: ignore[arg-type]
+        CanonicalMessage(role=role_value, parts=tuple(parts), tool_call_id=tool_call_id),
         losses,
     )
 

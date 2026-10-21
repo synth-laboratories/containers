@@ -8,7 +8,7 @@ transport watermarks, rather than a second event store or execution service.
 ## Polling and replay scope
 
 The existing sequence `after`, `limit`, `ack` and `wait_ms` inputs remain available.
-`/rollouts/{id}/events` also accepts repeated `kinds` filters and a `cursor` token.
+`/rollouts/{id}/events` also accepts repeated `kinds` filters, `scoped=true` and a `cursor` token.
 `/rollouts/{id}/reward/events` uses the fixed reward-view filter. A token conflicts
 with a nonzero explicit `after`. Invalid or ahead-of-history positions now refuse;
 they never silently reset or clamp to the available prefix.
@@ -18,7 +18,14 @@ from one atomic snapshot. These fields do not move when a writer appends or clos
 while that page is serialized. Public envelopes are detached copies, so mutating
 an append/read result cannot change retained history.
 
-The additive cursor fields are:
+Scoped cursor fields require `scoped=true` or SDK `poll_payload(..., scoped=True)`.
+Supplying a valid SC1 cursor selects the scoped profile automatically. Without
+either, generic and live-annotation polling retain their original six cursor
+fields; the platform journal retains its original eight (including `chain_head`
+and `acked`). This preserves closed legacy decoders. Live-annotation event polling
+also accepts `scoped` and `cursor` with its own stream/subject binding.
+
+The scoped cursor fields are:
 
 | Field | Meaning |
 | --- | --- |

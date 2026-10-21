@@ -465,7 +465,7 @@ def _handler(server: CollectorServer) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
-        def log_message(self, fmt: str, *args: Any) -> None:
+        def log_message(self, format: str, *args: Any) -> None:
             return
 
         def _json(self, status: int, payload: dict[str, Any]) -> None:

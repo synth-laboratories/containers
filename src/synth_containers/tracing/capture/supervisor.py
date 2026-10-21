@@ -15,6 +15,7 @@ with an interrupted lifecycle and a partial completeness claim.
 
 from __future__ import annotations
 
+
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 import json
@@ -365,6 +366,7 @@ class CaptureSupervisor:
                 ),
             )
             if config.responses_websocket
+            and responses_endpoint is not None
             and not self._terminal_resume_candidate
             else None
         )

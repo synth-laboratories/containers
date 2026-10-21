@@ -52,7 +52,7 @@ def reconcile_docker_trial(trial_dir: Path, client: Any, *, now: datetime | None
     90-second operation budget is checked before every provider request.
     """
     request_timeout = getattr(client.api, "timeout", None)
-    if type(request_timeout) not in (int, float) or not 0 < request_timeout <= 5:
+    if request_timeout is None or type(request_timeout) not in (int, float) or not 0 < request_timeout <= 5:
         raise DockerRecoveryError(
             "Docker recovery requires a request timeout of at most five seconds"
         )

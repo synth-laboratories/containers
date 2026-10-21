@@ -151,6 +151,8 @@ def all_schemas() -> dict[str, dict[str, Any]]:
 
 
 def _schema_for(record_type: type, defs: dict[str, Any]) -> dict[str, Any]:
+    if not is_dataclass(record_type):
+        raise TypeError("Schema records must be dataclasses")
     hints = get_type_hints(record_type)
     properties: dict[str, Any] = {}
     required: list[str] = []

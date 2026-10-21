@@ -853,6 +853,14 @@ def format_sse(
     )
 
 
+def legacy_poll_cursor(cursor: dict[str, Any], *, journal_state: bool = False) -> dict[str, Any]:
+    """Keep the original cursor shape unless the scoped profile is requested."""
+    keys = ("kind", "after", "high_water", "closed", "next", "has_more")
+    if journal_state:
+        keys += ("chain_head", "acked")
+    return {key: cursor[key] for key in keys}
+
+
 def poll_payload(
     log: RolloutEventLog,
     *,
@@ -862,9 +870,12 @@ def poll_payload(
     subject_id_field: str = "rollout_id",
     subject_id: str | None = None,
     cursor: str | None = None,
+    scoped: bool = False,
 ) -> dict[str, Any]:
     """Page of envelopes after ``after``, optionally restricted to ``kinds``."""
 
+    if type(scoped) is not bool:
+        raise StreamCursorError("invalid_stream_scope", status_code=422)
     if type(limit) is not int or limit < 1 or limit > 10_000:
         raise ValueError("invalid_page_limit")
     allowed = normalize_stream_kinds(kinds)
@@ -911,7 +922,7 @@ def poll_payload(
     next_sequence = max([after, *(item.sequence for item in page if item.sequence is not None)])
     has_more = len(evidence) > limit
     scanned_through = next_sequence if has_more else high_water
-    return {
+    result = {
         subject_id_field: identity,
         "stream_id": log.stream_id,
         "cursor": {
@@ -932,6 +943,9 @@ def poll_payload(
         },
         "events": envelopes,
     }
+    if cursor is None and not scoped:
+        result["cursor"] = legacy_poll_cursor(result["cursor"])
+    return result
 
 
 async def iter_sse(

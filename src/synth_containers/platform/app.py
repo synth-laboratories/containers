@@ -106,8 +106,8 @@ def create_compat_app(
             "hidden_cot": False,
         }
 
-    @app.get("/health")
-    async def health() -> dict[str, Any]:
+    @app.get("/health", response_model=dict[str, Any])
+    async def health() -> dict[str, Any] | JSONResponse:
         payload = {
             "status": "ok",
             "target": spec.target_id,
@@ -327,11 +327,12 @@ def create_compat_app(
         wait_ms: int = Query(default=0, ge=0, le=10_000),
         cursor: str | None = Query(default=None, max_length=4096),
         kinds: list[str] | None = Query(default=None),
+        scoped: bool = Query(default=False),
     ) -> Any:
-        result = platform.events_payload(rollout_id, after, limit, kinds=kinds, ack=ack, cursor=cursor)
+        result = platform.events_payload(rollout_id, after, limit, kinds=kinds, ack=ack, cursor=cursor, scoped=scoped)
         if (wait_ms > 0 and "error" not in result
                 and not any(row.get("sequence") is not None for row in result["events"])):
-            scanned = result["cursor"]["scanned_through"]
+            scanned = result["cursor"].get("scanned_through", result["cursor"]["high_water"])
             deadline = time.monotonic() + wait_ms / 1000.0
             while True:
                 log = platform.logs.get(rollout_id)
@@ -340,7 +341,7 @@ def create_compat_app(
                 if time.monotonic() >= deadline:
                     break
                 await asyncio.sleep(0.05)
-            result = platform.events_payload(rollout_id, after, limit, kinds=kinds, ack=ack, cursor=cursor)
+            result = platform.events_payload(rollout_id, after, limit, kinds=kinds, ack=ack, cursor=cursor, scoped=scoped)
         return _platform_response(result, default_status=404)
 
     @app.get("/rollouts/{rollout_id}/frames/{step}.png")
@@ -436,8 +437,9 @@ def create_compat_app(
         after: int = Query(default=0, ge=0),
         limit: int = Query(default=1000, ge=1, le=10_000),
         cursor: str | None = Query(default=None, max_length=4096),
+        scoped: bool = Query(default=False),
     ) -> Any:
-        result = platform.events_payload(rollout_id, after, limit, kinds=tuple(REWARD_STREAM_KINDS), cursor=cursor)
+        result = platform.events_payload(rollout_id, after, limit, kinds=tuple(REWARD_STREAM_KINDS), cursor=cursor, scoped=scoped)
         return _platform_response(result, default_status=404)
 
     @app.get("/rollouts/{rollout_id}/reward/stream")

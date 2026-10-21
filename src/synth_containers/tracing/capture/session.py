@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 import threading
-from collections.abc import Iterator, Mapping
-from typing import Any
+from collections.abc import Mapping
+from typing import Generator, Any
 
 from ..canonical import record_id
 from ..store.base import BlobStore
@@ -121,7 +121,7 @@ class CaptureSession:
             return manifest
 
     @contextmanager
-    def write_transaction(self) -> Iterator[None]:
+    def write_transaction(self) -> Generator[None, None, None]:
         """Keep a compound collector write atomic against finalization."""
 
         with self._lock:

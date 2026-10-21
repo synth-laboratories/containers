@@ -19,7 +19,7 @@ import json
 import os
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Iterator, Protocol
+from typing import Generator, Any, Protocol
 
 from synth_containers.serde import JsonDataclassMixin
 
@@ -136,7 +136,7 @@ class LocalReservationBroker:
         self.root.mkdir(parents=True, exist_ok=True)
 
     @contextlib.contextmanager
-    def _lock(self) -> Iterator[None]:
+    def _lock(self) -> Generator[None, None, None]:
         with (self.root / ".lock").open("a+") as handle:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
             try:

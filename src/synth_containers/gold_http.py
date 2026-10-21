@@ -365,13 +365,21 @@ class GoldHttpWorld:
     # ---------------------------------------------------------------- internal
 
     def _result(self, payload: dict[str, Any]) -> StepResult:
-        readout = payload.get("readout") if isinstance(payload.get("readout"), dict) else {}
-        observation = (
-            readout.get("observation") if isinstance(readout.get("observation"), dict) else {}
-        )
-        public = readout.get("public") if isinstance(readout.get("public"), dict) else {}
-        private = readout.get("private") if isinstance(readout.get("private"), dict) else {}
-        progress = payload.get("progress") if isinstance(payload.get("progress"), dict) else {}
+        readout = payload.get("readout")
+        if not isinstance(readout, dict):
+            readout = {}
+        observation = readout.get("observation")
+        if not isinstance(observation, dict):
+            observation = {}
+        public = readout.get("public")
+        if not isinstance(public, dict):
+            public = {}
+        private = readout.get("private")
+        if not isinstance(private, dict):
+            private = {}
+        progress = payload.get("progress")
+        if not isinstance(progress, dict):
+            progress = {}
         total_reward = private.get("total_reward")
         reward = private.get("reward_last")
         if not isinstance(reward, (int, float)) and isinstance(total_reward, (int, float)):
@@ -401,7 +409,7 @@ class GoldHttpWorld:
         done = bool(payload.get("terminated") or payload.get("truncated") or public.get("done"))
         frame_url: str | None = None
         frame_bytes: bytes | None = None
-        if self.frame_path and self.rollout_id is not None:
+        if self.frame_path and self.rollout_id is not None and self.base_url is not None:
             frame_url = self.base_url + self.frame_path.format(
                 rollout_id=self.rollout_id, env_steps=env_steps
             )
@@ -439,6 +447,8 @@ class GoldHttpWorld:
         """Best-effort per-hero ego PNGs. A missing viewer never fails the step."""
 
         frames: dict[str, bytes] = {}
+        if self.base_url is None or self.view_frame_path is None:
+            return frames
         for agent_id in self._hero_ids(public, private):
             url = self.base_url + self.view_frame_path.format(
                 rollout_id=self.rollout_id, env_steps=env_steps, agent_id=agent_id

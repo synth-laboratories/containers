@@ -20,7 +20,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import fields, is_dataclass, replace
 from datetime import UTC, datetime
-from typing import Any, Iterator, TypeVar
+from typing import Generator, Any, TypeVar
 
 from pydantic import BaseModel
 from synth_containers.serde import jsonable
@@ -102,6 +102,8 @@ def content_digest(value: Any) -> str:
 def seal_record(record: RecordT) -> RecordT:
     """Return a copy of a dataclass record whose ``content_digest`` matches its content."""
 
+    if not is_dataclass(record) or isinstance(record, type):
+        raise TypeError("Trace records must be dataclass instances")
     return replace(record, content_digest=content_digest(record))
 
 
@@ -144,7 +146,7 @@ _PINNED_NOW: ContextVar[str | None] = ContextVar("synth_trace_pinned_now", defau
 
 
 @contextmanager
-def pinned_utc_now(value: str) -> Iterator[str]:
+def pinned_utc_now(value: str) -> Generator[str, None, None]:
     """Pin :func:`utc_now` to ``value`` inside the context.
 
     Deterministic importers (the harbor job-dir adapter) pin the clock to a
