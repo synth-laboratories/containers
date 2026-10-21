@@ -92,6 +92,7 @@ from .package_build import (
     validate_container_build_output,
 )
 from .package_files import ContainerPackageError
+from .stream_cursor import StreamCursorError, StreamCursorV1, StreamScopeV1, StreamWatermarkV1
 from .package_compatibility import (
     PackageCompatibilityIssue,
     PackageCompatibilityReport,
@@ -256,6 +257,10 @@ from .wire import (
 )
 
 __all__ = [
+    "StreamCursorError",
+    "StreamCursorV1",
+    "StreamScopeV1",
+    "StreamWatermarkV1",
     "ContainerArtifactDescriptor",
     "ContainerPackageError",
     "ContainerPackageManifest",

@@ -17,7 +17,6 @@ from typing import Any
 from ..event_log import (
     CONTROL_SUBSCRIBED,
     RolloutEventLog,
-    poll_payload,
     stream_descriptor,
     validate_rollout_id,
 )
@@ -30,6 +29,7 @@ from ..metadata import (
 from ..live_annotation.service import LiveAnnotationService, annotation_channel
 from .affordances import bind_recipe
 from .journal_retention import journal_retention, retention_ttl_seconds
+from .journal_pages import journal_events_payload
 from .http_requests import CreateRolloutRequest, ISOLATED_POLICY_HARNESS, NANOHORIZON_HARNESS
 from .policy_process import DEFAULT_HEURISTIC, IsolatedPolicyProcess
 from .reward_plan import PlanOutcome, classify_plan_outcome
@@ -1940,30 +1940,12 @@ class CompatPlatform:
         kinds: list[str] | tuple[str, ...] | None = None,
         *,
         ack: int | None = None,
+        cursor: str | None = None,
     ) -> dict[str, Any]:
-        log = self.logs.get(rollout_id)
-        if log is None:
-            return {"error": "unknown_rollout", "status_code": 404}
-        try:
-            payload = poll_payload(log, after=after, limit=limit, kinds=kinds, subject_id=rollout_id)
-        except ValueError:
-            return {"error": "invalid_page_limit", "status_code": 422}
-        if ack is not None:
-            try:
-                log.record_ack(ack)
-            except ValueError:
-                return {"error": "invalid_ack", "status_code": 422}
-        payload["cursor"].update(chain_head=log.chain_head, acked=log.last_acked)
-        payload["retention"] = self._journal_retention(log)
-        # No credential scan here. `_persist` already runs `assert_no_secrets`
-        # on every appended envelope, which matches secret *patterns* and
-        # credential-bearing *field names* -- strictly stronger than the
-        # substring check that used to live on this path. That check cost two
-        # full `json.dumps` per event per call, and `events_payload` is invoked
-        # with limit=10_000 at the end of every rollout, so a 50-call episode
-        # paid tens of thousands of redundant serializations of multi-KB
-        # payloads for a weaker guarantee already provided at write time.
-        return payload
+        return journal_events_payload(
+            self.logs, self._journal_retention, rollout_id, after, limit, kinds,
+            ack=ack, cursor=cursor,
+        )
 
     def _retention_ttl_seconds(self) -> int:
         return retention_ttl_seconds(self.runtime_config)

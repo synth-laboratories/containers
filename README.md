@@ -57,6 +57,10 @@ Trace V5 producer/aggregation fixes preserve partial usage, Codex source-time
 basis and Responses terminal outcomes. See [the accounting/adapter contract](docs/specs/trace-v5-partial-accounting.md)
 for version compatibility and the remaining publication/timestamp work.
 
+Rollout polling and opt-in scoped SSE share resumable view/history cursors and
+typed watermarks. See [the replay contract](docs/specs/stream-resume-v1.md) for
+local persistence guarantees, error handling and the remaining hosted/UI work.
+
 ## The HTTP optimizer contract
 
 | Route | Method | Purpose |
