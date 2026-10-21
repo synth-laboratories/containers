@@ -1,0 +1,39 @@
+{
+  "scope": "v0.24 portable package/build protocol; provider-free qualification only",
+  "source_revision": "c416acaf67b80976be81aae1c4f8ab7d42d01af4",
+  "base_revision": "e8b14e82fcc419c097f86fed3e451e8ea3d7ed6e",
+  "tests": {
+    "tests": 136,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1
+  },
+  "passed": 135,
+  "optional_skip": "SYNTH_EVALS_IMAGE_CATALOG source integration was not enrolled",
+  "lint": "ruff check src and touched tests passed",
+  "new_module_typing": "passed",
+  "type_comparison": {
+    "base_revision": "e8b14e82fcc419c097f86fed3e451e8ea3d7ed6e",
+    "base_diagnostics": 226,
+    "candidate_diagnostics": 226,
+    "added": [],
+    "historical_release_gate": "fails; no baseline waiver applied"
+  },
+  "installed_wheel": {
+    "wheel": "/Users/joshuapurtell/GitHub/workspaces/v024-rhodes-20261021/containers/.local/qualified-dist/synth_containers-0.4.5.dev2026102025-py3-none-any.whl",
+    "wheel_sha256": "1e9031a381926cdde856aa3c0ecbd59534bb6e341f0c7bd5f4b7ebf119c0e0ba",
+    "installed_from_unrelated_cwd": true,
+    "source_pythonpath": "unset for installed commands",
+    "package_files_match_source": true,
+    "provider_jobs": 0,
+    "schemas": [
+      "synth.container-build-plan.v1",
+      "synth.container-artifact.v1",
+      "ContainerArtifactDescriptor"
+    ]
+  },
+  "provider_image_verification": "not performed",
+  "runtime_startup_qualification": "not performed",
+  "paid_jobs": 0,
+  "published_or_deployed": false
+}
