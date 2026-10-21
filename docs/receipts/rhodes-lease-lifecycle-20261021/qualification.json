@@ -1,0 +1,19 @@
+{
+  "installed_client_tests": 21,
+  "logs": {
+    "rhodes-lease-lifecycle-installed-unit.log": "2713ac4f62d10d33744bb50041307a68f04e68a2ac9b6cf46423db31652d1a05",
+    "rhodes-lease-lifecycle-source-unit.log": "27960904309bdee7a7330b011c129898af0e213a69ab2f2af1becb6281fb541d",
+    "rhodes-lease-lifecycle-types.log": "3c687dfbc5540c869598cb442343cf0d7140dae2cfc72c7b84ee74a8182ae0d2"
+  },
+  "schema_version": "synth.rhodes-installed-lease-lifecycle-qualification.v1",
+  "scope": "Client normalizes acquisition/renew/release envelopes; get retains the canonical flat read. Not a provider/cohort/deployment qualification.",
+  "source_client_tests": 21,
+  "source_commit": "a149b7a8693ca9fa9651602cd7946d10d5b1d369",
+  "type_profiles": {
+    "main": "zero diagnostics from locked offline preparation",
+    "mitm": "zero diagnostics from locked offline preparation"
+  },
+  "verified_installed_library_modules": 305,
+  "version": "0.4.5.dev2026102106",
+  "wheel_sha256": "2c2f54cb90d502e615b24cee205f5ce5de94b8b8635c442df6326fcb92e6e08c"
+}

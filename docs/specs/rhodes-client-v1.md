@@ -63,6 +63,8 @@ deliberate operation, rather than automatic rebasing of a write.
 `task_readiness(pool_id, task_id)` reads exact provider observations without
 reserving capacity. The observed claim returns flat lease coordinates including
 `lease_id`, `container_id` and `reused`; malformed service envelopes refuse.
+Logical acquisition uses the same coordinates. Get/renew/release return flat
+lease snapshots; release reports `status="released"`.
 `acquire_observed_lease` requests the optional single-slot,
 fresh-instance local Docker HTTP profile. It differs from `acquire_lease`, which
 retains the legacy logical reservation contract. Warm reset and hosted placement
