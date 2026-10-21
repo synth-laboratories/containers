@@ -1,0 +1,107 @@
+{
+  "schema_version": "synth.local-qualification.v1",
+  "qualified_source_commit": "c427eeb754ec9777c82f3d67979f069412098a2e",
+  "branch": "codex/v024-container-build-contract-20261021",
+  "base_branch": "dev",
+  "pinned_dev_base": "e8b14e82fcc419c097f86fed3e451e8ea3d7ed6e",
+  "draft_pr": "https://github.com/synth-laboratories/containers/pull/37",
+  "scope": [
+    "portable checkpoint v1 metadata wrapping ApplicationCheckpoint v1",
+    "digest-verified complete local export/inspection",
+    "explicit strict/same-policy/edited-policy restore preflight",
+    "strict committed-position selector separate from legacy reward/frontier search",
+    "provider-free checkpoint export/inspect/check/schema CLI"
+  ],
+  "tests": {
+    "selected_suite_passed": 572,
+    "skipped": 11,
+    "errors": 0,
+    "failures": 0,
+    "dependency_warnings": 17,
+    "distinct_passing_cases": 572,
+    "checkpoint_focused_cases": 36,
+    "checkpoint_and_legacy_suite_passed": 84,
+    "junit": "checkpoint-qualified-tests.xml",
+    "full_repository_suite": false
+  },
+  "lint": "all src and new checkpoint tests pass",
+  "new_modules_types": "pass",
+  "full_source_types": {
+    "reference_source": "6cb51d89a64f5ee66dcb26429bdb3b025763daa3",
+    "reference_diagnostics": 225,
+    "candidate_diagnostics": 225,
+    "added": [],
+    "removed": []
+  },
+  "release_type_gate": {
+    "returncode": 1,
+    "gate_pass": false
+  },
+  "wheel": {
+    "wheel": ".local/checkpoint-final-dist/synth_containers-0.4.5.dev2026102025-py3-none-any.whl",
+    "sha256": "24cbfba77e60e7bbf0dd13c6e256a0d581920f6962e153d8c83aec4c87a2255a",
+    "packaged_python_files": 289,
+    "source_mismatches": []
+  },
+  "installed_cli": {
+    "installed_module": "/Users/joshuapurtell/GitHub/workspaces/v024-rhodes-20261021/containers/.local/installed/lib/python3.13/site-packages/synth_containers/__init__.py",
+    "python": "/Users/joshuapurtell/GitHub/workspaces/v024-rhodes-20261021/containers/.local/installed/bin/python",
+    "source_removed": true,
+    "verified_blobs": 6,
+    "verified_bytes": 2283,
+    "manifest": "sha256:314187bff303f47e2ae3a3053a3ddbd68494072508654473a1834c7e6f8dac7f",
+    "cli_export_inspect_check": true,
+    "unknown_retained": true,
+    "terminal_refused": true,
+    "decoder_execution": "not_run",
+    "admission": "not_checked"
+  },
+  "installed_joint_restore": {
+    "participants": 3,
+    "worlds": 1,
+    "policies": 2,
+    "suffix_actions": 7,
+    "source_store_deleted": true,
+    "fresh_child_process": true,
+    "uninterrupted_suffix_and_final_state_equal": true,
+    "duplicate_completed_restore_total_participant_calls": 3,
+    "provider_calls": 0,
+    "decoder": "trusted deterministic test fixture",
+    "raw_proof": "checkpoint-qualified-joint-restore/fixture/child-restore-proof.json"
+  },
+  "host_check": {
+    "elapsed_seconds": 12.0,
+    "returncode": -15,
+    "timed_out": true,
+    "free_gib": 105.21,
+    "stdout": "",
+    "stderr": "",
+    "full_host_check_pass": false
+  },
+  "feedback": {
+    "validation_mistake": "6c808d11-c78c-413d-913c-c58bb98cc988",
+    "checkpoint_learning": "cbd96cf1-6bb6-43ff-aa60-f7c65a30735d",
+    "host_checker_open": "2a91a2af-1cc4-4fdd-926a-8cce8a8ce2ea"
+  },
+  "evidence_directory": "/Users/joshuapurtell/GitHub/Pressure/artifacts/agent-runs/dec300d6-2d97-46dc-ad64-ebde3cd1420a/containers-multi-agent/checkpoint-contract-20261021",
+  "authority_boundaries": [
+    "commit anchor and runtime support are owner-supplied, unsigned local reports never grant authority",
+    "preflight does not execute decoders, restore participants or renew deadlines, leases or budgets",
+    "current admission, target inputs, native decode safety, suffix and resource reconciliation remain mandatory",
+    "source liabilities retained verbatim, including unknown outstanding amounts"
+  ],
+  "not_qualified": [
+    "Craftax/GELO/MAPO checkpoint adapters",
+    "hosted Rhodes admission, fences and retention registration",
+    "post-checkpoint committed suffix and resource reconciliation",
+    "kill at every native call/action/reward/commit boundary",
+    "actual CLI resume/fork execution",
+    "private/external hosted bundle custody",
+    "regrading implementation"
+  ],
+  "provider_runs": 0,
+  "deployment": false,
+  "package_publication": false,
+  "dev_merge": false,
+  "production_release_ready": false
+}
