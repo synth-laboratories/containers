@@ -7,11 +7,13 @@ is performed. Disconnect and timeout detach; cancel is an explicit operation.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import math
 import re
 from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import Any
+from pathlib import Path
 from urllib.parse import quote
 
 from .pools import PoolClient, PoolClientError, PoolRolloutTimeout, TERMINAL_STATUSES, _rollout_id
@@ -108,6 +110,123 @@ class RhodesClient(PoolClient):
     async def import_environment(self, manifest: Mapping[str, Any]) -> dict[str, Any]:
         """Register a content-addressed version from retained Artifact Platform input."""
         return await self._request("POST", "/environment_releases", payload=manifest)
+
+    async def prepare_environment_source(self, declaration: Mapping[str, Any]) -> dict[str, Any]:
+        return await self._request("POST", "/environment_sources/prepare", payload=declaration)
+
+    async def finalize_environment_source(
+        self, publication_id: str, declaration: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        return await self._request(
+            "POST",
+            "/environment_sources/" + quote(publication_id, safe="") + "/finalize",
+            payload=declaration,
+        )
+
+    async def upload_environment_source(
+        self,
+        path: str | Path,
+        *,
+        operation_id: str,
+        logical_path: str = "source.tar",
+        media_type: str = "application/x-tar",
+    ) -> dict[str, Any]:
+        """Upload a bounded snapshot through Artifact Platform, returning its reference.
+
+        Storage PUTs use a separate client without the Synth bearer token.
+        Finalize verifies content even when a create-only target already exists.
+        Retrying uses the same operation ID and never starts a build or rollout.
+        """
+        if not operation_id or len(operation_id) > 256:
+            raise ValueError("A stable bounded upload operation_id is required")
+
+        def snapshot():
+            with Path(path).open("rb") as stream:
+                content = stream.read(64 * 1024 * 1024 + 1)
+            if not 0 < len(content) <= 64 * 1024 * 1024:
+                raise ValueError("Environment source must be between 1 byte and 64 MiB")
+            return content
+
+        content = await asyncio.to_thread(snapshot)
+        digest = hashlib.sha256(content).hexdigest()
+        declaration = {
+            "schema_version": "synth.rhodes-source-upload.v1",
+            "operation_id": operation_id,
+            "source": {
+                "logical_path": logical_path,
+                "digest_sha256": digest,
+                "size_bytes": len(content),
+                "media_type": media_type,
+            },
+        }
+        prepared = await self.prepare_environment_source(declaration)
+        targets = prepared.get("upload_targets")
+        publication_id = prepared.get("publication_id")
+        if (
+            not isinstance(publication_id, str)
+            or not publication_id
+            or not isinstance(targets, list)
+            or len(targets) > 1
+        ):
+            raise PoolClientError("Rhodes source preparation returned invalid coordinates")
+        for target in targets:
+            if (
+                not isinstance(target, dict)
+                or target.get("digest_sha256") != digest
+                or target.get("logical_path") != logical_path
+            ):
+                raise PoolClientError("Rhodes upload target does not match the source declaration")
+            url = httpx.URL(target.get("upload_url", ""))
+            headers = target.get("required_headers")
+            if (
+                (
+                    url.scheme != "https"
+                    and not (url.scheme == "http" and url.host in {"127.0.0.1", "::1", "localhost"})
+                )
+                or url.username
+                or url.password
+                or url.fragment
+            ):
+                raise PoolClientError("Rhodes source upload requires a protected storage URL")
+            if not isinstance(headers, dict) or any(
+                not isinstance(k, str) or not isinstance(v, str) for k, v in headers.items()
+            ):
+                raise PoolClientError("Rhodes upload headers are malformed")
+            normalized = {k.lower(): v for k, v in headers.items()}
+            if (
+                normalized.get("if-none-match") != "*"
+                or {"authorization", "cookie", "proxy-authorization"} & normalized.keys()
+            ):
+                raise PoolClientError("Rhodes upload requires create-only storage headers")
+            try:
+                async with httpx.AsyncClient(
+                    trust_env=False, follow_redirects=False, timeout=60
+                ) as storage:
+                    response = await storage.put(url, headers=headers, content=content)
+                    if response.status_code != 412:
+                        response.raise_for_status()
+            except httpx.HTTPError:
+                # Signed storage URLs can contain credentials; omit them from
+                # the refusal and retain the original publication for retry.
+                raise PoolClientError(
+                    "Rhodes source transfer failed; retry the original operation"
+                ) from None
+        finalized = await self.finalize_environment_source(publication_id, declaration)
+        manifest_digest = finalized.get("manifest_digest")
+        if (
+            finalized.get("status") != "committed"
+            or finalized.get("publication_id") != publication_id
+            or not isinstance(manifest_digest, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", manifest_digest)
+        ):
+            raise PoolClientError("Rhodes source publication did not commit its original identity")
+        return {
+            "publication_id": publication_id,
+            "manifest_digest": "sha256:" + manifest_digest,
+            "logical_path": logical_path,
+            "digest": "sha256:" + digest,
+            "size_bytes": len(content),
+        }
 
     async def list_environments(self, *, after: str = "", limit: int = 50) -> dict[str, Any]:
         if type(limit) is not int or not 1 <= limit <= 100:
@@ -290,14 +409,39 @@ async def _operator_frames(
                 try:
                     if len(identifiers) != 1 or len(data) != 1 or not identifiers[0].isdigit():
                         raise ValueError("Expected exact operator event frame")
-                    event = json.loads(data[0])
+                    event = json.loads(
+                        data[0],
+                        object_pairs_hook=_unique_event_fields,
+                        parse_constant=_invalid_number,
+                        parse_float=_finite_number,
+                    )
                     if not isinstance(event, dict):
                         raise ValueError("Expected operator event object")
                     yield int(identifiers[0]), event
-                except (ValueError, UnicodeError) as error:
+                except (ValueError, UnicodeError, RecursionError) as error:
                     raise PoolClientError("Malformed Rhodes operator SSE event") from error
             if len(pending) > maximum_frame_bytes:
                 raise PoolClientError("Rhodes event frame exceeds 1 MiB")
     if pending.strip():
         # EOF cannot turn an unterminated event into committed evidence.
         raise PoolClientError("Rhodes event stream ended with an incomplete frame")
+
+
+def _unique_event_fields(pairs):
+    value = {}
+    for name, content in pairs:
+        if name in value:
+            raise ValueError("Duplicate operator event field")
+        value[name] = content
+    return value
+
+
+def _invalid_number(value):
+    raise ValueError("Nonfinite operator event number")
+
+
+def _finite_number(value):
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError("Nonfinite operator event number")
+    return parsed

@@ -105,7 +105,14 @@ async def test_timeout_detaches_and_never_sends_cancel():
 @run_async
 @pytest.mark.parametrize(
     "content",
-    [b'id: 1\ndata: {"sequence":1}', b"x" * (1024 * 1024 + 1), b"id: invalid\ndata: {}\n\n"],
+    [
+        b'id: 1\ndata: {"sequence":1}',
+        b"x" * (1024 * 1024 + 1),
+        b"id: invalid\ndata: {}\n\n",
+        b'id: 1\ndata: {"sequence":1,"sequence":1}\n\n',
+        b'id: 1\ndata: {"sequence":1,"value":NaN}\n\n',
+        b'id: 1\ndata: {"sequence":1,"value":1e999}\n\n',
+    ],
 )
 async def test_corrupt_or_incomplete_sse_refuses(content):
     async def chunks():
@@ -202,3 +209,69 @@ async def test_batch_validates_all_keys_before_io_and_uses_service_wire():
             ]
         }
     ]
+
+
+@run_async
+@pytest.mark.parametrize("storage_status", [200, 412])
+async def test_source_upload_uses_separate_create_only_transport_and_finalizes(
+    tmp_path, monkeypatch, storage_status
+):
+    import hashlib
+    import synth_containers.rhodes_client as module
+
+    path = tmp_path / "source.tar"
+    path.write_bytes(b"frozen source")
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    calls = []
+
+    def backend(request):
+        declaration = json.loads(request.content)
+        calls.append((request.url.path, declaration))
+        if request.url.path.endswith("/prepare"):
+            return httpx.Response(
+                200,
+                json={
+                    "publication_id": "publication",
+                    "upload_targets": [
+                        {
+                            "logical_path": "source.tar",
+                            "digest_sha256": digest,
+                            "upload_url": "https://storage.invalid/upload",
+                            "required_headers": {"If-None-Match": "*"},
+                        }
+                    ],
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "publication_id": "publication",
+                "status": "committed",
+                "manifest_digest": "a" * 64,
+            },
+        )
+
+    def storage(request):
+        assert request.url.host == "storage.invalid"
+        assert "authorization" not in request.headers
+        assert request.headers["If-None-Match"] == "*"
+        assert request.content == b"frozen source"
+        return httpx.Response(storage_status)
+
+    original = httpx.AsyncClient
+    async with original(
+        transport=httpx.MockTransport(backend),
+        base_url="https://rhodes.invalid",
+        headers={"Authorization": "Bearer fixture"},
+    ) as transport:
+        monkeypatch.setattr(
+            module.httpx,
+            "AsyncClient",
+            lambda **kwargs: original(transport=httpx.MockTransport(storage), **kwargs),
+        )
+        client = RhodesClient(api_key="fixture", client=transport)
+        source = await client.upload_environment_source(path, operation_id="same-operation")
+    assert source["digest"] == "sha256:" + digest
+    assert source["manifest_digest"] == "sha256:" + "a" * 64
+    assert calls[0][1] == calls[1][1]
+    assert calls[1][0] == "/v1/environment_sources/publication/finalize"

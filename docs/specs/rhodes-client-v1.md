@@ -7,6 +7,14 @@ compatibility, acquires/renews/releases server leases, and follows committed
 operator events. Existing submit/get/results/usage/cancel operations remain on
 the same client and service authority.
 
+`upload_environment_source(path, operation_id=...)` captures at most 64 MiB,
+prepares one private Artifact Platform publication, uploads create-only bytes
+through a separate transport without the Synth bearer token, and finalizes the
+same original declaration. It returns the source reference consumed by the
+release manifest. A lost response can be reconciled with the same operation;
+changed content under that operation conflicts. Lower-level prepare/finalize
+methods support callers that already manage the canonical upload targets.
+
 An imported manifest is not a validated release. An acquired legacy lease is
 not proof of observed provider readiness. Inspect server evidence separately;
 unsupported profiles and missing qualification must not trigger provider or
