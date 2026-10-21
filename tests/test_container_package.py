@@ -322,3 +322,11 @@ p.write_text("{}")
         asyncio.run(build_container_package(manifest, destination))
     assert PackageBuildPlan.model_validate_json((destination / "plan.json").read_text())
     assert not (destination / "artifact.json").exists()
+
+
+def test_runtime_argv_preserves_intentional_empty_arguments(tmp_path: Path) -> None:
+    manifest = package(tmp_path / "source")
+    manifest.write_text(
+        manifest.read_text().replace('["python", "run.py"]', '["python", "run.py", ""]')
+    )
+    assert plan_container_package(manifest).manifest.runtime.command == ("python", "run.py", "")

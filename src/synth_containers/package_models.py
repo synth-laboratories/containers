@@ -84,8 +84,8 @@ class RuntimeDeclaration(PackageModel):
 
     @model_validator(mode="after")
     def validate_command(self) -> RuntimeDeclaration:
-        if any(not part or "\x00" in part for part in self.command):
-            raise ValueError("Runtime command requires nonempty argv")
+        if not self.command[0] or any("\x00" in part for part in self.command):
+            raise ValueError("Runtime command requires an executable and NUL-free argv")
         directory = PurePosixPath(self.working_directory)
         if (
             not directory.is_absolute()
