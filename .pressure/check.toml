@@ -22,3 +22,12 @@ require_paths = ["tests/test_stream_cursor.py", "tests/test_journal_contract_v2.
 command = 'mkdir -p .local/tmp && TMPDIR="$PWD/.local/tmp" PYTHONPATH=src .venv/bin/python -m pytest -q tests/test_stream_cursor.py tests/test_journal_contract_v2.py'
 command_timeout_seconds = 30
 remedy = "Restore scoped replay, atomic snapshot/chain metadata, close-tail drain and uncertain-write fencing. Do not reset invalid cursors or treat transport EOF as run completion."
+
+[[checks]]
+id = "portable_checkpoint_continuation_boundaries"
+description = "Portable checkpoints retain byte closure, strict identity, explicit forks and resource unknowns"
+severity = "error"
+require_paths = ["tests/test_portable_checkpoint.py", ".venv/bin/python"]
+command = 'mkdir -p .local/tmp && TMPDIR="$PWD/.local/tmp" PYTHONPATH=src .venv/bin/python -m pytest -q tests/test_portable_checkpoint.py'
+command_timeout_seconds = 30
+remedy = "Restore complete portable closure, trusted-codec coverage, strict-position selection and explicit child funding. Compatibility must never grant execution authority or reset liabilities."

@@ -14,9 +14,12 @@ from .contracts import ArtifactReference, CheckpointFailure
 MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 
 
-class ArtifactStore(Protocol):
+class ArtifactReader(Protocol):
+    def get(self, reference: ArtifactReference, /) -> bytes: ...
+
+
+class ArtifactStore(ArtifactReader, Protocol):
     def put(self, payload: bytes) -> ArtifactReference: ...
-    def get(self, reference: ArtifactReference) -> bytes: ...
 
 
 def reference(namespace: str, payload: bytes) -> ArtifactReference:

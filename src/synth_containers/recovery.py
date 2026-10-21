@@ -81,6 +81,11 @@ def derive_run_recovery_projection(
     checkpoints: list[dict[str, Any]] | None = None,
     transform_failures: list[TransformFailure] | None = None,
 ) -> RunRecoveryProjection:
+    """Legacy search/fork projection ranked by reward/frontier, not strict continuation.
+
+    Strict continuation uses checkpoints.select_strict_checkpoint with verified
+    owner-anchored reports. This projection intentionally preserves old callers.
+    """
     checkpoint_rows = [dict(item) for item in list(checkpoints or []) if isinstance(item, dict)]
     failures = list(transform_failures or [])
     eligible_checkpoints = [row for row in checkpoint_rows if bool(row.get("resume_eligible") or row.get("restore_eligible"))]
@@ -192,6 +197,7 @@ def derive_run_recovery_projection(
         transform_failures=failures,
         operator_next_action=next_action,
         metadata={
+            "selection_policy": "reward_frontier_search",
             "checkpoint_count": len(checkpoint_rows),
             "eligible_checkpoint_count": len(eligible_checkpoints),
             "run_outcome": outcome,
