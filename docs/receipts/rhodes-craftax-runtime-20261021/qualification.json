@@ -1,0 +1,95 @@
+{
+  "compiler": {
+    "binary_sha256": "ee4fcb19bb6356c79c4234c0f6123165b8d0981a321ccf2d39ef6f01797db9f2",
+    "cleanup": {
+      "instance_id": "1ce4a704df91fe5a60aff037b2622392e75f8feb7eb85fd07b2726548811d9ff",
+      "status": "independently_absent"
+    },
+    "mbx_sha256": "3b7408c71fae119b09c506ab47daff6cba6476c5e7140111959824bd72e63331",
+    "operation_id": "c36820adb96145acaad60244b012a17b",
+    "preparation_script_sha256": "44692c78f32e8bc79f111a9443062583ea5b706ec4ccb9f2d1b7d23b482f2b4a",
+    "rust_image": "rust:1.97-slim-bookworm@sha256:2775a09d208ff0d7c1f50490c45b62db929e87ba1dcbc3f2132ac71a704bcdd3"
+  },
+  "deployments": 0,
+  "engine_tests": 12,
+  "image_build_operation": "55f16ba3e0364a4dba5e173442591aa0",
+  "image_digest": "sha256:c3e1ad5d4069d9b1c59514d6b2274e3e242d0d2fda1d51d36c035d92279e06fe",
+  "mbx_cache_hits": 188,
+  "mbx_cache_misses": 0,
+  "native_fixture": {
+    "absence_readback": true,
+    "image_digest": "sha256:c3e1ad5d4069d9b1c59514d6b2274e3e242d0d2fda1d51d36c035d92279e06fe",
+    "instance_id": "14a9f4d2d99faff2638ea8d494b7a2db5aeb03d28e0b0ea279f2bc05d2c69e07",
+    "local_http_health_checked": true,
+    "name": "capacity-7c3096787a974d7dbb72a7d7966a39b3",
+    "native_contract": {
+      "checkpoint_semantics": null,
+      "contract_version": "2026-05-28",
+      "expected_contract_version": "2026-05-28",
+      "metadata_keys": [
+        "active_leases",
+        "adapter_chain",
+        "affordance_booleans",
+        "affordances",
+        "annotation_api",
+        "blocking_trial",
+        "capabilities",
+        "environment_ref",
+        "evaluation_plan_ref",
+        "event_kinds",
+        "live_annotation",
+        "live_frames",
+        "live_reward",
+        "logical_service_ids",
+        "max_episode_steps",
+        "mcp_bind",
+        "policy_ref",
+        "policy_refs",
+        "reconnect",
+        "retention",
+        "reward_api",
+        "reward_authority",
+        "reward_calculator",
+        "runtime_family",
+        "runtime_identity",
+        "scale_leases",
+        "target_id",
+        "task_instance_id",
+        "true_checkpoint",
+        "world_ref"
+      ],
+      "protocol_fidelity": null,
+      "qualification": "declared",
+      "resume_semantics": null,
+      "rollout_modes": null,
+      "runtime_family": "external",
+      "target_id": "craftax_react"
+    },
+    "observed_image_digest": "sha256:c3e1ad5d4069d9b1c59514d6b2274e3e242d0d2fda1d51d36c035d92279e06fe",
+    "observed_instance_id": "14a9f4d2d99faff2638ea8d494b7a2db5aeb03d28e0b0ea279f2bc05d2c69e07",
+    "operation_id": "7c3096787a974d7dbb72a7d7966a39b3",
+    "state": "confirmed_removed"
+  },
+  "open": [
+    "Native supervised execution and archive custody",
+    "Hosted builds and capacity",
+    "G0-G5 acceptance, shared workload/funding adoption, optimizer/MCP witnesses and Mnemosyne cutover"
+  ],
+  "paid_model_calls": 0,
+  "postgres_capacity_and_native_cases": 3,
+  "pressure_records": [
+    "eb68becc-b385-44ea-b871-a4238001d9fe",
+    "999de092-ca96-4bb6-a334-59fd67cdda79"
+  ],
+  "python_image_tests": 21,
+  "retained_failures": [
+    "Initial deep guest TMPDIR failed before Rust compilation; corrected short owned mount.",
+    "Earlier completed attempt cleanup reconciled exact absence after lowercase CLI diagnostic.",
+    "First facade gate expected optimizer extension label; corrected to canonical SDK version."
+  ],
+  "schema_version": "synth.rhodes-craftax-runtime-qualification.v1",
+  "scope": "Local compiler, runtime assembly and strict facade readiness only; no execution cohort or deployment.",
+  "sdk_version": "0.4.5.dev2026102104",
+  "sdk_wheel_sha256": "c990273d1ef44736cfffe25d90ff402cd4a8c4e5a2eb8f2bf68b4b39935cd83d",
+  "source_revision": "338356c859e56dd1450ec3a839ad9d14903efb7d"
+}

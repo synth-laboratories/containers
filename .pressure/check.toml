@@ -67,3 +67,12 @@ require_paths = ["tests/test_eval_exec_contract.py", ".local/release-types-main/
 command = 'TMPDIR="$PWD/.local/tmp" PYTHONPATH=src .local/release-types-main/bin/python -m pytest -q tests/test_eval_exec_contract.py tests/test_portable_checkpoint.py'
 command_timeout_seconds = 30
 remedy = "Restore exact candidate/configuration/source identity, strict checkpoint refusal, explicit child funding and retention roots. Native engine qualification remains separate from these provider-free contract tests."
+
+[[checks]]
+id = "craftax_prebuilt_runtime_custody"
+description = "Craftax runtime consumes exact qualified compiler bytes and never compiles at startup; cleanup preserves unknown and foreign ownership"
+severity = "error"
+require_paths = ["scripts/prepare_craftax_runtime.py", "images/craftax-gamebench-rust/verify_engine_artifact.py", "tests/test_craftax_compiler_custody.py", "images/craftax-gamebench-rust/tests/test_prebuilt_engine_artifact.py", ".local/release-types-main/bin/python"]
+command = 'TMPDIR="$PWD/.local/tmp" PYTHONPATH=src .local/release-types-main/bin/python -m pytest -q tests/test_craftax_compiler_custody.py images/craftax-gamebench-rust/tests/test_prebuilt_engine_artifact.py'
+command_timeout_seconds = 30
+remedy = "Restore frozen binary/data closure, pinned Linux mbx/profile identity, runtime refusal without a prepared binary, exact-ID absence checks and ambiguous-create/foreign-owner preservation. Do not introduce raw Cargo, runtime compilation or unconfirmed cleanup success."

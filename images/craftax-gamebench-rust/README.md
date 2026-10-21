@@ -54,13 +54,32 @@ stays `craftax_react`.
 `synth-containers serve --target craftax_react` is the wrong path (public
 `TARGETS` has no Craftax).
 
-The Docker build requires both source roots explicitly; there are no sibling
-checkout fallbacks:
+The runtime image consumes two explicit frozen contexts: `CRAFTAX_ENGINE_ARTIFACTS`
+and `CONTAINERS_WHEEL_CONTEXT`. It never compiles Rust during image assembly or
+startup. Prepare the engine from a clean, pinned `craftax-runtime` checkout:
 
 ```bash
-export CONTAINERS_ROOT=/path/to/clean/containers
-export CRAFTAX_RUNTIME_ROOT=/path/to/clean/craftax-runtime
+python scripts/prepare_craftax_runtime.py \
+  --source-root /path/to/clean/craftax-runtime \
+  --output-root "$PWD/.local/craftax-runtime-builds" \
+  --launcher /path/to/synth-dev/local_dev/scripts/core_dev_build.py \
+  --storage-guard /path/to/synth-dev/local_dev/scripts/storage_target_guard.py \
+  --mbx-linux-dir /path/to/qualified/linux-arm64-mbx
 ```
+
+The command reports its frozen runtime directory and retains source/compiler
+hashes, test/build logs and cleanup state. The compiler has a bounded lifetime,
+two CPUs, 8 GiB memory, the normal shared admission lane and an 8 GiB owned target
+guard. Source is read-only at the same path used by runtime data lookup. Existing
+shared mbx caches retain their 80 GiB policy. A retained uncertain operation is
+reconciled before replacement; no raw Cargo fallback is available.
+
+Set `CRAFTAX_ENGINE_ARTIFACTS` to that qualified runtime directory and
+`CONTAINERS_WHEEL_CONTEXT` to a directory containing exactly one qualified
+`synth-containers` wheel. The image verifies binary/data closure and compiler
+identity, installs dependencies from the hash-locked requirements, then installs
+that wheel without resolving another SDK version. These local ARM64 inputs do
+not establish hosted/AMD64 placement qualification.
 
 Use this directory's dedicated `catalog.toml` for NanoHorizon and live evals.
 The parent `containers/images/catalog.toml` is a development inventory and may
