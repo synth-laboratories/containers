@@ -1,27 +1,28 @@
 {
   "scope": "v0.24 portable package/build protocol; provider-free qualification only",
-  "source_revision": "c416acaf67b80976be81aae1c4f8ab7d42d01af4",
+  "source_revision": "7adf3845cd39033fc2675dfffe833f9859ebdc0c",
   "base_revision": "e8b14e82fcc419c097f86fed3e451e8ea3d7ed6e",
   "tests": {
-    "tests": 136,
+    "tests": 139,
     "failures": 0,
     "errors": 0,
     "skipped": 1
   },
-  "passed": 135,
+  "passed": 138,
   "optional_skip": "SYNTH_EVALS_IMAGE_CATALOG source integration was not enrolled",
   "lint": "ruff check src and touched tests passed",
   "new_module_typing": "passed",
   "type_comparison": {
     "base_revision": "e8b14e82fcc419c097f86fed3e451e8ea3d7ed6e",
+    "candidate_revision": "7adf3845cd39033fc2675dfffe833f9859ebdc0c",
     "base_diagnostics": 226,
     "candidate_diagnostics": 226,
     "added": [],
     "historical_release_gate": "fails; no baseline waiver applied"
   },
   "installed_wheel": {
-    "wheel": "/Users/joshuapurtell/GitHub/workspaces/v024-rhodes-20261021/containers/.local/qualified-dist/synth_containers-0.4.5.dev2026102025-py3-none-any.whl",
-    "wheel_sha256": "1e9031a381926cdde856aa3c0ecbd59534bb6e341f0c7bd5f4b7ebf119c0e0ba",
+    "wheel": "/Users/joshuapurtell/GitHub/workspaces/v024-rhodes-20261021/containers/.local/final-dist/synth_containers-0.4.5.dev2026102025-py3-none-any.whl",
+    "wheel_sha256": "08d51ff68a8a2d559490c0b29cd0ea03139b1b7f99b7226392e35d30f60b1cbb",
     "installed_from_unrelated_cwd": true,
     "source_pythonpath": "unset for installed commands",
     "package_files_match_source": true,

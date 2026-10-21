@@ -83,6 +83,9 @@ host authority; frozen inputs and the small environment allowlist are not securi
 isolation. Use managed mbx/admission/storage launchers for Rust. Native builds
 and provider effects require their existing limits and authorization. The timeout
 and merged log bound do not impose a filesystem quota on files a builder writes.
+Uploaded/untrusted builds on Rhodes must execute as admitted isolated build
+workloads, rather than invoking this local helper in the API/control-plane
+process. The pure plan/descriptor contracts can be shared across those adapters.
 
 ## Build output and immutable artifact descriptor
 
