@@ -178,7 +178,7 @@ def _worker(plan: GradingPlanV1, inputs: dict[str, Any], directory: Path):
     status = "completed"
     started = time.monotonic_ns()
     with input_path.open("rb") as stdin:
-        process = subprocess.Popen([sys.executable, str(Path(__file__).with_name("grading_worker.py"))],
+        process = subprocess.Popen([sys.executable, "-P", str(Path(__file__).with_name("grading_worker.py"))],
             cwd=directory, stdin=stdin, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             env={"PATH": os.defpath, "LANG": "C.UTF-8", "PYTHONDONTWRITEBYTECODE": "1"},
             start_new_session=True, preexec_fn=limits)

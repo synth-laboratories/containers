@@ -12,7 +12,7 @@ import sys
 
 @contextmanager
 def owned_gold_engine(plan, *, owner: str, receipt: Path):
-    process = subprocess.Popen([sys.executable, str(Path(__file__).with_name("engine_guard.py"))],
+    process = subprocess.Popen([sys.executable, "-m", "synth_containers.engine_guard"],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         start_new_session=True)
     assert process.stdin is not None and process.stdout is not None and process.stderr is not None
@@ -26,6 +26,11 @@ def owned_gold_engine(plan, *, owner: str, receipt: Path):
                 raise RuntimeError("native_engine_startup_timeout")
             line = process.stdout.readline()
         if not line:
+            # Retain bounded diagnostics privately; do not mask startup failure
+            # with a missing cleanup receipt for an allocation that never began.
+            errors = process.stderr.read(65536)
+            from .tracing.atomic import durable_write
+            durable_write(receipt.with_suffix(".stderr"), errors.encode())
             raise RuntimeError("native_engine_startup_failed")
         yield json.loads(line)["url"]
     finally:
@@ -38,5 +43,5 @@ def owned_gold_engine(plan, *, owner: str, receipt: Path):
         finally:
             process.stdout.close()
             process.stderr.close()
-        if not receipt.exists() or json.loads(receipt.read_bytes())["cleanup"] != "stopped":
+        if process.returncode == 0 and (not receipt.exists() or json.loads(receipt.read_bytes())["cleanup"] != "stopped"):
             raise RuntimeError("native_engine_cleanup_unconfirmed")
