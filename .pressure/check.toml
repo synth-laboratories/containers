@@ -55,7 +55,7 @@ id = "immutable_grading_recovery"
 description = "Grading keeps exact subject/rubric identity and reuses committed output after controller/publication failure"
 severity = "error"
 require_paths = ["tests/test_immutable_grading.py", ".local/release-types-main/bin/python"]
-command = 'TMPDIR="$PWD/.local/tmp" PYTHONPATH=src .local/release-types-main/bin/python -m pytest -q tests/test_immutable_grading.py'
+command = 'TMPDIR="$PWD/.local/tmp" PYTHONPATH=src .local/release-types-main/bin/python -m pytest -q tests/test_immutable_grading.py tests/test_grading_craftax.py'
 command_timeout_seconds = 30
 remedy = "Restore evidence sufficiency refusal, immutable V5 judgments, explicit authority/correction and compute-free result publication. Never treat missing evidence as zero or execute submissions on the host."
 
@@ -76,3 +76,12 @@ require_paths = ["scripts/prepare_craftax_runtime.py", "images/craftax-gamebench
 command = 'TMPDIR="$PWD/.local/tmp" PYTHONPATH=src .local/release-types-main/bin/python -m pytest -q tests/test_craftax_compiler_custody.py images/craftax-gamebench-rust/tests/test_prebuilt_engine_artifact.py'
 command_timeout_seconds = 30
 remedy = "Restore frozen binary/data closure, pinned Linux mbx/profile identity, runtime refusal without a prepared binary, exact-ID absence checks and ambiguous-create/foreign-owner preservation. Do not introduce raw Cargo, runtime compilation or unconfirmed cleanup success."
+
+[[checks]]
+id = "rhodes_sdk_wire_protocol"
+description = "Pool configuration and leases use the actual Rhodes service envelopes"
+severity = "error"
+command_timeout_seconds = 30
+require_paths = ["tests/test_pools.py", "tests/test_rhodes_client.py", ".local/release-types-main/bin/python"]
+command = 'TMPDIR="$PWD/.local/tmp" PYTHONPATH=src .local/release-types-main/bin/python -m pytest -q tests/test_pools.py tests/test_rhodes_client.py'
+remedy = "Keep pool SDK convenience fields translated to canonical flat configuration and metadata; reject collisions and qualify installed SDK against the ordinary-role public API. Lease mutation envelopes and flat lease GET remain distinct."

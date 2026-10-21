@@ -1,0 +1,54 @@
+{
+  "backend_receipts": [
+    "docs/receipts/rhodes-installed-pool-sdk-20261021/qualification.json",
+    "docs/receipts/rhodes-retained-regrading-20261021/qualification.json"
+  ],
+  "installed_tests": 79,
+  "locked_type_profiles": {
+    "main": 0,
+    "mitm": 0
+  },
+  "native_backend_source": "e0f162347",
+  "native_integration": {
+    "passed": 22,
+    "seconds": 80.21,
+    "warnings": 1
+  },
+  "not_qualified": [
+    "full simulator snapshots",
+    "hosted providers",
+    "all ticket acceptance"
+  ],
+  "publication": "unpublished bundled development candidate",
+  "regrading": {
+    "fresh_exports_self_contained": true,
+    "new_model_calls": 0,
+    "new_provider_calls": 0,
+    "original_cohort_seeds": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9
+    ],
+    "original_rollouts_reexecuted": 0,
+    "original_trace_and_archive_bytes_unchanged": true,
+    "rubric_revisions_per_trace": 2
+  },
+  "schema_version": "synth.containers-sdk-qualification.v1",
+  "scope": [
+    "pool configuration/metadata round-trip",
+    "original live-window native result recovery",
+    "trace-bound observed trajectory regrading"
+  ],
+  "source_commit": "0970f74",
+  "source_tests": 79,
+  "source_wheel_installed_byte_equal_python_modules": 306,
+  "version": "0.4.5.dev2026102107",
+  "wheel_sha256": "6b6309f04b6582dd78e18f7a3c85c4636a2ac69fe0e305a0cf1837d1876fbf81"
+}
