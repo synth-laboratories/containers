@@ -8,9 +8,9 @@ Do not use `nonsensitive/craftax_go_explore` (JAX). Do not serve a fixture world
 
 ## Up
 
-Needs the rust binary (or a crate it can build): sibling
-`craftax-runtime/gold_rust`, or pin
-`SYNTH_CRAFTAX_GOLD_BIN` / `SYNTH_CRAFTAX_GOLD_ROOT`.
+Direct module startup requires an explicitly qualified executable for that
+runtime in `SYNTH_CRAFTAX_GOLD_BIN`. It never builds a crate on startup. The
+Docker image supplies its qualified Linux ARM64 executable automatically.
 
 Prefer the module so Ctrl+C stops **both** rust and the façade. Catalog `up`
 runs the same command as a subprocess; a wrapper SIGTERM can leave rust
@@ -18,8 +18,7 @@ listening.
 
 ```bash
 export SYNTH_CONTAINER_IMAGE_CATALOG=/path/to/containers/images/craftax-gamebench-rust
-# optional: skip cargo if you already built
-# export SYNTH_CRAFTAX_GOLD_BIN=/path/to/gold_rust/target/release/craftax_gold
+export SYNTH_CRAFTAX_GOLD_BIN=/path/to/qualified/host-native/craftax_gold
 
 cd containers/images/craftax-gamebench-rust
 PYTHONPATH=. python -m craftax_gold --port 8080
@@ -79,7 +78,10 @@ Set `CRAFTAX_ENGINE_ARTIFACTS` to that qualified runtime directory and
 `synth-containers` wheel. The image verifies binary/data closure and compiler
 identity, installs dependencies from the hash-locked requirements, then installs
 that wheel without resolving another SDK version. These local ARM64 inputs do
-not establish hosted/AMD64 placement qualification.
+not establish hosted/AMD64 placement qualification. Runtime assembly refuses
+an AMD64 Python image paired with the ARM64 engine. On another host, select
+`--platform=linux/arm64` explicitly with a qualified emulation/build provider;
+otherwise this profile is unsupported there.
 
 Use this directory's dedicated `catalog.toml` for NanoHorizon and live evals.
 The parent `containers/images/catalog.toml` is a development inventory and may

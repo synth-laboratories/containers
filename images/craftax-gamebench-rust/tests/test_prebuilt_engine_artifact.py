@@ -13,6 +13,11 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
 
+@pytest.fixture(autouse=True)
+def arm_runtime(monkeypatch):
+    monkeypatch.setattr(module.platform, "machine", lambda: "aarch64")
+
+
 def artifact(root):
     header = b"\x7fELF\x02\x01" + b"\0" * 12 + (183).to_bytes(2, "little")
     (root / "craftax_gold").write_bytes(header + b"unit fixture only")
@@ -64,3 +69,10 @@ def test_runtime_boot_refuses_missing_binary_instead_of_compiling(monkeypatch):
     monkeypatch.setenv("SYNTH_CRAFTAX_GOLD_BIN", str(ROOT / "missing-binary"))
     with pytest.raises(RuntimeError, match="craftax_gold_bin_missing"):
         stack.resolve_binary()
+
+
+@pytest.mark.parametrize("machine", ["x86_64", "amd64", "armv7l", "unknown"])
+def test_runtime_architecture_must_match_the_prepared_engine(tmp_path,monkeypatch,machine):
+    monkeypatch.setattr(module.platform,"machine",lambda:machine)
+    with pytest.raises(ValueError,match="requires an ARM64 runtime image"):
+        module.verify(tmp_path)

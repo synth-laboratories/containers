@@ -3,11 +3,14 @@
 import hashlib
 import json
 from pathlib import Path
+import platform
 import re
 import sys
 
 
 def verify(root):
+    if platform.machine().lower() not in {"aarch64", "arm64"}:
+        raise ValueError("prepared Craftax engine requires an ARM64 runtime image")
     root = Path(root)
     manifest = json.loads((root / "build-inputs.json").read_bytes())
     if (
