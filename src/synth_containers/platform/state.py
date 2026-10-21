@@ -111,6 +111,9 @@ class CompatPlatform:
         self.policy_process: IsolatedPolicyProcess | None = None
         self.live_annotation = LiveAnnotationService(self.storage_root)
         self._state_lock = threading.RLock()
+        # Policy startup may wait on candidate code. Keep mutation ordering
+        # independent of the lock used by status and rollout readers.
+        self._policy_mutation_lock = threading.RLock()
         self._seed_default_policies()
         self._recover_checkpoints()
         self._recover_completed_rollouts()
@@ -1389,7 +1392,7 @@ class CompatPlatform:
             process.close()
 
     def put_policy(self, body: dict[str, Any]) -> dict[str, Any]:
-        with self._state_lock:
+        with self._policy_mutation_lock:
             return self._put_policy(body)
 
     def _put_policy(self, body: dict[str, Any]) -> dict[str, Any]:
@@ -1538,7 +1541,7 @@ class CompatPlatform:
             }
 
     def restart_policy(self) -> dict[str, Any]:
-        with self._state_lock:
+        with self._policy_mutation_lock:
             return self._restart_policy()
 
     def _restart_policy(self) -> dict[str, Any]:
@@ -1563,7 +1566,7 @@ class CompatPlatform:
         }
 
     def register_policy_config(self, config_id: str, body: dict[str, Any]) -> dict[str, Any]:
-        with self._state_lock:
+        with self._policy_mutation_lock:
             return self._register_policy_config(config_id, body)
 
     def _register_policy_config(self, config_id: str, body: dict[str, Any]) -> dict[str, Any]:

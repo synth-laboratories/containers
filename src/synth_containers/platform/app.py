@@ -14,6 +14,7 @@ from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocket
 from ..nested import NestedError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
 from ..event_log import SSE_HEADERS, RolloutEventLog, iter_sse
 from ..live_annotation.api import mount_live_annotation
@@ -512,7 +513,9 @@ def create_compat_app(
         except (RequestParseError, ValueError) as exc:
             # Translate once at the HTTP edge: parse failures are 422, not 500.
             raise _http_from_parse(exc) from exc
-        result = platform.register_policy_config(req.config_id, to_policy_config_dict(req))
+        result = await run_in_threadpool(
+            platform.register_policy_config, req.config_id, to_policy_config_dict(req)
+        )
         return _platform_response(result)
 
     @app.put("/policy")
@@ -523,12 +526,12 @@ def create_compat_app(
         except (RequestParseError, ValueError) as exc:
             # Translate once at the HTTP edge: parse failures are 422, not 500.
             raise _http_from_parse(exc) from exc
-        result = platform.put_policy(to_put_policy_dict(req))
+        result = await run_in_threadpool(platform.put_policy, to_put_policy_dict(req))
         return _platform_response(result)
 
     @app.post("/policy/restart")
     async def restart_policy() -> dict[str, Any]:
-        return platform.restart_policy()
+        return await run_in_threadpool(platform.restart_policy)
 
     @app.post("/world/stop")
     async def world_stop() -> dict[str, Any]:

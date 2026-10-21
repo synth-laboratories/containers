@@ -200,6 +200,63 @@ def test_programmatic_update_and_rollback_change_the_real_policy_child(tmp_path,
         platform._close_policy_process()
 
 
+def test_policy_startup_does_not_block_platform_state_readers(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    from types import SimpleNamespace
+
+    platform = _client().app.state.platform
+    entered, release = Event(), Event()
+
+    def delayed_start():
+        entered.set()
+        assert release.wait(5)
+        return SimpleNamespace(isolation_receipt={"spawned": True})
+
+    monkeypatch.setattr(platform, "_ensure_policy_process", delayed_start)
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        install = workers.submit(platform.put_policy, {
+            "namespace": "test", "name": "code", "harness": "isolated_policy_process",
+            "code": "def act(x): return 'noop'",
+        })
+        try:
+            assert entered.wait(2)
+            state = workers.submit(platform.policy_state_payload).result(timeout=1)
+            assert state["status"] == "installed"
+        finally:
+            release.set()
+        assert install.result(timeout=2)["status"] == "installed"
+
+
+def test_http_policy_startup_keeps_health_and_policy_reads_responsive(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    from types import SimpleNamespace
+
+    entered, release = Event(), Event()
+    with _client() as client:
+        platform = client.app.state.platform
+
+        def delayed_start():
+            entered.set()
+            assert release.wait(5)
+            return SimpleNamespace(isolation_receipt={"spawned": True})
+
+        monkeypatch.setattr(platform, "_ensure_policy_process", delayed_start)
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            install = workers.submit(client.put, "/policy", json={
+                "namespace": "test", "name": "code", "harness": "isolated_policy_process",
+                "code": "def act(x): return 'noop'",
+            })
+            try:
+                assert entered.wait(2)
+                assert workers.submit(client.get, "/health").result(timeout=1).status_code == 200
+                assert workers.submit(client.get, "/policy").result(timeout=1).status_code == 200
+            finally:
+                release.set()
+            assert install.result(timeout=2).status_code == 200
+
+
 def test_rollout_rejects_missing_unknown_and_mismatched_policy_revision() -> None:
     client = _client()
     client.post(
