@@ -29,14 +29,18 @@ from ..canonical import record_id, utc_now
 from ..models.document import TraceDocumentV5
 from ..models.messages import MessageNodeV5, PartType
 from ..models.projection import ProjectionLossV1, ProjectionManifestV1
-from ..models.spans import SpanKind, UsageProvenance
+from ..models.spans import SpanKind, UsageProvenance, UsageV5
 
 
 PROJECTION_FORMAT = "synth-v4"
 PROJECTION_PRODUCER = "synth_containers.tracing.projections.v4"
-PROJECTION_VERSION = "1"
+PROJECTION_VERSION = "2"
 
 _V4_ROLES = {"system", "user", "assistant", "tool"}
+
+
+def _usage_count(usage: UsageV5, name: str) -> int:
+    return 0 if name in usage.unavailable_fields else int(getattr(usage, name) or 0)
 
 
 def project_v4(document: TraceDocumentV5) -> tuple[RolloutTraceV4, ProjectionManifestV1]:
@@ -69,19 +73,35 @@ def project_v4(document: TraceDocumentV5) -> tuple[RolloutTraceV4, ProjectionMan
         usage = CanonicalUsage()
         if span.usage is not None:
             usage = CanonicalUsage(
-                prompt_tokens=int(span.usage.prompt_tokens or 0),
-                completion_tokens=int(span.usage.completion_tokens or 0),
-                reasoning_tokens=int(span.usage.reasoning_tokens or 0),
-                cached_tokens=int(span.usage.cached_tokens or 0),
+                prompt_tokens=_usage_count(span.usage, "prompt_tokens"),
+                completion_tokens=_usage_count(span.usage, "completion_tokens"),
+                reasoning_tokens=_usage_count(span.usage, "reasoning_tokens"),
+                cached_tokens=_usage_count(span.usage, "cached_tokens"),
             )
             if str(span.usage.provenance) != UsageProvenance.OBSERVED_PROVIDER:
                 losses.append(
                     ProjectionLossV1(
                         field_path="spans[].usage.provenance",
-                        reason=("V4 usage carries no provenance; unobserved usage renders as zero"),
+                        reason="V4 usage cannot retain observation provenance",
                         record_count=1,
                     )
                 )
+            missing = [
+                name for name in ("prompt_tokens", "completion_tokens", "reasoning_tokens", "cached_tokens")
+                if getattr(span.usage, name) is None or name in span.usage.unavailable_fields
+            ]
+            if missing:
+                losses.append(ProjectionLossV1(
+                    field_path="spans[].usage",
+                    reason="V4 cannot represent unknown usage fields; rendered as zero: " + ", ".join(missing),
+                    record_count=1,
+                ))
+        else:
+            losses.append(ProjectionLossV1(
+                field_path="spans[].usage",
+                reason="V4 cannot represent missing usage; rendered as zero",
+                record_count=1,
+            ))
         model = str(span.detail.get("model") or "")
         spans.append(
             RolloutTraceSpanV4(

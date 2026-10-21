@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from synth_containers.tracing.adapters.atif import import_atif
+from synth_containers.tracing.adapters.openai_responses import NORMALIZER_VERSION
 from synth_containers.tracing.capture.binding import (
     BindingCaptureV1,
     BindingWorkloadV1,
@@ -338,7 +339,7 @@ def _call_started_payload() -> dict[str, object]:
     return {
         "call_index": 1,
         "provider_adapter": "openai_responses",
-        "provider_adapter_version": "1",
+        "provider_adapter_version": NORMALIZER_VERSION,
         "route": "/v1/responses",
         "stream": False,
         "request_digest": "sha256:request",

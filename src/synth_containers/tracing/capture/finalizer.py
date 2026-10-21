@@ -553,7 +553,7 @@ class TraceFinalizer:
         # Model calls are built first so an application event may cite the call that
         # produced it. Chronological sequence is the raw capture ordinal throughout,
         # which keeps model calls and application events in one replayable order.
-        total_usage = UsageV5(provenance=UsageProvenance.DERIVED, requests=0)
+        total_usage: UsageV5 | None = None
         call_index_to_event: dict[int, str] = {}
         for call_id in order:
             state = calls[call_id]
@@ -565,7 +565,7 @@ class TraceFinalizer:
             diagnostics.extend(built.diagnostics)
             call_index_to_span[state.call_index] = built.span.span_id
             call_index_to_event[state.call_index] = built.events[-1].event_id
-            total_usage = total_usage.merged(built.usage)
+            total_usage = built.usage if total_usage is None else total_usage.merged(built.usage)
 
         for record in application_records:
             application_events += 1
@@ -580,7 +580,7 @@ class TraceFinalizer:
             envelope_to_event[str(record["envelope_id"])] = event.event_id
             events.append(event)
 
-        if not order:
+        if total_usage is None:
             total_usage = UsageV5(
                 provenance=UsageProvenance.UNAVAILABLE,
                 requests=0,
@@ -1074,6 +1074,12 @@ class TraceFinalizer:
             if state.http_status is not None and 200 <= state.http_status < 300
             else SpanStatus.ERROR
         )
+        if status == SpanStatus.OK:
+            status = {
+                "incomplete": SpanStatus.TRUNCATED,
+                "failed": SpanStatus.ERROR,
+                "cancelled": SpanStatus.CANCELED,
+            }.get(provider_result.terminal_status or "", status)
         span = SpanV5(
             span_id=span_id,
             span_kind=SpanKind.MODEL_CALL,
@@ -1099,6 +1105,13 @@ class TraceFinalizer:
                 "route": state.route,
                 "provider_ids": provider_result.provider_ids,
                 "provider_terminal_observed": provider_result.terminal_observed,
+                **(
+                    {
+                        "provider_terminal_status": provider_result.terminal_status,
+                        "provider_terminal_details": provider_result.terminal_details,
+                    }
+                    if provider_result.terminal_status is not None else {}
+                ),
                 "correlation_headers": _correlation_headers(state.request_headers),
                 "native_correlation": state.native_correlation,
                 **request_observation(state.request_body),
@@ -1155,7 +1168,10 @@ class TraceFinalizer:
                 source_order_id=state.call_id,
             ),
             caused_by_event_ids=(started_event.event_id,),
-            status=EventStatus.OK if status == SpanStatus.OK else EventStatus.ERROR,
+            status=(
+                EventStatus.OK if status == SpanStatus.OK else
+                EventStatus.TRUNCATED if status == SpanStatus.TRUNCATED else EventStatus.ERROR
+            ),
             payload={
                 "call_index": state.call_index,
                 "http_status": state.http_status,
@@ -1168,6 +1184,10 @@ class TraceFinalizer:
                     )
                 ),
                 "provider_terminal_observed": provider_result.terminal_observed,
+                **(
+                    {"provider_terminal_status": provider_result.terminal_status}
+                    if provider_result.terminal_status is not None else {}
+                ),
             },
         ).sealed()
 

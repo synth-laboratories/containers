@@ -1,0 +1,15 @@
+scope = "repo:containers"
+
+[thresholds]
+max_linked_worktrees = 15
+max_local_branches = 20
+max_target_dir_gib = 8.0
+
+[[checks]]
+id = "container_package_and_partial_trace_contracts"
+description = "Package declaration checks and partial trace accounting preserve unknowns and authority boundaries"
+severity = "error"
+require_paths = ["tests/test_container_package.py", "tests/test_trace_v5_partial_accounting.py", ".venv/bin/python"]
+command = 'mkdir -p .local/tmp && TMPDIR="$PWD/.local/tmp" PYTHONPATH=src .venv/bin/python -m pytest -q tests/test_container_package.py tests/test_trace_v5_partial_accounting.py'
+command_timeout_seconds = 30
+remedy = "Restore package refusal/identity checks, partial usage, source-time basis and terminal outcome conformance; use the repo dev environment. Do not waive unknown evidence or runtime admission."

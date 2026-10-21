@@ -62,7 +62,7 @@ def import_rollout_trace_v4(
     events: list[EventV5] = []
     messages: list[MessageNodeV5] = []
     aliases: list[AliasV1] = []
-    total = UsageV5(provenance=UsageProvenance.DERIVED, requests=0)
+    total: UsageV5 | None = None
     raw_spans = payload.get("spans")
     ordered = sorted(
         [item for item in list(raw_spans or []) if isinstance(item, Mapping)],
@@ -126,7 +126,7 @@ def import_rollout_trace_v4(
             requests=1,
             source_refs=(source_span_id,),
         )
-        total = total.merged(usage)
+        total = usage if total is None else total.merged(usage)
         spans.append(
             SpanV5(
                 span_id=span_id,
@@ -250,7 +250,7 @@ def import_rollout_trace_v4(
         messages=tuple(messages),
         spans=tuple(spans),
         events=tuple(events),
-        usage=total,
+        usage=total if total is not None else UsageV5(requests=0),
         aliases=tuple(aliases),
     ).sealed()
 

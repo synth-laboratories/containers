@@ -9,7 +9,9 @@ Responses/SSE coverage from JSONL alone is the overclaim this contract exists to
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -18,7 +20,7 @@ from ..models.identity import AliasNamespace, AliasV1
 
 
 IMPORTER_NAME = "codex_stdout_jsonl"
-IMPORTER_VERSION = "2"
+IMPORTER_VERSION = "3"
 
 _EVENT_TYPE_BY_CODEX_KIND = {
     "agent_message": "codex.agent_message",
@@ -164,6 +166,7 @@ def import_codex_jsonl(source: Path | bytes, *, target_id: str) -> CodexImport:
                 "body": body,
                 "codex_id": codex_id,
                 "native_kind": kind,
+                **_source_time(record, message),
             }
         )
         usage = record.get("usage") or message.get("usage")
@@ -205,6 +208,41 @@ def import_codex_jsonl(source: Path | bytes, *, target_id: str) -> CodexImport:
                 )
             )
     return result
+
+
+def _source_time(record: Mapping[str, Any], message: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep RFC3339 producer time separate from V5's required display fallback."""
+    selected = next(
+        (
+            (f"{prefix}{key}", source[key])
+            for prefix, source in (("", record), ("msg.", message))
+            for key in ("timestamp", "occurred_at")
+            if source.get(key) is not None
+        ),
+        None,
+    )
+    value = selected[1] if selected else None
+    valid = False
+    if isinstance(value, str) and re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})",
+        value,
+    ):
+        try:
+            parsed = datetime.fromisoformat(value.replace("z", "+00:00").replace("Z", "+00:00"))
+            valid = parsed.utcoffset() is not None
+        except ValueError:
+            pass
+    return {
+        "occurred_at": value if valid else None,
+        "source_time": {
+            "profile": "synth.codex-source-time.v1",
+            "basis": "producer" if valid else "unavailable",
+            "field": selected[0] if selected else None,
+            "occurred_at": value if valid else None,
+            "reason": None if valid else "invalid" if selected else "absent",
+            "canonical_fallback": None if valid else "1970-01-01T00:00:00Z",
+        },
+    }
 
 
 __all__ = ["IMPORTER_NAME", "IMPORTER_VERSION", "CodexImport", "import_codex_jsonl"]

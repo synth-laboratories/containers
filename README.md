@@ -45,12 +45,17 @@ bounded logs and a validated artifact descriptor:
 ```sh
 synth-containers package plan ./container.toml
 synth-containers package build ./container.toml --output ./build-receipt
+synth-containers package check ./build-receipt/artifact.json --runtime-support ./runtime-support.json
 synth-containers package schema artifact
 ```
 
 See [the package/build contract](docs/specs/container-package-v1.md). Artifact
 identity validation, runtime readiness, provider support and current admission
 remain distinct checks. Hosted registry/runtime integration is subsequent work.
+
+Trace V5 producer/aggregation fixes preserve partial usage, Codex source-time
+basis and Responses terminal outcomes. See [the accounting/adapter contract](docs/specs/trace-v5-partial-accounting.md)
+for version compatibility and the remaining publication/timestamp work.
 
 ## The HTTP optimizer contract
 

@@ -92,6 +92,12 @@ from .package_build import (
     validate_container_build_output,
 )
 from .package_files import ContainerPackageError
+from .package_compatibility import (
+    PackageCompatibilityIssue,
+    PackageCompatibilityReport,
+    PackageRuntimeSupport,
+    check_package_compatibility,
+)
 from .package_models import (
     ContainerArtifactDescriptor,
     ContainerPackageManifest,
@@ -253,6 +259,10 @@ __all__ = [
     "ContainerArtifactDescriptor",
     "ContainerPackageError",
     "ContainerPackageManifest",
+    "PackageCompatibilityIssue",
+    "PackageCompatibilityReport",
+    "PackageRuntimeSupport",
+    "check_package_compatibility",
     "ImageArtifactIdentity",
     "PackageBuildOutput",
     "PackageBuildPlan",

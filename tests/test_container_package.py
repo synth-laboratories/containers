@@ -16,7 +16,9 @@ from synth_containers import (
     ContainerPackageError,
     ImageArtifactIdentity,
     PackageBuildPlan,
+    PackageRuntimeSupport,
     build_container_package,
+    check_package_compatibility,
     plan_container_package,
     validate_container_build_output,
 )
@@ -80,6 +82,79 @@ def output(plan: PackageBuildPlan) -> dict:
             "platform": "linux/amd64",
         },
     }
+
+
+def runtime_support(**changes) -> PackageRuntimeSupport:
+    return PackageRuntimeSupport.model_validate({
+        "schema_version": "synth.package-runtime-support.v1", "runtime_id": "test-runtime",
+        "platforms": ["linux/amd64"], "runtime_profiles": ["command"],
+        "readiness_kinds": ["process"], **changes,
+    })
+
+
+def test_package_check_is_declaration_matching_not_qualification_or_admission(tmp_path: Path) -> None:
+    plan = plan_container_package(package(tmp_path / "source"))
+    artifact = validate_container_build_output(plan, output(plan))
+    report = check_package_compatibility(artifact, runtime_support())
+    assert report.declaration_supported
+    assert not report.issues
+    assert report.artifact_verification == "not_checked"
+    assert report.runtime_qualification == "not_run"
+    assert report.admission == "not_checked"
+    assert report.readiness == "not_observed"
+    different_runtime = check_package_compatibility(artifact, runtime_support(runtime_id="other"))
+    assert different_runtime.runtime_support_digest != report.runtime_support_digest
+    assert different_runtime.artifact_descriptor_digest == report.artifact_descriptor_digest
+
+
+@pytest.mark.parametrize("change,code", [
+    ({"platforms": ["linux/arm64"]}, "platform_unsupported"),
+    ({"runtime_profiles": ["native"]}, "runtime_profile_unsupported"),
+    ({"readiness_kinds": ["http"]}, "readiness_kind_unsupported"),
+    ({"image_digest_kinds": ["oci_config"]}, "image_digest_kind_unsupported"),
+])
+def test_package_check_refuses_unsupported_declarations(tmp_path: Path, change: dict, code: str) -> None:
+    plan = plan_container_package(package(tmp_path / "source"))
+    report = check_package_compatibility(validate_container_build_output(plan, output(plan)),
+                                         runtime_support(**change))
+    assert not report.declaration_supported
+    assert [issue.code for issue in report.issues] == [code]
+
+
+def test_native_adapter_and_exact_contract_versions_require_explicit_support(tmp_path: Path) -> None:
+    manifest = package(tmp_path / "source")
+    text = manifest.read_text().replace('profile = "command"', 'profile = "native"')
+    text = text.replace('kind = "process"', 'kind = "adapter"\nadapter = "harbor"')
+    manifest.write_text(text + '\n[[contracts]]\nname = "trace"\nversion = "5"\n')
+    plan = plan_container_package(manifest)
+    artifact = validate_container_build_output(plan, output(plan))
+    support = runtime_support(runtime_profiles=["native"], readiness_kinds=["adapter"],
+                              contracts=[{"name": "trace", "version": "4"}])
+    report = check_package_compatibility(artifact, support)
+    assert {issue.code for issue in report.issues} == {"contract_unsupported", "readiness_adapter_unsupported"}
+    support = runtime_support(runtime_profiles=["native"], readiness_kinds=["adapter"],
+                              readiness_adapters=["harbor"], contracts=[{"name": "trace", "version": "5"}])
+    assert check_package_compatibility(artifact, support).declaration_supported
+
+
+def test_cli_package_check_emits_report_and_nonzero_for_unsupported(tmp_path: Path, capsys) -> None:
+    plan = plan_container_package(package(tmp_path / "source"))
+    artifact = validate_container_build_output(plan, output(plan))
+    artifact_file, support_file = tmp_path / "artifact.json", tmp_path / "runtime-support.json"
+    artifact_file.write_text(artifact.model_dump_json())
+    support_file.write_text(runtime_support(platforms=[]).model_dump_json())
+    args = ["package", "check", str(artifact_file), "--runtime-support", str(support_file)]
+    assert main(args) == 2
+    assert json.loads(capsys.readouterr().out)["issues"][0]["code"] == "platform_unsupported"
+    support_file.write_text(runtime_support().model_dump_json())
+    assert main(args) == 0
+    assert json.loads(capsys.readouterr().out)["declaration_supported"] is True
+    support_file.write_text('{"schema_version":"bad","private":"must-not-print","private":42}')
+    assert main(args) == 2
+    assert json.loads(capsys.readouterr().out) == {"error": "container_package_descriptor_invalid"}
+    support_file.write_text('{"schema_version":"bad","private":"must-not-print"}')
+    assert main(args) == 2
+    assert "must-not-print" not in capsys.readouterr().out
 
 
 def test_plan_is_portable_and_does_not_execute_package_code(tmp_path: Path) -> None:

@@ -17,10 +17,12 @@ from .sse import SSEDecoder, SSEEvent
 
 
 NORMALIZER_NAME = "openai_responses"
-NORMALIZER_VERSION = "1"
+NORMALIZER_VERSION = "2"
 RESPONSES_PATH = "/v1/responses"
 RESPONSES_COMPACT_PATH = "/v1/responses/compact"
 RESPONSES_WEBSOCKET_URL = "wss://api.openai.com/v1/responses"
+TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "incomplete"})
+TERMINAL_EVENTS = frozenset(f"response.{status}" for status in TERMINAL_STATUSES)
 
 
 def normalize_responses_request(body: Mapping[str, Any]) -> list[NormalizedMessage]:
@@ -202,7 +204,9 @@ def normalize_responses_response(body: Mapping[str, Any]) -> NormalizedProviderR
             for key in ("id", "previous_response_id", "conversation")
             if body.get(key) is not None
         },
-        terminal_observed=str(body.get("status") or "") in {"completed", "failed", "cancelled"}
+        terminal_status=(str(body["status"]) if body.get("status") in TERMINAL_STATUSES else None),
+        terminal_details=_terminal_details(body),
+        terminal_observed=str(body.get("status") or "") in TERMINAL_STATUSES
         or "compaction" in body
         or "compact_window" in body,
     )
@@ -221,13 +225,12 @@ def usage_from_responses(payload: Mapping[str, Any] | None) -> UsageV5:
     if isinstance(input_details, Mapping):
         cached = _int(input_details.get("cached_tokens"))
         cache_write = _int(
-            input_details.get("cache_write_tokens")
-            or input_details.get("cache_creation_tokens")
+            input_details.get("cache_write_tokens", input_details.get("cache_creation_tokens"))
         )
     if isinstance(output_details, Mapping):
         reasoning = _int(output_details.get("reasoning_tokens"))
-    prompt = _int(payload.get("input_tokens") or payload.get("prompt_tokens"))
-    completion = _int(payload.get("output_tokens") or payload.get("completion_tokens"))
+    prompt = _int(payload.get("input_tokens", payload.get("prompt_tokens")))
+    completion = _int(payload.get("output_tokens", payload.get("completion_tokens")))
     total = _int(payload.get("total_tokens"))
     return UsageV5(
         provenance=UsageProvenance.OBSERVED_PROVIDER,
@@ -303,11 +306,16 @@ class OpenAIResponsesStreamAssembler:
                 item
                 for item in reversed(self.events)
                 if str(item.get("type") or "")
-                in {"response.completed", "response.failed", "response.cancelled"}
+                in TERMINAL_EVENTS
             ),
             None,
         )
         terminal_response = terminal.get("response") if terminal else None
+        if isinstance(terminal_response, Mapping) and terminal:
+            terminal_response = {
+                **terminal_response,
+                "status": str(terminal["type"]).removeprefix("response."),
+            }
         if (
             isinstance(terminal_response, Mapping)
             and terminal_response.get("output")
@@ -335,6 +343,8 @@ def _responses_from_events(
     call_aliases: dict[str, str] = {}
     usage: Mapping[str, Any] | None = None
     terminal = False
+    terminal_status: str | None = None
+    terminal_details: dict[str, Any] = {}
     provider_ids: dict[str, str] = {}
     for event in events:
         kind = str(event.get("type") or "")
@@ -367,10 +377,12 @@ def _responses_from_events(
                 call["name"] = str(item.get("name") or call["name"])
                 if kind == "response.output_item.done" and item.get("arguments") is not None:
                     call["arguments"] = _json_text(item.get("arguments"))
-        elif kind in {"response.completed", "response.failed", "response.cancelled"}:
+        elif kind in TERMINAL_EVENTS:
             terminal = True
+            terminal_status = kind.removeprefix("response.")
             response = event.get("response")
             if isinstance(response, Mapping):
+                terminal_details = _terminal_details(response)
                 if isinstance(response.get("usage"), Mapping):
                     usage = response["usage"]
                 if response.get("id") is not None:
@@ -418,13 +430,24 @@ def _responses_from_events(
             )
         )
     return NormalizedProviderResult(
-        messages=[NormalizedMessage(role="assistant", parts=parts)] if parts else [],
+        messages=[NormalizedMessage(role="assistant", parts=parts, finish_reason=terminal_status)]
+        if parts else [],
         usage=usage_from_responses(usage),
         diagnostics=list(diagnostics),
         provider_ids=provider_ids,
         terminal_observed=terminal,
+        terminal_status=terminal_status,
+        terminal_details=terminal_details,
         raw_events=list(events),
     )
+
+
+def _terminal_details(body: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        key: body[key]
+        for key in ("incomplete_details", "error")
+        if body.get(key) is not None
+    }
 
 
 class OpenAIResponsesAdapter:

@@ -41,7 +41,7 @@ reference = "secretref://org/inference"
 
 Generic command images need no Synth HTTP server. HTTP readiness declares
 `kind = "http"`, `path` and `port`; native readiness declares `kind = "adapter"`
-and an adapter identity. These are declarations for later runtime checks.
+and an adapter identity. These are declarations for runtime compatibility checks.
 `contracts` may be empty. A protocol declaration is not a negotiated or qualified
 optimizer capability. Credentials are references for later authorized binding;
 this local build command does not resolve them or forward provider credentials.
@@ -135,3 +135,50 @@ and `validate_container_build_output`. Models and schemas are public through
 `synth_containers`; `package schema` also exposes plan/build-output/artifact
 schemas. Hosted operation IDs, resumable uploads, runtime launch, catalog-wide
 adoption and optimizer recipe migration are subsequent accepted work.
+
+## Check a runtime's declared support
+
+`package check` compares a frozen artifact descriptor with an explicit support
+policy supplied by the runtime owner. It performs no build, launch, network call,
+credential lookup or optimizer negotiation:
+
+```sh
+synth-containers package check ./build-receipt/artifact.json \
+  --runtime-support ./runtime-support.json
+synth-containers package schema runtime-support
+synth-containers package schema compatibility
+```
+
+```json
+{
+  "schema_version": "synth.package-runtime-support.v1",
+  "runtime_id": "local-command",
+  "platforms": ["linux/amd64"],
+  "runtime_profiles": ["command"],
+  "readiness_kinds": ["process"],
+  "contracts": [{"name": "my-environment.eval", "version": "v1"}]
+}
+```
+
+Matching requires an allowed image digest kind/platform, runtime profile,
+readiness kind/adapter and every declared contract's exact name/version. Unknown
+contracts refuse; an empty contract list permits generic command containers.
+Registry manifest/index identities are the default allowed digest kinds; a local
+daemon config identity requires explicit runtime support. Multiple supported
+versions of a contract may be listed. Support policies reject duplicate entries,
+unknown fields and schema versions. CLI descriptor input is bounded at 8 MiB,
+refuses symlinks/duplicate JSON keys and returns content-free parse errors.
+
+The `synth.package-compatibility.v1` report binds the artifact descriptor and
+support policy digests and returns deterministic issue codes/field paths.
+Exit status is zero for a declaration match and two for an unsupported or invalid
+input. `declaration_supported` does **not** mean the image exists, startup passed,
+or an org may run it: artifact verification, runtime qualification, admission and
+observed readiness remain explicitly unperformed. A support policy is an input
+to this pure check, not an authority signed or authenticated by this command.
+
+Python uses `PackageRuntimeSupport` and `check_package_compatibility`. Actual
+optimizer handshakes continue to use `RuntimeCapabilitySurface` and the existing
+`evaluate_consumer_support` machinery. Rhodes must bind runtime-owner policy,
+qualification receipts and fresh admission decisions to these exact identities;
+the local helper does not replace those service-owned checks.
