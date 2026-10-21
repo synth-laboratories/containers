@@ -78,6 +78,16 @@ def preflight_grading(
     blockers: list[str] = []
     if document.content_digest != plan.trace_digest or document.trace_id != plan.trace_id or trace_content_digest(document) != plan.trace_digest:
         blockers.append("grading_trace_identity_mismatch")
+    if set(plan.required_facts) - {"full_state", "trace_bound_observation"}:
+        blockers.append("grading_required_fact_unsupported")
+    if "full_state" in plan.required_facts:
+        # A list of achievements cannot establish simulator/RNG/world closure.
+        blockers.append("grading_full_state_capability_unqualified")
+    if (
+        "trace_bound_observation" in plan.required_facts
+        and plan.scorer != "craftax-trajectory-metrics-v1"
+    ):
+        blockers.append("grading_trace_bound_observation_profile_unsupported")
     for selector in plan.required_selectors:
         if not resolve_selector(document, selector).resolved:
             blockers.append("grading_selector_unresolved")
@@ -108,7 +118,17 @@ def preflight_grading(
             if not all(isinstance(inputs["cases"][name], dict) and {"actual", "expected"} <= inputs["cases"][name].keys() for name in plan.case_ids):
                 blockers.append("grading_required_case_missing")
         elif plan.scorer == "craftax-trajectory-metrics-v1":
-            rows = inputs["trajectory"]["records"]
+            from .grading_craftax import SCHEMA, observed_craftax_trajectory
+
+            trajectory = inputs["trajectory"]
+            if trajectory.get("schema_version") == SCHEMA:
+                if canonical_bytes(trajectory) != canonical_bytes(
+                    observed_craftax_trajectory(document)
+                ):
+                    blockers.append("craftax_observed_trajectory_trace_mismatch")
+            elif "trace_bound_observation" in plan.required_facts:
+                blockers.append("craftax_trace_bound_observation_missing")
+            rows = trajectory["records"]
             if not isinstance(rows, list) or not rows or any(type(row.get("step")) is not int or row["step"] != index or "action" not in row for index, row in enumerate(rows)):
                 blockers.append("craftax_action_prefix_missing")
             if "full_state" in plan.required_facts or "achievements" in plan.case_ids:

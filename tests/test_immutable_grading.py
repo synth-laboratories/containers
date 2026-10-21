@@ -193,3 +193,33 @@ def test_craftax_captured_metric_and_worker_failure_keep_missing_score(tmp_path)
 def test_plan_result_models_never_accept_a_path_as_operation_identity():
     with pytest.raises(ValueError):
         GradingAuthorityV1(name="../outside", result_ids=())
+
+@pytest.mark.parametrize(
+    "required", ["unknown_required_fact", "full_state", "trace_bound_observation"]
+)
+def test_required_fact_cannot_be_silently_accepted_by_an_unqualified_profile(tmp_path, required):
+    bundle, document, plan = fixture(tmp_path)
+    requested = GradingPlanV1.model_validate(
+        {**plan.model_dump(mode="python"), "required_facts": [required]}
+    )
+    preflight = grading.preflight_grading(requested, document, bundle.blobs)
+    assert preflight.sufficient is False and preflight.compute_invoked is False
+
+
+def test_achievement_list_is_not_full_simulator_state(tmp_path):
+    bundle, document, plan = fixture(
+        tmp_path,
+        scorer="craftax-trajectory-metrics-v1",
+        case_ids=("achievements",),
+        values={
+            "trajectory": {
+                "records": [{"step": 0, "action": "noop", "state": {"achievements": []}}]
+            }
+        },
+    )
+    requested = GradingPlanV1.model_validate(
+        {**plan.model_dump(mode="python"), "required_facts": ["full_state"]}
+    )
+    preflight = grading.preflight_grading(requested, document, bundle.blobs)
+    assert "grading_full_state_capability_unqualified" in preflight.blockers
+

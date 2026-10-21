@@ -89,3 +89,25 @@ Exit codes: 0 completed/readable, 2 refused/preflight failure, 3 recorded gradin
 failure, 130 interrupted. JSON results and errors use separate stdout/stderr.
 Grading success means the rubric executed; scores and scientific validity remain
 separate facts.
+
+## Observed Craftax trajectory profile
+
+`observed_craftax_trajectory(document)` derives
+`synth.craftax-observed-trajectory.v1` from a sealed V5 trace. It requires one
+closed episode with an exact contiguous action prefix, an environment-authority
+reward and post-action readout for every step, and the initial observation.
+Duplicate steps, ambiguous event IDs, missing readouts, nonfinite rewards and
+unknown prefixes refuse. Records retain the source trace digest and exact action,
+reward and observation event IDs; readouts are copied without changing capture.
+
+A grading plan can require `trace_bound_observation`. Preflight derives this
+profile again from the original trace and compares the entire input, including
+citations. Renaming an input or changing a value cannot establish lineage.
+Legacy frozen trajectory inputs remain supported without this stronger claim.
+Unknown required facts refuse. `full_state` remains unqualified: symbolic readouts
+and achievement lists do not prove simulator, RNG or full world state. A future
+qualified snapshot profile must define that evidence explicitly.
+
+Raw reward can be negative. A rubric must declare a suitable score range; the
+named action, achievement and reward scores remain separate from its normalized
+aggregate. Different normalizations produce different rubric identities.
