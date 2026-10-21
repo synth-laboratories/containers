@@ -49,3 +49,12 @@ require_paths = ["tests/test_trace_semantics_publication.py", ".local/release-ty
 command = 'TMPDIR="$PWD/.local/tmp" PYTHONPATH=src .local/release-types-main/bin/python -m pytest -q tests/test_trace_semantics_publication.py'
 command_timeout_seconds = 30
 remedy = "Restore digest-bound semantic profiles, fsynced prefix retention, immutable repair evidence and compute-free publication/index retry. Never discard corrupt complete records."
+
+[[checks]]
+id = "immutable_grading_recovery"
+description = "Grading keeps exact subject/rubric identity and reuses committed output after controller/publication failure"
+severity = "error"
+require_paths = ["tests/test_immutable_grading.py", ".local/release-types-main/bin/python"]
+command = 'TMPDIR="$PWD/.local/tmp" PYTHONPATH=src .local/release-types-main/bin/python -m pytest -q tests/test_immutable_grading.py'
+command_timeout_seconds = 30
+remedy = "Restore evidence sufficiency refusal, immutable V5 judgments, explicit authority/correction and compute-free result publication. Never treat missing evidence as zero or execute submissions on the host."

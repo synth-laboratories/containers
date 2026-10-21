@@ -48,6 +48,22 @@ def test_container_rollout_promotes_under_its_own_trace_id(tmp_path: Path) -> No
     assert promote_container_rollout(document).content_digest == promoted.content_digest  # deterministic
 
 
+def test_absent_craftax_call_and_total_usage_never_becomes_zero(tmp_path: Path) -> None:
+    from dataclasses import replace
+    from synth_containers.tracing.models.spans import UsageV5
+    document, _ = _container_document(tmp_path)
+    document = replace(document, usage=UsageV5(), content_digest="").sealed()
+    native = container_rollout_to_native_events(document)
+    calls = [row for row in native["events"] if row["payload"].get("kind") == "policy.call"]
+    assert calls and calls[0]["payload"]["prompt_tokens"] is None
+    terminal = native["events"][-1]["payload"]["usage"]
+    assert terminal["prompt_tokens"] is None and terminal["completion_tokens"] is None
+    promoted = promote_container_rollout(document)
+    assert promoted.spans_of_kind("model_call")[0].usage.prompt_tokens is None
+    assert promoted.usage.prompt_tokens is None and promoted.usage.cost_usd is None
+    assert promoted.completeness.usage == "partial"
+
+
 def test_promoted_container_rollout_flows_through_the_bundle_loader(tmp_path: Path) -> None:
     document, bundle_dir = _container_document(tmp_path)
     refs = bundle_trace_refs(bundle_dir, promote=promote_container_rollout)

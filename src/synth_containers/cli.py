@@ -49,10 +49,15 @@ def main(argv: list[str] | None = None) -> int:
         from .checkpoints.cli import main as checkpoint_main
 
         return checkpoint_main(arguments[1:])
+    if arguments and arguments[0] == "regrade":
+        from .grading_cli import main as grading_main
+
+        return grading_main(arguments[1:])
     parser = argparse.ArgumentParser(prog="synth-containers", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("package", help="plan or build a versioned container package")
     sub.add_parser("checkpoint", help="inspect, export or preflight portable checkpoints")
+    sub.add_parser("regrade", help="describe, run and export immutable retained-evidence grading")
 
     serve = sub.add_parser("serve", help="run create_compat_app for a public target_id (demo path)")
     serve.add_argument("--target", default=os.environ.get("SYNTH_CONTAINER_TARGET", "openenv_echo"))
