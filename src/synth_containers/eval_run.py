@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from datetime import datetime, UTC
 import fcntl
+from hashlib import sha256
 import json
 import os
 from pathlib import Path
@@ -18,7 +19,7 @@ import threading
 import time
 from uuid import uuid4
 
-from .eval_models import EvaluationPlanV1, EvaluationRunDeclarationV1, CandidateBindingV1
+from .eval_models import EvaluationPlanV1, EvaluationRunDeclarationV1, CandidateBindingV1, ScriptedCandidateV1
 from .gold_http import GoldHttpWorld
 from .native_engine import owned_gold_engine
 from .operator_journal import OperatorJournal
@@ -130,7 +131,8 @@ def _state_fact(result) -> dict:
             "frame_digest": result.frame_digest}
 
 
-def _latest_checkpoint(root: Path, rows: list[dict]) -> tuple[Path, CheckpointCommitAnchorV1]:
+def _latest_checkpoint(root: Path, rows: list[dict], *, run: EvaluationRunDeclarationV1 | None = None,
+                       candidate: ScriptedCandidateV1 | None = None) -> tuple[Path, CheckpointCommitAnchorV1]:
     valid = []
     for path in (root / "commits").glob("*.json"):
         commit = json.loads(path.read_bytes())
@@ -145,7 +147,18 @@ def _latest_checkpoint(root: Path, rows: list[dict]) -> tuple[Path, CheckpointCo
         expected_head = rows[manifest.sequence - 1]["chain_head"] if manifest.sequence else content_digest({"action_journal": "genesis-v1"})
         if manifest.digest() != anchor.manifest or manifest.chain_head != expected_head:
             raise ValueError("checkpoint_committed_prefix_mismatch")
-        if not manifest.terminal:
+        compatible = True
+        if run is not None and candidate is not None:
+            execution = manifest.execution
+            expected = {"source": run.plan.source_digest, "image": run.plan.image_digest,
+                "dependencies": run.plan.dependencies_digest, "task": content_digest(run.plan.task),
+                "world": content_digest(run.plan.task.get("world", {})), "scorer": run.plan.scorer_digest,
+                "protocol": content_digest({"adapter": run.plan.adapter, "capture": run.plan.capture})}
+            compatible = all(getattr(execution, name) == value for name, value in expected.items())
+            compatible = compatible and execution.configuration.sha256 == sha256(canonical_bytes(run.plan.model_dump(mode="json"))).hexdigest()
+            if run.restore_mode != "edited_policy_fork" or manifest.run_id == run.run_id:
+                compatible = compatible and execution.policies.sha256 == sha256(canonical_bytes(candidate.model_dump(mode="json"))).hexdigest()
+        if not manifest.terminal and compatible:
             valid.append((manifest.sequence, bundle, anchor))
     if not valid:
         raise ValueError("strict_resume_requires_committed_nonterminal_checkpoint")
@@ -216,7 +229,7 @@ def _run_lane(run: EvaluationRunDeclarationV1, candidate: CandidateBindingV1, se
     try:
         current = world.reset(seed)
         if resume:
-            bundle, anchor = _latest_checkpoint(directory / "checkpoints", rows)
+            bundle, anchor = _latest_checkpoint(directory / "checkpoints", rows, run=run, candidate=candidate.content)
             source_manifest = load_checkpoint_bundle(bundle).manifest
             mode = run.restore_mode if source_manifest.run_id != run.run_id else "strict_continue"
             manifest, policy, current = restore_gold_checkpoint(bundle, run, candidate.content, world=world,
@@ -341,7 +354,7 @@ def execute_evaluation(run: EvaluationRunDeclarationV1, root: Path, *, resume: b
                         result_path = directory / "job_result.json"
                         if result_path.exists() and json.loads(result_path.read_bytes()).get("execution_status") == "completed":
                             continue
-                        _latest_checkpoint(directory / "checkpoints", read_actions(directory / "actions.jsonl"))
+                        _latest_checkpoint(directory / "checkpoints", read_actions(directory / "actions.jsonl"), run=run, candidate=candidate.content)
                         if run.plan.limits.clock_policy == "active_runtime":
                             settled = {json.loads(path.read_bytes())["attempt_id"] for path in (directory / "results").glob("*.json")}
                             starts = {json.loads(path.read_bytes())["attempt_id"] for path in (directory / "attempts").glob("*.json")
@@ -449,7 +462,8 @@ def fork_evaluation(root: Path, destination: Path, *, run_id: str,
                     lane = f"{candidate.label}-s{seed}-r{replicate}"
                     source = root / lane
                     rows = read_actions(source / "actions.jsonl")
-                    bundle, anchor = _latest_checkpoint(source / "checkpoints", rows)
+                    original_policy = next(item.content for item in parent.candidates if item.label == candidate.label)
+                    bundle, anchor = _latest_checkpoint(source / "checkpoints", rows, run=parent, candidate=original_policy)
                     cuts.append((lane, source, rows[:anchor.sequence], bundle, anchor))
         durable_mkdir(destination)
         for lane, source, rows, bundle, anchor in cuts:

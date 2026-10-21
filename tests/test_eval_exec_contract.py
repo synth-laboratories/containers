@@ -110,6 +110,15 @@ def test_native_joint_cut_identity_forks_and_terminal_refusal(tmp_path):
         restore_gold_checkpoint(bundle, child, changed, world=world, mode="edited_policy_fork", expected_commit=anchor)
     restore_gold_checkpoint(bundle, child, changed, world=world, mode="edited_policy_fork",
         child_budget={"authority": "owner", "reference": "child"}, expected_commit=anchor)
+    # A newer committed point with a different policy does not replace the
+    # greatest compatible strict cut. Selection never falls back to fresh run.
+    from synth_containers.eval_run import _latest_checkpoint
+    rows = [{"action": "noop", "reward": 0, "chain_head": D}]
+    world.position = 1
+    commit_gold_checkpoint(tmp_path, run, changed, world=world, rows=rows, chain_head=D,
+                           calls=1, active_ns=1, terminal=False)
+    selected, selected_anchor = _latest_checkpoint(tmp_path, rows, run=run, candidate=candidate)
+    assert selected == bundle and selected_anchor.sequence == 0
 
 
 def test_explicit_detach_refusal_before_allocating_root(tmp_path, capsys):
