@@ -41,8 +41,13 @@ def main(argv: list[str] | None = None) -> int:
         from .tunnels.cli import main as tunnel_main
 
         return tunnel_main(arguments[1:])
+    if arguments and arguments[0] == "package":
+        from .package_cli import main as package_main
+
+        return package_main(arguments[1:])
     parser = argparse.ArgumentParser(prog="synth-containers", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("package", help="plan or build a versioned container package")
 
     serve = sub.add_parser("serve", help="run create_compat_app for a public target_id (demo path)")
     serve.add_argument("--target", default=os.environ.get("SYNTH_CONTAINER_TARGET", "openenv_echo"))

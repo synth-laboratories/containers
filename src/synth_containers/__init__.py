@@ -86,6 +86,19 @@ from .launch import (
     serve_image,
     up_image,
 )
+from .package_build import (
+    build_container_package,
+    plan_container_package,
+    validate_container_build_output,
+)
+from .package_files import ContainerPackageError
+from .package_models import (
+    ContainerArtifactDescriptor,
+    ContainerPackageManifest,
+    ImageArtifactIdentity,
+    PackageBuildOutput,
+    PackageBuildPlan,
+)
 from .nouns import (
     Action,
     Actor,
@@ -237,6 +250,15 @@ from .wire import (
 )
 
 __all__ = [
+    "ContainerArtifactDescriptor",
+    "ContainerPackageError",
+    "ContainerPackageManifest",
+    "ImageArtifactIdentity",
+    "PackageBuildOutput",
+    "PackageBuildPlan",
+    "build_container_package",
+    "plan_container_package",
+    "validate_container_build_output",
     "Action",
     "ActionableSideInfo",
     "Actor",
