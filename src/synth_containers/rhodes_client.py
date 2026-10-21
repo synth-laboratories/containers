@@ -371,7 +371,7 @@ class RhodesClient(PoolClient):
         """
         if not idempotency_key:
             raise ValueError("A stable lease idempotency_key is required")
-        return await self._request(
+        response = await self._request(
             "POST",
             "/pools/"
             + quote(pool_id, safe="")
@@ -388,6 +388,16 @@ class RhodesClient(PoolClient):
                 "reset": "fresh_instance",
             },
         )
+
+        lease = response.get("lease")
+        if (
+            not isinstance(lease, dict)
+            or not isinstance(lease.get("lease_id"), str)
+            or not lease["lease_id"]
+            or type(response.get("reused")) is not bool
+        ):
+            raise PoolClientError("Rhodes observed capacity returned malformed lease coordinates")
+        return {**lease, "reused": response["reused"]}
 
     async def get_lease(self, lease_id: str) -> dict[str, Any]:
         return await self._request("GET", "/container_leases/" + quote(lease_id, safe=""))

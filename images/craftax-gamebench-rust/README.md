@@ -32,15 +32,6 @@ synth-containers up craftax-gamebench-rust \
   --port 8080
 ```
 
-Python:
-
-```python
-from craftax_gold import serve
-
-with serve(port=8080) as handle:
-    handle.health()
-```
-
 `/health` is 200 only when rust gold is up (`gold_ok: true`). Otherwise 503.
 Do not set `SYNTH_CRAFTAX_URL` unless you are attaching to gold you already
 started.

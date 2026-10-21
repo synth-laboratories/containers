@@ -23,16 +23,22 @@ async def test_observed_capacity_is_explicit_and_keeps_exact_task_and_operation(
 
     def respond(request):
         requests.append(request)
-        return httpx.Response(200, json={"ready": True})
+        return httpx.Response(
+            200,
+            json={"ready": True}
+            if request.method == "GET"
+            else {"lease": {"lease_id": "original", "container_id": "observed"}, "reused": False},
+        )
 
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(respond), base_url="https://rhodes.invalid"
     ) as transport:
         client = RhodesClient(api_key="fixture", client=transport)
         await client.task_readiness("pool", "task/one")
-        await client.acquire_observed_lease(
+        lease = await client.acquire_observed_lease(
             "pool", "task/one", image_kind="craftax_eval", idempotency_key="exact-operation"
         )
+    assert lease == {"lease_id": "original", "container_id": "observed", "reused": False}
     assert requests[0].url.raw_path == b"/v1/pools/pool/tasks/task%2Fone/readiness"
     assert requests[1].url.raw_path == b"/v1/pools/pool/tasks/task%2Fone/capacity_leases"
     payload = json.loads(requests[1].content)
@@ -341,16 +347,43 @@ async def test_source_upload_uses_separate_create_only_transport_and_finalizes(
 @run_async
 async def test_optional_capacity_lease_is_forwarded_with_original_submission_identity():
     seen = []
+
     def respond(request):
         seen.append(request)
         if len(seen) == 1:
             raise httpx.ReadError("accepted response lost", request=request)
-        return httpx.Response(200, json={"rollout_id":"original-rollout"})
-    async with httpx.AsyncClient(transport=httpx.MockTransport(respond), base_url="https://rhodes.invalid") as transport:
+        return httpx.Response(200, json={"rollout_id": "original-rollout"})
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(respond), base_url="https://rhodes.invalid"
+    ) as transport:
         client = RhodesClient(api_key="fixture", client=transport, retry_backoff_seconds=0)
-        result = await client.submit("pool-one", {"idempotency_key":"evaluation-17",
-            "capacity_lease_id":"observed-lease", "task_id":"craftax", "seed":17})
+        result = await client.submit(
+            "pool-one",
+            {
+                "idempotency_key": "evaluation-17",
+                "capacity_lease_id": "observed-lease",
+                "task_id": "craftax",
+                "seed": 17,
+            },
+        )
     assert result == "original-rollout"
     assert seen[0].content == seen[1].content
     assert json.loads(seen[1].content)["capacity_lease_id"] == "observed-lease"
     assert json.loads(seen[1].content)["idempotency_key"] == "evaluation-17"
+
+
+@run_async
+@pytest.mark.parametrize(
+    "response", [{}, {"lease": {}, "reused": False}, {"lease": {"lease_id": "r"}, "reused": "yes"}]
+)
+async def test_observed_capacity_refuses_malformed_authority_response(response):
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json=response)),
+        base_url="https://rhodes.invalid",
+    ) as transport:
+        client = RhodesClient(api_key="fixture", client=transport)
+        with pytest.raises(PoolClientError, match="malformed lease"):
+            await client.acquire_observed_lease(
+                "pool", "task", image_kind="craftax_eval", idempotency_key="same"
+            )
