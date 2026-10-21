@@ -46,6 +46,7 @@ def local_execution_dependencies_digest() -> str:
 
 def describe_evaluation(plan: EvaluationPlanV1, candidates: tuple[CandidateBindingV1, ...]) -> dict:
     blockers = []
+    grading = None
     if plan.adapter == "rhodes-v1":
         blockers.append("rhodes_adapter_requires_service_admission: not installed in local CLI")
     if plan.adapter == "local-gold-scripted-v1":
@@ -55,12 +56,23 @@ def describe_evaluation(plan: EvaluationPlanV1, candidates: tuple[CandidateBindi
             blockers.append("execution_dependency_identity_mismatch")
         if not candidates or len({c.label for c in candidates}) != len(candidates):
             blockers.append("unique_candidate_bindings_required")
+    elif plan.adapter == "retained-grading-v1":
+        try:
+            from .grading import preflight_grading
+            grade_plan, bundle, document = _grading_inputs(plan)
+            checked = preflight_grading(grade_plan, document, bundle.blobs,
+                trusted_source_digests=frozenset(plan.trusted_scorer_source_digests))
+            grading = {"plan": grade_plan.model_dump(mode="json"), "preflight": checked.model_dump(mode="json")}
+            blockers.extend(checked.blockers)
+        except (ValueError, OSError):
+            blockers.append("retained_grading_inputs_unavailable")
     return {"schema_version": "synth.evaluation-preflight.v1", "plan_digest": plan.digest,
         "plan": plan.model_dump(mode="json"), "candidate_bindings": [
             {"label": c.label, "digest": c.content.digest, "configuration": c.content.model_dump(mode="json"),
              "model": "scripted", "provider": "none", "effort": None} for c in candidates],
         "rollouts": len(candidates) * len(plan.seeds) * plan.replicates if candidates else 1,
         "aggregate_maximum_provider_cost_usd": "0", "supported": not blockers, "blockers": blockers,
+        "retained_grading": grading,
         "capabilities": {"foreground": True, "detached": False, "watch": True,
             "strict_continue": plan.adapter == "local-gold-scripted-v1", "fork": plan.adapter == "local-gold-scripted-v1",
             "provider_calls": False, "credentials_consumed": [], "admission": "local-owner-resource-pins"}}
@@ -376,12 +388,7 @@ def execute_evaluation(run: EvaluationRunDeclarationV1, root: Path, *, resume: b
 
 def _execute_grading(run, root, events):
     from .grading import run_grading, export_grading
-    from .grading_models import GradingPlanV1
-    from .tracing.store.bundle import LocalTraceBundle
-    from .tracing.validation.rehydrate import trace_document_from_payload
-    plan = GradingPlanV1.model_validate_json(Path(run.plan.grading_plan).read_bytes())
-    bundle = LocalTraceBundle(Path(run.plan.grading_bundle))
-    document = trace_document_from_payload(bundle.read_trace(plan.trace_digest))
+    plan, bundle, document = _grading_inputs(run.plan)
     result = run_grading(plan, document, bundle.blobs, root / "grades",
         trusted_source_digests=frozenset(run.plan.trusted_scorer_source_digests), source_bundle=bundle)
     output = root / "grading-output"
@@ -398,6 +405,24 @@ def _execute_grading(run, root, events):
     durable_write(root / "summary.json", canonical_bytes(summary), replace=True)
     events.emit("eval.run.terminal", summary, lane="grading")
     return summary
+
+
+def _grading_inputs(evaluation: EvaluationPlanV1):
+    from .grading_models import GradingPlanV1
+    from .tracing.store.bundle import LocalTraceBundle
+    from .tracing.validation.rehydrate import trace_document_from_payload
+    import tomllib
+    if evaluation.grading_plan is None or evaluation.grading_bundle is None:
+        raise ValueError("grading_inputs_required")
+    path = Path(evaluation.grading_plan)
+    body = tomllib.loads(path.read_text()) if path.suffix == ".toml" else json.loads(path.read_bytes())
+    plan = GradingPlanV1.model_validate(body)
+    source = Path(evaluation.grading_bundle)
+    if not (source / "manifest.json").is_file():
+        raise ValueError("grading_retained_bundle_missing")
+    bundle = LocalTraceBundle(source)
+    document = trace_document_from_payload(bundle.read_trace(plan.trace_digest))
+    return plan, bundle, document
 
 
 def fork_evaluation(root: Path, destination: Path, *, run_id: str,
