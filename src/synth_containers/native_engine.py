@@ -16,6 +16,7 @@ def owned_gold_engine(plan, *, owner: str, receipt: Path):
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         start_new_session=True)
     assert process.stdin is not None and process.stdout is not None and process.stderr is not None
+    allocation_observed = False
     try:
         process.stdin.write(json.dumps({"owner": owner, "receipt": str(receipt.absolute()),
             "image": plan.image_digest, "cpu": plan.cpu, "memory_mb": plan.memory_mb}) + "\n")
@@ -32,7 +33,9 @@ def owned_gold_engine(plan, *, owner: str, receipt: Path):
             from .tracing.atomic import durable_write
             durable_write(receipt.with_suffix(".stderr"), errors.encode())
             raise RuntimeError("native_engine_startup_failed")
-        yield json.loads(line)["url"]
+        url = json.loads(line)["url"]
+        allocation_observed = True
+        yield url
     finally:
         process.stdin.close()
         try:
@@ -43,5 +46,7 @@ def owned_gold_engine(plan, *, owner: str, receipt: Path):
         finally:
             process.stdout.close()
             process.stderr.close()
-        if process.returncode == 0 and (not receipt.exists() or json.loads(receipt.read_bytes())["cleanup"] != "stopped"):
+        if (receipt.exists() and json.loads(receipt.read_bytes())["cleanup"] != "stopped") or (
+            not receipt.exists() and (allocation_observed or process.returncode == 0)
+        ):
             raise RuntimeError("native_engine_cleanup_unconfirmed")
