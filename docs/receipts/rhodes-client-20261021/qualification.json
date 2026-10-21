@@ -1,0 +1,14 @@
+{
+  "source_commit": "a5d12e514bc2dac9e7ee29b1da5ef22cd433a0dc",
+  "version": "0.4.5.dev2026102101",
+  "wheel_sha256": "77ee1d2327f8fb5d1772a22f6bebd36bb48c47acf1b2fb81b0c2da1b8b8ddb27",
+  "source_modules_equal": true,
+  "installed_import": "/Users/joshuapurtell/GitHub/workspaces/v024-rhodes-20261021/containers/.local/rhodes-client-installed/lib/python3.13/site-packages/synth_containers/__init__.py",
+  "unit_tests_passed": 25,
+  "type_profiles": {
+    "main": "zero diagnostics",
+    "mitm": "zero diagnostics"
+  },
+  "provider_calls": 0,
+  "publication": "unpublished development candidate"
+}
