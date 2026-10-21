@@ -18,6 +18,36 @@ def run_async(function):
 
 
 @run_async
+async def test_observed_capacity_is_explicit_and_keeps_exact_task_and_operation():
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(200, json={"ready": True})
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(respond), base_url="https://rhodes.invalid"
+    ) as transport:
+        client = RhodesClient(api_key="fixture", client=transport)
+        await client.task_readiness("pool", "task/one")
+        await client.acquire_observed_lease(
+            "pool", "task/one", image_kind="craftax_eval", idempotency_key="exact-operation"
+        )
+    assert requests[0].url.raw_path == b"/v1/pools/pool/tasks/task%2Fone/readiness"
+    assert requests[1].url.raw_path == b"/v1/pools/pool/tasks/task%2Fone/capacity_leases"
+    payload = json.loads(requests[1].content)
+    assert payload == {
+        "schema_version": "synth.rhodes-observed-capacity.v1",
+        "image_kind": "craftax_eval",
+        "idempotency_key": "exact-operation",
+        "project_id": None,
+        "ttl_seconds": 900,
+        "slots": 1,
+        "reset": "fresh_instance",
+    }
+
+
+@run_async
 async def test_registry_and_lease_verbs_preserve_original_coordinates():
     seen = []
 

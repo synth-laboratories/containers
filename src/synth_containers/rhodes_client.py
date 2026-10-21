@@ -272,6 +272,52 @@ class RhodesClient(PoolClient):
             },
         )
 
+    async def task_readiness(self, pool_id: str, task_id: str) -> dict[str, Any]:
+        """Read provider-observed readiness; this does not reserve capacity."""
+        return await self._request(
+            "GET",
+            "/pools/"
+            + quote(pool_id, safe="")
+            + "/tasks/"
+            + quote(task_id, safe="")
+            + "/readiness",
+        )
+
+    async def acquire_observed_lease(
+        self,
+        pool_id: str,
+        task_id: str,
+        *,
+        image_kind: str,
+        idempotency_key: str,
+        project_id: str | None = None,
+        ttl_seconds: int = 900,
+    ) -> dict[str, Any]:
+        """Reserve one observed fresh-instance slot on a supported profile.
+
+        Reuse/reset and hosted observation support are explicit server decisions.
+        Close releases this borrowed slot; its pool retains provider custody.
+        """
+        if not idempotency_key:
+            raise ValueError("A stable lease idempotency_key is required")
+        return await self._request(
+            "POST",
+            "/pools/"
+            + quote(pool_id, safe="")
+            + "/tasks/"
+            + quote(task_id, safe="")
+            + "/capacity_leases",
+            payload={
+                "schema_version": "synth.rhodes-observed-capacity.v1",
+                "image_kind": image_kind,
+                "idempotency_key": idempotency_key,
+                "project_id": project_id,
+                "ttl_seconds": ttl_seconds,
+                "slots": 1,
+                "reset": "fresh_instance",
+            },
+        )
+
     async def get_lease(self, lease_id: str) -> dict[str, Any]:
         return await self._request("GET", "/container_leases/" + quote(lease_id, safe=""))
 
