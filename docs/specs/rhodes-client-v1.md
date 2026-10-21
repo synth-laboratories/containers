@@ -70,5 +70,14 @@ The observed claim excludes competing pool use and survives TTL expiry until
 closed or reconciled. Pending interactive operations prevent close. Closing
 this borrowed slot retains the provider deployment under pool custody and does
 not confirm provider shutdown. Historical use prevents reset-free reassignment.
-Supervised rollout attachment and native harness validation remain separate
-qualification; the initial claim does not grant those capabilities.
+A rollout can opt into this profile by passing `capacity_lease_id` in its
+existing `submit` payload together with its stable `idempotency_key`. The server
+consumes that exact lease for one evaluation, pins task/instance/image/expiry,
+reobserves the provider before execution and narrows the execution deadline to
+the original lease expiry. The executor records the admitted lease ID. Another
+rollout or interactive writer cannot reuse the consumed instance without a
+qualified reset. Closing an attached live or unresolved rollout refuses.
+
+The optional attachment is a local Docker HTTP profile. Native harness
+validation, hosted placement, funding guarantees and MCP/optimizer qualification
+remain separate; unsupported profiles refuse explicitly.

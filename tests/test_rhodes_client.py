@@ -336,3 +336,21 @@ async def test_source_upload_uses_separate_create_only_transport_and_finalizes(
     assert source["manifest_digest"] == "sha256:" + "a" * 64
     assert calls[0][1] == calls[1][1]
     assert calls[1][0] == "/v1/environment_sources/publication/finalize"
+
+
+@run_async
+async def test_optional_capacity_lease_is_forwarded_with_original_submission_identity():
+    seen = []
+    def respond(request):
+        seen.append(request)
+        if len(seen) == 1:
+            raise httpx.ReadError("accepted response lost", request=request)
+        return httpx.Response(200, json={"rollout_id":"original-rollout"})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond), base_url="https://rhodes.invalid") as transport:
+        client = RhodesClient(api_key="fixture", client=transport, retry_backoff_seconds=0)
+        result = await client.submit("pool-one", {"idempotency_key":"evaluation-17",
+            "capacity_lease_id":"observed-lease", "task_id":"craftax", "seed":17})
+    assert result == "original-rollout"
+    assert seen[0].content == seen[1].content
+    assert json.loads(seen[1].content)["capacity_lease_id"] == "observed-lease"
+    assert json.loads(seen[1].content)["idempotency_key"] == "evaluation-17"
