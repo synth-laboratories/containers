@@ -38,3 +38,37 @@ before any deliberate retry.
 This interface is in implementation qualification. Native benchmark/provider,
 ready-capacity, org funding and Swarms/optimizer adoption evidence remain
 separate acceptance requirements in the v0.24 Rhodes tickets.
+
+## Named definitions
+
+`bind_definition(name, release_id, expected_revision=0, operation_id=...)`
+creates a named definition. Use the inspected revision for later bindings.
+Names are lowercase letters, digits, underscores, dots or hyphens, starting
+with a letter or digit. A binding points to an already imported immutable
+release; it does not mutate that release or start compute.
+
+`get_definition`, `list_definitions`, `definition_history` and
+`definition_operation` expose the current head, bounded pages and retained
+receipts. `archive_definition` requires the current revision and a stable
+operation ID. Archive preserves history and executable versions. An explicit
+later bind at the archived revision reactivates the name as a new revision.
+
+Bind/archive retries preserve the original operation and expected revision.
+The server returns the original receipt even after intervening updates; changed
+requests conflict. HTTP 409 revision conflicts require inspection and a new
+deliberate operation, rather than automatic rebasing of a write.
+
+## Observed local capacity
+
+`task_readiness(pool_id, task_id)` reads exact provider observations without
+reserving capacity. `acquire_observed_lease` requests the optional single-slot,
+fresh-instance local Docker HTTP profile. It differs from `acquire_lease`, which
+retains the legacy logical reservation contract. Warm reset and hosted placement
+require their own supported profiles; the client never substitutes one.
+
+The observed claim excludes competing pool use and survives TTL expiry until
+closed or reconciled. Pending interactive operations prevent close. Closing
+this borrowed slot retains the provider deployment under pool custody and does
+not confirm provider shutdown. Historical use prevents reset-free reassignment.
+Supervised rollout attachment and native harness validation remain separate
+qualification; the initial claim does not grant those capabilities.

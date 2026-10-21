@@ -248,6 +248,77 @@ class RhodesClient(PoolClient):
             params={"provider": provider},
         )
 
+    async def bind_definition(
+        self, name: str, release_id: str, *, expected_revision: int, operation_id: str
+    ) -> dict[str, Any]:
+        """Create at revision0 or atomically bind a new immutable release.
+
+        Reuse the operation ID and original body after uncertain transport loss.
+        Replaying returns that operation's receipt even after later revisions.
+        """
+        if not operation_id:
+            raise ValueError("A stable definition operation_id is required")
+        return await self._request(
+            "PUT",
+            "/environment_definitions/" + quote(name, safe=""),
+            payload={
+                "schema_version": "synth.rhodes-definition-bind.v1",
+                "release_id": release_id,
+                "expected_revision": expected_revision,
+                "operation_id": operation_id,
+            },
+            replay_safe=True,
+        )
+
+    async def archive_definition(
+        self, name: str, *, expected_revision: int, operation_id: str
+    ) -> dict[str, Any]:
+        """Archive discoverability; retain immutable releases and history."""
+        if not operation_id:
+            raise ValueError("A stable definition operation_id is required")
+        return await self._request(
+            "POST",
+            "/environment_definitions/" + quote(name, safe="") + "/archive",
+            payload={
+                "schema_version": "synth.rhodes-definition-archive.v1",
+                "expected_revision": expected_revision,
+                "operation_id": operation_id,
+            },
+            replay_safe=True,
+        )
+
+    async def get_definition(self, name: str) -> dict[str, Any]:
+        return await self._request("GET", "/environment_definitions/" + quote(name, safe=""))
+
+    async def list_definitions(
+        self, *, after_name: str | None = None, include_archived: bool = False, limit: int = 100
+    ) -> dict[str, Any]:
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100")
+        return await self._request(
+            "GET",
+            "/environment_definitions",
+            params={
+                "include_archived": str(include_archived).lower(),
+                "limit": limit,
+                **({"after_name": after_name} if after_name is not None else {}),
+            },
+        )
+
+    async def definition_history(
+        self, name: str, *, after_revision: int = 0, limit: int = 100
+    ) -> dict[str, Any]:
+        return await self._request(
+            "GET",
+            "/environment_definitions/" + quote(name, safe="") + "/history",
+            params={"after_revision": after_revision, "limit": limit},
+        )
+
+    async def definition_operation(self, operation_id: str) -> dict[str, Any]:
+        return await self._request(
+            "GET", "/environment_definition_operations/" + quote(operation_id, safe="")
+        )
+
     async def acquire_lease(
         self,
         *,

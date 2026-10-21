@@ -82,6 +82,37 @@ async def test_registry_and_lease_verbs_preserve_original_coordinates():
 
 
 @run_async
+async def test_definition_cas_transport_retry_keeps_original_operation_and_revision():
+    seen = []
+
+    def respond(request):
+        seen.append(request)
+        if len(seen) == 1:
+            raise httpx.ReadError("response lost", request=request)
+        return httpx.Response(200, json={"receipt": {"revision": 1}, "reused": True})
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(respond), base_url="https://rhodes.invalid"
+    ) as transport:
+        client = RhodesClient(api_key="fixture", client=transport, retry_backoff_seconds=0)
+        result = await client.bind_definition(
+            "craftax", "release-1", expected_revision=0, operation_id="same-operation"
+        )
+        await client.archive_definition("craftax", expected_revision=1, operation_id="archive")
+        await client.definition_operation("same-operation")
+        await client.definition_history("craftax", after_revision=1, limit=10)
+        await client.list_definitions(after_name="banking77")
+    assert result["reused"] is True
+    assert seen[0].content == seen[1].content
+    assert json.loads(seen[1].content)["expected_revision"] == 0
+    assert json.loads(seen[1].content)["operation_id"] == "same-operation"
+    assert seen[2].url.path.endswith("/craftax/archive")
+    assert seen[3].url.path.endswith("/same-operation")
+    assert seen[4].url.params["after_revision"] == "1"
+    assert seen[5].url.params["after_name"] == "banking77"
+
+
+@run_async
 async def test_follow_reconnects_at_delivered_event_not_page_high_water():
     cursors = []
     pages = 0
