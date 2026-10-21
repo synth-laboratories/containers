@@ -20,6 +20,10 @@ rollouts. Gold code-policy rollouts own their own policy processes. Re-selecting
 an older installed revision restores its source before restarting the façade's
 policy child; repeating the current selection does not restart it again.
 
+Policy mutations use a dedicated lock and run outside the HTTP event loop. A
+child waiting during startup does not hold the platform state lock or block
+health/policy reads. Startup timeout and readiness remain separate follow-ups.
+
 These revision/config registries are currently process-local. A policy install
 receipt establishes the stored definition; process startup errors remain in its
 isolation receipt. Durable revision storage and explicit readiness/failed-start
