@@ -1,0 +1,20 @@
+{
+  "installed_client_tests": 21,
+  "logs": {
+    "rhodes-observed-shape-installed-unit.log": "3a3f3aeffc309611181b13cca5be7461f358bb1451c0d23878d63fdf8bcd4428",
+    "rhodes-observed-shape-lock.log": "e8e1db58427901ae0804dd5a4b6b84c64d100718fa64d6ac3b05d0372fabbab9",
+    "rhodes-observed-shape-locked-types.log": "3c687dfbc5540c869598cb442343cf0d7140dae2cfc72c7b84ee74a8182ae0d2",
+    "rhodes-observed-shape-source-unit.log": "64d514a41f48ff1de30d21d633ad83bb35c1239049b7bc1e7286c7e1cd7aa197"
+  },
+  "schema_version": "synth.rhodes-installed-lease-shape-qualification.v1",
+  "scope": "Installed client validates and unwraps observed lease response; not a provider/cohort/deployment qualification.",
+  "source_client_tests": 21,
+  "source_commit": "6f5f7cd",
+  "type_profiles": {
+    "main": "zero diagnostics from locked offline preparation",
+    "mitm": "zero diagnostics from locked offline preparation"
+  },
+  "verified_installed_library_modules": 305,
+  "version": "0.4.5.dev2026102105",
+  "wheel_sha256": "75c35acf360bf1b5854cd7308c5b401367d5ed2c74f21af6a936f8a8b4ad01d5"
+}

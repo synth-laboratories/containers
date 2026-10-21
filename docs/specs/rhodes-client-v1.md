@@ -61,7 +61,9 @@ deliberate operation, rather than automatic rebasing of a write.
 ## Observed local capacity
 
 `task_readiness(pool_id, task_id)` reads exact provider observations without
-reserving capacity. `acquire_observed_lease` requests the optional single-slot,
+reserving capacity. The observed claim returns flat lease coordinates including
+`lease_id`, `container_id` and `reused`; malformed service envelopes refuse.
+`acquire_observed_lease` requests the optional single-slot,
 fresh-instance local Docker HTTP profile. It differs from `acquire_lease`, which
 retains the legacy logical reservation contract. Warm reset and hosted placement
 require their own supported profiles; the client never substitutes one.
