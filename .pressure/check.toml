@@ -58,3 +58,12 @@ require_paths = ["tests/test_immutable_grading.py", ".local/release-types-main/b
 command = 'TMPDIR="$PWD/.local/tmp" PYTHONPATH=src .local/release-types-main/bin/python -m pytest -q tests/test_immutable_grading.py'
 command_timeout_seconds = 30
 remedy = "Restore evidence sufficiency refusal, immutable V5 judgments, explicit authority/correction and compute-free result publication. Never treat missing evidence as zero or execute submissions on the host."
+
+[[checks]]
+id = "portable_evaluation_and_native_continuation"
+description = "CLI declarations, native joint cuts, explicit forks, retention and JSON identities remain compatible"
+severity = "error"
+require_paths = ["tests/test_eval_exec_contract.py", ".local/release-types-main/bin/python"]
+command = 'TMPDIR="$PWD/.local/tmp" PYTHONPATH=src .local/release-types-main/bin/python -m pytest -q tests/test_eval_exec_contract.py tests/test_portable_checkpoint.py'
+command_timeout_seconds = 30
+remedy = "Restore exact candidate/configuration/source identity, strict checkpoint refusal, explicit child funding and retention roots. Native engine qualification remains separate from these provider-free contract tests."

@@ -61,13 +61,21 @@ def load_publication(outbox: Path, operation_id: str) -> PublicationPlanV1:
 
 def prepare_publication(
     bundle: LocalTraceBundle, outbox: Path, *, operation_id: str, attribution: dict[str, str],
+    max_archive_bytes: int = 64 * 1024 * 1024,
 ) -> PublicationPlanV1:
     """Freeze a verified self-contained cut; the outbox survives source cleanup."""
     portable_path(operation_id)
     manifest = bundle.read_manifest()
+    if type(max_archive_bytes) is not int or not 1 <= max_archive_bytes <= 1024 * 1024 * 1024:
+        raise ValueError("publication archive allowance outside supported bounds")
+    objects = manifest.get("objects") or []
+    if len(objects) > 10000 or sum(item["byte_size"] for item in objects) > max_archive_bytes:
+        raise ValueError("publication object closure exceeds allowance")
     if not manifest.get("self_contained", False):
         raise ValueError("publication requires self-contained retained evidence")
     archive = bundle.archive_bytes()
+    if len(archive) > max_archive_bytes:
+        raise ValueError("publication archive exceeds allowance")
     digest = bytes_digest(archive)
     plan = PublicationPlanV1(operation_id=operation_id, attribution=attribution,
         bundle_id=bundle.bundle_id, bundle_manifest_digest=content_digest(manifest),

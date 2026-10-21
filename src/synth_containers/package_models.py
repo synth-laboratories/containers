@@ -16,8 +16,12 @@ Platform = Annotated[str, StringConstraints(pattern=r"^[a-z0-9]+/[a-z0-9_]+(?:/[
 
 
 def content_digest(value: object) -> str:
-    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
-    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+    return "sha256:" + hashlib.sha256(content_bytes(value)).hexdigest()
+
+
+def content_bytes(value: object) -> bytes:
+    """Portable contract JSON preserves explicit nulls; sealed V5 has its own profile."""
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
 
 
 def portable_path(value: str) -> str:

@@ -169,6 +169,7 @@ def test_worker_committed_before_controller_receipt_is_recovered_without_compute
     recovered = grading.run_grading(plan, None, bundle.blobs, root)
     assert recovered.mean_score == .5 and recovered.elapsed_ns is None
     assert recovered.cleanup == "worker-exit-not-observed"
+    assert grading.run_grading(plan, None, bundle.blobs, root) == recovered
 
 
 def test_craftax_metrics_refuse_uncaptured_state_instead_of_zero(tmp_path):

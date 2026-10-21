@@ -200,9 +200,26 @@ class CompatPlatform:
     def drop_checkpoint(self, checkpoint_id: str) -> None:
         """Forget a checkpoint. Idempotent if the id or file is already gone."""
 
+        if self.checkpoint_is_retained(checkpoint_id):
+            raise RuntimeError("checkpoint_has_retention_roots")
         self.checkpoints.pop(checkpoint_id, None)
         path = self._checkpoint_path(checkpoint_id)
         path.unlink(missing_ok=True)
+
+    def retain_checkpoint(self, checkpoint_id: str, *, owner_kind: str, owner_id: str) -> str:
+        """Owning runtime registers active continuation/fork/archive custody."""
+        from ..checkpoint_retention import retain_checkpoint
+        if checkpoint_id not in self.checkpoints:
+            raise ValueError("checkpoint_retention_subject_missing")
+        return retain_checkpoint(self.storage_root, checkpoint_id, owner_kind=owner_kind, owner_id=owner_id)
+
+    def release_checkpoint_root(self, checkpoint_id: str, *, owner_kind: str, owner_id: str) -> None:
+        from ..checkpoint_retention import release_checkpoint_root
+        release_checkpoint_root(self.storage_root, checkpoint_id, owner_kind=owner_kind, owner_id=owner_id)
+
+    def checkpoint_is_retained(self, checkpoint_id: str) -> bool:
+        from ..checkpoint_retention import checkpoint_is_retained
+        return checkpoint_is_retained(self.storage_root, checkpoint_id)
 
     @staticmethod
     def _receipt_digest(value: dict[str, Any]) -> str:

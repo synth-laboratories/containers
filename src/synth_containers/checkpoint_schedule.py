@@ -108,6 +108,9 @@ def apply_checkpoint_keep_last(
             break
         if retain_checkpoint_id and checkpoint_id == retain_checkpoint_id:
             continue
+        retained = getattr(platform, "checkpoint_is_retained", None)
+        if callable(retained) and retained(checkpoint_id):
+            continue
         platform.drop_checkpoint(checkpoint_id)
         dropped += 1
 

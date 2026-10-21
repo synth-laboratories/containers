@@ -117,6 +117,9 @@ class GoldRuntime:
             resume_checkpoint = platform.checkpoints.get(pin.resume_from_checkpoint_id)
             if resume_checkpoint is None:
                 raise RuntimeError(f"unknown_checkpoint:{pin.resume_from_checkpoint_id}")
+            retain = getattr(platform, "retain_checkpoint", None)
+            if callable(retain):
+                retain(pin.resume_from_checkpoint_id, owner_kind="continuation", owner_id=pin.rollout_id)
 
         checkpoint_callback = None
         if pin.checkpoint_schedule is not None:

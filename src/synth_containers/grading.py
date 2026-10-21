@@ -22,7 +22,7 @@ from typing import Any
 from uuid import uuid4
 
 from .grading_models import GradingPlanV1, GradingPreflightV1, GradingResultV1, GradingAuthorityV1
-from .package_models import content_digest
+from .package_models import content_digest, content_bytes
 from .tracing.atomic import durable_mkdir, durable_write
 from .tracing.canonical import bytes_digest, canonical_bytes, utc_now
 from .tracing.models.evidence import TraceEvidenceBundleV5, TraceRefV5
@@ -230,7 +230,7 @@ def run_grading(
     plan = GradingPlanV1.model_validate(plan.model_dump(mode="python"))
     directory = root / plan.operation_id
     durable_mkdir(directory)
-    durable_write(directory / "plan.json", canonical_bytes(plan.model_dump(mode="json")))
+    durable_write(directory / "plan.json", content_bytes(plan.model_dump(mode="json")))
     with (directory / "write.lock").open("a") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -299,7 +299,7 @@ def run_grading(
             durable_write(attempt / "stdout", stdout)
             durable_write(attempt / "stderr", stderr)
             produced_at = utc_now()
-        durable_write(attempt / "completion.json", canonical_bytes({"status": status,
+        durable_write(attempt / "completion.json", content_bytes({"status": status,
             "stdout_digest": bytes_digest(stdout), "stderr_digest": bytes_digest(stderr) if stderr is not None else None,
             "elapsed_ns": elapsed, "produced_at": produced_at, "cleanup": cleanup}))
         rubric = build(RubricDefinitionV2, inputs["rubric"])
@@ -375,7 +375,7 @@ def run_grading(
             scored_cases=len(scores), mean_score=mean, elapsed_ns=elapsed,
             stdout_digest=bytes_digest(stdout), stderr_digest=bytes_digest(stderr) if stderr is not None else None,
             cleanup=cleanup, case_scores={item.criterion_id: item.score for item in judgments})
-        durable_write(result_path, canonical_bytes(result.model_dump(mode="json")))
+        durable_write(result_path, content_bytes(result.model_dump(mode="json")))
         return result
 
 
