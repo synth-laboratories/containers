@@ -1,0 +1,204 @@
+import json
+import asyncio
+from functools import wraps
+
+import httpx
+import pytest
+
+from synth_containers.rhodes_client import RhodesClient, RhodesRequestError, _operator_frames
+from synth_containers.pools import PoolClientError, PoolRolloutTimeout
+
+
+def run_async(function):
+    @wraps(function)
+    def run(*args, **kwargs):
+        return asyncio.run(function(*args, **kwargs))
+
+    return run
+
+
+@run_async
+async def test_registry_and_lease_verbs_preserve_original_coordinates():
+    seen = []
+
+    def respond(request):
+        seen.append(
+            (
+                request.method,
+                request.url.path,
+                json.loads(request.content) if request.content else None,
+            )
+        )
+        return httpx.Response(200, json={"release_id": "original", "lease_id": "lease-original"})
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(respond), base_url="https://rhodes.invalid"
+    ) as transport:
+        client = RhodesClient(api_key="fixture", client=transport)
+        assert (await client.import_environment({"descriptor": {"digest": "frozen"}}))[
+            "release_id"
+        ] == "original"
+        await client.acquire_lease(
+            project_id="project",
+            image_kind="craftax_eval",
+            substrate="docker",
+            idempotency_key="same-key",
+        )
+        await client.renew_lease("lease-original")
+        await client.release_lease("lease-original")
+    assert seen[0] == ("POST", "/v1/environment_releases", {"descriptor": {"digest": "frozen"}})
+    assert seen[1][2]["idempotency_key"] == "same-key"
+    assert seen[-1][1] == "/v1/container_leases/lease-original/release"
+
+
+@run_async
+async def test_follow_reconnects_at_delivered_event_not_page_high_water():
+    cursors = []
+    pages = 0
+
+    def respond(request):
+        nonlocal pages
+        if request.url.params.get("format") == "sse":
+            cursors.append(request.headers["Last-Event-ID"])
+            sequence = len(cursors)
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/event-stream"},
+                content=f'id: {sequence}\ndata: {{"sequence":{sequence},"rollout_id":"run"}}\n\n',
+            )
+        pages += 1
+        return httpx.Response(
+            200, json={"status": "completed", "high_water": 2, "cleanup_pending": pages == 1}
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(respond), base_url="https://rhodes.invalid"
+    ) as transport:
+        client = RhodesClient(api_key="fixture", client=transport)
+        events = [event async for event in client.follow_events("run", timeout_seconds=2)]
+    assert cursors == ["0", "1"]
+    assert [event["sequence"] for event in events] == [1, 2]
+
+
+@run_async
+async def test_timeout_detaches_and_never_sends_cancel():
+    calls = []
+
+    def respond(request):
+        calls.append(request.method)
+        if request.url.params.get("format") == "sse":
+            return httpx.Response(
+                200, headers={"content-type": "text/event-stream"}, content=b": heartbeat\n\n"
+            )
+        return httpx.Response(200, json={"status": "running", "high_water": 0})
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(respond), base_url="https://rhodes.invalid"
+    ) as transport:
+        client = RhodesClient(api_key="fixture", client=transport)
+        with pytest.raises(PoolRolloutTimeout):
+            async for _ in client.follow_events("run", timeout_seconds=0.02):
+                pass
+    assert calls and set(calls) == {"GET"}
+
+
+@run_async
+@pytest.mark.parametrize(
+    "content",
+    [b'id: 1\ndata: {"sequence":1}', b"x" * (1024 * 1024 + 1), b"id: invalid\ndata: {}\n\n"],
+)
+async def test_corrupt_or_incomplete_sse_refuses(content):
+    async def chunks():
+        for i in range(0, len(content), 7):
+            yield content[i : i + 7]
+
+    with pytest.raises(PoolClientError):
+        _ = [value async for value in _operator_frames(chunks())]
+
+
+@run_async
+async def test_chunk_boundaries_and_heartbeats_do_not_invent_events():
+    async def chunks():
+        for value in [
+            b": hi\n\nid: 1\ndat",
+            b'a: {"sequence":1}\n',
+            b'\nid: 2\ndata: {"sequence":2}\n\n',
+        ]:
+            yield value
+
+    assert [identifier async for identifier, event in _operator_frames(chunks())] == [1, 2]
+
+
+@run_async
+async def test_retryable_refusal_retains_code_and_retry_after():
+    attempts = []
+
+    def respond(request):
+        attempts.append(request)
+        return httpx.Response(
+            429,
+            headers={"Retry-After": "17"},
+            json={"detail": {"code": "rhodes.capacity_exhausted"}},
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(respond), base_url="https://rhodes.invalid"
+    ) as transport:
+        client = RhodesClient(
+            api_key="fixture", client=transport, max_retries=1, retry_backoff_seconds=0
+        )
+        with pytest.raises(RhodesRequestError) as caught:
+            await client.get_environment("release")
+    assert len(attempts) == 2
+    assert (caught.value.status_code, caught.value.code, caught.value.retry_after) == (
+        429,
+        "rhodes.capacity_exhausted",
+        "17",
+    )
+
+
+@run_async
+async def test_unidentified_mutation_transport_failure_is_not_retried():
+    attempts = []
+
+    def respond(request):
+        attempts.append(request)
+        raise httpx.ReadError("response lost", request=request)
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(respond), base_url="https://rhodes.invalid"
+    ) as transport:
+        client = RhodesClient(
+            api_key="fixture", client=transport, max_retries=3, retry_backoff_seconds=0
+        )
+        with pytest.raises(PoolClientError):
+            await client.renew_lease("lease")
+    assert len(attempts) == 1
+
+
+@run_async
+async def test_batch_validates_all_keys_before_io_and_uses_service_wire():
+    requests = []
+
+    def respond(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json={"items": [{"id": "run-a"}, {"id": "run-b"}]})
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(respond), base_url="https://rhodes.invalid"
+    ) as transport:
+        client = RhodesClient(api_key="fixture", client=transport)
+        with pytest.raises(ValueError):
+            await client.submit_batch("pool", [{"idempotency_key": "a"}, {}])
+        assert not requests
+        assert await client.submit_batch(
+            "pool", [{"idempotency_key": "a"}, {"idempotency_key": "b"}]
+        ) == ["run-a", "run-b"]
+    assert requests == [
+        {
+            "requests": [
+                {"idempotency_key": "a", "pool_id": "pool"},
+                {"idempotency_key": "b", "pool_id": "pool"},
+            ]
+        }
+    ]

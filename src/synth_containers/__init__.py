@@ -163,6 +163,7 @@ from .pools import (
     pool_state_is_terminal,
     validate_pool_transition,
 )
+from .rhodes_client import RhodesClient
 from .profiles import all_profile_specs, infer_profiles, missing_protocols, spec_for_profile
 from .prompt_programs import (
     GEPA_OPTIMIZER_CONTRACT_VERSION,
@@ -347,6 +348,7 @@ __all__ = [
     "PauseRequest",
     "PolicyDisableReasoning",
     "PoolClient",
+    "RhodesClient",
     "PoolClientError",
     "PoolRolloutTimeout",
     "PoolState",

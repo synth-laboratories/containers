@@ -462,10 +462,12 @@ class PoolClient:
         payload: Mapping[str, Any] | None = None,
         params: Mapping[str, Any] | None = None,
         optional: bool = False,
+        replay_safe: bool = True,
     ) -> dict[str, Any]:
         url = f"{POOL_API_PREFIX}{path}"
         last_error: Exception | None = None
-        for attempt in range(self._max_retries + 1):
+        retries = self._max_retries if replay_safe else 0
+        for attempt in range(retries + 1):
             try:
                 response = await self._client.request(
                     method.upper(),
@@ -494,9 +496,10 @@ class PoolClient:
                 if 400 <= status < 500 and status not in {408, 429}:
                     raise PoolClientError(f"{method.upper()} {url} refused: {message}") from exc
                 last_error = PoolClientError(message)
+                last_error.__cause__ = exc
             except (httpx.RequestError, ValueError) as exc:
                 last_error = exc
-            if attempt < self._max_retries:
+            if attempt < retries:
                 await asyncio.sleep(self._retry_backoff_seconds * (attempt + 1))
         raise PoolClientError(
             f"pool request failed {method.upper()} {url}: {last_error}"
