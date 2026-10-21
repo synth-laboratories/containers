@@ -1,0 +1,114 @@
+{
+  "scope": "v0.24 partial trace accounting/adapters and offline package runtime declaration checks",
+  "source_revision": "6f1d4df7e3e53cb4331e53bb0b9fcf0844a1a283",
+  "qualified_at": "2026-10-21T16:37:27.507487+00:00",
+  "tests": {
+    "tests": 394,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 11
+  },
+  "passed": 383,
+  "skip_reasons": [
+    {
+      "test": "test_retry_reuses_completed_workers_and_merges_every_output[True-False]",
+      "reason": "opt-in retained 10,000-event four-actor archive"
+    },
+    {
+      "test": "test_retry_reuses_completed_workers_and_merges_every_output[True-True]",
+      "reason": "opt-in retained 10,000-event four-actor archive"
+    },
+    {
+      "test": "test_every_operation_named_in_a_skill_exists",
+      "reason": "Workshop skills directory not found (set WORKSHOP_SKILLS_DIR)"
+    },
+    {
+      "test": "test_workshop_consumer_gate[TS-E01]",
+      "reason": "TS-E01 is Workshop/Desktop (A1/A5). Containers owns the producer profile in Gates A\u2013D."
+    },
+    {
+      "test": "test_workshop_consumer_gate[TS-E02]",
+      "reason": "TS-E02 is Workshop/Desktop (A1/A5). Containers owns the producer profile in Gates A\u2013D."
+    },
+    {
+      "test": "test_workshop_consumer_gate[TS-E03]",
+      "reason": "TS-E03 is Workshop/Desktop (A1/A5). Containers owns the producer profile in Gates A\u2013D."
+    },
+    {
+      "test": "test_workshop_consumer_gate[TS-E04]",
+      "reason": "TS-E04 is Workshop/Desktop (A1/A5). Containers owns the producer profile in Gates A\u2013D."
+    },
+    {
+      "test": "test_workshop_consumer_gate[TS-E05]",
+      "reason": "TS-E05 is Workshop/Desktop (A1/A5). Containers owns the producer profile in Gates A\u2013D."
+    },
+    {
+      "test": "test_workshop_consumer_gate[TS-E06]",
+      "reason": "TS-E06 is Workshop/Desktop (A1/A5). Containers owns the producer profile in Gates A\u2013D."
+    },
+    {
+      "test": "test_workshop_consumer_gate[TS-E07]",
+      "reason": "TS-E07 is Workshop/Desktop (A1/A5). Containers owns the producer profile in Gates A\u2013D."
+    },
+    {
+      "test": "test_workshop_consumer_gate[TS-E08]",
+      "reason": "TS-E08 is Workshop/Desktop (A1/A5). Containers owns the producer profile in Gates A\u2013D."
+    }
+  ],
+  "lint": "passed",
+  "new_module_typing": "passed",
+  "type_comparison": {
+    "base_revision": "e8b14e82fcc419c097f86fed3e451e8ea3d7ed6e",
+    "base_diagnostics": 226,
+    "candidate_diagnostics": 226,
+    "added": [],
+    "removed": [],
+    "historical_release_gate": "fails; SYN-4923; no baseline waiver"
+  },
+  "installed_wheel": {
+    "wheel": "/Users/joshuapurtell/GitHub/workspaces/v024-rhodes-20261021/containers/.local/trace-dist/synth_containers-0.4.5.dev2026102025-py3-none-any.whl",
+    "wheel_sha256": "1662177076f47f85dc3834d147960119c21b0b5c5683437ae75efcac1f410fb7",
+    "installed_module": "/Users/joshuapurtell/GitHub/workspaces/v024-rhodes-20261021/containers/.local/installed/lib/python3.13/site-packages/synth_containers/__init__.py",
+    "cwd": "/Users/joshuapurtell/GitHub/workspaces/v024-rhodes-20261021/containers/.local/unrelated-cwd",
+    "source_pythonpath": "unset",
+    "package_source_files_verified": 284,
+    "commands": [
+      "plan",
+      "build",
+      "check-supported",
+      "check-unsupported",
+      "schema-all-six"
+    ],
+    "usage_partial_and_missingness": "pass",
+    "responses_incomplete_and_zero": "pass",
+    "codex_source_time_sealed_readback": "pass",
+    "trace_digest": "sha256:92a7bc8470722c66709834c3f08c5405f5fbb9fdf8a370f5e245806d668a3ac1",
+    "image_verification": "not performed; synthetic OCI declaration only",
+    "provider_jobs": 0
+  },
+  "pressure_invariant": ".pressure/check.toml:container_package_and_partial_trace_contracts",
+  "local_evidence": "/Users/joshuapurtell/GitHub/Pressure/artifacts/agent-runs/dec300d6-2d97-46dc-ad64-ebde3cd1420a/containers-multi-agent/trace-package-20261021",
+  "limitations": [
+    "Hosted registry, org grants, provider image verification and observed runtime readiness are not implemented by this declaration check.",
+    "Trace partial publication/index/commit clocks and full replay/part identity semantics remain pending SYN-4918/SYN-4648.",
+    "Sealed V5 bytes remain readable; new Responses captures use adapter 2; unfinished adapter-1 raw captures require their matching runtime.",
+    "Full repository release qualification remains pending; historical type gate fails SYN-4923."
+  ],
+  "provider_jobs": 0,
+  "deployed_or_published": false,
+  "pressure_host_check": {
+    "command": [
+      "/Users/joshuapurtell/GitHub/Pressure/artifacts/bin/pressure",
+      "check",
+      "--repo",
+      "/Users/joshuapurtell/GitHub/workspaces/v024-rhodes-20261021/containers"
+    ],
+    "elapsed_seconds": 12.00376120803412,
+    "timed_out": true,
+    "exit_code": -9,
+    "stdout": "",
+    "stderr": "",
+    "disk_free_gib": 65.34987258911133,
+    "configured_invariant": "covered by final 383-passed offline test suite; host check is separate"
+  }
+}
