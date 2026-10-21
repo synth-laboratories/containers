@@ -45,6 +45,20 @@ def _http_refusal(error: httpx.HTTPStatusError) -> RhodesRequestError:
     )
 
 
+def _lease_from_envelope(
+    response: dict[str, Any], *, require_reused: bool = False
+) -> dict[str, Any]:
+    lease = response.get("lease")
+    if (
+        not isinstance(lease, dict)
+        or not isinstance(lease.get("lease_id"), str)
+        or not lease["lease_id"]
+        or (require_reused and type(response.get("reused")) is not bool)
+    ):
+        raise PoolClientError("Rhodes returned malformed lease coordinates")
+    return {**lease, **({"reused": response["reused"]} if require_reused else {})}
+
+
 class RhodesClient(PoolClient):
     async def _request(
         self, method: str, path: str, *, payload=None, params=None, optional=False, replay_safe=None
@@ -331,7 +345,7 @@ class RhodesClient(PoolClient):
         """Acquire the server lease; inspect readiness independently before work."""
         if not idempotency_key:
             raise ValueError("A stable lease idempotency_key is required")
-        return await self._request(
+        response = await self._request(
             "POST",
             "/container_leases",
             payload={
@@ -342,6 +356,8 @@ class RhodesClient(PoolClient):
                 "ttl_seconds": ttl_seconds,
             },
         )
+
+        return _lease_from_envelope(response, require_reused=True)
 
     async def task_readiness(self, pool_id: str, task_id: str) -> dict[str, Any]:
         """Read provider-observed readiness; this does not reserve capacity."""
@@ -389,30 +405,26 @@ class RhodesClient(PoolClient):
             },
         )
 
-        lease = response.get("lease")
-        if (
-            not isinstance(lease, dict)
-            or not isinstance(lease.get("lease_id"), str)
-            or not lease["lease_id"]
-            or type(response.get("reused")) is not bool
-        ):
-            raise PoolClientError("Rhodes observed capacity returned malformed lease coordinates")
-        return {**lease, "reused": response["reused"]}
+        return _lease_from_envelope(response, require_reused=True)
 
     async def get_lease(self, lease_id: str) -> dict[str, Any]:
         return await self._request("GET", "/container_leases/" + quote(lease_id, safe=""))
 
     async def renew_lease(self, lease_id: str, *, ttl_seconds: int = 900) -> dict[str, Any]:
-        return await self._request(
+        response = await self._request(
             "POST",
             "/container_leases/" + quote(lease_id, safe="") + "/renew",
             payload={"ttl_seconds": ttl_seconds},
         )
 
+        return _lease_from_envelope(response)
+
     async def release_lease(self, lease_id: str) -> dict[str, Any]:
-        return await self._request(
+        response = await self._request(
             "POST", "/container_leases/" + quote(lease_id, safe="") + "/release"
         )
+
+        return _lease_from_envelope(response)
 
     async def event_page(
         self, rollout_id: str, *, after_sequence: int = 0, limit: int = 200

@@ -65,6 +65,17 @@ async def test_registry_and_lease_verbs_preserve_original_coordinates():
                 json.loads(request.content) if request.content else None,
             )
         )
+        if "/container_leases" in request.url.path:
+            return httpx.Response(
+                200,
+                json={
+                    "lease": {
+                        "lease_id": "lease-original",
+                        "status": "released" if request.url.path.endswith("/release") else "active",
+                    },
+                    "reused": True,
+                },
+            )
         return httpx.Response(200, json={"release_id": "original", "lease_id": "lease-original"})
 
     async with httpx.AsyncClient(
@@ -81,7 +92,7 @@ async def test_registry_and_lease_verbs_preserve_original_coordinates():
             idempotency_key="same-key",
         )
         await client.renew_lease("lease-original")
-        await client.release_lease("lease-original")
+        assert (await client.release_lease("lease-original"))["status"] == "released"
     assert seen[0] == ("POST", "/v1/environment_releases", {"descriptor": {"digest": "frozen"}})
     assert seen[1][2]["idempotency_key"] == "same-key"
     assert seen[-1][1] == "/v1/container_leases/lease-original/release"
