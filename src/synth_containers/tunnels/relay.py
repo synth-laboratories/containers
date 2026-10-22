@@ -10,6 +10,7 @@ import logging
 import socket
 import json
 import queue
+import re
 import threading
 import time
 import urllib.error
@@ -311,7 +312,14 @@ class SynthTunnelProvider:
         metadata: Mapping[str, object],
         capabilities: Mapping[str, object],
         wait_ready: bool = True,
+        origin_authorization_header: str | None = None,
     ) -> AttachedSynthTunnelLease:
+        declared = (origin_authorization_header or "").strip().lower() or None
+        if declared is not None and (
+            declared in _LOCAL_ONLY_AUTH_HEADERS | _HOP_BY_HOP_HEADERS
+            or not re.fullmatch(r"x-[a-z0-9-]{1,64}", declared)
+        ):
+            raise ValueError("origin_authorization_header must be a custom x- header")
         target = _parse_local_target(local_url)
         local_health_url = _join_health_url(target.base_url)
         if wait_ready:
@@ -341,6 +349,7 @@ class SynthTunnelProvider:
                 max_in_flight_requests=self._max_in_flight_requests,
                 max_request_body_bytes=self._max_request_body_bytes,
                 max_websocket_streams=self._max_websocket_streams,
+                origin_authorization_header=declared,
             )
         except Exception as response_error:
             try:
@@ -428,6 +437,14 @@ class _SynthTunnelAgent:
             ],
         ] = {}
         self._attachment = attachment
+        self._local_only_headers = frozenset(
+            _LOCAL_ONLY_AUTH_HEADERS
+            | (
+                {attachment.origin_authorization_header}
+                if isinstance(attachment, LeaseAttachment) and attachment.origin_authorization_header
+                else set()
+            )
+        )
         if isinstance(attachment, ConnectorAttachment) and self._protocol != SUBPROTOCOL:
             raise SynthTunnelRelayError("connector attachment requires the binary v2 protocol")
         if agent_connect is not None:
@@ -511,6 +528,13 @@ class _SynthTunnelAgent:
         self, payload: Mapping[str, Any]
     ) -> tuple[_LocalTarget, tuple[tuple[str, str], ...], OriginPoolScope]:
         match self._attachment:
+            case LeaseAttachment(target=target, origin_authorization_header=declared) if declared:
+                origin_auth = tuple(
+                    ("Authorization", value)
+                    for key, value in _header_pairs(payload.get("headers"))
+                    if key.strip().lower() == declared
+                )
+                return target, origin_auth[:1], None
             case LeaseAttachment(target=target):
                 return target, (), None
             case ConnectorAttachment(connector=connector, targets=targets):
@@ -1259,7 +1283,7 @@ class _SynthTunnelAgent:
                 continue
             if (
                 name in _HOP_BY_HOP_HEADERS
-                or name in _LOCAL_ONLY_AUTH_HEADERS
+                or name in self._local_only_headers
                 or name in _WEBSOCKET_HANDSHAKE_HEADERS
             ):
                 continue
@@ -1357,7 +1381,7 @@ class _SynthTunnelAgent:
                 path += "?" + upstream.query
             connection.putrequest(request.method, path)
             for key, value in request.headers:
-                if key.lower() not in _HOP_BY_HOP_HEADERS | _LOCAL_ONLY_AUTH_HEADERS:
+                if key.lower() not in _HOP_BY_HOP_HEADERS | self._local_only_headers:
                     connection.putheader(key, value)
             for key, value in request.origin_headers:
                 connection.putheader(key, value)
@@ -1456,7 +1480,7 @@ class _SynthTunnelAgent:
             headers = {
                 key: value
                 for key, value in request.headers
-                if key.strip().lower() not in _HOP_BY_HOP_HEADERS | _LOCAL_ONLY_AUTH_HEADERS
+                if key.strip().lower() not in _HOP_BY_HOP_HEADERS | self._local_only_headers
             }
             headers.update(request.origin_headers)
             try:
@@ -1931,9 +1955,10 @@ class SynthTunnelRelayAgent(_SynthTunnelAgent):
         max_in_flight_requests: int,
         max_request_body_bytes: int,
         max_websocket_streams: int = _DEFAULT_MAX_WEBSOCKET_STREAMS,
+        origin_authorization_header: str | None = None,
     ) -> None:
         super().__init__(
-            attachment=LeaseAttachment(lease_id, local_target),
+            attachment=LeaseAttachment(lease_id, local_target, origin_authorization_header),
             agent_connect=agent_connect,
             max_in_flight_requests=max_in_flight_requests,
             max_request_body_bytes=max_request_body_bytes,
