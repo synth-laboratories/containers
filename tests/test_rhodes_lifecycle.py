@@ -17,6 +17,7 @@ class FakeRhodes:
         self.calls = []
         self.pools = {}
         self.deployments = {}
+        self.kinds = {}
         self.leases = {}
         self.rollouts = {}
         self.cancelled = []
@@ -42,6 +43,7 @@ class FakeRhodes:
         self._call(operation + "_deployment", key=idempotency_key, payload=payload)
         if operation == "create":
             self.deployments[(pool_id, task_id)] = "r1"
+            self.kinds[(pool_id, task_id)] = set(payload.get("image_kinds") or ())
             return {"status": "completed", "revision": "r1"}
         assert self.deployments.pop((pool_id, task_id)) == expected_revision
         return {"status": "completed", "provider_cleanup": {"status": "confirmed_removed"}}
@@ -61,6 +63,9 @@ class FakeRhodes:
     async def acquire_observed_lease(self, pool_id, task_id, *, image_kind, idempotency_key,
                                      project_id, ttl_seconds):
         self._call("acquire_lease", key=idempotency_key)
+        # Mirrors observed_leases: the task must declare the leased kind.
+        if image_kind not in self.kinds.get((pool_id, task_id), set()):
+            raise RhodesRequestError(422, "rhodes.capacity.task_image_kind_mismatch", None)
         lease_id = "lease-" + task_id
         self.leases[lease_id] = "active"
         return {"lease_id": lease_id, "reused": False}
@@ -88,8 +93,9 @@ class FakeRhodes:
 
     async def get_rollout(self, rollout_id):
         status = self.rollouts[rollout_id]
-        return {"status": status, "reward_status": "scored" if status == "completed" else None,
-                "score": 1.0}
+        # Real wire shape (Rhodes v0.24): the scored outcome is nested under "result".
+        return {"status": status, "score": 1.0, "result": {
+            "status": status, "reward_status": "scored" if status == "completed" else None}}
 
     async def usage(self, rollout_id):
         return {"rollout_id": rollout_id, "settlement_status": "unresolved"}

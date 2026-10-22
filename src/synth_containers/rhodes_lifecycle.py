@@ -150,6 +150,8 @@ class Lifecycle:
                 payload={
                     "provider": "docker",
                     "interface_mode": "synth_http",
+                    # Observed leases admit only a kind the task itself declares.
+                    "image_kinds": [args.image_kind],
                     # A registered release pins image, port and health path server-side.
                     **(
                         {"environment_release_id": self.release_id}
@@ -199,7 +201,11 @@ class Lifecycle:
             result = await self.client.get_rollout(record.rollout_id)
             record.finished_at = time.monotonic()
             record.status = result.get("status")
-            record.reward_status = result.get("reward_status")
+            # The scored outcome is nested; the top level carries only status/score.
+            outcome = result.get("result")
+            record.reward_status = (
+                outcome.get("reward_status") if isinstance(outcome, dict) else None
+            )
             record.score = result.get("score")
             (self.out / f"result-seed{record.seed}.json").write_text(
                 json.dumps(result, indent=2, sort_keys=True, default=str) + "\n"
