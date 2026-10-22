@@ -124,6 +124,35 @@ def _parser() -> argparse.ArgumentParser:
         if verb == "history":
             command.add_argument("--after-revision", type=int, default=0)
             command.add_argument("--limit", type=int, default=100)
+    pools = commands.add_parser("pools").add_subparsers(dest="verb", required=True)
+    pools.add_parser("create").add_argument("config", type=Path)
+    for verb in ("get", "delete"):
+        pools.add_parser(verb).add_argument("pool_id")
+    deployments = commands.add_parser("deployments").add_subparsers(dest="verb", required=True)
+    for verb in ("create", "get", "delete", "operation"):
+        command = deployments.add_parser(verb)
+        command.add_argument("pool_id")
+        command.add_argument("task_id" if verb != "operation" else "operation_id")
+        command.add_argument("--project-id", required=True)
+        if verb == "create":
+            command.add_argument("config", type=Path)
+        if verb in {"create", "delete"}:
+            command.add_argument("--operation-id", required=True)
+        if verb == "delete":
+            command.add_argument("--expected-revision", required=True)
+    readiness = commands.add_parser("readiness")
+    readiness.add_argument("pool_id")
+    readiness.add_argument("task_id")
+    leases = commands.add_parser("leases").add_subparsers(dest="verb", required=True)
+    acquire = leases.add_parser("acquire")
+    acquire.add_argument("pool_id")
+    acquire.add_argument("task_id")
+    acquire.add_argument("--image-kind", required=True)
+    acquire.add_argument("--operation-id", required=True)
+    acquire.add_argument("--project-id")
+    acquire.add_argument("--ttl-seconds", type=int, default=900)
+    for verb in ("get", "release"):
+        leases.add_parser(verb).add_argument("lease_id")
     for name in ("results", "usage", "cancel", "wait", "follow"):
         command = commands.add_parser(name)
         command.add_argument("rollout_id")
@@ -184,6 +213,46 @@ async def _execute(client: RhodesClient, args: argparse.Namespace, body: dict | 
             output = await client.archive_definition(
                 args.name, expected_revision=args.expected_revision, operation_id=args.operation_id
             )
+    elif args.command == "pools":
+        if args.verb == "create":
+            assert body is not None
+            output = await client.create_project_pool(body)
+        elif args.verb == "get":
+            output = await client.get_pool(args.pool_id)
+        else:
+            output = await client.delete_pool(args.pool_id)
+    elif args.command == "deployments":
+        if args.verb == "create":
+            output = await client.deployment_operation(
+                args.pool_id, args.task_id, project_id=args.project_id, operation="create",
+                idempotency_key=args.operation_id, payload=body,
+            )
+        elif args.verb == "delete":
+            output = await client.deployment_operation(
+                args.pool_id, args.task_id, project_id=args.project_id, operation="delete",
+                idempotency_key=args.operation_id, expected_revision=args.expected_revision,
+            )
+        elif args.verb == "get":
+            output = await client.get_deployment(
+                args.pool_id, args.task_id, project_id=args.project_id
+            )
+        else:
+            output = await client.get_deployment_operation(
+                args.pool_id, args.operation_id, project_id=args.project_id
+            )
+    elif args.command == "readiness":
+        output = await client.task_readiness(args.pool_id, args.task_id)
+    elif args.command == "leases":
+        if args.verb == "acquire":
+            output = await client.acquire_observed_lease(
+                args.pool_id, args.task_id, image_kind=args.image_kind,
+                idempotency_key=args.operation_id, project_id=args.project_id,
+                ttl_seconds=args.ttl_seconds,
+            )
+        elif args.verb == "get":
+            output = await client.get_lease(args.lease_id)
+        else:
+            output = await client.release_lease(args.lease_id)
     elif args.command == "exec":
         assert body is not None
         rollout_id = await client.submit(args.pool_id, body)
@@ -226,7 +295,7 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("rhodes.explicit_backend_origin_required")
         if args.command == "follow" and args.after_sequence < 0:
             raise ValueError("rhodes.invalid_event_cursor")
-        body = _payload(args.config) if args.command in {"exec", "import"} else None
+        body = _payload(args.config) if getattr(args, "config", None) is not None else None
         if args.command == "watch" and args.cursors is not None:
             body = _payload(args.cursors)
         if args.command == "exec" and (

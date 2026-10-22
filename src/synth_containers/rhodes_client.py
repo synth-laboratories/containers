@@ -409,6 +409,86 @@ class RhodesClient(PoolClient):
             "GET", "/environment_definition_operations/" + quote(operation_id, safe="")
         )
 
+    async def create_project_pool(self, body: Mapping[str, Any]) -> dict[str, Any]:
+        """Create a pool from an explicit wire body, including its bound ``project_id``.
+
+        Pool creation has no server replay identity, so it is never retried.
+        """
+        if not isinstance(body.get("name"), str) or not body["name"].strip():
+            raise ValueError("Rhodes pool creation requires a name")
+        return await self._request("POST", "/pools", payload=dict(body), replay_safe=False)
+
+    async def deployment_operation(
+        self,
+        pool_id: str,
+        task_id: str,
+        *,
+        project_id: str,
+        operation: str,
+        idempotency_key: str,
+        expected_revision: str | None = None,
+        payload: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Create, update or delete one server-provisioned deployment.
+
+        The server persists ownership before provider effects. An identical
+        retry replays the completed receipt; a pending one requires recovery.
+        """
+        if operation not in {"create", "update", "delete"}:
+            raise ValueError("Unknown Rhodes deployment operation")
+        if not idempotency_key:
+            raise ValueError("A stable deployment idempotency_key is required")
+        if operation != "create" and not expected_revision:
+            raise ValueError("Deployment update/delete requires expected_revision")
+        return await self._request(
+            "POST",
+            "/pools/"
+            + quote(pool_id, safe="")
+            + "/deployments/"
+            + quote(task_id, safe="")
+            + "/operations",
+            payload={
+                "project_id": project_id,
+                "operation": operation,
+                "idempotency_key": idempotency_key,
+                "expected_revision": expected_revision,
+                "payload": dict(payload or {}),
+            },
+        )
+
+    async def get_deployment(self, pool_id: str, task_id: str, *, project_id: str) -> dict[str, Any]:
+        return await self._request(
+            "GET",
+            "/pools/" + quote(pool_id, safe="") + "/deployments/" + quote(task_id, safe=""),
+            params={"project_id": project_id},
+        )
+
+    async def get_deployment_operation(
+        self, pool_id: str, operation_id: str, *, project_id: str
+    ) -> dict[str, Any]:
+        return await self._request(
+            "GET",
+            "/pools/"
+            + quote(pool_id, safe="")
+            + "/deployment-operations/"
+            + quote(operation_id, safe=""),
+            params={"project_id": project_id},
+        )
+
+    async def find_deployment_operation(
+        self, pool_id: str, task_id: str, *, project_id: str, idempotency_key: str
+    ) -> dict[str, Any]:
+        """Reconcile an uncertain mutation by its original key without repeating it."""
+        return await self._request(
+            "GET",
+            "/pools/"
+            + quote(pool_id, safe="")
+            + "/deployments/"
+            + quote(task_id, safe="")
+            + "/operations",
+            params={"project_id": project_id, "idempotency_key": idempotency_key},
+        )
+
     async def acquire_lease(
         self,
         *,

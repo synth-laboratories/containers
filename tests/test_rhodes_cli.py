@@ -122,6 +122,77 @@ def test_registry_and_explicit_cancel_wire(monkeypatch, capsys, arguments, metho
     assert (json.loads(requests[0].content) if requests[0].content else None) == body
 
 
+PROJECT = "11111111-2222-4333-8444-555555555555"
+
+
+@pytest.mark.parametrize("arguments,method,path,params,body", [
+    (["pools", "get", "pool"], "GET", "/v1/pools/pool", {}, None),
+    (["pools", "delete", "pool"], "DELETE", "/v1/pools/pool", {}, None),
+    (["deployments", "get", "pool", "seed-1", "--project-id", PROJECT],
+     "GET", "/v1/pools/pool/deployments/seed-1", {"project_id": PROJECT}, None),
+    (["deployments", "operation", "pool", "op", "--project-id", PROJECT],
+     "GET", "/v1/pools/pool/deployment-operations/op", {"project_id": PROJECT}, None),
+    (["deployments", "delete", "pool", "seed-1", "--project-id", PROJECT,
+      "--expected-revision", "r1", "--operation-id", "undeploy"],
+     "POST", "/v1/pools/pool/deployments/seed-1/operations", {}, {
+         "project_id": PROJECT, "operation": "delete", "idempotency_key": "undeploy",
+         "expected_revision": "r1", "payload": {}}),
+    (["readiness", "pool", "seed-1"], "GET", "/v1/pools/pool/tasks/seed-1/readiness", {}, None),
+])
+def test_lifecycle_verbs_use_original_wire(monkeypatch, capsys, arguments, method, path, params, body):
+    requests = install_client(monkeypatch, lambda _: httpx.Response(200, json={"original": True}))
+    assert main(["rhodes", *arguments]) == 0
+    assert json.loads(capsys.readouterr().out) == {"original": True}
+    assert len(requests) == 1
+    assert (requests[0].method, requests[0].url.path) == (method, path)
+    assert dict(requests[0].url.params) == params
+    assert (json.loads(requests[0].content) if requests[0].content else None) == body
+
+
+def test_deployment_create_and_pool_create_send_config_unchanged(monkeypatch, capsys, tmp_path):
+    requests = install_client(monkeypatch, lambda _: httpx.Response(200, json={"pool_id": "p"}))
+    config = tmp_path / "task.json"
+    config.write_text('{"provider":"docker","image_ref":"sha256:' + "a" * 64 + '","port":8080}')
+    assert main(["rhodes", "deployments", "create", "pool", "seed-1", str(config),
+                 "--project-id", PROJECT, "--operation-id", "deploy"]) == 0
+    assert json.loads(requests[0].content) == {
+        "project_id": PROJECT, "operation": "create", "idempotency_key": "deploy",
+        "expected_revision": None,
+        "payload": {"provider": "docker", "image_ref": "sha256:" + "a" * 64, "port": 8080}}
+    pool = tmp_path / "pool.toml"
+    pool.write_text(f'name="lane0"\nbackend="arbitrary"\nproject_id="{PROJECT}"\n')
+    assert main(["rhodes", "pools", "create", str(pool)]) == 0
+    assert (requests[1].method, requests[1].url.path) == ("POST", "/v1/pools")
+    assert json.loads(requests[1].content) == {
+        "name": "lane0", "backend": "arbitrary", "project_id": PROJECT}
+
+
+def test_pool_create_is_never_retried_without_replay_identity(monkeypatch, capsys, tmp_path):
+    requests = install_client(monkeypatch, lambda _: httpx.Response(503, json={}))
+    pool = tmp_path / "pool.json"
+    pool.write_text('{"name":"lane0","backend":"arbitrary"}')
+    assert main(["rhodes", "pools", "create", str(pool)]) == 2
+    assert len(requests) == 1
+
+
+def test_observed_lease_acquire_and_release_wire(monkeypatch, capsys):
+    def respond(request):
+        if request.url.path.endswith("/capacity_leases"):
+            return httpx.Response(200, json={"lease": {"lease_id": "L"}, "reused": False})
+        return httpx.Response(200, json={"lease": {"lease_id": "L", "status": "released"}})
+
+    requests = install_client(monkeypatch, respond)
+    assert main(["rhodes", "leases", "acquire", "pool", "seed-1", "--image-kind", "craftax_eval",
+                 "--operation-id", "lease", "--project-id", PROJECT]) == 0
+    assert json.loads(capsys.readouterr().out) == {"lease_id": "L", "reused": False}
+    body = json.loads(requests[0].content)
+    assert requests[0].url.path == "/v1/pools/pool/tasks/seed-1/capacity_leases"
+    assert body["idempotency_key"] == "lease" and body["project_id"] == PROJECT
+    assert body["reset"] == "fresh_instance" and body["slots"] == 1
+    assert main(["rhodes", "leases", "release", "L"]) == 0
+    assert (requests[1].method, requests[1].url.path) == ("POST", "/v1/container_leases/L/release")
+
+
 @pytest.mark.parametrize("content", [
     "{}", '{"idempotency_key":" "}', '[]',
     '{"idempotency_key":"a","idempotency_key":"b"}',
