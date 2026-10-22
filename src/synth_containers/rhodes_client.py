@@ -34,25 +34,42 @@ import httpx
 class RhodesRequestError(PoolClientError):
     """Preserve the service refusal and backpressure without retrying effects."""
 
-    def __init__(self, status_code: int, code: str, retry_after: str | None):
+    def __init__(
+        self,
+        status_code: int,
+        code: str,
+        retry_after: str | None,
+        identifiers: dict[str, str] | None = None,
+    ):
         self.status_code = status_code
         self.code = code
         self.retry_after = retry_after
+        # Bounded identifiers only (the blocking operation, the backend cause
+        # class); refusal bodies are never echoed.
+        self.identifiers = dict(identifiers or {})
         super().__init__(f"Rhodes request refused: HTTP {status_code} ({code})")
 
 
 def _http_refusal(error: httpx.HTTPStatusError) -> RhodesRequestError:
     code = "rhodes.http_error"
+    identifiers: dict[str, str] = {}
     try:
         body = error.response.json()
         detail = body.get("detail", body) if isinstance(body, dict) else {}
         candidate = detail.get("code") if isinstance(detail, dict) else None
         if isinstance(candidate, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", candidate):
             code = candidate
+        for name in ("operation_id", "cause_type"):
+            value = detail.get(name) if isinstance(detail, dict) else None
+            if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", value):
+                identifiers[name] = value
     except ValueError:
         pass  # Non-JSON error bodies still retain the HTTP refusal and header.
     return RhodesRequestError(
-        error.response.status_code, code, error.response.headers.get("Retry-After")
+        error.response.status_code,
+        code,
+        error.response.headers.get("Retry-After"),
+        identifiers,
     )
 
 

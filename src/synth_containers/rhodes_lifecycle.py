@@ -29,6 +29,8 @@ from .rhodes_client import RhodesClient, RhodesRequestError
 
 TERMINAL = {"completed", "failed", "cancelled"}
 # The cached native Craftax runtime used by the retained native cohort receipts.
+# The server bounds one deployment execution at 120 s; read back a little longer.
+DEPLOYMENT_RECONCILE_SECONDS = 150
 DEFAULT_CRAFTAX_IMAGE = "sha256:8f33bf128a3c48a457e9357688b7a41288b4b4714722a6ad725cfdcefa59a329"
 
 
@@ -60,7 +62,7 @@ def _manifest(value: str) -> dict[str, Any]:
 
 def _refusal(error: BaseException) -> dict[str, Any]:
     if isinstance(error, RhodesRequestError):
-        return {"error": error.code, "http_status": error.status_code}
+        return {"error": error.code, "http_status": error.status_code, **error.identifiers}
     # Never echo bodies; they can carry credentials or terminal control bytes.
     return {"error": type(error).__name__}
 
@@ -110,8 +112,53 @@ class Lifecycle:
         self._log.write(line + "\n")
         self._log.flush()
 
+    def _deployed_image(self) -> str:
+        # A registered release pins its own image server-side; --image is unused then.
+        return f"release:{self.release_id}" if self.release_id else self.args.image
+
     def key(self, *parts: object) -> str:
         return ":".join(["rhodes-lifecycle", self.run_id, *map(str, parts)])
+
+    async def _deployment_operation(
+        self, pool_id: str, task_id: str, *, operation: str, idempotency_key: str, **request: Any
+    ) -> dict[str, Any]:
+        """Run one deployment mutation, reconciling our own uncertain replay by its key.
+
+        A transport retry of an identified mutation can reach the server while the
+        first attempt still executes; the server then answers 409
+        DEPLOYMENT_RECOVERY_REQUIRED naming that same operation. Read it back by
+        key (never repeat the effect) until it completes, then use its retained
+        receipt. Any other blocker, or an operation that needs recovery, stays a
+        refusal.
+        """
+        try:
+            return await self.client.deployment_operation(
+                pool_id, task_id, project_id=self.args.project_id, operation=operation,
+                idempotency_key=idempotency_key, **request,
+            )
+        except RhodesRequestError as refusal:
+            if refusal.code != "DEPLOYMENT_RECOVERY_REQUIRED":
+                raise
+            deadline = time.monotonic() + DEPLOYMENT_RECONCILE_SECONDS
+            while True:
+                try:
+                    intent = await self.client.find_deployment_operation(
+                        pool_id, task_id, project_id=self.args.project_id,
+                        idempotency_key=idempotency_key,
+                    )
+                except RhodesRequestError as lookup:
+                    if lookup.status_code == 404:
+                        raise refusal from None  # the blocker is not our operation
+                    raise
+                blocker = refusal.identifiers.get("operation_id")
+                if blocker is not None and blocker != intent.get("operation_id"):
+                    raise refusal
+                if intent.get("state") == "completed" and isinstance(intent.get("result"), dict):
+                    self.log(f"{task_id} {operation} reconciled {intent.get('operation_id')}")
+                    return intent["result"]
+                if intent.get("state") != "pending" or time.monotonic() >= deadline:
+                    raise refusal
+                await asyncio.sleep(2)
 
     async def _readiness(self, pool_id: str, task_id: str) -> dict[str, Any]:
         deadline = time.monotonic() + self.args.ready_seconds
@@ -144,8 +191,8 @@ class Lifecycle:
         args = self.args
         try:
             record.stage = "deploy"
-            receipt = await self.client.deployment_operation(
-                pool_id, record.task_id, project_id=args.project_id, operation="create",
+            receipt = await self._deployment_operation(
+                pool_id, record.task_id, operation="create",
                 idempotency_key=self.key("deploy", record.seed),
                 payload={
                     "provider": "docker",
@@ -238,8 +285,8 @@ class Lifecycle:
             current = await self.client.get_deployment(
                 pool_id, record.task_id, project_id=args.project_id
             )
-            receipt = await self.client.deployment_operation(
-                pool_id, record.task_id, project_id=args.project_id, operation="delete",
+            receipt = await self._deployment_operation(
+                pool_id, record.task_id, operation="delete",
                 idempotency_key=self.key("undeploy", record.seed),
                 expected_revision=current["revision"],
             )
@@ -348,7 +395,7 @@ class Lifecycle:
         lanes = min(self.args.parallel, len(seeds))
         plan = {lane: seeds[lane::lanes] for lane in range(lanes)}
         self.log(
-            f"START run={self.run_id} seeds={len(seeds)} lanes={lanes} image={self.args.image}"
+            f"START run={self.run_id} seeds={len(seeds)} lanes={lanes} image={self._deployed_image()}"
         )
         if not await self._registry():
             for seed in seeds:
@@ -384,7 +431,7 @@ class Lifecycle:
         report = {
             "run_id": self.run_id,
             "backend_url": self.args.backend_url,
-            "image": self.args.image,
+            "image": self._deployed_image(),
             "lanes": lanes,
             "observed_rollout_overlap": overlap,
             "checks": checks,

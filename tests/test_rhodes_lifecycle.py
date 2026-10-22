@@ -307,3 +307,55 @@ def test_main_refuses_without_backend_and_project(monkeypatch, capsys, tmp_path)
     monkeypatch.delenv("SYNTH_PROJECT_ID", raising=False)
     assert rhodes_lifecycle.main(["--out", str(tmp_path)]) == 2
     assert "backend_and_project_required" in capsys.readouterr().err
+
+
+class ReplayedCreateRhodes(FakeRhodes):
+    """The first create's response is lost; its replay meets the still-pending original."""
+
+    def __init__(self, *, blocker=None, final_state="completed", **kwargs):
+        super().__init__(not_ready_reads=0, **kwargs)
+        self.blocker = blocker
+        self.final_state = final_state
+        self.intents = {}
+        self.lookups = 0
+
+    async def deployment_operation(self, pool_id, task_id, *, project_id, operation,
+                                   idempotency_key, expected_revision=None, payload=None):
+        if operation == "create" and idempotency_key not in self.intents:
+            receipt = await super().deployment_operation(
+                pool_id, task_id, project_id=project_id, operation=operation,
+                idempotency_key=idempotency_key, payload=payload)
+            self.intents[idempotency_key] = receipt
+            raise RhodesRequestError(409, "DEPLOYMENT_RECOVERY_REQUIRED", None, {
+                "operation_id": self.blocker or "op-" + idempotency_key})
+        return await super().deployment_operation(
+            pool_id, task_id, project_id=project_id, operation=operation,
+            idempotency_key=idempotency_key, expected_revision=expected_revision, payload=payload)
+
+    async def find_deployment_operation(self, pool_id, task_id, *, project_id, idempotency_key):
+        self.lookups += 1
+        state = "pending" if self.lookups == 1 else self.final_state
+        return {"operation_id": "op-" + idempotency_key, "state": state,
+                "result": self.intents[idempotency_key] if state == "completed" else None}
+
+
+def test_replayed_create_is_reconciled_by_key_not_repeated(tmp_path):
+    client = ReplayedCreateRhodes()
+    report = asyncio.run(lifecycle(tmp_path, client, "--seeds", "7", "--parallel", "1").run())
+    assert report["passed"], report["checks"]
+    # The provider effect ran once; the driver read the pending original back by key.
+    assert sum(1 for name, _ in client.calls if name == "create_deployment") == 1
+    assert client.lookups == 2
+    assert client.deployments == {} and set(client.pools.values()) == {"archived"}
+
+
+def test_foreign_blocker_or_recovery_required_stays_a_refusal(tmp_path):
+    for client in (ReplayedCreateRhodes(blocker="op-someone-else"),
+                   ReplayedCreateRhodes(final_state="recovery_required")):
+        out = tmp_path / str(id(client))
+        out.mkdir()
+        report = asyncio.run(lifecycle(out, client, "--seeds", "7", "--parallel", "1").run())
+        assert not report["passed"]
+        (seed,) = report["seeds"]
+        assert seed["errors"][0]["error"] == "DEPLOYMENT_RECOVERY_REQUIRED"
+        assert seed["errors"][0]["operation_id"].startswith("op-")

@@ -334,6 +334,35 @@ async def test_retryable_refusal_retains_code_and_retry_after(monkeypatch):
 
 
 @run_async
+async def test_refusal_retains_bounded_identifiers_but_never_the_message():
+    def respond(request):
+        return httpx.Response(
+            409,
+            json={
+                "detail": {
+                    "code": "DEPLOYMENT_RECOVERY_REQUIRED",
+                    "operation_id": "dep-op_1:create",
+                    "cause_type": "TimeoutError",
+                    "message": "secret-bearing \x1b[31m body",
+                    "extra": "not retained",
+                }
+            },
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(respond), base_url="https://rhodes.invalid"
+    ) as transport:
+        client = RhodesClient(api_key="fixture", client=transport, max_retries=0)
+        with pytest.raises(RhodesRequestError) as caught:
+            await client.get_environment("release")
+    assert caught.value.code == "DEPLOYMENT_RECOVERY_REQUIRED"
+    assert caught.value.identifiers == {
+        "operation_id": "dep-op_1:create",
+        "cause_type": "TimeoutError",
+    }
+
+
+@run_async
 async def test_unidentified_mutation_transport_failure_is_not_retried():
     attempts = []
 
