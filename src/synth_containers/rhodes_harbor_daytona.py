@@ -177,9 +177,17 @@ class DaytonaObserver:
         )
 
     def sandboxes(self) -> set[str]:
-        listed = self._sdk.list(labels={"synth_subtype": "harbor"})
-        items = getattr(listed, "items", listed) or []
-        return {str(getattr(item, "id", "")) for item in items if getattr(item, "id", None)}
+        # The SDK's list() still calls the removed /sandbox/paginated route; read the
+        # current /sandbox route raw, as backend Harbor recovery does.
+        response = self._sdk._sandbox_api.list_sandboxes_without_preload_content(
+            labels=json.dumps({"synth_subtype": "harbor"})
+        )
+        page = json.loads(response.data)
+        if not isinstance(page, dict) or not isinstance(page.get("items"), list):
+            raise ValueError("Daytona sandbox listing returned an invalid page")
+        if page.get("nextCursor"):
+            raise ValueError("Daytona sandbox listing is paginated; leak check would be partial")
+        return {str(item["id"]) for item in page["items"] if isinstance(item, dict) and item.get("id")}
 
     def snapshots(self) -> set[str]:
         names: set[str] = set()
