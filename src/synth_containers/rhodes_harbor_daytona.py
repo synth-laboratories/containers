@@ -8,8 +8,9 @@ snapshot that appeared during the run is gone.
 
 Agents: ``fixed_solution`` applies the task's reference patch (no model; qualifies
 provisioning, grading and cleanup), ``codex`` runs a model through the backend's gateway.
-DeepSWE's ``separate`` verifier mode is run as ``shared``: the grader resets every file
-``model.patch`` touches to the base commit before applying it, so it grades the same tree.
+DeepSWE's ``separate`` verifier maps to Rhodes' isolated verifier with patch-only handoff:
+a fresh sandbox from the same snapshot receives the hidden tests and ``model.patch`` and
+nothing else from the agent's sandbox.
 """
 
 from __future__ import annotations
@@ -135,7 +136,8 @@ def task_payload(task: DeepSweTask, *, task_id: str, agent: dict[str, Any]) -> d
         "workdir": "/app",
         "agent_user": "",
         "verifier_user": "",
-        "verifier_environment_mode": "shared",
+        "verifier_environment_mode": "isolated",
+        "verifier_workspace_transfer": "model_patch",
         "collect_phase_logs": True,
     }
     return {

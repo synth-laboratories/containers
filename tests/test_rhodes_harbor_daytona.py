@@ -34,12 +34,13 @@ def _corpus(tmp_path: Path) -> tuple[Path, Path]:
     return tmp_path / "corpus", pins
 
 
-def test_task_runs_shared_with_hidden_tests_injected(tmp_path):
+def test_task_verifies_isolated_from_the_patch_alone(tmp_path):
     corpus, pins = _corpus(tmp_path)
     task = load_task(corpus, pins, "demo")
     payload = task_payload(task, task_id="demo", agent={"name": "fixed_solution", "script_b64": "eA=="})
     native = payload["harbor_native_phases"]
-    assert native["verifier_environment_mode"] == "shared"
+    assert native["verifier_environment_mode"] == "isolated"
+    assert native["verifier_workspace_transfer"] == "model_patch"
     assert native["allow_internet"] is False and native["workdir"] == "/app"
     with tarfile.open(fileobj=io.BytesIO(base64.b64decode(native["tests_archive_b64"]))) as archive:
         assert sorted(archive.getnames()) == ["grader.py", "test.sh"]
