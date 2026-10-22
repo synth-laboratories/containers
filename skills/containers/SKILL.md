@@ -294,7 +294,11 @@ For native Harbor tasks, read `harbor_environment.py`: inspect with
 separate agent/verifier image identities with `register_harbor_environment`.
 Registration is a static content-addressed contract, not execution or proof of
 provider isolation. Local Docker `sha256:<64>` image IDs are valid only for
-`local-docker`; remote providers require immutable registry digest references.
+`local-docker`. Remote providers use immutable registry digest references, or
+for native Daytona builds the provider-specific
+`daytona://snapshots/<uuid>/daytona-<64hex>:daytona` identity. The Daytona
+executor must read back the snapshot UUID and content-addressed build ref
+before launch. A build ref is not an OCI manifest digest; never relabel it.
 Preserve source-package digests, artifact collection and separate-verifier
 custody. Provider support must be qualified against the actual Harbor backend;
 do not translate a local image tag into a remote compatibility claim.

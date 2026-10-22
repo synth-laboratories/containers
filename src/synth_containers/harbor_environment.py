@@ -34,6 +34,8 @@ __all__ = [
 HARBOR_PACKAGE_DRAFT_SCHEMA = "synth.harbor-package-draft.v1"
 HARBOR_ENVIRONMENT_RELEASE_SCHEMA = "synth.harbor-environment-release.v1"
 _PINNED_IMAGE = re.compile(r"^.+@sha256:[0-9a-f]{64}$")
+_LOCAL_IMAGE_ID = re.compile(r"^sha256:[0-9a-f]{64}$")
+_DAYTONA_SNAPSHOT = re.compile(r"^daytona://snapshots/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/daytona-[0-9a-f]{64}:daytona$")
 _IDENTIFIER = re.compile(r"[^a-z0-9._-]+")
 _ISOLATED_NETWORKS = frozenset({"no-network", "none", "isolated", ""})
 
@@ -299,9 +301,22 @@ def register_harbor_environment(
 ) -> HarborEnvironmentRelease:
     """Register prebuilt pinned images as a scored Harbor environment release."""
 
-    if not _PINNED_IMAGE.fullmatch(agent_image):
+    # Local Docker's content-addressed image ID is immutable but is not a
+    # registry manifest digest. Admit it only for the explicit local provider;
+    # never invent a registry reference from an image configuration hash.
+    # Daytona-native builds expose a snapshot UUID and a content-addressed build
+    # ref, not an OCI manifest digest. Bind both under a provider-specific URI;
+    # the executor must verify their association before creating a sandbox.
+    def pinned(image: str) -> bool:
+        return bool(_PINNED_IMAGE.fullmatch(image) or (
+            provider.provider_id == "local-docker" and _LOCAL_IMAGE_ID.fullmatch(image)
+        ) or (
+            provider.provider_id == "daytona" and _DAYTONA_SNAPSHOT.fullmatch(image)
+        ))
+
+    if not pinned(agent_image):
         raise HarborEnvironmentError("harbor_release_agent_image_unpinned")
-    if not _PINNED_IMAGE.fullmatch(verifier_image):
+    if not pinned(verifier_image):
         raise HarborEnvironmentError("harbor_release_verifier_image_unpinned")
     validation = draft.validate(provider)
     if not validation.valid:
