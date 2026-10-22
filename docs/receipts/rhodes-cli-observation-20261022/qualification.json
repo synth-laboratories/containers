@@ -1,0 +1,68 @@
+{
+  "backend_source": "18667f06121cf12bf08d9d19330f7fafb829406a",
+  "containers_source": "f9e3d06425a211f68198c9aac6d70d695c285da9",
+  "database_operation": "775462e9ba944c6ca81414930e565d7e",
+  "deployment": false,
+  "independently_absent_instance_ids": [
+    "3223db821b6ad9002cf9ccee53ad162a4892a343c419a442974216790cf1d223",
+    "b2b9861fcb60c9a2f3785e6dc47110df80a9436f8e5b394df0a28110edc5d1e9",
+    "418a747d78276cfeace5ad1f50ea246b22186f13114fdc3222c32af68fb99b88",
+    "3a36b22b9c143c16949f4edb2e6f050e28c5836bfd29d43781e1c1d104635731",
+    "7a806a5eae2d30ba8ea94a2349052a15f799c67ba8f75d25924d8f8bcf847f3f"
+  ],
+  "log_sha256": {
+    "backend_units": "0e2fd852ec260a48177d34aad169fbb57b60e33f26bb361f39a793ee083453f0",
+    "installed_tests": "93ebe98ee723c366c5ed19813b81cae847690fc508007af4ef6effa2612b0ffe",
+    "native": "1c38cadd3eb4057dea46811ea72e87572a30a69678cd12c1ac3a7c6a03af662d",
+    "source_tests": "2c650d7b725f5c7f32e096d21f2306534d2a84b4526616132fe5267ab1e1f6f2",
+    "typing": "3c687dfbc5540c869598cb442343cf0d7140dae2cfc72c7b84ee74a8182ae0d2"
+  },
+  "migration_heads": [
+    "20261022_rhodes_lease_admit"
+  ],
+  "native_cli": [
+    {
+      "case": "test_real_api_and_idle_worker_2",
+      "events_equal": 6,
+      "original_rollout_id": "rollout_c736d6331e091e95e232844e2b5b61f192f72dd1",
+      "result_equal": true,
+      "reward": 0.8,
+      "status": "completed"
+    },
+    {
+      "case": "test_real_api_and_idle_worker_3",
+      "events_equal": 7,
+      "original_rollout_id": "rollout_7e265b23af4d26bf003e203abbd9e3d5d14d5af7",
+      "result_equal": true,
+      "reward": 0.8,
+      "status": "completed"
+    }
+  ],
+  "not_qualified": [
+    "multi-rollout terminal viewer",
+    "optimizer and enrolled Swarms adoption",
+    "native registry validation authority",
+    "first-class checkpoint custody/restore",
+    "hosted provider matrices",
+    "all v0.24 acceptance"
+  ],
+  "paid_provider_calls": 0,
+  "pressure_full_check": "still exceeds15seconds; not passed",
+  "runtime_image_sdk": "0.4.5.dev2026102104 unchanged",
+  "schema_version": "synth.rhodes-cli-observation-qualification.v1",
+  "sdk_version": "0.4.5.dev2026102109",
+  "source_wheel_installed_modules_equal": 307,
+  "storage_operation": "84fa31e79f7147569d2f65f6d4095884",
+  "tests": {
+    "backend_units": 524,
+    "installed": 124,
+    "native_process_cases": 17,
+    "native_seconds": 100.11,
+    "source": 124,
+    "typing_profiles": {
+      "main": "zero_diagnostics",
+      "mitm": "zero_diagnostics"
+    }
+  },
+  "wheel_sha256": "4311c7d3b21fd71913aeaa47c2e86dc58bf02c4539ab8fb12e779bdc65ee41a9"
+}
