@@ -113,6 +113,10 @@ Optional async/lifecycle routes:
 - `GET /rollouts/{id}/usage`
 - `GET /rollouts/{id}/artifacts`
 - `GET /rollouts/{id}/events`
+- `GET /rollouts/{id}/stream` (SSE when implemented)
+- `GET /rollouts/{id}/reward`
+- `GET /rollouts/{id}/reward/events`
+- `GET /rollouts/{id}/reward/stream`
 - `GET /rollouts/{id}/trace`
 - `POST /rollouts/{id}/pause`
 - `POST /rollouts/{id}/terminate`
@@ -242,7 +246,7 @@ event logs, traces, or sample artifacts.
 Use `synth_containers` vocabulary where possible:
 
 - runtime kind and task family
-- rollout modes: `sync`, `async`
+- rollout modes: `blocking`, `async` (`ontology.RolloutMode`)
 - statefulness tier
 - checkpoint/restore/branching support
 - reward/verifier/trace/artifact support
