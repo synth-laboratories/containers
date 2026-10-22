@@ -13,7 +13,11 @@ observed. It is an operator tool, not an acceptance claim.
    "unqualified"`. Without either flag the driver deploys `--image` (a pinned
    `sha256:` digest, default the cached native Craftax runtime). Source upload
    stays a separate step (`synth-containers rhodes upload-source`) because the
-   import declaration must reference the author's own manifest.
+   import declaration must reference the author's own manifest. `--validate`
+   first runs one bounded server validation (`--validation-seed`, same harness
+   and `--max-steps`), waits up to `--validation-seconds` and records the
+   operation in `registry.validation`. A pass makes the verdict `supported`;
+   `--validate` without a release refuses.
 2. **Lanes.** `--parallel N` creates N project-bound `arbitrary` Docker pools.
    The observed-capacity profile holds a whole pool per lease and never reuses a
    used instance, so seeds within a lane run in order, each on a fresh deployment.
@@ -44,7 +48,9 @@ no model or paid provider calls.
 ## CLI verbs added with this driver
 
 `pools create|get|delete`, `deployments create|get|delete|operation`,
-`readiness`, `leases acquire|get|release`, alongside the existing registry,
+`readiness`, `leases acquire|get|release`,
+`environments validate|validation` (`validate --wait` exits 0 only on
+`passed`), alongside the existing registry,
 `exec`, `watch` and result verbs.
 
 ## Known limits
@@ -54,7 +60,8 @@ no model or paid provider calls.
   container that address is the container itself, so this profile needs a slot
   networking decision (SYN-4840) before it can pass there. Host-process backends
   are unaffected.
-- **Validation.** Registry validation is `not_run` until SYN-4839; no release is
-  `supported` today.
+- **Validation.** Server validation (SYN-4839) runs in the API process. On
+  slots it shares the loopback limit above; it also inspects trace bytes
+  without retaining them yet.
 - **Not covered.** Hosted providers, warm reset, money settlement, Swarms or
   optimizer adoption and the G0–G5 matrices.

@@ -228,6 +228,51 @@ def test_accepted_unqualified_import_deploys_the_registered_release(tmp_path):
     assert "image_ref" not in payload and "port" not in payload
 
 
+class ValidatingRhodes(RegistryRhodes):
+    def __init__(self, outcome):
+        super().__init__("unqualified")
+        self.outcome = outcome
+
+    async def validate_environment(self, release_id, *, operation_id, case):
+        self._call("validate", release_id=release_id, key=operation_id, case=case)
+        return {"validation_id": "val-1", "state": "pending"}
+
+    async def wait_for_validation(self, release_id, validation_id, *, timeout_seconds):
+        if self.outcome == "passed":
+            self.verdict = "supported"
+        return {"validation_id": validation_id, "state": self.outcome}
+
+
+def test_validate_qualifies_the_release_before_any_pool(tmp_path):
+    client = ValidatingRhodes("passed")
+    report = asyncio.run(lifecycle(
+        tmp_path, client, "--release-id", "release-1", "--validate", "--seeds", "0",
+    ).run())
+    assert report["passed"] and report["release_support"] == "supported"
+    names = [name for name, _ in client.calls]
+    assert names.index("validate") < names.index("compatibility") < names.index("create_pool")
+    validate = next(d for name, d in client.calls if name == "validate")
+    assert validate["key"] == "rhodes-lifecycle:run:validate"
+    assert validate["case"]["policy_ref"] == {"harness": "scripted_react", "config": "engine_acceptance"}
+
+
+def test_failed_validation_leaves_release_unqualified_and_refuses(tmp_path):
+    client = ValidatingRhodes("failed")
+    report = asyncio.run(lifecycle(
+        tmp_path, client, "--release-id", "release-1", "--validate", "--seeds", "0",
+    ).run())
+    assert not report["passed"] and report["registry"]["validation"]["state"] == "failed"
+    assert not any(name == "create_pool" for name, _ in client.calls)
+
+
+def test_validate_without_a_release_refuses_instead_of_ignoring_the_flag(tmp_path):
+    client = FakeRhodes()
+    report = asyncio.run(lifecycle(tmp_path, client, "--validate", "--seeds", "0").run())
+    assert not report["passed"]
+    assert report["registry"]["error"] == {"error": "rhodes.lifecycle.validate_requires_release"}
+    assert client.calls == []
+
+
 @pytest.mark.parametrize("verdict", ["unsupported", "blocked"])
 def test_unsupported_or_blocked_release_refuses_even_when_accepting_unqualified(tmp_path, verdict):
     client = RegistryRhodes(verdict)

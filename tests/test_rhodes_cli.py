@@ -175,6 +175,37 @@ def test_pool_create_is_never_retried_without_replay_identity(monkeypatch, capsy
     assert len(requests) == 1
 
 
+@pytest.mark.parametrize("state,exit_code", [("passed", 0), ("failed", 3)])
+def test_validate_wait_emits_identity_first_and_exits_on_result(monkeypatch, capsys, state, exit_code):
+    def respond(request):
+        if request.method == "POST":
+            return httpx.Response(202, json={
+                "validation": {"validation_id": "val-1", "state": "pending"}, "reused": False})
+        return httpx.Response(200, json={"validation_id": "val-1", "state": state})
+
+    requests = install_client(monkeypatch, respond)
+    assert main(["rhodes", "environments", "validate", "release", "--operation-id", "v",
+                 "--seed", "17", "--max-steps", "10", "--harness", "scripted_react",
+                 "--policy-config", "engine_acceptance", "--wait"]) == exit_code
+    lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert lines[0] == {"validation_id": "val-1", "state": "pending"}
+    assert lines[-1]["state"] == state
+    assert requests[0].url.path == "/v1/environment_releases/release/validations"
+    assert json.loads(requests[0].content) == {
+        "schema_version": "synth.rhodes-environment-validation.v1", "operation_id": "v",
+        "provider": "docker", "case": {
+            "seed": 17, "max_steps": 10, "timeout_seconds": 300,
+            "policy_ref": {"harness": "scripted_react", "config": "engine_acceptance"}}}
+    assert requests[1].url.path == "/v1/environment_releases/release/validations/val-1"
+
+
+def test_validation_read_wire(monkeypatch, capsys):
+    requests = install_client(monkeypatch, lambda _: httpx.Response(200, json={"state": "passed"}))
+    assert main(["rhodes", "environments", "validation", "release", "val-1"]) == 0
+    assert (requests[0].method, requests[0].url.path) == (
+        "GET", "/v1/environment_releases/release/validations/val-1")
+
+
 def test_observed_lease_acquire_and_release_wire(monkeypatch, capsys):
     def respond(request):
         if request.url.path.endswith("/capacity_leases"):

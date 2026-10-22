@@ -409,6 +409,60 @@ class RhodesClient(PoolClient):
             "GET", "/environment_definition_operations/" + quote(operation_id, safe="")
         )
 
+    async def validate_environment(
+        self,
+        release_id: str,
+        *,
+        operation_id: str,
+        case: Mapping[str, Any],
+        provider: str = "docker",
+    ) -> dict[str, Any]:
+        """Start one bounded server validation of an exact release/provider pairing.
+
+        The same operation ID replays the original operation; a changed case
+        under that ID conflicts. Validation reserves no capacity.
+        """
+        if not operation_id:
+            raise ValueError("A stable validation operation_id is required")
+        response = await self._request(
+            "POST",
+            "/environment_releases/" + quote(release_id, safe="") + "/validations",
+            payload={
+                "schema_version": "synth.rhodes-environment-validation.v1",
+                "operation_id": operation_id,
+                "provider": provider,
+                "case": dict(case),
+            },
+            replay_safe=True,
+        )
+        operation = response.get("validation")
+        if not isinstance(operation, dict) or not operation.get("validation_id"):
+            raise PoolClientError("Rhodes returned malformed validation coordinates")
+        return {**operation, "reused": bool(response.get("reused"))}
+
+    async def get_validation(self, release_id: str, validation_id: str) -> dict[str, Any]:
+        return await self._request(
+            "GET",
+            "/environment_releases/"
+            + quote(release_id, safe="")
+            + "/validations/"
+            + quote(validation_id, safe=""),
+        )
+
+    async def wait_for_validation(
+        self, release_id: str, validation_id: str, *, timeout_seconds: float = 900
+    ) -> dict[str, Any]:
+        """Poll until terminal. Expiry detaches without cancelling the server operation."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_seconds
+        while True:
+            operation = await self.get_validation(release_id, validation_id)
+            if operation.get("state") != "pending":
+                return operation
+            if loop.time() >= deadline:
+                raise PoolRolloutTimeout("Rhodes validation still pending (not cancelled)")
+            await asyncio.sleep(2)
+
     async def create_project_pool(self, body: Mapping[str, Any]) -> dict[str, Any]:
         """Create a pool from an explicit wire body, including its bound ``project_id``.
 

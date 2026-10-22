@@ -106,6 +106,19 @@ def _parser() -> argparse.ArgumentParser:
         command.add_argument("release_id")
         if verb == "compatibility":
             command.add_argument("--provider", required=True)
+    validate = environments.add_parser("validate")
+    validate.add_argument("release_id")
+    validate.add_argument("--operation-id", required=True)
+    validate.add_argument("--seed", type=int, required=True)
+    validate.add_argument("--max-steps", type=int, required=True)
+    validate.add_argument("--harness", required=True)
+    validate.add_argument("--policy-config", required=True)
+    validate.add_argument("--case-timeout-seconds", type=int, default=300)
+    validate.add_argument("--wait", action="store_true")
+    validate.add_argument("--timeout-seconds", type=_seconds, default=900)
+    validation = environments.add_parser("validation")
+    validation.add_argument("release_id")
+    validation.add_argument("validation_id")
     definitions = commands.add_parser("definitions").add_subparsers(dest="verb", required=True)
     listing = definitions.add_parser("list")
     listing.add_argument("--after-name")
@@ -189,6 +202,22 @@ async def _execute(client: RhodesClient, args: argparse.Namespace, body: dict | 
             output = await client.get_environment(args.release_id)
         elif args.verb == "archive":
             output = await client.archive_environment(args.release_id)
+        elif args.verb == "validate":
+            output = await client.validate_environment(
+                args.release_id, operation_id=args.operation_id, case={
+                    "seed": args.seed, "max_steps": args.max_steps,
+                    "policy_ref": {"harness": args.harness, "config": args.policy_config},
+                    "timeout_seconds": args.case_timeout_seconds,
+                },
+            )
+            if args.wait:
+                # Emit the accepted identity first so an interrupted wait never hides it.
+                _emit({"validation_id": output["validation_id"], "state": output["state"]})
+                output = await client.wait_for_validation(
+                    args.release_id, output["validation_id"], timeout_seconds=args.timeout_seconds
+                )
+        elif args.verb == "validation":
+            output = await client.get_validation(args.release_id, args.validation_id)
         else:
             output = await client.environment_compatibility(args.release_id, provider=args.provider)
     elif args.command == "definitions":
@@ -278,6 +307,8 @@ async def _execute(client: RhodesClient, args: argparse.Namespace, body: dict | 
         output = await client.cancel(args.rollout_id)
     _emit(output)
     # A zero reward is a scientific result, not an execution failure.
+    if args.command == "environments" and args.verb == "validate" and args.wait:
+        return 0 if output.get("state") == "passed" else 3
     return 3 if args.command in {"exec", "wait"} and output.get("status") in {
         "failed", "cancelled"
     } else 0

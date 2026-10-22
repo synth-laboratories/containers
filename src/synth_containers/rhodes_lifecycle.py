@@ -296,6 +296,11 @@ class Lifecycle:
         args = self.args
         if args.import_manifest is None and self.release_id is None:
             self.registry = {"mode": "image_digest", "image": args.image}
+            if args.validate:
+                # Only a registered release has an identity a validation can qualify.
+                self.registry["error"] = {"error": "rhodes.lifecycle.validate_requires_release"}
+                self.log("registry refused: --validate needs --release-id or --import")
+                return False
             return True
         try:
             if args.import_manifest is not None:
@@ -306,8 +311,22 @@ class Lifecycle:
                 self.registry["imported"] = True
                 self.log(f"registry imported release {self.release_id}")
             assert self.release_id is not None
+            if args.validate:
+                started = await self.client.validate_environment(
+                    self.release_id, operation_id=self.key("validate"), case={
+                        "seed": args.validation_seed, "max_steps": args.max_steps,
+                        "policy_ref": {"harness": args.harness, "config": args.policy_config},
+                    },
+                )
+                self.log(f"registry validation {started['validation_id']} {started['state']}")
+                finished = await self.client.wait_for_validation(
+                    self.release_id, started["validation_id"],
+                    timeout_seconds=args.validation_seconds,
+                )
+                self.registry["validation"] = finished
+                self.log(f"registry validation {finished['state']}")
             verdict = await self.client.environment_compatibility(self.release_id, provider="docker")
-        except (RhodesRequestError, PoolClientError, ValueError) as error:
+        except (RhodesRequestError, PoolClientError, ValueError, PoolRolloutTimeout) as error:
             self.registry.update(mode="release", release_id=self.release_id, error=_refusal(error))
             self.log(f"registry refused {_refusal(error)}")
             return False
@@ -405,6 +424,12 @@ def _parser() -> argparse.ArgumentParser:
         "--import", dest="import_manifest", type=_manifest,
         help="environment release import declaration (JSON/TOML) to register first",
     )
+    parser.add_argument(
+        "--validate", action="store_true",
+        help="run one bounded server validation of the release before the verdict",
+    )
+    parser.add_argument("--validation-seed", type=int, default=0)
+    parser.add_argument("--validation-seconds", type=float, default=900)
     parser.add_argument(
         "--allow-unqualified", action="store_true",
         help="run an unqualified release; the report still records it as unqualified",
