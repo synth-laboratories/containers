@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 import json
@@ -21,16 +22,17 @@ from pathlib import Path
 import signal
 import sys
 import time
-from typing import Any
+from typing import Any, Callable
 from uuid import uuid4
 
+from .platform.trace_bundle import inspect_harbor_trace_bundle
 from .pools import PoolClientError, PoolRolloutTimeout
 from .rhodes_client import RhodesClient, RhodesRequestError
 
 TERMINAL = {"completed", "failed", "cancelled"}
-# The cached native Craftax runtime used by the retained native cohort receipts.
 # The server bounds one deployment execution at 120 s; read back a little longer.
 DEPLOYMENT_RECONCILE_SECONDS = 150
+# The cached native Craftax runtime used by the retained native cohort receipts.
 DEFAULT_CRAFTAX_IMAGE = "sha256:8f33bf128a3c48a457e9357688b7a41288b4b4714722a6ad725cfdcefa59a329"
 
 
@@ -89,12 +91,23 @@ class SeedRecord:
     deployment_deleted: bool = False
     provider_cleanup: Any = None
     absent_after_delete: bool | None = None
+    replay_rollout_id: str | None = None
+    # Read back after every pool, lease and container is gone.
+    retained: dict[str, Any] = field(default_factory=dict)
     errors: list[dict[str, Any]] = field(default_factory=list)
 
 
 class Lifecycle:
-    def __init__(self, client: RhodesClient, args: argparse.Namespace, out: Path) -> None:
+    def __init__(
+        self,
+        client: RhodesClient,
+        args: argparse.Namespace,
+        out: Path,
+        *,
+        inspect_trace: Callable[[Path], Any] = inspect_harbor_trace_bundle,
+    ) -> None:
         self.client = client
+        self.inspect_trace = inspect_trace
         self.args = args
         self.out = out
         self.run_id = out.name
@@ -224,14 +237,15 @@ class Lifecycle:
                 return
             record.stage = "rollout"
             record.started_at = time.monotonic()
-            record.rollout_id = await self.client.submit(pool_id, {
+            submission = {
                 "idempotency_key": self.key("rollout", record.seed),
                 "capacity_lease_id": record.lease_id,
                 "task_id": record.task_id,
                 "seed": record.seed,
                 "max_steps": args.max_steps,
                 "policy_ref": {"harness": args.harness, "config": args.policy_config},
-            })
+            }
+            record.rollout_id = await self.client.submit(pool_id, submission)
             self.log(f"lane{record.lane} seed{record.seed} rollout {record.rollout_id}")
             try:
                 async for event in self.client.follow_events(
@@ -258,6 +272,9 @@ class Lifecycle:
                 json.dumps(result, indent=2, sort_keys=True, default=str) + "\n"
             )
             record.usage = await self.client.usage(record.rollout_id)
+            # Exact replay: the original key must attach to the original attempt, not run again.
+            record.stage = "replay"
+            record.replay_rollout_id = await self.client.submit(pool_id, submission)
             record.stage = "done"
         except (RhodesRequestError, PoolClientError, ValueError, OSError) as error:
             record.errors.append({"stage": record.stage, **_refusal(error)})
@@ -408,7 +425,47 @@ class Lifecycle:
             await asyncio.gather(*(self._lane(lane, plan[lane]) for lane in plan))
         finally:
             progress.cancel()
+        if not self.interrupted:
+            await asyncio.gather(*(self._verify_retained(r) for r in self.records if r.rollout_id))
         return self.report(lanes)
+
+    async def _verify_retained(self, record: SeedRecord) -> None:
+        """After all owned capacity is gone, the result, usage and trace archive must remain."""
+        assert record.rollout_id is not None
+        original_path = self.out / f"result-seed{record.seed}.json"
+        try:
+            later = await self.client.get_rollout(record.rollout_id)
+            original = json.loads(original_path.read_text()) if original_path.exists() else {}
+            record.retained["result_unchanged"] = bool(original) and all(
+                later.get(key) == original.get(key) for key in ("status", "score", "result")
+            )
+            usage = (await self.client.usage(record.rollout_id)).get("usage") or {}
+            pool_usage = usage.get("container_pool") or {}
+            receipts = pool_usage.get("receipts") or []
+            before = ((record.usage or {}).get("usage") or {}).get("container_pool") or {}
+            record.retained["usage_recorded"] = bool(
+                receipts
+                and pool_usage.get("observed_through")
+                and not any(receipt.get("duplicate") for receipt in receipts)
+                and {r.get("usage_fact_id") for r in receipts}
+                == {r.get("usage_fact_id") for r in before.get("receipts") or []}
+            )
+            trace = (later.get("metadata") or {}).get("native_service_trace") or {}
+            if trace.get("status") != "committed" or not trace.get("publication_id"):
+                record.retained["archive_reopened"] = False
+                record.errors.append({"stage": "retained", "error": "trace_not_committed"})
+                return
+            archive = await self.client.publication_asset(trace["publication_id"], "trace.zip")
+            path = self.out / "archives" / f"seed{record.seed}.zip"
+            path.parent.mkdir(exist_ok=True)
+            path.write_bytes(archive)
+            inspected = await asyncio.to_thread(self.inspect_trace, path)
+            record.retained["archive_reopened"] = (
+                hashlib.sha256(archive).hexdigest() == trace.get("archive_sha256")
+                and getattr(inspected, "trace_id", None) == record.rollout_id
+            )
+        except (RhodesRequestError, PoolClientError, ValueError, OSError) as error:
+            record.errors.append({"stage": "retained", **_refusal(error)})
 
     def report(self, lanes: int) -> dict[str, Any]:
         records = sorted(self.records, key=lambda r: r.seed)
@@ -426,6 +483,19 @@ class Lifecycle:
             ),
             "every_pool_deleted": all(p["deleted"] for p in self.pools.values()),
             "observed_overlap_reaches_lanes": overlap >= lanes,
+            "replay_attaches_to_original": all(
+                r.replay_rollout_id == r.rollout_id for r in records if r.status == "completed"
+            ),
+            # Read back after every lease, deployment and pool is gone.
+            "results_retained_after_cleanup": all(
+                r.retained.get("result_unchanged") for r in records if r.rollout_id
+            ),
+            "usage_recorded_after_cleanup": all(
+                r.retained.get("usage_recorded") for r in records if r.rollout_id
+            ),
+            "trace_archives_reopen_after_cleanup": all(
+                r.retained.get("archive_reopened") for r in records if r.rollout_id
+            ),
             "not_interrupted": not self.interrupted,
         }
         report = {
@@ -457,7 +527,9 @@ class Lifecycle:
             lines.append(
                 f"  seed{r.seed:<4} {str(r.status):<10} reward={r.reward_status} score={r.score} "
                 f"events={r.events} lease_released={r.lease_released} "
-                f"undeployed={r.deployment_deleted} absent={r.absent_after_delete}"
+                f"undeployed={r.deployment_deleted} absent={r.absent_after_delete} "
+                f"replay_same={r.replay_rollout_id == r.rollout_id} "
+                f"retained={sorted(k for k, v in r.retained.items() if v)}"
                 + (f" errors={r.errors}" if r.errors else "")
             )
         (self.out / "summary.txt").write_text("\n".join(lines) + "\n")

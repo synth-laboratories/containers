@@ -1,7 +1,9 @@
 """The lifecycle driver reports observations and always tears down what it created."""
 
 import asyncio
+import hashlib
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -20,6 +22,7 @@ class FakeRhodes:
         self.kinds = {}
         self.leases = {}
         self.rollouts = {}
+        self.submitted = {}
         self.cancelled = []
 
     def _call(self, name, **details):
@@ -77,7 +80,11 @@ class FakeRhodes:
 
     async def submit(self, pool_id, payload):
         self._call("submit", payload=payload)
+        # The original idempotency key attaches to the original attempt.
+        if payload["idempotency_key"] in self.submitted:
+            return self.submitted[payload["idempotency_key"]]
         rollout_id = "run-" + str(payload["seed"])
+        self.submitted[payload["idempotency_key"]] = rollout_id
         self.rollouts[rollout_id] = "running"
         return rollout_id
 
@@ -95,10 +102,23 @@ class FakeRhodes:
         status = self.rollouts[rollout_id]
         # Real wire shape (Rhodes v0.24): the scored outcome is nested under "result".
         return {"status": status, "score": 1.0, "result": {
-            "status": status, "reward_status": "scored" if status == "completed" else None}}
+            "status": status, "reward_status": "scored" if status == "completed" else None},
+            "metadata": {"native_service_trace": {
+                "status": "committed", "publication_id": "pub-" + rollout_id,
+                "archive_sha256": hashlib.sha256(self.archive(rollout_id)).hexdigest()}}}
 
     async def usage(self, rollout_id):
-        return {"rollout_id": rollout_id, "settlement_status": "unresolved"}
+        return {"rollout_id": rollout_id, "usage": {"container_pool": {
+            "observed_through": "2026-10-22T00:00:00+00:00",
+            "receipts": [{"usage_fact_id": "fact-" + rollout_id, "duplicate": False}]}}}
+
+    @staticmethod
+    def archive(rollout_id):
+        return ("trace " + rollout_id).encode()
+
+    async def publication_asset(self, publication_id, asset):
+        self._call("publication_asset", publication_id=publication_id, asset=asset)
+        return self.archive(publication_id.removeprefix("pub-"))
 
     async def cancel(self, rollout_id):
         self.cancelled.append(rollout_id)
@@ -116,7 +136,11 @@ def lifecycle(tmp_path, client, *extra):
     ])
     out = tmp_path / "run"
     out.mkdir()
-    return rhodes_lifecycle.Lifecycle(client, args, out)
+    # The real inspector opens a Harbor bundle; the fake archive names its rollout.
+    return rhodes_lifecycle.Lifecycle(
+        client, args, out,
+        inspect_trace=lambda path: SimpleNamespace(trace_id=path.read_bytes().decode()[6:]),
+    )
 
 
 def test_full_lifecycle_passes_and_tears_down_everything(tmp_path):
@@ -359,3 +383,40 @@ def test_foreign_blocker_or_recovery_required_stays_a_refusal(tmp_path):
         (seed,) = report["seeds"]
         assert seed["errors"][0]["error"] == "DEPLOYMENT_RECOVERY_REQUIRED"
         assert seed["errors"][0]["operation_id"].startswith("op-")
+
+
+def test_retained_evidence_is_read_back_after_all_cleanup(tmp_path):
+    client = FakeRhodes(not_ready_reads=0)
+    report = asyncio.run(lifecycle(tmp_path, client, "--seeds", "0-1", "--parallel", "1").run())
+    assert report["passed"], report["checks"]
+    for name in ("replay_attaches_to_original", "results_retained_after_cleanup",
+                 "usage_recorded_after_cleanup", "trace_archives_reopen_after_cleanup"):
+        assert report["checks"][name] is True
+    # Archives are fetched only after every pool is archived.
+    names = [name for name, _ in client.calls]
+    assert names.index("publication_asset") > max(
+        i for i, name in enumerate(names) if name == "delete_pool")
+    assert (tmp_path / "run" / "archives" / "seed1.zip").read_bytes() == b"trace run-1"
+
+
+class RerunningRhodes(FakeRhodes):
+    """A server that starts a new attempt for a replayed key and serves a foreign archive."""
+
+    async def submit(self, pool_id, payload):
+        key = payload["idempotency_key"]
+        if key in self.submitted:
+            return self.submitted[key] + "-again"
+        return await super().submit(pool_id, payload)
+
+    async def publication_asset(self, publication_id, asset):
+        return b"tampered"
+
+
+def test_replay_and_archive_mismatches_fail_the_run(tmp_path):
+    client = RerunningRhodes(not_ready_reads=0)
+    report = asyncio.run(lifecycle(tmp_path, client, "--seeds", "3", "--parallel", "1").run())
+    assert not report["passed"]
+    assert report["checks"]["replay_attaches_to_original"] is False
+    assert report["checks"]["trace_archives_reopen_after_cleanup"] is False
+    assert report["checks"]["results_retained_after_cleanup"] is True
+    assert report["checks"]["usage_recorded_after_cleanup"] is True

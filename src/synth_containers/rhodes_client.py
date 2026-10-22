@@ -653,6 +653,26 @@ class RhodesClient(PoolClient):
 
         return _lease_from_envelope(response)
 
+    async def publication_asset(
+        self, publication_id: str, asset: str, *, max_bytes: int = 256 * 1024 * 1024
+    ) -> bytes:
+        """Read one committed Artifact Platform publication asset (e.g. a native trace archive)."""
+        path = (
+            "/artifacts/v1/publications/"
+            + quote(publication_id, safe="")
+            + "/assets/"
+            + quote(asset, safe="")
+        )
+        async with self._client.stream("GET", path) as response:
+            if response.status_code >= 400:
+                raise RhodesRequestError(response.status_code, "publication_asset_unavailable", None)
+            body = bytearray()
+            async for chunk in response.aiter_bytes():
+                body.extend(chunk)
+                if len(body) > max_bytes:
+                    raise PoolClientError("publication asset exceeds the bounded read size")
+        return bytes(body)
+
     async def event_page(
         self, rollout_id: str, *, after_sequence: int = 0, limit: int = 200
     ) -> dict[str, Any]:
