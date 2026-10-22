@@ -175,6 +175,7 @@ class AttachedSynthTunnelLease:
     _ready_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
     _closing: threading.Event = field(default_factory=threading.Event, repr=False)
     _local_ready: bool = field(default=False, repr=False)
+    _health_path: str = field(default="health", repr=False)
     _agent_started: bool = field(default=False, repr=False)
     _agent_stopped: bool = field(default=False, repr=False)
     _control_plane_closed: bool = field(default=False, repr=False)
@@ -217,7 +218,7 @@ class AttachedSynthTunnelLease:
                     raise SynthTunnelRelayError("SynthTunnel lease is closed")
                 self._agent_started = True
         _wait_for_http_ok(
-            _join_health_url(self.public_url),
+            _join_health_url(self.public_url, self._health_path),
             headers={"Authorization": f"Bearer {self.worker_token}"},
             timeout_seconds=ready_timeout,
             cancel_event=self._closing,
@@ -313,6 +314,7 @@ class SynthTunnelProvider:
         capabilities: Mapping[str, object],
         wait_ready: bool = True,
         origin_authorization_header: str | None = None,
+        health_path: str = "health",
     ) -> AttachedSynthTunnelLease:
         declared = (origin_authorization_header or "").strip().lower() or None
         if declared is not None and (
@@ -321,7 +323,9 @@ class SynthTunnelProvider:
         ):
             raise ValueError("origin_authorization_header must be a custom x- header")
         target = _parse_local_target(local_url)
-        local_health_url = _join_health_url(target.base_url)
+        if not re.fullmatch(r"[a-z0-9][a-z0-9/_-]{0,63}", health_path):
+            raise ValueError("health_path must be a relative path such as 'healthz'")
+        local_health_url = _join_health_url(target.base_url, health_path)
         if wait_ready:
             _wait_for_http_ok(
                 local_health_url,
@@ -370,6 +374,7 @@ class SynthTunnelProvider:
             _attach_timeout_seconds=self._attach_timeout_seconds,
             _ready_timeout_seconds=self._ready_timeout_seconds,
             _local_ready=wait_ready,
+            _health_path=health_path,
             route_token=_optional_text(response.get("route_token")),
             diagnostics_hint=_optional_text(response.get("diagnostics_hint")),
             _control_plane=self._control_plane,
@@ -1877,8 +1882,8 @@ def _wait_for_http_ok(
     raise SynthTunnelRelayError(f"timed out waiting for tunnel health: {last_error}")
 
 
-def _join_health_url(base_url: str) -> str:
-    return urljoin(base_url.rstrip("/") + "/", "health")
+def _join_health_url(base_url: str, health_path: str = "health") -> str:
+    return urljoin(base_url.rstrip("/") + "/", health_path)
 
 
 def _local_upstream_url(target: _LocalTarget, path: str, query: str) -> str:

@@ -324,7 +324,7 @@ def main() -> int:
     parser.add_argument("--pins", type=Path, required=True, help="harbor-deepswe pins.toml")
     parser.add_argument("--task", default="anko-default-function-arguments")
     parser.add_argument("--agent", choices=["fixed_solution", "codex"], default="fixed_solution")
-    parser.add_argument("--model", default="openai/gpt-5.4-mini")
+    parser.add_argument("--model", default="gpt-6-luna")
     parser.add_argument("--rollout-seconds", type=float, default=3600)
     parser.add_argument("--cleanup-seconds", type=float, default=180)
     parser.add_argument("--out", type=Path, default=Path(".local/rhodes-harbor-daytona"))
