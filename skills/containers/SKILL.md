@@ -282,3 +282,37 @@ unless the user explicitly requested tests.
 - Document any intentionally unsupported route rather than returning a
   misleading success.
 
+
+## Repository source of truth (Harbor and streaming)
+
+Use the checked-out `src/synth_containers/` implementation as the API authority;
+verify installed-package parity before relying on an installed SDK. This skill
+is guidance, not a replacement for current signatures or provider validation.
+
+For native Harbor tasks, read `harbor_environment.py`: inspect with
+`inspect_harbor_package`, validate `HarborProviderCompatibility`, then register
+separate agent/verifier image identities with `register_harbor_environment`.
+Registration is a static content-addressed contract, not execution or proof of
+provider isolation. Local Docker `sha256:<64>` image IDs are valid only for
+`local-docker`; remote providers require immutable registry digest references.
+Preserve source-package digests, artifact collection and separate-verifier
+custody. Provider support must be qualified against the actual Harbor backend;
+do not translate a local image tag into a remote compatibility claim.
+
+For rollout streams, read `event_log.py` and the runtime's route implementation.
+Use `RolloutEventLog` for durable append-before-publication journals,
+`stream_descriptor` (`synth.rollout.stream.v1`), and `LogEnvelope`
+(`synth.trace-stream-event.v1`). Poll with `poll_payload`; stream with `iter_sse`
+and `SSE_HEADERS`. Consumers validate envelope digests and contiguous sequence
+cursors; SSE reconnects use `Last-Event-ID`, polling uses `after`. Controls have
+no sequence. Advertise only implemented transports. Reward routes preserve
+explicit zero scores and distinguish unscored failure from zero reward.
+Journal recovery is not execution resume; interruption must remain explicit.
+Checkpoint/branch/cancel capabilities require real runtime implementations.
+
+Parallel Harbor workers must isolate process-wide environment and provider
+clients, output directories, verifier credentials and lifecycle ownership.
+Share a process-safe aggregate spend ledger, correlate each call to its rollout,
+and retain provider cleanup receipts. Qualify Docker and remote providers
+separately; a Docker pass does not prove Daytona execution. Explicitly label
+retained replay and never present it as a new paid or remote run.
