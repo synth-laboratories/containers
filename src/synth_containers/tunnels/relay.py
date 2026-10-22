@@ -1945,6 +1945,12 @@ def _startup_error_detail(error: Exception) -> str:
             character.isalnum() or character in {"_", ".", "-"} for character in missing_module
         ):
             return f"ModuleNotFoundError({missing_module})"
+    # A relay that closes during attach says why only in its close frame.
+    received = getattr(error, "rcvd", None)
+    code = getattr(received, "code", None)
+    if isinstance(code, int):
+        reason = re.sub(r"[^A-Za-z0-9_. -]", "", str(getattr(received, "reason", "") or ""))[:80]
+        return f"{type(error).__name__}(close={code}{':' + reason if reason else ''})"
     return type(error).__name__
 
 
