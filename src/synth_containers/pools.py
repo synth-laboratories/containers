@@ -454,6 +454,12 @@ class PoolClient:
 
     # -- transport ---------------------------------------------------------
 
+    def _retry_delay_seconds(
+        self, response: httpx.Response | None, attempt: int
+    ) -> float | None:
+        """Transport retry policy; None surfaces the current refusal immediately."""
+        return self._retry_backoff_seconds * (attempt + 1)
+
     async def _request(
         self,
         method: str,
@@ -468,6 +474,7 @@ class PoolClient:
         last_error: Exception | None = None
         retries = self._max_retries if replay_safe else 0
         for attempt in range(retries + 1):
+            response: httpx.Response | None = None
             try:
                 response = await self._client.request(
                     method.upper(),
@@ -500,7 +507,10 @@ class PoolClient:
             except (httpx.RequestError, ValueError) as exc:
                 last_error = exc
             if attempt < retries:
-                await asyncio.sleep(self._retry_backoff_seconds * (attempt + 1))
+                delay = self._retry_delay_seconds(response, attempt)
+                if delay is None:
+                    break
+                await asyncio.sleep(delay)
         raise PoolClientError(
             f"pool request failed {method.upper()} {url}: {last_error}"
         ) from last_error

@@ -215,8 +215,14 @@ async def test_chunk_boundaries_and_heartbeats_do_not_invent_events():
 
 
 @run_async
-async def test_retryable_refusal_retains_code_and_retry_after():
+async def test_retryable_refusal_retains_code_and_retry_after(monkeypatch):
     attempts = []
+    delays = []
+
+    async def sleep(seconds):
+        delays.append(seconds)
+
+    monkeypatch.setattr("synth_containers.pools.asyncio.sleep", sleep)
 
     def respond(request):
         attempts.append(request)
@@ -235,6 +241,7 @@ async def test_retryable_refusal_retains_code_and_retry_after():
         with pytest.raises(RhodesRequestError) as caught:
             await client.get_environment("release")
     assert len(attempts) == 2
+    assert delays == [17.0]
     assert (caught.value.status_code, caught.value.code, caught.value.retry_after) == (
         429,
         "rhodes.capacity_exhausted",
@@ -398,3 +405,82 @@ async def test_observed_capacity_refuses_malformed_authority_response(response):
             await client.acquire_observed_lease(
                 "pool", "task", image_kind="craftax_eval", idempotency_key="same"
             )
+
+
+@pytest.mark.parametrize("status", [429, 503])
+@run_async
+async def test_long_retry_after_surfaces_without_early_retry_or_sleep(monkeypatch, status):
+    attempts = []
+
+    def respond(request):
+        attempts.append(request)
+        return httpx.Response(status, headers={"Retry-After": "120"},
+                              json={"detail": {"code": "rhodes.capacity_exhausted"}})
+
+    async def sleep(_):
+        raise AssertionError("Long backpressure belongs to the caller queue")
+
+    monkeypatch.setattr("synth_containers.pools.asyncio.sleep", sleep)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond),
+                                base_url="https://rhodes.invalid") as transport:
+        client = RhodesClient(api_key="fixture", client=transport, max_retries=3)
+        with pytest.raises(RhodesRequestError) as caught:
+            await client.get_environment("release")
+    assert len(attempts) == 1
+    assert caught.value.retry_after == "120" and caught.value.status_code == status
+
+
+def test_retry_after_date_and_malformed_values():
+    from datetime import datetime, timezone
+    from synth_containers.rhodes_client import _retry_after_seconds
+
+    now = datetime(2026, 10, 22, 0, 0, 0, tzinfo=timezone.utc)
+    assert _retry_after_seconds("Thu, 22 Oct 2026 00:00:17 GMT", now=now) == 17
+    assert _retry_after_seconds("Thu, 22 Oct 2026 00:00:00 GMT", now=now) == 0
+    assert _retry_after_seconds("Wed, 21 Oct 2026 23:59:59 GMT", now=now) == 0
+    assert _retry_after_seconds("0", now=now) == 0
+    for value in ("-1", "nan", "inf", "1.5", "invalid", "9" * 129,
+                  "Thu, 22 Oct 2026 00:00:17"):
+        assert _retry_after_seconds(value, now=now) is None
+
+
+@pytest.mark.parametrize("status", [429, 503])
+@run_async
+async def test_backpressure_does_not_make_unidentified_mutation_replay_safe(monkeypatch, status):
+    attempts = []
+
+    def respond(request):
+        attempts.append(request)
+        return httpx.Response(status, headers={"Retry-After": "2"}, json={})
+
+    async def sleep(_):
+        raise AssertionError("Unidentified mutation must not retry")
+
+    monkeypatch.setattr("synth_containers.pools.asyncio.sleep", sleep)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond),
+                                base_url="https://rhodes.invalid") as transport:
+        client = RhodesClient(api_key="fixture", client=transport, max_retries=3)
+        with pytest.raises(RhodesRequestError):
+            await client.create_task("pool", {"task_id": "task"})
+    assert len(attempts) == 1
+
+
+@run_async
+async def test_retry_delay_honors_date_and_local_backoff(monkeypatch):
+    from datetime import datetime, timezone
+    from synth_containers import rhodes_client
+
+    class Clock:
+        @staticmethod
+        def now(zone):
+            assert zone == timezone.utc
+            return datetime(2026, 10, 22, tzinfo=zone)
+
+    monkeypatch.setattr(rhodes_client, "datetime", Clock)
+    client = RhodesClient(api_key="fixture", backend_url="https://rhodes.invalid", retry_backoff_seconds=2)
+    date_response = httpx.Response(503, headers={"Retry-After": "Thu, 22 Oct 2026 00:00:17 GMT"})
+    assert client._retry_delay_seconds(date_response, 0) == 17
+    assert client._retry_delay_seconds(httpx.Response(429, headers={"Retry-After": "0"}), 0) == 2
+    assert client._retry_delay_seconds(httpx.Response(429, headers={"Retry-After": "nan"}), 1) == 4
+    assert client._retry_delay_seconds(httpx.Response(429, headers={"Retry-After": "9" * 100}), 0) is None
+    await client.aclose()

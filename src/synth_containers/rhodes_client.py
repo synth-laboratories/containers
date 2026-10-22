@@ -11,6 +11,8 @@ import hashlib
 import json
 import math
 import re
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import Any
 from pathlib import Path
@@ -59,7 +61,40 @@ def _lease_from_envelope(
     return {**lease, **({"reused": response["reused"]} if require_reused else {})}
 
 
+def _retry_after_seconds(value: str, *, now: datetime) -> float | None:
+    """Decode bounded HTTP delay-seconds or an aware HTTP date."""
+    if len(value) > 128:
+        return None
+    value = value.strip()
+    if re.fullmatch(r"[0-9]+", value):
+        return float(value)
+    try:
+        deadline = parsedate_to_datetime(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if deadline.tzinfo is None:
+        return None
+    return max(0.0, (deadline - now).total_seconds())
+
+
 class RhodesClient(PoolClient):
+    def _retry_delay_seconds(
+        self, response: httpx.Response | None, attempt: int
+    ) -> float | None:
+        fallback = super()._retry_delay_seconds(response, attempt)
+        if response is None or response.status_code not in {429, 503}:
+            return fallback
+        value = response.headers.get("Retry-After")
+        if value is None:
+            return fallback
+        seconds = _retry_after_seconds(value, now=datetime.now(timezone.utc))
+        if seconds is None:
+            return fallback
+        delay = max(fallback or 0.0, seconds)
+        # A long server delay belongs to the caller's durable queue. Never cap
+        # it by retrying early, or keep an interactive client asleep indefinitely.
+        return delay if delay <= 30.0 else None
+
     async def _request(
         self, method: str, path: str, *, payload=None, params=None, optional=False, replay_safe=None
     ) -> dict[str, Any]:

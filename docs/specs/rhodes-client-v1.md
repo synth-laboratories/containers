@@ -85,3 +85,17 @@ qualified reset. Closing an attached live or unresolved rollout refuses.
 The optional attachment is a local Docker HTTP profile. Native harness
 validation, hosted placement, funding guarantees and MCP/optimizer qualification
 remain separate; unsupported profiles refuse explicitly.
+
+
+### Backpressure delays
+
+Replay-safe Rhodes requests honor `Retry-After` on HTTP429 and503, accepting
+bounded integer delay-seconds or a timezone-aware HTTP date. A retry waits at
+least the greater of that delay and the configured local backoff. A server delay
+over30seconds is surfaced immediately with the original status/code/header so a
+caller can retain it in a durable queue; the client never shortens it to retry
+early. Invalid headers retain the existing local backoff. A retryable response
+does not make an unidentified mutation safe to replay. The batch transport still
+requires reconciliation of original per-item identities after partial admission.
+This is transport backpressure handling, not adaptive rollout concurrency or
+proof that downstream provider effects are safe to repeat.
