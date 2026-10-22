@@ -37,6 +37,10 @@ def _env_pairs(items: list[str] | None) -> dict[str, str]:
 
 def main(argv: list[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] == "rhodes":
+        from .rhodes_cli import main as rhodes_main
+
+        return rhodes_main(arguments[1:])
     if arguments and arguments[0] == "tunnel":
         from .tunnels.cli import main as tunnel_main
 
@@ -59,6 +63,7 @@ def main(argv: list[str] | None = None) -> int:
         return eval_main(arguments[1:])
     parser = argparse.ArgumentParser(prog="synth-containers", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("rhodes", help="remote registry, committed events and rollout lifecycle")
     sub.add_parser("package", help="plan or build a versioned container package")
     sub.add_parser("checkpoint", help="inspect, export or preflight portable checkpoints")
     sub.add_parser("regrade", help="describe, run and export immutable retained-evidence grading")

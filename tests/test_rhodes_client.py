@@ -18,6 +18,90 @@ def run_async(function):
 
 
 @run_async
+@pytest.mark.parametrize("phase", ["request", "retry", "poll"])
+async def test_poll_deadline_bounds_entire_observation_without_cancel(phase):
+    requests = []
+    request_cancelled = asyncio.Event()
+
+    async def respond(request):
+        requests.append(request)
+        if phase == "request":
+            try:
+                await asyncio.sleep(10)
+            finally:
+                request_cancelled.set()
+        if phase == "retry":
+            return httpx.Response(429, headers={"Retry-After": "10"}, json={})
+        return httpx.Response(200, json={"status": "running"})
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(respond), base_url="https://rhodes.invalid"
+    ) as transport:
+        client = RhodesClient(api_key="fixture", client=transport)
+        # The outer guard fails the test if a request, retry or poll interval
+        # outlives the client's much smaller observation deadline.
+        async with asyncio.timeout(2):
+            with pytest.raises(PoolRolloutTimeout, match="not cancelled"):
+                await client.wait_for("original-run", timeout_seconds=0.02, poll_interval_seconds=10)
+    assert len(requests) == 1
+    assert requests[0].method == "GET"
+    assert requests[0].url.path == "/v1/rollouts/original-run"
+    assert request_cancelled.is_set() == (phase == "request")
+
+
+@run_async
+@pytest.mark.parametrize("parameter", ["timeout_seconds", "poll_interval_seconds"])
+@pytest.mark.parametrize("value", [0, -1, float("nan"), float("inf"), 86401])
+async def test_poll_invalid_timing_refuses_before_network(parameter, value):
+    def unexpected(request):
+        pytest.fail("invalid observation timing must not perform a request")
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(unexpected), base_url="https://rhodes.invalid"
+    ) as transport:
+        client = RhodesClient(api_key="fixture", client=transport)
+        with pytest.raises(ValueError, match=parameter):
+            await client.wait_for("run", **{parameter: value})
+
+
+@run_async
+async def test_poll_preserves_transport_timeout_and_external_cancellation():
+    entered = asyncio.Event()
+
+    async def respond(request):
+        if not entered.is_set():
+            entered.set()
+            raise TimeoutError("transport-owned timeout")
+        await asyncio.sleep(10)
+        pytest.fail("cancelled request completed")
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(respond), base_url="https://rhodes.invalid"
+    ) as transport:
+        client = RhodesClient(api_key="fixture", client=transport)
+        with pytest.raises(TimeoutError, match="transport-owned timeout"):
+            await client.wait_for("run", timeout_seconds=1)
+        task = asyncio.create_task(client.wait_for("run", timeout_seconds=1))
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+
+@run_async
+async def test_poll_terminal_result_retains_original_payload():
+    payload = {"status": "completed", "rollout_id": "run", "reward": 0, "cleanup_pending": True}
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json=payload)),
+        base_url="https://rhodes.invalid",
+    ) as transport:
+        result = await RhodesClient(api_key="fixture", client=transport).wait_for("run")
+    assert result.rollout_id == "run"
+    assert result.status == "completed"
+    assert result.payload == payload
+
+
+@run_async
 async def test_observed_capacity_is_explicit_and_keeps_exact_task_and_operation():
     requests = []
 

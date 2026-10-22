@@ -18,7 +18,16 @@ from typing import Any
 from pathlib import Path
 from urllib.parse import quote
 
-from .pools import PoolClient, PoolClientError, PoolRolloutTimeout, TERMINAL_STATUSES, _rollout_id
+from .pools import (
+    DEFAULT_POLL_INTERVAL_SECONDS,
+    DEFAULT_POLL_TIMEOUT_SECONDS,
+    PoolClient,
+    PoolClientError,
+    PoolRolloutTimeout,
+    RolloutOutcome,
+    TERMINAL_STATUSES,
+    _rollout_id,
+)
 import httpx
 
 
@@ -78,6 +87,38 @@ def _retry_after_seconds(value: str, *, now: datetime) -> float | None:
 
 
 class RhodesClient(PoolClient):
+    async def wait_for(
+        self,
+        rollout_id: str,
+        *,
+        timeout_seconds: float = DEFAULT_POLL_TIMEOUT_SECONDS,
+        poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS,
+    ) -> RolloutOutcome:
+        """Bound the entire observation, including requests and backpressure.
+
+        The deadline belongs to this observer. Expiry never cancels the server
+        rollout, releases its lease, or resubmits the original request.
+        """
+        if not math.isfinite(timeout_seconds) or not 0 < timeout_seconds <= 86400:
+            raise ValueError("timeout_seconds must be positive and at most one day")
+        if not math.isfinite(poll_interval_seconds) or not 0 < poll_interval_seconds <= 86400:
+            raise ValueError("poll_interval_seconds must be positive and at most one day")
+        observation = asyncio.timeout(timeout_seconds)
+        try:
+            async with observation:
+                return await super().wait_for(
+                    rollout_id,
+                    timeout_seconds=timeout_seconds,
+                    poll_interval_seconds=poll_interval_seconds,
+                )
+        except TimeoutError as error:
+            if not observation.expired():
+                raise
+            raise PoolRolloutTimeout(
+                f"rollout {rollout_id} observation timed out after {timeout_seconds}s "
+                "(not cancelled)"
+            ) from error
+
     def _retry_delay_seconds(
         self, response: httpx.Response | None, attempt: int
     ) -> float | None:

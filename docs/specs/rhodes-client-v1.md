@@ -99,3 +99,52 @@ does not make an unidentified mutation safe to replay. The batch transport still
 requires reconciliation of original per-item identities after partial admission.
 This is transport backpressure handling, not adaptive rollout concurrency or
 proof that downstream provider effects are safe to repeat.
+
+### Observation deadlines
+
+`wait_for` bounds the whole observation, including slow HTTP requests,
+backpressure sleeps and polling intervals. Its timeout and interval must be
+finite, positive and at most one day. Expiry raises `PoolRolloutTimeout` and
+detaches; it never cancels, releases capacity or creates another run. External
+task cancellation propagates unchanged. A transport-owned timeout remains a
+transport error. `wait_for` returns the execution snapshot at terminal status;
+use `follow_events` to wait for the committed journal and its pending axes.
+
+## Remote CLI
+
+`synth-containers rhodes` exposes the SDK registry and rollout operations. Set
+`SYNTH_API_KEY` and an explicit `SYNTH_BACKEND_URL`, or supply `--backend-url`
+before the subcommand. The CLI accepts only a backend origin without embedded
+credentials, query or fragment; it has no implicit hosted target or key flag.
+
+```sh
+synth-containers rhodes upload-source source.tar --operation-id upload-original
+synth-containers rhodes import environment.toml
+synth-containers rhodes definitions bind craftax RELEASE_ID --expected-revision 0 --operation-id bind-original
+synth-containers rhodes exec rollout.toml --pool-id POOL_ID --detach
+synth-containers rhodes follow ROLLOUT_ID --after-sequence 0
+synth-containers rhodes results ROLLOUT_ID
+synth-containers rhodes usage ROLLOUT_ID
+```
+
+Import and exec files are bounded JSON or TOML objects containing the existing
+service payload. Duplicate JSON keys, nonfinite numbers and non-JSON TOML values
+refuse. Exec requires a caller-selected stable `idempotency_key` in the file;
+the CLI never generates a fresh paid intent to recover an uncertain response.
+Named definitions support list/get/history/operation/bind/archive; immutable
+releases support list/get/archive/compatibility. These commands do not certify
+a release or build an unsupported profile.
+
+Exec prints accepted coordinates before following; `--detach` returns those
+coordinates immediately. Follow emits original committed events as JSON lines,
+without synthetic terminal or usage events. Its delivered sequence is the
+cursor for later attachment. Attached exec bounds observation and its final
+result read under one deadline after submission. Wait observes execution
+terminal status; results and usage inspect existing IDs. Only explicit cancel
+requests cancellation. Exit codes: 0 success, 2 command/refusal, 3 observed
+failed/cancelled execution, 4 observer timeout, 130 observer interruption.
+Scientific reward zero does not cause an execution-failure exit.
+
+This initial remote CLI has one-rollout JSON streaming. The stacked terminal
+view, multi-rollout cursors and optimizer command adoption remain separate
+qualification work; it does not silently substitute the local eval journal.
