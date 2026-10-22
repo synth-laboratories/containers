@@ -320,3 +320,17 @@ Share a process-safe aggregate spend ledger, correlate each call to its rollout,
 and retain provider cleanup receipts. Qualify Docker and remote providers
 separately; a Docker pass does not prove Daytona execution. Explicitly label
 retained replay and never present it as a new paid or remote run.
+
+Native Daytona builds may return an empty `image_name` while exposing `ref` and
+`build_info.snapshot_ref`. Its private build registry is not necessarily
+pullable as a downstream `FROM`. Self-contained Dockerfiles with shared cached
+prefixes avoid inventing registry access or digest evidence. Verify this against
+the installed Daytona SDK and provider readback rather than treating a registry
+tag as immutable.
+
+When bootstrapping a long-lived relay in native Harbor Daytona, its command
+session can wait on background descendants. An SDK bootstrap that spawns a
+process with a new session, closed inherited descriptors and redirected stdio
+avoids that wait. This is transport setup; keep the policy's native agent loop.
+Retain separate evidence for failed startup attempts and successful provider
+qualification, including network policy readback and exact sandbox deletion.
