@@ -85,3 +85,13 @@ command_timeout_seconds = 30
 require_paths = ["tests/test_pools.py", "tests/test_rhodes_client.py", "tests/test_rhodes_cli.py", "tests/test_rhodes_watch.py", ".local/release-types-main/bin/python"]
 command = 'TMPDIR="$PWD/.local/tmp" PYTHONPATH=src .local/release-types-main/bin/python -m pytest -q tests/test_pools.py tests/test_rhodes_client.py tests/test_rhodes_cli.py tests/test_rhodes_watch.py'
 remedy = "Keep pool SDK convenience fields translated to canonical flat configuration and metadata; reject collisions and qualify installed SDK against the ordinary-role public API. Lease mutation envelopes and flat lease GET remain distinct. Honor bounded server Retry-After; surface longer waits to the queue and never replay unidentified mutations. Bound the full observer deadline and keep CLI original run/cursor identities; timeout never cancels."
+
+
+[[checks]]
+id = "native_checkpoint_custody"
+description = "Native checkpoint acknowledgment preserves target identity, immutable bytes, lost acknowledgments and retention/delete barriers"
+severity = "error"
+command_timeout_seconds = 30
+require_paths = ["tests/test_checkpoint_custody.py", ".local/release-types-main/bin/python"]
+command = 'TMPDIR="$PWD/.local/tmp" PYTHONPATH=src .local/release-types-main/bin/python -m pytest -q tests/test_checkpoint_custody.py tests/test_checkpoint_schedule.py tests/test_checkpoint_retention.py'
+remedy = "Keep producer facts separate from platform target/schema/digest, copy normalized cuts, reconcile original disk commits without overwrite, serialize ownership changes and confirm deletion barriers before forgetting memory. This is not portable checkpoint or Rhodes restore admission proof."
