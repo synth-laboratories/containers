@@ -1,15 +1,16 @@
 """Run one DeepSWE task as a Rhodes Harbor rollout on Daytona and report what was observed.
 
-The Rhodes backend (a local slot running ``HARBOR_EXECUTION_BACKEND=daytona``) builds a
-Daytona snapshot from the task's pinned public image, runs the agent and the task's own
-hidden-test verifier in a Daytona sandbox, and grades with the task's grader. The driver
+The Rhodes backend (a local slot running ``HARBOR_EXECUTION_BACKEND=daytona``) starts
+Daytona sandboxes straight from the task's pinned public image (a FROM-only context needs
+no snapshot), runs the agent and the task's own hidden-test verifier there, and grades
+with the task's grader. The driver
 then deletes the pool and checks, through the Daytona API, that every Harbor sandbox and
 snapshot that appeared during the run is gone.
 
 Agents: ``fixed_solution`` applies the task's reference patch (no model; qualifies
 provisioning, grading and cleanup), ``codex`` runs a model through the backend's gateway.
 DeepSWE's ``separate`` verifier maps to Rhodes' isolated verifier with patch-only handoff:
-a fresh sandbox from the same snapshot receives the hidden tests and ``model.patch`` and
+a fresh sandbox from the same image receives the hidden tests and ``model.patch`` and
 nothing else from the agent's sandbox.
 """
 
@@ -250,9 +251,15 @@ class Run:
             self.report["rollout_id"] = rollout_id
             self.log("rollout", rollout_id=rollout_id)
             started = time.monotonic()
-            outcome = await self.client.wait_for(
-                rollout_id, timeout_seconds=args.rollout_seconds, poll_interval_seconds=5
-            )
+            seen: set[str] = set()
+            sampler = asyncio.create_task(self._sample_sandboxes(before_sandboxes, seen))
+            try:
+                outcome = await self.client.wait_for(
+                    rollout_id, timeout_seconds=args.rollout_seconds, poll_interval_seconds=5
+                )
+            finally:
+                sampler.cancel()
+                self.report["daytona_sandboxes_seen"] = sorted(seen)
             self.report["rollout_seconds"] = round(time.monotonic() - started, 1)
             body = outcome.payload
             (self.out / "rollout.json").write_text(json.dumps(body, indent=2, sort_keys=True) + "\n")
@@ -270,7 +277,9 @@ class Run:
         except (RhodesRequestError, PoolClientError, PoolRolloutTimeout, ValueError) as error:
             self.report["errors"].append({"stage": self.report["steps"][-1]["step"] if self.report["steps"] else "start",
                                           "error": type(error).__name__, "detail": str(error)[:500]})
-            self.log("error", error=type(error).__name__)
+            self.log("error", error=type(error).__name__, status=getattr(error, "status_code", None),
+                     code=getattr(error, "code", None), identifiers=getattr(error, "identifiers", None),
+                     detail=str(error)[:300])
         finally:
             if pool_id:
                 try:
@@ -283,6 +292,15 @@ class Run:
                 before_sandboxes, before_snapshots
             )
         return self._finish()
+
+    async def _sample_sandboxes(self, before: set[str], seen: set[str]) -> None:
+        """Record every sandbox the rollout creates; the isolated verifier makes a second one."""
+        while True:
+            try:
+                seen.update(await asyncio.to_thread(self.observer.sandboxes) - before)
+            except Exception:  # one failed listing must not end the observation
+                pass
+            await asyncio.sleep(2)
 
     async def _leaks(self, sandboxes: set[str], snapshots: set[str]) -> tuple[list[str], list[str]]:
         """Daytona deletes asynchronously; allow the cleanup bound before calling it a leak."""
@@ -303,7 +321,8 @@ class Run:
             # The reference solution must pass the task's own hidden tests.
             **({"oracle_scores_one": r.get("reward") == expected} if expected is not None else {}),
             "replay_attaches_to_original": r.get("replay_rollout_id") == r.get("rollout_id") is not None,
-            "snapshot_built_on_daytona": bool(r.get("snapshots_created")),
+            # Agent and isolated verifier each run in their own Daytona sandbox.
+            "agent_and_verifier_ran_on_daytona": len(r.get("daytona_sandboxes_seen") or ()) >= 2,
             "pool_deleted": r.get("pool_deleted") is True,
             "no_daytona_sandbox_left": r.get("leaked_sandboxes") == [],
             "no_daytona_snapshot_left": r.get("leaked_snapshots") == [],
