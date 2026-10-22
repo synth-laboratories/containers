@@ -244,6 +244,8 @@ class Lifecycle:
                 "seed": record.seed,
                 "max_steps": args.max_steps,
                 "policy_ref": {"harness": args.harness, "config": args.policy_config},
+                # sync executes inside the API request; queued hands the attempt to rhodes-worker.
+                "mode": args.execution_mode,
             }
             record.rollout_id = await self.client.submit(pool_id, submission)
             self.log(f"lane{record.lane} seed{record.seed} rollout {record.rollout_id}")
@@ -565,6 +567,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--parallel", type=int, default=4)
     parser.add_argument("--max-steps", type=int, default=10)
     parser.add_argument("--harness", default="scripted_react")
+    parser.add_argument("--execution-mode", choices=["sync", "queued"], default="sync")
     parser.add_argument("--policy-config", default="engine_acceptance")
     parser.add_argument("--ready-seconds", type=float, default=180)
     parser.add_argument("--rollout-seconds", type=float, default=1500)
