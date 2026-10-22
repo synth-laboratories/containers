@@ -124,6 +124,32 @@ git diff --binary {base} HEAD > /logs/artifacts/model.patch
 """
 
 
+# DeepSWE task images ship without an agent. The oracle needs none, so its context is
+# FROM-only and Rhodes creates sandboxes straight from the digest. Codex must be baked
+# in: the agent phase has no internet (only the gateway hop), so it cannot install at
+# run time. Same layer the backend appends to corpus Harbor tasks, with codex pinned.
+CODEX_CLI_VERSION = "0.163.0"
+CODEX_BUILD_LAYER = f"""
+USER root
+RUN if ! command -v codex >/dev/null 2>&1; then \\
+      if command -v apt-get >/dev/null 2>&1; then \\
+        apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl ca-certificates ripgrep && rm -rf /var/lib/apt/lists/*; \\
+      fi; \\
+      export NVM_DIR=/opt/nvm; mkdir -p "$NVM_DIR"; \\
+      curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.2/install.sh | bash; \\
+      . "$NVM_DIR/nvm.sh"; nvm install 22; npm install -g @openai/codex@{CODEX_CLI_VERSION}; \\
+      ln -sf "$(command -v node)" /usr/local/bin/node; \\
+      ln -sf "$(command -v codex)" /usr/local/bin/codex; \\
+    fi
+"""
+
+
+def task_dockerfile(task: DeepSweTask, agent: dict[str, Any]) -> str:
+    """FROM-only for the oracle (image-based sandboxes); codex adds its pinned CLI layer."""
+    dockerfile = f"FROM {task.image}\n"
+    return dockerfile + CODEX_BUILD_LAYER if agent.get("name") == "codex" else dockerfile
+
+
 def task_payload(task: DeepSweTask, *, task_id: str, agent: dict[str, Any]) -> dict[str, Any]:
     native = {
         "instruction_b64": _b64(task.instruction),
@@ -143,7 +169,7 @@ def task_payload(task: DeepSweTask, *, task_id: str, agent: dict[str, Any]) -> d
     }
     return {
         "task_id": task_id,
-        "context_tar_base64": _tar_b64({"Dockerfile": f"FROM {task.image}\n".encode()}),
+        "context_tar_base64": _tar_b64({"Dockerfile": task_dockerfile(task, agent).encode()}),
         "entrypoint": "native_harbor_phases",
         "entrypoint_mode": "native_harbor",
         "artifact_exfil_command": "cd /app && git diff HEAD 2>/dev/null || true",
@@ -188,7 +214,9 @@ class DaytonaObserver:
             raise ValueError("Daytona sandbox listing returned an invalid page")
         if page.get("nextCursor"):
             raise ValueError("Daytona sandbox listing is paginated; leak check would be partial")
-        return {str(item["id"]) for item in page["items"] if isinstance(item, dict) and item.get("id")}
+        return {
+            str(item["id"]) for item in page["items"] if isinstance(item, dict) and item.get("id")
+        }
 
     def snapshots(self) -> set[str]:
         names: set[str] = set()
@@ -197,7 +225,9 @@ class DaytonaObserver:
             listed = self._sdk.snapshot.list(page=page, limit=100)
             items = list(getattr(listed, "items", None) or [])
             names.update(
-                str(item.name) for item in items if str(getattr(item, "name", "")).startswith(HARBOR_SNAPSHOT_PREFIX)
+                str(item.name)
+                for item in items
+                if str(getattr(item, "name", "")).startswith(HARBOR_SNAPSHOT_PREFIX)
             )
             if len(items) < 100:
                 return names
@@ -205,16 +235,28 @@ class DaytonaObserver:
 
 
 class Run:
-    def __init__(self, client: RhodesClient, observer: DaytonaObserver, args: argparse.Namespace, out: Path) -> None:
+    def __init__(
+        self, client: RhodesClient, observer: DaytonaObserver, args: argparse.Namespace, out: Path
+    ) -> None:
         self.client, self.observer, self.args, self.out = client, observer, args, out
-        self.report: dict[str, Any] = {"run_id": out.name, "started_at": _now(), "steps": [], "errors": []}
+        self.report: dict[str, Any] = {
+            "run_id": out.name,
+            "started_at": _now(),
+            "steps": [],
+            "errors": [],
+        }
 
     def log(self, message: str, **fields: Any) -> None:
-        print(f"{_now()} {message} {json.dumps(fields, sort_keys=True) if fields else ''}".rstrip(), flush=True)
+        print(
+            f"{_now()} {message} {json.dumps(fields, sort_keys=True) if fields else ''}".rstrip(),
+            flush=True,
+        )
         self.report["steps"].append({"at": _now(), "step": message, **fields})
 
     def save(self) -> None:
-        (self.out / "report.json").write_text(json.dumps(self.report, indent=2, sort_keys=True) + "\n")
+        (self.out / "report.json").write_text(
+            json.dumps(self.report, indent=2, sort_keys=True) + "\n"
+        )
 
     async def execute(self) -> dict[str, Any]:
         args = self.args
@@ -228,7 +270,9 @@ class Run:
         self.report.update(task=f"deepswe/{task.slug}", image=task.image, agent=args.agent)
         pool_id = None
         try:
-            pool = await self.client.create_pool(name=f"deepswe-daytona-{self.out.name[-8:]}", backend="harbor")
+            pool = await self.client.create_pool(
+                name=f"deepswe-daytona-{self.out.name[-8:]}", backend="harbor"
+            )
             pool_id = str(pool.get("id") or pool.get("pool_id"))
             self.log("pool", pool_id=pool_id)
             started = time.monotonic()
@@ -236,8 +280,12 @@ class Run:
                 pool_id, task_payload(task, task_id=task.slug, agent=agent)
             )
             self.report["snapshot_build_seconds"] = round(time.monotonic() - started, 1)
-            self.log("task", task_id=task.slug, build_seconds=self.report["snapshot_build_seconds"],
-                     status=created.get("status"))
+            self.log(
+                "task",
+                task_id=task.slug,
+                build_seconds=self.report["snapshot_build_seconds"],
+                status=created.get("status"),
+            )
             during_snapshots = await asyncio.to_thread(self.observer.snapshots)
             self.report["snapshots_created"] = sorted(during_snapshots - before_snapshots)
             submission = {
@@ -262,7 +310,9 @@ class Run:
                 self.report["daytona_sandboxes_seen"] = sorted(seen)
             self.report["rollout_seconds"] = round(time.monotonic() - started, 1)
             body = outcome.payload
-            (self.out / "rollout.json").write_text(json.dumps(body, indent=2, sort_keys=True) + "\n")
+            (self.out / "rollout.json").write_text(
+                json.dumps(body, indent=2, sort_keys=True) + "\n"
+            )
             result = body.get("result") or {}
             metrics = result.get("metrics") or body.get("metrics") or {}
             self.report.update(
@@ -270,16 +320,30 @@ class Run:
                 reward=metrics.get("outcome_reward", body.get("score")),
                 reward_details=(result.get("details") or {}).get("rewards"),
             )
-            self.log("result", status=outcome.status, reward=self.report["reward"],
-                     seconds=self.report["rollout_seconds"])
+            self.log(
+                "result",
+                status=outcome.status,
+                reward=self.report["reward"],
+                seconds=self.report["rollout_seconds"],
+            )
             # Exact replay attaches to the original attempt instead of running again.
             self.report["replay_rollout_id"] = await self.client.submit(pool_id, submission)
         except (RhodesRequestError, PoolClientError, PoolRolloutTimeout, ValueError) as error:
-            self.report["errors"].append({"stage": self.report["steps"][-1]["step"] if self.report["steps"] else "start",
-                                          "error": type(error).__name__, "detail": str(error)[:500]})
-            self.log("error", error=type(error).__name__, status=getattr(error, "status_code", None),
-                     code=getattr(error, "code", None), identifiers=getattr(error, "identifiers", None),
-                     detail=str(error)[:300])
+            self.report["errors"].append(
+                {
+                    "stage": self.report["steps"][-1]["step"] if self.report["steps"] else "start",
+                    "error": type(error).__name__,
+                    "detail": str(error)[:500],
+                }
+            )
+            self.log(
+                "error",
+                error=type(error).__name__,
+                status=getattr(error, "status_code", None),
+                code=getattr(error, "code", None),
+                identifiers=getattr(error, "identifiers", None),
+                detail=str(error)[:300],
+            )
         finally:
             if pool_id:
                 try:
@@ -287,7 +351,9 @@ class Run:
                     self.report["pool_deleted"] = True
                 except (RhodesRequestError, PoolClientError) as error:
                     self.report["pool_deleted"] = False
-                    self.report["errors"].append({"stage": "delete_pool", "detail": str(error)[:300]})
+                    self.report["errors"].append(
+                        {"stage": "delete_pool", "detail": str(error)[:300]}
+                    )
             self.report["leaked_sandboxes"], self.report["leaked_snapshots"] = await self._leaks(
                 before_sandboxes, before_snapshots
             )
@@ -320,7 +386,9 @@ class Run:
             "graded": r.get("reward") is not None,
             # The reference solution must pass the task's own hidden tests.
             **({"oracle_scores_one": r.get("reward") == expected} if expected is not None else {}),
-            "replay_attaches_to_original": r.get("replay_rollout_id") == r.get("rollout_id") is not None,
+            "replay_attaches_to_original": r.get("replay_rollout_id")
+            == r.get("rollout_id")
+            is not None,
             # Agent and isolated verifier each run in their own Daytona sandbox.
             "agent_and_verifier_ran_on_daytona": len(r.get("daytona_sandboxes_seen") or ()) >= 2,
             "pool_deleted": r.get("pool_deleted") is True,
@@ -348,8 +416,15 @@ def main() -> int:
     parser.add_argument("--cleanup-seconds", type=float, default=180)
     parser.add_argument("--out", type=Path, default=Path(".local/rhodes-harbor-daytona"))
     args = parser.parse_args()
-    if not args.backend_url or not os.environ.get("SYNTH_API_KEY") or not os.environ.get("DAYTONA_API_KEY"):
-        print('{"error":"rhodes.harbor_daytona.backend_api_key_and_daytona_key_required"}', file=sys.stderr)
+    if (
+        not args.backend_url
+        or not os.environ.get("SYNTH_API_KEY")
+        or not os.environ.get("DAYTONA_API_KEY")
+    ):
+        print(
+            '{"error":"rhodes.harbor_daytona.backend_api_key_and_daytona_key_required"}',
+            file=sys.stderr,
+        )
         return 2
     out = args.out / f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{uuid4().hex[:8]}"
     out.mkdir(parents=True)
