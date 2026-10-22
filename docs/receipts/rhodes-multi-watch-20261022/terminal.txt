@@ -1,0 +1,11 @@
+Rhodes  10 rollouts                                                                                
+rollout_41…c5988bb4  event=6                       | completed  01:11:03Z  result_publication      
+rollout_ca…a6d53837  event=6                       | completed  01:11:03Z  result_publication      
+rollout_e4…a95ea166  event=6                       | completed  01:11:02Z  result_publication      
+rollout_b1…62f907bd  event=6                       | completed  01:11:02Z  result_publication      
+rollout_a1…eb3e10a6  event=6                       | completed  01:11:32Z  result_publication      
+rollout_5b…5c429264  event=6                       | completed  01:11:32Z  result_publication      
+rollout_ee…bc81e086  event=6                       | completed  01:11:32Z  result_publication      
+rollout_fc…df5d4bed  event=6                       | completed  01:11:32Z  result_publication      
+rollout_f2…63a4c348  event=6                       | completed  01:12:05Z  result_publication      
+rollout_68…47b6df49  event=6                       | completed  01:12:05Z  result_publication      

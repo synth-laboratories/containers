@@ -1,0 +1,136 @@
+{
+  "backend_source": "11a8d662c5ca2e0605395ccf28f087487cd13224",
+  "containers_source": "86cb58403358a968dae70b1cab2b48db5b0b0f4b",
+  "database_operation": "9a0499e2fd9c4910aa103a2687f4c189",
+  "deployment": false,
+  "independently_absent_instance_ids": [
+    "ff3ad073c3b36041cb83bc13b267daa4fd3ad780a6196bfff2f5e91a6395c8d3",
+    "7711493eb51438e7e6e044a47b85c5dd46fb0e4f054c81dfc201dfc824d6c972",
+    "e963e62f0f9c118bf5f542d1312f89391113f08633119e21150af498c2e1b8a5",
+    "13b59cbfd3568f0783bb6eaef5339c6a8e0b38c2acc4847cff91dedb0792ef64",
+    "f0c3119ae648d192d35f4a2afef370f9655fe68cbe1658ad7e0388b284fa0cce",
+    "fd0c0797b93c69d15e16c51cda24088ca409532033f70d54e9cbae9d22e8a35c",
+    "3c56927c63c80ab493be181f82e3b35c1a554f4e36fd951b8fdeefc4c361be4b",
+    "e533a247ae44143b72380f6de4d4c673b0f4acd107a05bd202dc21c348d41dcb",
+    "2639dde28abe6868562cdcf38759bcddaa000854a1b76e3eb273caf952b76b82",
+    "d7027713c88e645899c9967f76b19c66391db3dab36b59ee65123eecc33a6768",
+    "972b25e9de300f6bc07b8667f181f3e28bfd461da2a5d9eeb5037f010c00664d",
+    "79ca02fc27188e8fb97c434cad6c2b8c6a2b6d56deb20fd89585646711a7f501",
+    "040507379bcefc0334178df15c88dba6398a8b90fba080528f5956eeee140553",
+    "c8d1b92d65f7dce595a17fa55346930d5f471300ed5bb6f9826bbb252cac6b39",
+    "f0d8e8245d62f0867e8bf1ed502a70339abf94fbf26632746f1d69a9b3301ed1"
+  ],
+  "log_sha256": {
+    "backend_units": "ceeb5418aa231c18f481371e6faf185b1deb04a7e27863766c41ad9503b5b924",
+    "installed_tests": "81d971d455b5ac6e2af1f58e9db1f23ec6625df12b1fcc960bf3d62737083afe",
+    "multiplex_json": "30cfbc9562009b8b10929fb0546c62f3bd63cb6471008a0776281be42cc8facb",
+    "native": "488b5c8f7cd6ee4d49f3a32e057020bf5964193472c6df1905eae165bea4f39d",
+    "source_tests": "37a2acc62d6fef9c2937448bc52b0fa78cff5e0a8ac18badac3457e71dbe310a",
+    "terminal": "594b5e72c4fcd43c3f7dffdb1d945eff7f974957e42824beb7e90af98e24f71c",
+    "typing": "3c687dfbc5540c869598cb442343cf0d7140dae2cfc72c7b84ee74a8182ae0d2"
+  },
+  "migration_heads": [
+    "20261022_rhodes_lease_admit"
+  ],
+  "multiplex_watch": {
+    "cursors": {
+      "rollout_414822cf037669d8488d125dca7c14a9c5988bb4": 0,
+      "rollout_5b7fb792a1263783052879608e58086d5c429264": 1,
+      "rollout_6880782b6147fbe6ab269e7599f303ca47b6df49": 1,
+      "rollout_a176c26e4b4eb7f093a115b19c3eefaaeb3e10a6": 0,
+      "rollout_b1f188a0f291dbcad7b1fdee5f25766e62f907bd": 1,
+      "rollout_caf323d0dc2d0ea33daecfb829ee4e53a6d53837": 1,
+      "rollout_e44b59ca45d861ed6097316acbc63d7da95ea166": 0,
+      "rollout_eea90371d3515b0ca4194d78c23d103bbc81e086": 0,
+      "rollout_f2694253dce9725413202fb009e33b9163a4c348": 0,
+      "rollout_fc04bd0442fc644d21b2cab38c55db31df5d4bed": 1
+    },
+    "events_equal": 55,
+    "read_only_after_original_cleanup": true,
+    "rollout_ids": [
+      "rollout_414822cf037669d8488d125dca7c14a9c5988bb4",
+      "rollout_caf323d0dc2d0ea33daecfb829ee4e53a6d53837",
+      "rollout_e44b59ca45d861ed6097316acbc63d7da95ea166",
+      "rollout_b1f188a0f291dbcad7b1fdee5f25766e62f907bd",
+      "rollout_a176c26e4b4eb7f093a115b19c3eefaaeb3e10a6",
+      "rollout_5b7fb792a1263783052879608e58086d5c429264",
+      "rollout_eea90371d3515b0ca4194d78c23d103bbc81e086",
+      "rollout_fc04bd0442fc644d21b2cab38c55db31df5d4bed",
+      "rollout_f2694253dce9725413202fb009e33b9163a4c348",
+      "rollout_6880782b6147fbe6ab269e7599f303ca47b6df49"
+    ],
+    "scope": "historical multiplex replay and explicit TTY projection; single live streams separately qualified",
+    "terminal_visible_rows": 10
+  },
+  "not_qualified": [
+    "optimizer and enrolled Swarms adoption",
+    "native registry validation authority",
+    "first-class checkpoint custody/restore",
+    "hosted provider matrices",
+    "all v0.24 acceptance",
+    "native scientific step/token/cost progress projection"
+  ],
+  "paid_provider_calls": 0,
+  "pressure_full_check": "still exceeds15seconds; not passed",
+  "runtime_image_sdk": "0.4.5.dev2026102104 unchanged",
+  "schema_version": "synth.rhodes-multi-watch-qualification.v1",
+  "scripted_cohort": {
+    "attempts": 10,
+    "declared_concurrency": 4,
+    "instance_ids": [
+      "f0c3119ae648d192d35f4a2afef370f9655fe68cbe1658ad7e0388b284fa0cce",
+      "fd0c0797b93c69d15e16c51cda24088ca409532033f70d54e9cbae9d22e8a35c",
+      "3c56927c63c80ab493be181f82e3b35c1a554f4e36fd951b8fdeefc4c361be4b",
+      "e533a247ae44143b72380f6de4d4c673b0f4acd107a05bd202dc21c348d41dcb",
+      "2639dde28abe6868562cdcf38759bcddaa000854a1b76e3eb273caf952b76b82",
+      "d7027713c88e645899c9967f76b19c66391db3dab36b59ee65123eecc33a6768",
+      "972b25e9de300f6bc07b8667f181f3e28bfd461da2a5d9eeb5037f010c00664d",
+      "79ca02fc27188e8fb97c434cad6c2b8c6a2b6d56deb20fd89585646711a7f501",
+      "040507379bcefc0334178df15c88dba6398a8b90fba080528f5956eeee140553",
+      "c8d1b92d65f7dce595a17fa55346930d5f471300ed5bb6f9826bbb252cac6b39"
+    ],
+    "maximum_admitted_execution_overlap": 4,
+    "provider_model_calls": 0,
+    "rollout_ids": [
+      "rollout_414822cf037669d8488d125dca7c14a9c5988bb4",
+      "rollout_caf323d0dc2d0ea33daecfb829ee4e53a6d53837",
+      "rollout_e44b59ca45d861ed6097316acbc63d7da95ea166",
+      "rollout_b1f188a0f291dbcad7b1fdee5f25766e62f907bd",
+      "rollout_a176c26e4b4eb7f093a115b19c3eefaaeb3e10a6",
+      "rollout_5b7fb792a1263783052879608e58086d5c429264",
+      "rollout_eea90371d3515b0ca4194d78c23d103bbc81e086",
+      "rollout_fc04bd0442fc644d21b2cab38c55db31df5d4bed",
+      "rollout_f2694253dce9725413202fb009e33b9163a4c348",
+      "rollout_6880782b6147fbe6ab269e7599f303ca47b6df49"
+    ],
+    "scientific_policy": "scripted_react/engine_acceptance",
+    "scope": "local control-plane lifecycle; not a model-performance experiment",
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9
+    ]
+  },
+  "sdk_version": "0.4.5.dev2026102110",
+  "source_wheel_installed_modules_equal": 308,
+  "storage_operation": "9b5d834abf50404290aae369f59d71d9",
+  "tests": {
+    "backend_units": 524,
+    "installed": 143,
+    "native_process_cases": 17,
+    "native_seconds": 206.54,
+    "source": 143,
+    "typing_profiles": {
+      "main": "zero_diagnostics",
+      "mitm": "zero_diagnostics"
+    }
+  },
+  "wheel_sha256": "7ee378a685776012b92e78075c3992525bfb2a76593b316f2e8170c3fc6113cb"
+}
