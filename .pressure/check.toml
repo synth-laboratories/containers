@@ -82,6 +82,6 @@ id = "rhodes_sdk_wire_protocol"
 description = "Rhodes wire envelopes and retry delays preserve server identity and backpressure"
 severity = "error"
 command_timeout_seconds = 30
-require_paths = ["tests/test_pools.py", "tests/test_rhodes_client.py", "tests/test_rhodes_cli.py", ".local/release-types-main/bin/python"]
-command = 'TMPDIR="$PWD/.local/tmp" PYTHONPATH=src .local/release-types-main/bin/python -m pytest -q tests/test_pools.py tests/test_rhodes_client.py tests/test_rhodes_cli.py'
+require_paths = ["tests/test_pools.py", "tests/test_rhodes_client.py", "tests/test_rhodes_cli.py", "tests/test_rhodes_watch.py", ".local/release-types-main/bin/python"]
+command = 'TMPDIR="$PWD/.local/tmp" PYTHONPATH=src .local/release-types-main/bin/python -m pytest -q tests/test_pools.py tests/test_rhodes_client.py tests/test_rhodes_cli.py tests/test_rhodes_watch.py'
 remedy = "Keep pool SDK convenience fields translated to canonical flat configuration and metadata; reject collisions and qualify installed SDK against the ordinary-role public API. Lease mutation envelopes and flat lease GET remain distinct. Honor bounded server Retry-After; surface longer waits to the queue and never replay unidentified mutations. Bound the full observer deadline and keep CLI original run/cursor identities; timeout never cancels."

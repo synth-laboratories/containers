@@ -68,6 +68,29 @@ def test_follow_keeps_committed_event_and_cursor_without_submit(monkeypatch, cap
     assert len(requests) == 2 and all(request.method == "GET" for request in requests)
 
 
+def test_watch_json_preserves_per_rollout_cursors_and_events(monkeypatch, capsys, tmp_path):
+    cursors = tmp_path / "cursors.json"
+    cursors.write_text('{"a":7,"b":12}')
+    expected = []
+
+    def respond(request):
+        identity = request.url.path.split("/")[-2]
+        sequence = {"a": 8, "b": 13}[identity]
+        if request.url.params.get("format") == "sse":
+            assert request.headers["Last-Event-ID"] == str(sequence - 1)
+            event = {"sequence": sequence, "rollout_id": identity, "score": 0}
+            expected.append(event)
+            return httpx.Response(200, headers={"content-type": "text/event-stream"},
+                                 content=f"id: {sequence}\ndata: " + json.dumps(event) + "\n\n")
+        return httpx.Response(200, json={"status": "completed", "high_water": sequence})
+
+    requests = install_client(monkeypatch, respond)
+    assert main(["rhodes", "watch", "a", "b", "--cursors", str(cursors), "--format", "json"]) == 0
+    emitted = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert sorted(emitted, key=lambda event: event["rollout_id"]) == expected
+    assert len(requests) == 4 and all(request.method == "GET" for request in requests)
+
+
 @pytest.mark.parametrize("status,exit_code", [("completed", 0), ("failed", 3), ("cancelled", 3)])
 def test_wait_exit_tracks_execution_status_not_zero_reward(monkeypatch, capsys, status, exit_code):
     payload = {"status": status, "reward": 0, "cleanup_pending": True}

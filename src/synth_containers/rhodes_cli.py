@@ -18,6 +18,7 @@ import httpx
 
 from .pools import PoolClientError, PoolRolloutTimeout
 from .rhodes_client import RhodesClient, RhodesRequestError
+from .rhodes_watch import RhodesTerminal, watch_rollouts
 
 
 def _payload(path: Path) -> dict:
@@ -81,6 +82,11 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="synth-containers rhodes", description=__doc__)
     parser.add_argument("--backend-url", default=os.environ.get("SYNTH_BACKEND_URL"))
     commands = parser.add_subparsers(dest="command", required=True)
+    watch = commands.add_parser("watch")
+    watch.add_argument("rollout_ids", nargs="+")
+    watch.add_argument("--cursors", type=Path)
+    watch.add_argument("--format", choices=("auto", "tty", "json"), default="auto")
+    watch.add_argument("--timeout-seconds", type=_seconds, default=1800)
     upload = commands.add_parser("upload-source")
     upload.add_argument("path", type=Path)
     upload.add_argument("--operation-id", required=True)
@@ -129,6 +135,19 @@ def _parser() -> argparse.ArgumentParser:
 
 
 async def _execute(client: RhodesClient, args: argparse.Namespace, body: dict | None) -> int:
+    if args.command == "watch":
+        renderer = (
+            RhodesTerminal(sys.stdout, args.rollout_ids)
+            if args.format == "tty" or args.format == "auto" and sys.stdout.isatty()
+            else None
+        )
+        if renderer is not None:
+            renderer.render()
+        await watch_rollouts(
+            client, args.rollout_ids, cursors=body or {}, timeout_seconds=args.timeout_seconds,
+            emit=renderer if renderer is not None else _emit,
+        )
+        return 0
     if args.command == "upload-source":
         output = await client.upload_environment_source(args.path, operation_id=args.operation_id)
     elif args.command == "import":
@@ -208,6 +227,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "follow" and args.after_sequence < 0:
             raise ValueError("rhodes.invalid_event_cursor")
         body = _payload(args.config) if args.command in {"exec", "import"} else None
+        if args.command == "watch" and args.cursors is not None:
+            body = _payload(args.cursors)
         if args.command == "exec" and (
             body is None or not isinstance(body.get("idempotency_key"), str)
             or not body["idempotency_key"].strip()

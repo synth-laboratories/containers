@@ -145,6 +145,34 @@ requests cancellation. Exit codes: 0 success, 2 command/refusal, 3 observed
 failed/cancelled execution, 4 observer timeout, 130 observer interruption.
 Scientific reward zero does not cause an execution-failure exit.
 
-This initial remote CLI has one-rollout JSON streaming. The stacked terminal
-view, multi-rollout cursors and optimizer command adoption remain separate
-qualification work; it does not silently substitute the local eval journal.
+### Multi-rollout watch
+
+`synth-containers rhodes watch ID_1 ID_2 --format auto` attaches to between1
+and100 distinct existing rollout IDs. Auto renders a stacked view on a terminal
+and emits original JSON lines when piped. `--format tty` or `json` is explicit.
+At most10 rows are visible, with a fixed status/updated/event column and a
+count of additional selected rollouts. Active rows take precedence over
+terminal rows. Narrow terminals reduce the visible count. Row labels may be
+abbreviated; JSON retains the exact original rollout ID and sequence.
+
+`--cursors cursors.json` accepts an object mapping selected rollout IDs to
+their delivered sequence. Unspecified IDs start at0; unknown IDs, duplicate
+selection, bool/negative/overflowing cursors refuse. Every multiplexed event
+must carry its exact selected rollout identity. Streams preserve independent
+sequence domains; there is no combined server cursor or synthetic journal.
+Keep the last delivered sequence for each ID to attach again.
+
+There are at most32 active stream readers and32 queued events. Slow consumers
+apply local backpressure. The single observation deadline covers queued
+readers too. One refusal, timeout, consumer error or interrupt closes all client
+reader tasks without cancelling server rollouts. A watch success means journal
+observation completed, not that every scientific execution succeeded.
+
+The terminal is a read-only projection. It starts as unobserved and displays
+only received execution transitions, event position and the server event's
+UTC creation time. Publication status cannot overwrite execution status.
+Missing scientific step/token/cost progress remains unknown; event position
+is explicitly labelled event, not steps or budget utilization. Untrusted
+control characters cannot escape columns. Native producer progress/limits
+and optimizer command adoption require their own qualified contracts; this
+view does not substitute the local eval journal or native Trace V5.
