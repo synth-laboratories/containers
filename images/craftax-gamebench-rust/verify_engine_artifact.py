@@ -8,15 +8,37 @@ import re
 import sys
 
 
+# Qualified mbx v1.21.0 binaries and ELF e_machine per runtime platform.
+PLATFORMS = {
+    "linux/arm64": dict(
+        machines={"aarch64", "arm64"},
+        elf_machine=183,
+        mbx_sha256="3b7408c71fae119b09c506ab47daff6cba6476c5e7140111959824bd72e63331",
+    ),
+    "linux/amd64": dict(
+        machines={"x86_64", "amd64"},
+        elf_machine=62,
+        mbx_sha256="1eb4922ffc5250bfe9326344f00a970fcd542f3574ad70d9ef58a4bec06e7be8",
+    ),
+}
+
+
+def runtime_platform():
+    machine = platform.machine().lower()
+    for name, spec in PLATFORMS.items():
+        if machine in spec["machines"]:
+            return name, spec
+    raise ValueError("prepared Craftax engine requires an ARM64 or AMD64 runtime image")
+
+
 def verify(root):
-    if platform.machine().lower() not in {"aarch64", "arm64"}:
-        raise ValueError("prepared Craftax engine requires an ARM64 runtime image")
+    platform_name, spec = runtime_platform()
     root = Path(root)
     manifest = json.loads((root / "build-inputs.json").read_bytes())
     if (
         manifest.get("schema_version") != "synth.craftax.compiler-artifact.v1"
-        or manifest.get("platform") != "linux/arm64"
-        or manifest.get("mbx_sha256") != "3b7408c71fae119b09c506ab47daff6cba6476c5e7140111959824bd72e63331"
+        or manifest.get("platform") != platform_name
+        or manifest.get("mbx_sha256") != spec["mbx_sha256"]
         or manifest.get("rust_image") != "rust:1.97-slim-bookworm@sha256:2775a09d208ff0d7c1f50490c45b62db929e87ba1dcbc3f2132ac71a704bcdd3"
         or not re.fullmatch("[0-9a-f]{40}", manifest.get("source_revision", ""))
     ):
@@ -43,9 +65,9 @@ def verify(root):
     if (
         len(header) != 20
         or header[:6] != b"\x7fELF\x02\x01"
-        or int.from_bytes(header[18:20], "little") != 183
+        or int.from_bytes(header[18:20], "little") != spec["elf_machine"]
     ):
-        raise ValueError("Linux ARM64 engine required")
+        raise ValueError("Linux engine for " + platform_name + " required")
     return manifest
 
 
