@@ -420,3 +420,25 @@ def test_replay_and_archive_mismatches_fail_the_run(tmp_path):
     assert report["checks"]["trace_archives_reopen_after_cleanup"] is False
     assert report["checks"]["results_retained_after_cleanup"] is True
     assert report["checks"]["usage_recorded_after_cleanup"] is True
+
+
+def test_hosted_provider_and_limits_reach_pool_deploy_and_report(tmp_path):
+    client = FakeRhodes(not_ready_reads=0, rollout_seconds=0.05)
+    report = asyncio.run(lifecycle(
+        tmp_path, client, "--seeds", "0-1", "--parallel", "2",
+        "--provider", "daytona", "--cpu-cores", "1", "--memory-mb", "1024",
+    ).run())
+    assert report["passed"], report["checks"]
+    assert report["provider"] == "daytona"
+    pools = [d["body"] for name, d in client.calls if name == "create_pool"]
+    assert {body["provider"] for body in pools} == {"daytona"}
+    deploys = [d["payload"] for name, d in client.calls if name == "create_deployment"]
+    assert all(p["provider"] == "daytona" for p in deploys)
+    assert all(p["limits"] == {"cpu_cores": 1.0, "memory_mb": 1024} for p in deploys)
+
+
+def test_docker_default_sends_no_limits(tmp_path):
+    client = FakeRhodes(not_ready_reads=0, rollout_seconds=0.05)
+    asyncio.run(lifecycle(tmp_path, client, "--seeds", "0", "--parallel", "1").run())
+    deploys = [d["payload"] for name, d in client.calls if name == "create_deployment"]
+    assert deploys and all(p["provider"] == "docker" and "limits" not in p for p in deploys)
