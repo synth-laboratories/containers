@@ -495,7 +495,9 @@ def _wire_tool_calls(calls: object) -> list[dict[str, Any]]:
     for index, call in enumerate(calls):
         if not isinstance(call, dict):
             continue
-        function = call.get("function") if isinstance(call.get("function"), dict) else {}
+        function = call.get("function")
+        if not isinstance(function, dict):
+            function = {}
         arguments = function.get("arguments")
         if not isinstance(arguments, str):
             arguments = json.dumps(
@@ -642,11 +644,8 @@ class HttpSampler:
         self.min_interval = float(config.get("min_request_interval") or 0.0)
         if not self.local and self.min_interval <= 0:
             self.min_interval = 2.0
-        self.retries = int(
-            config.get("sampler_retries")
-            if config.get("sampler_retries") is not None
-            else (16 if not self.local else 0)
-        )
+        configured_retries = config.get("sampler_retries")
+        self.retries = int(configured_retries if configured_retries is not None else (16 if not self.local else 0))
         self.retry_max_wait = float(config.get("retry_max_wait") or (90.0 if not self.local else 20.0))
 
     def _auth_headers(self) -> dict[str, str]:
@@ -768,14 +767,16 @@ class HttpSampler:
         reasoning_details = message.get("reasoning_details")
         if isinstance(reasoning_details, list):
             wired["reasoning_details"] = copy.deepcopy(reasoning_details)
-        usage = body.get("usage") if isinstance(body.get("usage"), dict) else {}
+        usage = body.get("usage")
+        if not isinstance(usage, dict):
+            usage = {}
         usage = copy.deepcopy(usage)
-        completion_details = (
-            usage.get("completion_tokens_details")
-            if isinstance(usage.get("completion_tokens_details"), dict)
-            else {}
-        )
-        headers = body.get("_headers") if isinstance(body.get("_headers"), dict) else {}
+        completion_details = usage.get("completion_tokens_details")
+        if not isinstance(completion_details, dict):
+            completion_details = {}
+        headers = body.get("_headers")
+        if not isinstance(headers, dict):
+            headers = {}
         completion = {
             "text": _text_field(wired.get("content")),
             "message": wired,
@@ -893,7 +894,7 @@ class NanoHorizonPlanner:
         self._last_trace: dict[str, Any] = {}
         self._call_gen_ai: list[dict[str, Any]] = []
         self._proxy_request_ids: list[str] = []
-        self._usage = {
+        self._usage: dict[str, Any] = {
             "prompt_tokens": 0,
             "completion_tokens": 0,
             "total_tokens": 0,
@@ -1047,7 +1048,9 @@ class NanoHorizonPlanner:
                 self._usage["completion_tokens"] or 0
             )
             self._usage["calls"] = self._calls
-            usage = completion.get("usage") if isinstance(completion.get("usage"), dict) else {}
+            usage = completion.get("usage")
+            if not isinstance(usage, dict):
+                usage = {}
             cost, source = billed_or_estimated_cost_usd(
                 usage,
                 prompt_tokens=prompt_tokens,

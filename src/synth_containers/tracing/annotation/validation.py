@@ -721,6 +721,8 @@ class ProposalValidator:
                     )
                 )
                 continue
+            if score is None:
+                raise TypeError("Decisive judgment requires a score")
             numeric = float(score)
             passed = numeric >= criterion.pass_threshold if criterion.higher_is_better else numeric <= criterion.pass_threshold
             records.append(

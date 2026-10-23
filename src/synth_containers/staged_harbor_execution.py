@@ -33,7 +33,8 @@ def validate_staged_harbor(receipt: Mapping[str, Any]) -> None:
     for phase in ("agent", "verifier"):
         seconds = resolved.get(phase)
         if (
-            type(seconds) not in (int, float)
+            seconds is None
+            or type(seconds) not in (int, float)
             or not math.isfinite(seconds)
             or seconds <= 0
             or manifest.get(phase, {}).get("timeout_sec") != seconds

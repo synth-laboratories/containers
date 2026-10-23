@@ -14,6 +14,7 @@ from synth_containers.serde import JsonDataclassMixin
 
 from ..canonical import canonical_payload, canonical_text, content_digest, text_digest
 from .document import TraceDocumentV5
+from .messages import MessageNodeV5
 
 
 SELECTOR_SCHEMA_VERSION = "synth.trace-selector.v1"
@@ -153,12 +154,14 @@ def resolve_selector(
         if digest_attr
         else content_digest(entity)
     )
+    if not isinstance(entity_digest, str) or not entity_digest:
+        return SelectorResolutionV1(selector=selector, resolved=False, reason="entity_digest_unavailable")
     return _finish_resolution(
         selector,
         entity=entity,
         entity_kind=kind,
         entity_digest=entity_digest,
-        default_text=entity.text() if kind == SelectorKind.MESSAGE else None,
+        default_text=entity.text() if isinstance(entity, MessageNodeV5) else None,
     )
 
 

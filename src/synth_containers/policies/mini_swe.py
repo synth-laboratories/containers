@@ -31,7 +31,10 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from renderers import Message as RendererMessage
 
 DeltaCallback = Callable[[dict[str, Any]], None]
 
@@ -119,7 +122,7 @@ class MiniSweAgent:
             "completion_tokens": 0,
             "total_tokens": 0,
         }
-        self._messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        self._messages: list[RendererMessage] = [{"role": "system", "content": SYSTEM_PROMPT}]
         self._last_trace: dict[str, Any] = {}
         self._transcript: list[dict[str, Any]] = []
         self._last_prompt_tokens = 0
@@ -320,7 +323,9 @@ class MiniSweAgent:
             raise RuntimeError(f"mini_swe policy HTTP {exc.code}: {detail}") from exc
         self.calls += 1
         message = (body.get("choices") or [{}])[0].get("message") or {}
-        usage = body.get("usage") if isinstance(body.get("usage"), dict) else {}
+        usage = body.get("usage")
+        if not isinstance(usage, dict):
+            usage = {}
         for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
             value = usage.get(key)
             if isinstance(value, int):
@@ -403,6 +408,8 @@ class MiniSweAgent:
         # sampled surface for the harness's Harmony/tool-call parser.
         renderer.parse_response(token_ids)
         content = tokenizer.decode(token_ids, skip_special_tokens=False)
+        if not isinstance(content, str):
+            raise RuntimeError("mini_swe_tokenizer_decode_requires_text")
         self.calls += 1
         self._last_prompt_tokens = len(prompt_ids)
         self._usage["prompt_tokens"] += len(prompt_ids)

@@ -1,0 +1,77 @@
+{
+  "profile": "synth.stream-cursor.v1",
+  "vectors": [
+    {
+      "name": "unfiltered",
+      "kinds": null,
+      "scope": {
+        "stream_id": "stream:fixture",
+        "subject_id_field": "rollout_id",
+        "subject_id": "fixture",
+        "kinds_digest": "sha256:42285b5d37451e93a868c0d12ea24059ab2bcba60c85add7e75f41fd027deaf6"
+      },
+      "cursor": {
+        "schema_version": "synth.stream-cursor.v1",
+        "scope": {
+          "stream_id": "stream:fixture",
+          "subject_id_field": "rollout_id",
+          "subject_id": "fixture",
+          "kinds_digest": "sha256:42285b5d37451e93a868c0d12ea24059ab2bcba60c85add7e75f41fd027deaf6"
+        },
+        "after": 7,
+        "chain_head": "abababababababababababababababababababababababababababababababab"
+      },
+      "token": "sc1.eyJzY2hlbWFfdmVyc2lvbiI6InN5bnRoLnN0cmVhbS1jdXJzb3IudjEiLCJzY29wZSI6eyJzdHJlYW1faWQiOiJzdHJlYW06Zml4dHVyZSIsInN1YmplY3RfaWRfZmllbGQiOiJyb2xsb3V0X2lkIiwic3ViamVjdF9pZCI6ImZpeHR1cmUiLCJraW5kc19kaWdlc3QiOiJzaGEyNTY6NDIyODViNWQzNzQ1MWU5M2E4NjhjMGQxMmVhMjQwNTlhYjJiY2JhNjBjODVhZGQ3ZTc1ZjQxZmQwMjdkZWFmNiJ9LCJhZnRlciI6NywiY2hhaW5faGVhZCI6ImFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWIifQ"
+    },
+    {
+      "name": "empty",
+      "kinds": [],
+      "scope": {
+        "stream_id": "stream:fixture",
+        "subject_id_field": "rollout_id",
+        "subject_id": "fixture",
+        "kinds_digest": "sha256:b7b900c872fc02c72817fe14f35a9e8a01e26140b3ca24951cfe11e6a41129e0"
+      },
+      "cursor": {
+        "schema_version": "synth.stream-cursor.v1",
+        "scope": {
+          "stream_id": "stream:fixture",
+          "subject_id_field": "rollout_id",
+          "subject_id": "fixture",
+          "kinds_digest": "sha256:b7b900c872fc02c72817fe14f35a9e8a01e26140b3ca24951cfe11e6a41129e0"
+        },
+        "after": 7,
+        "chain_head": "abababababababababababababababababababababababababababababababab"
+      },
+      "token": "sc1.eyJzY2hlbWFfdmVyc2lvbiI6InN5bnRoLnN0cmVhbS1jdXJzb3IudjEiLCJzY29wZSI6eyJzdHJlYW1faWQiOiJzdHJlYW06Zml4dHVyZSIsInN1YmplY3RfaWRfZmllbGQiOiJyb2xsb3V0X2lkIiwic3ViamVjdF9pZCI6ImZpeHR1cmUiLCJraW5kc19kaWdlc3QiOiJzaGEyNTY6YjdiOTAwYzg3MmZjMDJjNzI4MTdmZTE0ZjM1YTllOGEwMWUyNjE0MGIzY2EyNDk1MWNmZTExZTZhNDExMjllMCJ9LCJhZnRlciI6NywiY2hhaW5faGVhZCI6ImFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWIifQ"
+    },
+    {
+      "name": "unicode-and-duplicate",
+      "kinds": [
+        "z",
+        "é",
+        "观察",
+        "a",
+        "é"
+      ],
+      "scope": {
+        "stream_id": "stream:fixture",
+        "subject_id_field": "rollout_id",
+        "subject_id": "fixture",
+        "kinds_digest": "sha256:97f0335048bc5b6e94f5d085864d8d4df8179525c7458788ce502eeddbeb4c7b"
+      },
+      "cursor": {
+        "schema_version": "synth.stream-cursor.v1",
+        "scope": {
+          "stream_id": "stream:fixture",
+          "subject_id_field": "rollout_id",
+          "subject_id": "fixture",
+          "kinds_digest": "sha256:97f0335048bc5b6e94f5d085864d8d4df8179525c7458788ce502eeddbeb4c7b"
+        },
+        "after": 7,
+        "chain_head": "abababababababababababababababababababababababababababababababab"
+      },
+      "token": "sc1.eyJzY2hlbWFfdmVyc2lvbiI6InN5bnRoLnN0cmVhbS1jdXJzb3IudjEiLCJzY29wZSI6eyJzdHJlYW1faWQiOiJzdHJlYW06Zml4dHVyZSIsInN1YmplY3RfaWRfZmllbGQiOiJyb2xsb3V0X2lkIiwic3ViamVjdF9pZCI6ImZpeHR1cmUiLCJraW5kc19kaWdlc3QiOiJzaGEyNTY6OTdmMDMzNTA0OGJjNWI2ZTk0ZjVkMDg1ODY0ZDhkNGRmODE3OTUyNWM3NDU4Nzg4Y2U1MDJlZWRkYmViNGM3YiJ9LCJhZnRlciI6NywiY2hhaW5faGVhZCI6ImFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWIifQ"
+    }
+  ]
+}

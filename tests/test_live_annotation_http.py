@@ -185,6 +185,10 @@ def test_annotation_channel_is_subscribable_before_start(tmp_path: Path) -> None
     channel = prepared.json()["stream"]["annotation"]
     page = client.get(channel["events"], params={"after": 0}).json()
     assert page["cursor"] == {"kind": "sequence", "after": 0, "high_water": 0, "closed": False, "next": 0, "has_more": False}
+    scoped = client.get(channel["events"], params={"scoped": "true"}).json()
+    token = scoped["cursor"]["resume"]
+    assert "scope" in scoped["cursor"]
+    assert client.get(channel["events"], params={"cursor": token}).status_code == 200
     assert [row["kind"] for row in page["events"]] == ["stream.subscribed"]
     assert page["events"][0]["payload"]["stream.id"] == channel["id"]
     journal = tmp_path / "live_annotation" / "events"

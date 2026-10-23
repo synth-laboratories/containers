@@ -1,4 +1,6 @@
-tests
-**/__pycache__
-**/*.pyc
-
+*
+!Dockerfile
+!requirements.lock
+!verify_engine_artifact.py
+!craftax_gold
+!craftax_gold/*.py

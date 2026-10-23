@@ -14,6 +14,7 @@ import websockets.asyncio.server
 
 from ..adapters.openai_responses import (
     NORMALIZER_VERSION as RESPONSES_ADAPTER_VERSION,
+    TERMINAL_EVENTS,
 )
 from ..canonical import bytes_digest, canonical_bytes, canonical_text
 from ...gen_ai import request_observation
@@ -161,11 +162,7 @@ class ResponsesWebSocketRelay:
                         )
                         frame_index += 1
                         event_type = str(event.get("type") or "")
-                        if event_type in {
-                            "response.completed",
-                            "response.failed",
-                            "error",
-                        }:
+                        if event_type in TERMINAL_EVENTS or event_type == "error":
                             response_payload = event.get("response")
                             usage = (
                                 response_payload.get("usage")
@@ -184,7 +181,7 @@ class ResponsesWebSocketRelay:
                                 payload={
                                     "http_status": (
                                         200
-                                        if event_type == "response.completed"
+                                        if event_type in {"response.completed", "response.incomplete", "response.cancelled"}
                                         else 502
                                     ),
                                     "provider_adapter": "openai_responses",
@@ -390,7 +387,7 @@ class ResponsesWebSocketServer:
                 self.host,
                 self.requested_port,
             )
-            self.port = int(self._server.sockets[0].getsockname()[1])
+            self.port = int(tuple(self._server.sockets)[0].getsockname()[1])
             self._ready.set()
 
         try:

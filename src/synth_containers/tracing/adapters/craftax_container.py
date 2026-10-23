@@ -114,7 +114,9 @@ def container_rollout_to_native_events(document: TraceDocumentV5) -> dict[str, A
     records = policy_call_records(document)
     for event in ordered:
         kind = str(event.event_type)
-        payload = event.payload if isinstance(event.payload, dict) else {}
+        payload = event.payload
+        if not isinstance(payload, dict):
+            payload = {}
         if kind == "observation":
             readout = payload.get("readout") or {}
             latest_obs = (readout.get("observation_text") if isinstance(readout, dict) else None) or latest_obs
@@ -124,7 +126,7 @@ def container_rollout_to_native_events(document: TraceDocumentV5) -> dict[str, A
             record = records.get(call_index + 1) or records.get(call_index) or {}
             reasoning = record.get("reasoning")
             reply = ("THOUGHT: " + reasoning.strip().replace("\n", " ") + "\n" if reasoning else "") + "ACTIONS: " + ", ".join(actions)
-            emit("craftax.transcript", event.occurred_at, {"kind": "policy.call", "call_index": call_index, "model": record.get("model") or policy.get("model") or policy.get("kind"), "reasoning_effort": policy.get("reasoning_effort"), "observation": "text", "prompt": latest_obs or "", "reply": reply, "finish_reason": "tool_call" if record.get("tool_arguments") else "plan", "prompt_tokens": int(record.get("prompt_tokens") or 0), "completion_tokens": int(record.get("completion_tokens") or 0), "reply_provenance": "span.policy.data" if record else "rendered from span.policy.plan", "container_event_id": event.event_id, "policy_data_event_id": record.get("event_id")})
+            emit("craftax.transcript", event.occurred_at, {"kind": "policy.call", "call_index": call_index, "model": record.get("model") or policy.get("model") or policy.get("kind"), "reasoning_effort": policy.get("reasoning_effort"), "observation": "text", "prompt": latest_obs or "", "reply": reply, "finish_reason": "tool_call" if record.get("tool_arguments") else "plan", "prompt_tokens": record.get("prompt_tokens"), "completion_tokens": record.get("completion_tokens"), "reply_provenance": "span.policy.data" if record else "rendered from span.policy.plan", "container_event_id": event.event_id, "policy_data_event_id": record.get("event_id")})
             call_index += 1
         elif kind in TRANSCRIPT_KINDS:
             if kind == "action_applied":
@@ -138,7 +140,7 @@ def container_rollout_to_native_events(document: TraceDocumentV5) -> dict[str, A
             reward = event.payload.get("value", event.payload.get("reward"))
             break
     last_ts = ordered[-1].occurred_at if ordered else document.lifecycle.ended_at or first_ts
-    emit("craftax.eval.run.terminal", last_ts, {"stopped_on": terminal_reason or "unknown", "terminated": True, "truncated": terminal_reason == "max_steps", "reward": reward, "env_steps": steps, "usage": {"calls": call_index, "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "actions_planned": planned, "actions_taken": steps}})
+    emit("craftax.eval.run.terminal", last_ts, {"stopped_on": terminal_reason or "unknown", "terminated": True, "truncated": terminal_reason == "max_steps", "reward": reward, "env_steps": steps, "usage": {"calls": call_index, "prompt_tokens": document.usage.prompt_tokens, "completion_tokens": document.usage.completion_tokens, "total_tokens": document.usage.total_tokens, "actions_planned": planned, "actions_taken": steps}})
     return {"run_id": f"container-{rollout_id}", "trace_correlation_id": rollout_id, "metadata": {"bridge": "container harbor document -> " + SOURCE_FORMAT, "container_trace_id": document.trace_id, "container_trace_digest": document.content_digest}, "events": events}
 
 
@@ -194,8 +196,12 @@ def policy_call_steps(document: TraceDocumentV5) -> dict[int, dict[str, Any]]:
     call_index = -1
     for event in ordered:
         kind = str(event.event_type)
-        payload = event.payload if isinstance(event.payload, dict) else {}
-        detail = payload.get("payload") if isinstance(payload.get("payload"), dict) else {}
+        payload = event.payload
+        if not isinstance(payload, dict):
+            payload = {}
+        detail = payload.get("payload")
+        if not isinstance(detail, dict):
+            detail = {}
         if kind == "span.policy.plan":
             call_index += 1
             batches[call_index] = {"planned": [str(item) for item in (payload.get("actions") or [])], "steps": [], "terminal": None}

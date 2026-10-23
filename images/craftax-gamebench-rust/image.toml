@@ -13,8 +13,8 @@ required_env = []
 startup_timeout_seconds = 180
 
 [build_contexts]
-containers = "$CONTAINERS_ROOT"
-gamebench  = "$CRAFTAX_RUNTIME_ROOT"
+containers_wheel = "$CONTAINERS_WHEEL_CONTEXT"
+craftax_engine = "$CRAFTAX_ENGINE_ARTIFACTS"
 
 [extra_env]
 # Workshop default. Contest speedrun: --target craftax_nanohorizon

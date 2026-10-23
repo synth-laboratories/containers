@@ -28,6 +28,8 @@ class NormalizedProviderResult:
     provider_ids: dict[str, str] = field(default_factory=dict)
     terminal_observed: bool = False
     raw_events: list[dict[str, Any]] = field(default_factory=list)
+    terminal_status: str | None = None
+    terminal_details: dict[str, Any] = field(default_factory=dict)
 
 
 @runtime_checkable

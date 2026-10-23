@@ -361,8 +361,12 @@ class AnnotationService:
         model = request.model or entry.definition.model
         effort = request.reasoning_effort or entry.program.parameters.get("default_effort")
         if runner is not None:
-            model = runner.resolve_model(request.model, entry.definition.model) if hasattr(runner, "resolve_model") else model
-            effort = runner.resolve_effort(request.reasoning_effort, entry.program.parameters.get("default_effort")) if hasattr(runner, "resolve_effort") else effort
+            resolve_model = getattr(runner, "resolve_model", None)
+            resolve_effort = getattr(runner, "resolve_effort", None)
+            if callable(resolve_model):
+                model = resolve_model(request.model, entry.definition.model)
+            if callable(resolve_effort):
+                effort = resolve_effort(request.reasoning_effort, entry.program.parameters.get("default_effort"))
         if not model:
             raise AnnotationServiceError(AnnotationJobErrorCode.RUNNER_UNAVAILABLE, f"annotator {entry.annotator_id} has no model: pass one or configure a runner default")
         return replace(request, model=model, reasoning_effort=effort, runner_kind=runner_kind)

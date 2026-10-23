@@ -1,0 +1,14 @@
+{
+  "schema_version": "synth.rhodes-definition-client-qualification.v1",
+  "source_commit": "2bfb6803e7c7e48ab2c394b925e559e421a9ae95",
+  "version": "0.4.5.dev2026102104",
+  "wheel_sha256": "c990273d1ef44736cfffe25d90ff402cd4a8c4e5a2eb8f2bf68b4b39935cd83d",
+  "source_modules_equal": true,
+  "installed_tests_passed": 32,
+  "type_profiles": {
+    "main": "zero diagnostics",
+    "mitm": "zero diagnostics"
+  },
+  "publication": "unpublished development candidate",
+  "provider_model_calls": 0
+}

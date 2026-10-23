@@ -927,10 +927,10 @@ class Runner:
             self.suite.fail("C5-01", f"{meta.get('blocking_trial')}")
         else:
             self.suite.ok("C5-01")
-        a = self.client.post("/policy-configs", json={"config_id": "luna_med", "config": {"model": "luna"}})
-        b = self.client.post("/policy-configs", json={"config_id": "sol_med", "config": {"model": "sol"}})
-        held = self._start(submission_mode="async", policy_ref={"harness": "harbor_fused", "config": "luna_med"})
-        mid = self.client.post("/policy-configs", json={"config_id": "other", "config": {}})
+        a = self.client.post("/policy-configs", json={"config_id": "compat_c5_luna", "config": {"model": "luna"}})
+        b = self.client.post("/policy-configs", json={"config_id": "compat_c5_sol", "config": {"model": "sol"}})
+        held = self._start(submission_mode="async", policy_ref={"harness": "harbor_fused", "config": "compat_c5_luna"})
+        mid = self.client.post("/policy-configs", json={"config_id": "compat_c5_mid", "config": {}})
         self.client.post(f"/rollouts/{_json(held)['rollout_id']}/complete")
         held_id = _json(held)["rollout_id"]
         held_policy = _json(self.client.get(f"/rollouts/{held_id}")).get("policy_ref")
@@ -938,7 +938,7 @@ class Runner:
             a.status_code == 200
             and b.status_code == 200
             and mid.status_code == 200
-            and held_policy == {"harness": "harbor_fused", "config": "luna_med", "code": None}
+            and held_policy == {"harness": "harbor_fused", "config": "compat_c5_luna", "code": None}
         ):
             self.suite.ok("C5-02")
         else:
@@ -1244,17 +1244,17 @@ class Runner:
 
         basic = self.client.post(
             "/policy-configs",
-            json={"config_id": "react_legal_actions", "harness": "react_legal_actions", "config": {"mcp_bind": "unused"}},
+            json={"config_id": "compat_c8_react", "harness": "react_legal_actions", "config": {"mcp_bind": "unused"}},
         )
         agentic = self.client.post(
             "/policy-configs",
-            json={"config_id": "agentic_codex", "harness": "codex", "config": {"mcp_bind": "digbench-mcp"}},
+            json={"config_id": "compat_c8_codex", "harness": "codex", "config": {"mcp_bind": "digbench-mcp"}},
         )
         if basic.status_code == 200 and agentic.status_code == 200:
             if self.target == "digbench_mock" and not self.paid:
                 self.suite.ok("C8-04", "agentic MCP skipped on mock")
             else:
-                agentic_run = self._start(policy_ref={"harness": "codex", "config": "agentic_codex"})
+                agentic_run = self._start(policy_ref={"harness": "codex", "config": "compat_c8_codex"})
                 akinds = _kinds(_json(self.client.get(_json(agentic_run)["stream"]["transports"]["poll"]["url"], params={"after": 0}))["events"])
                 if "span.mcp.opened" in akinds:
                     self.suite.ok("C8-04")

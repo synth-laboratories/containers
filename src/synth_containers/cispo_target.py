@@ -929,13 +929,13 @@ class CounterAttemptRuntime:
         # A probe reaches no provider, so it has no origin to reach one through.
         # It still walks this same episode, against the deterministic sampler,
         # which is the point: the unpaid path must exercise the paid one.
-        session = (
-            ProbePolicySession(
-                binding, rollout_id=plan.rollout_id, transport=self._transport
-            )
-            if probe
-            else BoundPolicySession(binding, transport=self._transport)
-        )
+        session: ProbePolicySession | BoundPolicySession
+        if probe:
+            session = ProbePolicySession(binding, rollout_id=plan.rollout_id, transport=self._transport)
+        else:
+            if not isinstance(binding, SamplerBinding):
+                raise CispoTargetError("Paid attempt requires a sampler binding")
+            session = BoundPolicySession(binding, transport=self._transport)
         env = self._runtime_factory()
         actions = _legal_actions(env)
         observation = env.reset(seed=plan.seed)

@@ -1,0 +1,14 @@
+{
+  "schema_version": "synth.rhodes-observed-capacity-client-qualification.v1",
+  "source_commit": "63d1afad433a6141fed4cf1c5ee28c1db1550f12",
+  "version": "0.4.5.dev2026102103",
+  "wheel_sha256": "8432681df5799419866b653c3e3772b93f07f77052d5736792c415a2bfb457be",
+  "source_modules_equal": true,
+  "installed_tests_passed": 31,
+  "type_profiles": {
+    "main": "zero diagnostics",
+    "mitm": "zero diagnostics"
+  },
+  "publication": "unpublished development candidate",
+  "provider_calls": 0
+}

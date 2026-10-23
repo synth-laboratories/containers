@@ -21,6 +21,11 @@ class LocalTarget:
 class LeaseAttachment:
     lease_id: str
     target: LocalTarget
+    # The relay consumes ``Authorization`` (the worker token) and the agent never
+    # forwards it. An origin that authenticates each caller itself (the inference
+    # gateway's rollout session) receives this declared request header as its
+    # ``Authorization`` instead; it is opt-in per lease and never forwarded as-is.
+    origin_authorization_header: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

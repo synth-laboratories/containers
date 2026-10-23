@@ -38,8 +38,10 @@ def mount_live_annotation(app: FastAPI, service: LiveAnnotationService, *, platf
         rollout_id: str,
         after: int = Query(default=0, ge=0),
         limit: int = Query(default=1000, ge=1, le=10_000),
+        scoped: bool = Query(default=False),
+        cursor: str | None = Query(default=None, max_length=4096),
     ) -> Any:
-        return _response(service.events_payload(rollout_id, after, limit), default_status=404)
+        return _response(service.events_payload(rollout_id, after, limit, scoped=scoped, cursor=cursor), default_status=404)
 
     @app.get("/rollouts/{rollout_id}/annotations/stream")
     async def annotation_sse(rollout_id: str, request: Request) -> StreamingResponse:

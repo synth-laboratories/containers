@@ -30,6 +30,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 # Directory names skipped anywhere in the tree (build/VCS/tooling noise,
 # never source we own).
 _EXCLUDED_DIR_NAMES = {
+    ".local",
     ".venv",
     ".git",
     "__pycache__",

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal, Mapping, cast
+from typing import Any, Literal, Mapping
 
 from synth_containers.serde import JsonDataclassMixin, jsonable
 
@@ -352,7 +352,7 @@ def chat_message_to_canonical(message: Mapping[str, Any]) -> CanonicalMessage:
     if not parts:
         parts.append(TextPart(text=""))
     return CanonicalMessage(
-        role=cast(MessageRole, role),
+        role=role,
         parts=tuple(parts),
         tool_call_id=str(message.get("tool_call_id") or "") or None,
         name=str(message.get("name") or "") or None,

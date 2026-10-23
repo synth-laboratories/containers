@@ -1,0 +1,102 @@
+{
+  "scope": "v0.24 local journal replay, scoped SSE/poll cursors and typed transport watermarks",
+  "source_revision": "6cb51d89a64f5ee66dcb26429bdb3b025763daa3",
+  "qualified_at": "2026-10-21T17:09:28.760650+00:00",
+  "test_sets": {
+    "broad": {
+      "passed": 488,
+      "skipped": 11,
+      "failed": 0
+    },
+    "focused": {
+      "passed": 34,
+      "failed": 0,
+      "includes_new_byte_vectors": 3
+    }
+  },
+  "distinct_verified_cases": {
+    "passed": 491,
+    "skipped": 11
+  },
+  "lint": "passed",
+  "changed_module_typing": "passed",
+  "full_type_comparison": {
+    "base_diagnostics": 226,
+    "candidate_diagnostics": 225,
+    "added": [],
+    "removed": [
+      "src/synth_containers/event_log.py: error[invalid-argument-type] Argument to bound method `RolloutEventLog.recover` is incorrect: Expected `Path`, found `Path | None`"
+    ]
+  },
+  "historical_release_type_gate": "fails; SYN-4923; no baseline waiver",
+  "before_wheel_sha256": "1662177076f47f85dc3834d147960119c21b0b5c5683437ae75efcac1f410fb7",
+  "before": {
+    "page_snapshot_consistent": false,
+    "page_high_water": 4,
+    "page_sequences": [
+      1
+    ],
+    "sse_retains_close_tail": false,
+    "uncertain_append_fenced": false,
+    "recovered_prefix": null,
+    "recovery_error": "ValueError: event_log_sequence_gap:2",
+    "public_envelope_detached": false,
+    "unterminated_tail_refused": false,
+    "unterminated_bytes_preserved": true,
+    "unterminated_sha256": "24dabb529d1ebac1ef281cb6766046a5c5d874b26ffb50fafe25027e0f9767eb",
+    "provider_calls": 0
+  },
+  "after": {
+    "page_snapshot_consistent": true,
+    "page_high_water": 1,
+    "page_sequences": [
+      1
+    ],
+    "sse_retains_close_tail": true,
+    "uncertain_append_fenced": true,
+    "recovered_prefix": 1,
+    "recovery_error": null,
+    "public_envelope_detached": true,
+    "unterminated_tail_refused": true,
+    "unterminated_bytes_preserved": true,
+    "unterminated_sha256": "51f419ccac36c61fc17246bf58c60b53b9a37cadd954f7c77262ecb4b52aa206",
+    "provider_calls": 0
+  },
+  "installed_http": {
+    "wheel_sha256": "9d18b8515e02d670663d27f07a89ce5727a11c74af52d1fa37f4a0e9d475d952",
+    "installed_module": "/Users/joshuapurtell/GitHub/workspaces/v024-rhodes-20261021/containers/.local/installed/lib/python3.13/site-packages/synth_containers/__init__.py",
+    "cwd": "/Users/joshuapurtell/GitHub/workspaces/v024-rhodes-20261021/containers/.local/unrelated-cwd",
+    "source_pythonpath": "unset",
+    "package_source_files_verified": 286,
+    "native_events_replayed_exactly": 13,
+    "poll_pages": 7,
+    "scoped_sse_and_poll_exchange": "pass",
+    "wrong_scope_and_invalid_header": "pass",
+    "journal_bytes_unchanged_by_reads": true,
+    "provider_calls": 0,
+    "journal_sha256": "15b25120eea31a53d38c3cf0f91cf4847516343a803f311b87c43a1b1d866be1",
+    "owned_server_stopped": true,
+    "server_exit_code": -15
+  },
+  "host_check": {
+    "elapsed_seconds": 12.011316041985992,
+    "timed_out": true,
+    "exit_code": -9,
+    "stdout": "",
+    "stderr": "",
+    "disk_free_gib": 35.43571090698242,
+    "workspace_backpressure_gib": 50,
+    "host_hard_floor_gib": 20,
+    "foreign_cleanup": false
+  },
+  "pressure_papercut": "dda826ca-c76b-4ed7-ac99-141499ddecb0",
+  "evidence": "/Users/joshuapurtell/GitHub/Pressure/artifacts/agent-runs/dec300d6-2d97-46dc-ad64-ebde3cd1420a/containers-multi-agent/stream-contract-20261021",
+  "limits": [
+    "Local single-writer filesystem custody only; no hosted commit/index/auth/admission claim.",
+    "Watermarks are filtered transport progress, not execution success, scientific verdict, capture seal or settlement.",
+    "Aggregate cursors, service generation fences, bounded slow readers/storage, per-client checkpoints and terminal renderers remain pending.",
+    "Provider/benchmark qualification, org quotas and hosted Rhodes serving/deployment remain pending."
+  ],
+  "provider_calls": 0,
+  "deployed_or_published": false
+}

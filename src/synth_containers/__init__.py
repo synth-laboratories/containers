@@ -86,6 +86,26 @@ from .launch import (
     serve_image,
     up_image,
 )
+from .package_build import (
+    build_container_package,
+    plan_container_package,
+    validate_container_build_output,
+)
+from .package_files import ContainerPackageError
+from .stream_cursor import StreamCursorError, StreamCursorV1, StreamScopeV1, StreamWatermarkV1
+from .package_compatibility import (
+    PackageCompatibilityIssue,
+    PackageCompatibilityReport,
+    PackageRuntimeSupport,
+    check_package_compatibility,
+)
+from .package_models import (
+    ContainerArtifactDescriptor,
+    ContainerPackageManifest,
+    ImageArtifactIdentity,
+    PackageBuildOutput,
+    PackageBuildPlan,
+)
 from .nouns import (
     Action,
     Actor,
@@ -143,6 +163,7 @@ from .pools import (
     pool_state_is_terminal,
     validate_pool_transition,
 )
+from .rhodes_client import RhodesClient
 from .profiles import all_profile_specs, infer_profiles, missing_protocols, spec_for_profile
 from .prompt_programs import (
     GEPA_OPTIMIZER_CONTRACT_VERSION,
@@ -237,6 +258,23 @@ from .wire import (
 )
 
 __all__ = [
+    "StreamCursorError",
+    "StreamCursorV1",
+    "StreamScopeV1",
+    "StreamWatermarkV1",
+    "ContainerArtifactDescriptor",
+    "ContainerPackageError",
+    "ContainerPackageManifest",
+    "PackageCompatibilityIssue",
+    "PackageCompatibilityReport",
+    "PackageRuntimeSupport",
+    "check_package_compatibility",
+    "ImageArtifactIdentity",
+    "PackageBuildOutput",
+    "PackageBuildPlan",
+    "build_container_package",
+    "plan_container_package",
+    "validate_container_build_output",
     "Action",
     "ActionableSideInfo",
     "Actor",
@@ -310,6 +348,7 @@ __all__ = [
     "PauseRequest",
     "PolicyDisableReasoning",
     "PoolClient",
+    "RhodesClient",
     "PoolClientError",
     "PoolRolloutTimeout",
     "PoolState",

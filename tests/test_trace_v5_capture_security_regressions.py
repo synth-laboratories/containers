@@ -22,9 +22,9 @@ from synth_containers.tracing.adapters.experiments_v4 import (
     import_experiments_trace_v4,
 )
 from synth_containers.tracing.adapters.native import import_native_to_bundle
+from synth_containers.tracing.adapters.openai_responses import NORMALIZER_VERSION
 from synth_containers.tracing.adapters.v4 import import_rollout_trace_v4
 from synth_containers.tracing.canonical import (
-    bytes_digest,
     canonical_bytes,
     canonical_text,
     content_digest,
@@ -769,7 +769,7 @@ def test_nonterminal_resume_rebuilds_durable_provider_counters(
         payload={
             "call_index": 1,
             "provider_adapter": "openai_responses",
-            "provider_adapter_version": "1",
+            "provider_adapter_version": NORMALIZER_VERSION,
             "route": "/v1/responses",
             "stream": False,
             "request_digest": "sha256:request",
@@ -1177,8 +1177,10 @@ def test_publication_retry_reuses_identical_terminal_candidate(
     ) == 1
 
 
+@pytest.mark.parametrize("raw_adapter_version", ["1", "999"])
 def test_finalizer_rejects_provider_adapter_version_drift(
     tmp_path: Path,
+    raw_adapter_version: str,
 ) -> None:
     supervisor = CaptureSupervisor(
         _supervisor_config(tmp_path / "adapter-version-drift")
@@ -1189,7 +1191,7 @@ def test_finalizer_rejects_provider_adapter_version_drift(
         payload={
             "call_index": 1,
             "provider_adapter": "openai_responses",
-            "provider_adapter_version": "999",
+            "provider_adapter_version": raw_adapter_version,
             "route": "/v1/responses",
             "stream": False,
             "request_digest": "sha256:request",
@@ -1211,7 +1213,7 @@ def test_finalizer_rejects_provider_adapter_version_drift(
 
     with pytest.raises(
         FinalizationError,
-        match="does not match installed openai_responses@1",
+        match=f"does not match installed openai_responses@{NORMALIZER_VERSION}",
     ):
         supervisor.finalize()
 
@@ -1509,6 +1511,7 @@ def test_codex_prompt_cache_key_exactly_attributes_provider_call_to_native_child
         payload={
             "call_index": 1,
             "provider_adapter": "openai_responses",
+            "provider_adapter_version": NORMALIZER_VERSION,
             "route": "/v1/responses",
             "stream": False,
             "request_digest": "sha256:request",
@@ -2056,9 +2059,11 @@ def test_cli_environment_allowlist_fails_when_requested_name_is_unset(
         _allowlisted_environment(["TRACE_V5_MISSING_ENV"])
 
 
+@pytest.mark.parametrize("terminal_status", ["completed", "incomplete", "failed", "cancelled"])
 def test_responses_websocket_relay_redacts_and_preserves_per_call_order(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    terminal_status: str,
 ) -> None:
     session = _session(tmp_path, capture_id="capture_websocket")
     request = json.dumps(
@@ -2074,7 +2079,7 @@ def test_responses_websocket_relay_redacts_and_preserves_per_call_order(
     )
     terminal = json.dumps(
         {
-            "type": "response.completed",
+            "type": f"response.{terminal_status}",
             "response": {
                 "id": "response-ws-1",
                 "status": "completed",
@@ -2179,7 +2184,7 @@ def test_responses_websocket_relay_redacts_and_preserves_per_call_order(
     assert started["payload"]["route"] == "/v1/responses"
     assert started["payload"]["upstream_host"] == "api.openai.com"
     assert started["payload"]["upstream_path"] == "/v1/responses"
-    assert started["payload"]["provider_adapter_version"] == "1"
+    assert started["payload"]["provider_adapter_version"] == NORMALIZER_VERSION
     assert (
         started["payload"]["request_body"]["response"]["api_key"]
         == REDACTED
@@ -2192,8 +2197,9 @@ def test_responses_websocket_relay_redacts_and_preserves_per_call_order(
     assert finished["payload"]["frames"] == 1
     assert finished["payload"]["usage_observed"] is True
     assert stats.calls_accepted == 1
-    assert stats.calls_completed == 1
-    assert stats.calls_errored == 0
+    assert finished["payload"]["provider_status"] == f"response.{terminal_status}"
+    assert stats.calls_completed == (1 if terminal_status == "completed" else 0)
+    assert stats.calls_errored == (0 if terminal_status == "completed" else 1)
     assert stats.calls_normalized == 1
     assert stats.frames == 1
     forwarded = connect_arguments["additional_headers"]
@@ -2434,11 +2440,10 @@ def test_raw_repair_does_not_promote_complete_logically_forged_envelope(
         encoding="utf-8",
     )
 
-    result = repair(root, capture_id="capture_forgery")
+    with pytest.raises(ValueError, match="corrupt complete record"):
+        repair(root, capture_id="capture_forgery")
 
-    assert result.repaired is True
-    assert result.recovered_records == 0
-    assert result.reason == "partial_had_no_complete_records"
+    assert (segments / "000001.partial").read_text() == canonical_text(forged) + "\n"
     assert not list(segments.glob("*.jsonl"))
 
 

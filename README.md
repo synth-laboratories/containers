@@ -1,14 +1,15 @@
 <h1 align="center">synth-containers</h1>
-<p align="center">The task contract for Synth optimizers and evals — wrap any task as a small HTTP service that optimizers can target without touching your code.</p>
+<p align="center">Shared task, runtime and evidence contracts for Synth optimizers and evals.</p>
 <p align="center">
 <a href="https://pypi.org/project/synth-containers/">PyPI</a> ·
 <a href="https://github.com/synth-laboratories/optimizers">Optimizers</a> ·
 <a href="https://github.com/synth-laboratories/synth-cookbooks-public">Cookbooks</a>
 </p>
 
-A Synth container is a small HTTP service around a task. It owns the dataset, the
-scoring/verifier logic, the mutable prompt or policy fields, and the policy-model
-credential boundary. An optimizer like
+A Synth container packages a task as a command job, HTTP service or native
+environment adapter. Task contracts retain dataset, scoring/verifier, mutable
+prompt or policy and credential boundaries. Through the HTTP optimizer profile,
+an optimizer like
 [`synth-optimizers`](https://github.com/synth-laboratories/optimizers) GEPA sees one URL
 and a typed rollout contract — it never imports your task package or reads private
 evaluator state. The same contract works whether the task is a classifier, a coding
@@ -34,7 +35,33 @@ uv sync --group dev
 uv run --group dev pytest tests
 ```
 
-## The contract
+## Portable package builds (v0.24 development)
+
+Versioned TOML/JSON package manifests declare a build/resolve script, immutable
+input identities, platform, startup/readiness and optional protocol/credential
+references. Plan without executing code, then run the entrypoint with retained
+bounded logs and a validated artifact descriptor:
+
+```sh
+synth-containers package plan ./container.toml
+synth-containers package build ./container.toml --output ./build-receipt
+synth-containers package check ./build-receipt/artifact.json --runtime-support ./runtime-support.json
+synth-containers package schema artifact
+```
+
+See [the package/build contract](docs/specs/container-package-v1.md). Artifact
+identity validation, runtime readiness, provider support and current admission
+remain distinct checks. Hosted registry/runtime integration is subsequent work.
+
+Trace V5 producer/aggregation fixes preserve partial usage, Codex source-time
+basis and Responses terminal outcomes. See [the accounting/adapter contract](docs/specs/trace-v5-partial-accounting.md)
+for version compatibility and the remaining publication/timestamp work.
+
+Rollout polling and opt-in scoped SSE share resumable view/history cursors and
+typed watermarks. See [the replay contract](docs/specs/stream-resume-v1.md) for
+local persistence guarantees, error handling and the remaining hosted/UI work.
+
+## The HTTP optimizer contract
 
 | Route | Method | Purpose |
 | --- | --- | --- |

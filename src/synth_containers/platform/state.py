@@ -7,7 +7,7 @@ import json
 import os
 import tempfile
 import threading
-import time
+import time as time
 import uuid
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -17,7 +17,6 @@ from typing import Any
 from ..event_log import (
     CONTROL_SUBSCRIBED,
     RolloutEventLog,
-    poll_payload,
     stream_descriptor,
     validate_rollout_id,
 )
@@ -29,6 +28,8 @@ from ..metadata import (
 )
 from ..live_annotation.service import LiveAnnotationService, annotation_channel
 from .affordances import bind_recipe
+from .journal_retention import journal_retention, retention_ttl_seconds
+from .journal_pages import journal_events_payload
 from .http_requests import CreateRolloutRequest, ISOLATED_POLICY_HARNESS, NANOHORIZON_HARNESS
 from .policy_process import DEFAULT_HEURISTIC, IsolatedPolicyProcess
 from .reward_plan import PlanOutcome, classify_plan_outcome
@@ -162,46 +163,128 @@ class CompatPlatform:
         if not root.is_dir():
             return
         for path in sorted(root.glob("*.json")):
-            record = json.loads(path.read_text(encoding="utf-8"))
-            checkpoint_id = str(record.get("checkpoint_id") or "")
-            if record.get("schema_version") != "synth.containers.checkpoint.v1":
-                raise ValueError(f"checkpoint_schema:{path.name}")
-            if path.name != f"{self._durable_key(checkpoint_id)}.json":
-                raise ValueError(f"checkpoint_identity:{path.name}")
-            if record.get("target_id") != self.spec.target_id:
-                continue
-            expected_digest = _checkpoint_digest(
-                {key: value for key, value in record.items() if key != "content_digest"}
-            )
-            if record.get("content_digest") != expected_digest:
-                raise ValueError(f"checkpoint_digest:{checkpoint_id}")
-            self.checkpoints[checkpoint_id] = record
+            record = self._read_checkpoint_record(path)
+            if record is not None:
+                self.checkpoints[str(record["checkpoint_id"])] = record
+
+    def _read_checkpoint_record(self, path: Path) -> dict[str, Any] | None:
+        record = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(record, dict) or record.get("schema_version") != "synth.containers.checkpoint.v1":
+            raise ValueError(f"checkpoint_schema:{path.name}")
+        checkpoint_id = str(record.get("checkpoint_id") or "")
+        if not checkpoint_id or path.name != f"{self._durable_key(checkpoint_id)}.json":
+            raise ValueError(f"checkpoint_identity:{path.name}")
+        if record.get("target_id") != self.spec.target_id:
+            return None
+        expected_digest = _checkpoint_digest(
+            {key: value for key, value in record.items() if key != "content_digest"}
+        )
+        if record.get("content_digest") != expected_digest:
+            raise ValueError(f"checkpoint_digest:{checkpoint_id}")
+        return record
+
+    @staticmethod
+    def _confirm_checkpoint_directory(path: Path) -> None:
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
 
     def record_checkpoint(self, record: dict[str, Any]) -> dict[str, Any]:
-        checkpoint_id = str(record.get("checkpoint_id") or "").strip()
-        if not checkpoint_id:
-            raise ValueError("checkpoint_id_required")
+        """Freeze native JSON facts before acknowledging durable checkpoint bytes.
+
+        See docs/specs/native-checkpoint-custody-v1.md. This process owns the
+        target/schema/digest. It is not a portable checkpoint import interface.
+        """
+        checkpoint_id = record.get("checkpoint_id")
+        if (
+            not isinstance(checkpoint_id, str) or not checkpoint_id
+            or checkpoint_id != checkpoint_id.strip() or len(checkpoint_id.encode()) > 1024
+        ):
+            raise ValueError("checkpoint_id_requires_bounded_canonical_string")
+        if {"schema_version", "target_id", "content_digest"} & record.keys():
+            raise ValueError("checkpoint_reserved_authority_fields")
+        try:
+            # Use the existing v1 JSON codec, but freeze its actual file value
+            # once. Caller aliases and tuple/list differences cannot change the
+            # retained in-memory value or make restart produce another cut.
+            captured = json.loads(json.dumps(
+                record, sort_keys=True, separators=(",", ":"), default=str, allow_nan=False
+            ))
+        except (ValueError, TypeError, RecursionError) as error:
+            raise ValueError("checkpoint_payload_invalid_json") from error
         durable = {
+            **captured,
             "schema_version": "synth.containers.checkpoint.v1",
             "target_id": self.spec.target_id,
-            **record,
         }
         durable["content_digest"] = _checkpoint_digest(durable)
-        existing = self.checkpoints.get(checkpoint_id)
-        if existing is not None:
-            if existing != durable:
+        path = self._checkpoint_path(checkpoint_id)
+        with self._state_lock:
+            cached = self.checkpoints.get(checkpoint_id)
+            if cached is not None and cached != durable:
                 raise ValueError(f"checkpoint_identity_conflict:{checkpoint_id}")
-            return existing
-        self._atomic_json(self._checkpoint_path(checkpoint_id), durable)
-        self.checkpoints[checkpoint_id] = durable
-        return durable
+            try:
+                existing = self._read_checkpoint_record(path)
+            except FileNotFoundError:
+                self._atomic_json(path, durable)
+            else:
+                if existing != durable:
+                    raise ValueError(f"checkpoint_identity_conflict:{checkpoint_id}")
+                # A previous replace may have committed before its ack or
+                # directory barrier failed. Confirm the original; never rewrite.
+                self._confirm_checkpoint_directory(path)
+            self.checkpoints[checkpoint_id] = durable
+            return deepcopy(durable)
 
     def drop_checkpoint(self, checkpoint_id: str) -> None:
         """Forget a checkpoint. Idempotent if the id or file is already gone."""
 
-        self.checkpoints.pop(checkpoint_id, None)
-        path = self._checkpoint_path(checkpoint_id)
-        path.unlink(missing_ok=True)
+        with self._state_lock:
+            if self.checkpoint_is_retained(checkpoint_id):
+                raise RuntimeError("checkpoint_has_retention_roots")
+            path = self._checkpoint_path(checkpoint_id)
+            try:
+                existing = self._read_checkpoint_record(path)
+            except FileNotFoundError:
+                if checkpoint_id not in self.checkpoints:
+                    return
+            else:
+                if existing is None or (
+                    checkpoint_id in self.checkpoints and self.checkpoints[checkpoint_id] != existing
+                ):
+                    raise ValueError(f"checkpoint_identity_conflict:{checkpoint_id}")
+                path.unlink()
+            # Keep memory and original identity when unlink or the durability
+            # barrier fails. An absent file on retry still needs this barrier.
+            self._confirm_checkpoint_directory(path)
+            self.checkpoints.pop(checkpoint_id, None)
+
+    def retain_checkpoint(self, checkpoint_id: str, *, owner_kind: str, owner_id: str) -> str:
+        """Owning runtime registers active continuation/fork/archive custody."""
+        from ..checkpoint_retention import retain_checkpoint
+        with self._state_lock:
+            if checkpoint_id not in self.checkpoints:
+                raise ValueError("checkpoint_retention_subject_missing")
+            try:
+                retained = self._read_checkpoint_record(self._checkpoint_path(checkpoint_id))
+            except FileNotFoundError as error:
+                raise ValueError("checkpoint_retention_subject_missing") from error
+            if retained != self.checkpoints[checkpoint_id]:
+                raise ValueError(f"checkpoint_identity_conflict:{checkpoint_id}")
+            self._confirm_checkpoint_directory(self._checkpoint_path(checkpoint_id))
+            return retain_checkpoint(self.storage_root, checkpoint_id, owner_kind=owner_kind, owner_id=owner_id)
+
+    def release_checkpoint_root(self, checkpoint_id: str, *, owner_kind: str, owner_id: str) -> None:
+        from ..checkpoint_retention import release_checkpoint_root
+        with self._state_lock:
+            release_checkpoint_root(self.storage_root, checkpoint_id, owner_kind=owner_kind, owner_id=owner_id)
+
+    def checkpoint_is_retained(self, checkpoint_id: str) -> bool:
+        from ..checkpoint_retention import checkpoint_is_retained
+        with self._state_lock:
+            return checkpoint_is_retained(self.storage_root, checkpoint_id)
 
     @staticmethod
     def _receipt_digest(value: dict[str, Any]) -> str:
@@ -747,7 +830,7 @@ class CompatPlatform:
                 and pin.status == "running"
                 and not bool(result.get("replayed"))
             )
-        if not should_run:
+        if not should_run or pin is None or log is None:
             return result
         try:
             # Policy and evaluator calls can take minutes. They are isolated by
@@ -1939,74 +2022,21 @@ class CompatPlatform:
         kinds: list[str] | tuple[str, ...] | None = None,
         *,
         ack: int | None = None,
+        cursor: str | None = None,
+        scoped: bool = False,
     ) -> dict[str, Any]:
-        log = self.logs.get(rollout_id)
-        if log is None:
-            return {"error": "unknown_rollout", "status_code": 404}
-        try:
-            payload = poll_payload(log, after=after, limit=limit, kinds=kinds, subject_id=rollout_id)
-        except ValueError:
-            return {"error": "invalid_page_limit", "status_code": 422}
-        if ack is not None:
-            try:
-                log.record_ack(ack)
-            except ValueError:
-                return {"error": "invalid_ack", "status_code": 422}
-        payload["cursor"].update(chain_head=log.chain_head, acked=log.last_acked)
-        payload["retention"] = self._journal_retention(log)
-        # No credential scan here. `_persist` already runs `assert_no_secrets`
-        # on every appended envelope, which matches secret *patterns* and
-        # credential-bearing *field names* -- strictly stronger than the
-        # substring check that used to live on this path. That check cost two
-        # full `json.dumps` per event per call, and `events_payload` is invoked
-        # with limit=10_000 at the end of every rollout, so a 50-call episode
-        # paid tens of thousands of redundant serializations of multi-KB
-        # payloads for a weaker guarantee already provided at write time.
-        return payload
+        return journal_events_payload(
+            self.logs, self._journal_retention, rollout_id, after, limit, kinds,
+            ack=ack, cursor=cursor, scoped=scoped,
+        )
 
     def _retention_ttl_seconds(self) -> int:
-        raw = (self.runtime_config or {}).get("journal_retention_ttl_seconds")
-        try:
-            ttl = int(raw) if raw is not None else 0
-        except (TypeError, ValueError):
-            ttl = 0
-        return ttl if ttl > 0 else 604_800
+        return retention_ttl_seconds(self.runtime_config)
 
     def _journal_retention(
         self, log: RolloutEventLog, *, now: float | None = None
     ) -> dict[str, Any]:
-        ttl = self._retention_ttl_seconds()
-        moment = time.time() if now is None else now
-        expires_at = None
-        released = False
-        reason = None
-        if log.closed:
-            if log.last_acked >= log.high_water:
-                released = True
-                reason = "acked"
-            if log.closed_at:
-                closed_epoch = datetime.fromisoformat(
-                    log.closed_at.replace("Z", "+00:00")
-                ).timestamp()
-                expires_epoch = closed_epoch + ttl
-                expires_at = (
-                    datetime.fromtimestamp(expires_epoch, tz=timezone.utc)
-                    .isoformat(timespec="seconds")
-                    .replace("+00:00", "Z")
-                )
-                if not released and moment >= expires_epoch:
-                    released = True
-                    reason = "ttl_expired"
-        return {
-            "policy": "until-acked-or-ttl",
-            "ttl_seconds": ttl,
-            "acked": log.last_acked,
-            "high_water": log.high_water,
-            "closed": log.closed,
-            "released": released,
-            "released_reason": reason,
-            "expires_at": expires_at,
-        }
+        return journal_retention(log, ttl_seconds=self._retention_ttl_seconds(), now=now)
 
     def release_retained_journals(
         self,

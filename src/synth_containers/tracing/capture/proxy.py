@@ -11,6 +11,8 @@ silently direct-connecting.
 
 from __future__ import annotations
 
+from email.message import Message
+
 import io
 import json
 import threading
@@ -152,7 +154,9 @@ class ProxyStats:
         for record in records:
             record_type = str(record.get("record_type") or "")
             payload = record.get("payload")
-            values = payload if isinstance(payload, Mapping) else {}
+            values = payload
+            if not isinstance(values, Mapping):
+                values = {}
             call_id = str(record.get("call_id") or "")
             redaction = values.get("redaction")
             if isinstance(redaction, Mapping):
@@ -226,7 +230,7 @@ class CaptureProxy:
         host: str = "127.0.0.1",
         port: int = 0,
         request_timeout: float = 600.0,
-        context_resolver: Callable[[Mapping[str, str]], TraceContextV1 | None] | None = None,
+        context_resolver: Callable[[Mapping[str, str] | Message], TraceContextV1 | None] | None = None,
         context_activity_begin: Callable[
             [TraceContextV1],
             Callable[[], None],
@@ -457,7 +461,7 @@ class CaptureProxy:
     def handle_chat_completions(
         self,
         *,
-        headers: Mapping[str, str],
+        headers: Mapping[str, str] | Message,
         body: bytes,
     ) -> "ProxyResponse":
         return self.handle_provider_request(
@@ -466,7 +470,7 @@ class CaptureProxy:
             body=body,
         )
 
-    def handle_models(self, *, headers: Mapping[str, str]) -> "ProxyResponse":
+    def handle_models(self, *, headers: Mapping[str, str] | Message) -> "ProxyResponse":
         """Pass model discovery through the same shutdown lease as model calls."""
 
         release_operation = self._begin_operation()
@@ -499,7 +503,7 @@ class CaptureProxy:
         self,
         *,
         path: str,
-        headers: Mapping[str, str],
+        headers: Mapping[str, str] | Message,
         body: bytes,
         query: str = "",
     ) -> "ProxyResponse":
@@ -871,7 +875,7 @@ class CaptureProxy:
 
     def _request_identity(
         self,
-        headers: Mapping[str, str],
+        headers: Mapping[str, str] | Message,
     ) -> tuple[str, str, Callable[[], None] | None]:
         """Resolve an authenticated child context, or use the root workload."""
 
@@ -978,7 +982,7 @@ class CaptureProxy:
         *,
         method: str,
         request_target: str,
-        headers: Mapping[str, str],
+        headers: Mapping[str, str] | Message,
         body: bytes = b"",
     ) -> "ProxyResponse":
         """Forward an unobserved route only for explicit best-effort capture.
@@ -1125,7 +1129,7 @@ def _combine_releases(
 
 
 def _forward_headers(
-    headers: Mapping[str, str],
+    headers: Mapping[str, str] | Message,
     endpoint: ProviderEndpointConfig,
     *,
     ensure_json_content_type: bool = True,
@@ -1167,7 +1171,7 @@ def _forward_headers(
 
 
 def _decode_request_body(
-    headers: Mapping[str, str],
+    headers: Mapping[str, str] | Message,
     body: bytes,
 ) -> tuple[bytes, tuple[str, ...]]:
     """Decode provider request content for inspection while retaining wire bytes.
@@ -1219,7 +1223,7 @@ def _decode_request_body(
 class _StreamingContentDecoder:
     """Incrementally decode response bytes for capture while forwarding wire bytes."""
 
-    def __init__(self, headers: Mapping[str, str]) -> None:
+    def __init__(self, headers: Mapping[str, str] | Message) -> None:
         declared = next(
             (
                 str(value)
@@ -1300,7 +1304,7 @@ def _read_bounded_stream(reader: Any) -> bytes:
             )
 
 
-def _client_headers(headers: Mapping[str, str], *, decoded: bool = False) -> dict[str, str]:
+def _client_headers(headers: Mapping[str, str] | Message, *, decoded: bool = False) -> dict[str, str]:
     """Headers to return to the caller.
 
     ``decoded=True`` is used when the body was already decompressed for the caller, so
@@ -1357,7 +1361,7 @@ class _StreamSink:
     def __init__(self, handler: BaseHTTPRequestHandler) -> None:
         self._handler = handler
 
-    def begin(self, status: int, headers: Mapping[str, str]) -> None:
+    def begin(self, status: int, headers: Mapping[str, str] | Message) -> None:
         # A streamed body has no known length, so the connection boundary ends it.
         self._handler.close_connection = True
         self._handler.send_response(status)
@@ -1375,10 +1379,10 @@ def _build_handler(proxy: CaptureProxy) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
-        def log_message(self, fmt: str, *args: Any) -> None:
+        def log_message(self, format: str, *args: Any) -> None:
             return
 
-        def _send(self, status: int, headers: Mapping[str, str], body: bytes) -> None:
+        def _send(self, status: int, headers: Mapping[str, str] | Message, body: bytes) -> None:
             self.send_response(status)
             for name, value in headers.items():
                 if name.lower() == "content-length":

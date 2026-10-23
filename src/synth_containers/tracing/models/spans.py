@@ -66,38 +66,40 @@ class UsageV5(JsonDataclassMixin):
     source_refs: tuple[str, ...] = ()
 
     def merged(self, other: "UsageV5") -> "UsageV5":
-        """Sum two observed usages; any unavailable component keeps the result partial."""
+        """Sum disjoint observations, preserving unknowns rather than assuming zero.
 
-        def add(left: int | None, right: int | None) -> int | None:
-            if left is None and right is None:
+        This is not a snapshot/delta reducer: callers must deduplicate observations.
+        Optional fields absent on both sides stay null. A field known on only one
+        side is unavailable for the aggregate and makes its provenance partial.
+        Initialize reductions from their first observation, not a synthetic zero.
+        """
+        unavailable = set(self.unavailable_fields) | set(other.unavailable_fields)
+        partial = bool(unavailable) or bool(
+            {self.provenance, other.provenance}
+            & {UsageProvenance.UNAVAILABLE, UsageProvenance.PARTIAL}
+        )
+
+        def add(name: str) -> Any:
+            nonlocal partial
+            left, right = getattr(self, name), getattr(other, name)
+            if (left is None) != (right is None):
+                unavailable.add(name)
+                partial = True
+            if name in unavailable or left is None or right is None:
                 return None
-            return int(left or 0) + int(right or 0)
+            return left + right
 
-        provenance = UsageProvenance.DERIVED
-        if UsageProvenance.UNAVAILABLE in {self.provenance, other.provenance}:
-            provenance = UsageProvenance.PARTIAL
+        values = {
+            name: add(name)
+            for name in (
+                "prompt_tokens", "completion_tokens", "reasoning_tokens", "cached_tokens",
+                "cache_write_tokens", "total_tokens", "requests", "wall_time_seconds", "cost_usd",
+            )
+        }
         return UsageV5(
-            provenance=provenance,
-            prompt_tokens=add(self.prompt_tokens, other.prompt_tokens),
-            completion_tokens=add(self.completion_tokens, other.completion_tokens),
-            reasoning_tokens=add(self.reasoning_tokens, other.reasoning_tokens),
-            cached_tokens=add(self.cached_tokens, other.cached_tokens),
-            cache_write_tokens=add(self.cache_write_tokens, other.cache_write_tokens),
-            total_tokens=add(self.total_tokens, other.total_tokens),
-            requests=add(self.requests, other.requests),
-            wall_time_seconds=(
-                None
-                if self.wall_time_seconds is None and other.wall_time_seconds is None
-                else float(self.wall_time_seconds or 0.0) + float(other.wall_time_seconds or 0.0)
-            ),
-            cost_usd=(
-                None
-                if self.cost_usd is None and other.cost_usd is None
-                else float(self.cost_usd or 0.0) + float(other.cost_usd or 0.0)
-            ),
-            unavailable_fields=tuple(
-                sorted(set(self.unavailable_fields) | set(other.unavailable_fields))
-            ),
+            provenance=UsageProvenance.PARTIAL if partial else UsageProvenance.DERIVED,
+            **values,
+            unavailable_fields=tuple(sorted(unavailable)),
             source_refs=tuple(sorted(set(self.source_refs) | set(other.source_refs))),
         )
 

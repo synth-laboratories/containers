@@ -17,6 +17,7 @@ from uuid import uuid4
 
 from daytona.common.errors import DaytonaNotFoundError
 from harbor.environments.daytona.environment import DaytonaEnvironment
+from tenacity import retry, stop_after_attempt
 
 from .harbor_resource_receipts import HarborResourceCleanupPending
 from .harbor_results import finite_number
@@ -159,6 +160,7 @@ class BoundedDaytonaEnvironment(DaytonaEnvironment):
         # The provider identity is checked afresh; it is never cast to an OCI digest.
         return self._snapshot_sandbox_params(artifact["snapshot_id"])
 
+    @retry(stop=stop_after_attempt(1), reraise=True)
     async def _create_sandbox(self, params, daytona=None):
         if self._resource_create_attempted:
             raise RuntimeError("Native Daytona creation allowance exhausted")
@@ -215,15 +217,19 @@ class BoundedDaytonaEnvironment(DaytonaEnvironment):
                 provider_id=self._sandbox.id if self._sandbox else None,
             )
             raise
-        self._resource_event("resource.created", provider_id=self._sandbox.id)
+        sandbox = self._sandbox
+        if sandbox is None:
+            self._resource_event("resource.create_unconfirmed", error_type="missing_handle", provider_id=None)
+            raise RuntimeError("Native Daytona did not retain a sandbox handle")
+        self._resource_event("resource.created", provider_id=sandbox.id)
         observed = tuple(
-            finite_number(getattr(self._sandbox, field, None), field=field)
+            finite_number(getattr(sandbox, field, None), field=field)
             for field in ("cpu", "memory", "disk")
         )
-        deadline_text = getattr(self._sandbox, "auto_destroy_at", None)
+        deadline_text = getattr(sandbox, "auto_destroy_at", None)
         self._resource_event(
             "resource.allocation_observed",
-            provider_id=self._sandbox.id,
+            provider_id=sandbox.id,
             cpu=observed[0],
             memory_gib=observed[1],
             disk_gib=observed[2],
@@ -251,7 +257,10 @@ class BoundedDaytonaEnvironment(DaytonaEnvironment):
         self._resource_event("resource.cleanup_requested", provider_id=identifier)
         try:
             async with asyncio.timeout(45):
-                client = await self._client_manager.get_client()
+                manager = self._client_manager
+                if manager is None:
+                    raise RuntimeError("Native Daytona cleanup client is unavailable")
+                client = await manager.get_client()
                 try:
                     await client.delete(self._sandbox, timeout=20, wait=True)
                 except DaytonaNotFoundError:

@@ -1,0 +1,18 @@
+{
+  "evals_source_base": "82e9d8e5dbc96717644610d273355de61b38a6d2",
+  "adapter": "core.containers.portable.PortableContainerRunner",
+  "installed_cli": "/Users/joshuapurtell/GitHub/workspaces/v024-rhodes-20261021/containers/.local/installed/bin/synth-containers",
+  "native_rollouts": 2,
+  "typed_events": 16,
+  "lane_projectors_terminal": 2,
+  "indexed_jobs": 2,
+  "idempotent_reingest_jobs": 2,
+  "authoritative_files": [
+    "matrix_run_manifest.json",
+    "events.jsonl",
+    "script-s2-r0/job_result.json",
+    "script-s3-r0/job_result.json"
+  ],
+  "index": "/Users/joshuapurtell/GitHub/workspaces/v024-rhodes-20261021/containers/.local/five-evals-bridge-proof-final/data/results/results.db",
+  "provider_calls": 0
+}

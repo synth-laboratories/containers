@@ -278,9 +278,9 @@ class ResearchIndex:
             coverage.append({"jobId": row["jobId"], "trialId": row["trialId"], "status": row.get("status"), "traceAvailability": row["traceAvailability"], "captureStatus": row.get("captureStatus")})
             input_row=row.copy()
             inputs.append(input_row)
-            entities = self.rows(key, td, "entities") if key and td in traces else []
-            annotations = self.rows(key, td, "annotations") if key and td in traces else []
-            rewards = self.rows(key, td, "rewards") if key and td in traces else []
+            entities = self.rows(key, td, "entities") if key and isinstance(td, str) and td in traces else []
+            annotations = self.rows(key, td, "annotations") if key and isinstance(td, str) and td in traces else []
+            rewards = self.rows(key, td, "rewards") if key and isinstance(td, str) and td in traces else []
             # A scalar episode score may carry its definition in sealed V5
             # evidence instead of the eval-job row. Adopt only a unique current,
             # valid trace-wide record that exactly agrees with the stored score.
@@ -322,7 +322,7 @@ class ResearchIndex:
                 entity_ids = {e["itemId"] for e in entities}
                 annotations = [a for a in annotations if a.get("selector", {}).get("entity_id") in entity_ids]
             elif relation:
-                entities = related_entities(entities, self.rows(key, td, "entities") if key else [], relation)
+                entities = related_entities(entities, self.rows(key, td, "entities") if key and isinstance(td, str) else [], relation)
                 if not entities:
                     continue
             grain = query.get("grain", "episodes")
@@ -455,9 +455,10 @@ def paired_rewards(rows, jobs):
         a, b = arms.get(jobs[0], []), arms.get(jobs[1], [])
         state = "matched" if len(a) == len(b) == 1 else ("ambiguous" if len(a)>1 or len(b)>1 else "unmatched")
         values = [(v[0].get("reward") if len(v)==1 and v[0].get("valid") is not False else None) for v in (a,b)]
-        numeric = all(isinstance(v,(int,float)) and not isinstance(v,bool) and math.isfinite(v) for v in values)
+        left, right = values
+        delta = right - left if (state == "matched" and isinstance(left, (int, float)) and isinstance(right, (int, float)) and not isinstance(left, bool) and not isinstance(right, bool) and math.isfinite(left) and math.isfinite(right)) else None
         result.append({**pair,"matchStatus":state,"jobIds":jobs,"episodeIds":[r["episodeId"] for v in (a,b) for r in v],
-                       "rewards":values,"rewardDelta":values[1]-values[0] if state=="matched" and numeric else None})
+                       "rewards":values,"rewardDelta":delta})
     return result
 
 

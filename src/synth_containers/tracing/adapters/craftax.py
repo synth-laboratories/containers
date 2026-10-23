@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import math
 from typing import Any
 
 from ..canonical import record_id
@@ -137,14 +138,14 @@ def promote_craftax_document(
         agent_events=CoverageState.COMPLETE,
         environment_events=CoverageState.COMPLETE,
         tool_events=CoverageState.NOT_CAPTURED,
-        usage=CoverageState.COMPLETE,
+        usage=CoverageState.COMPLETE if aggregate_usage.prompt_tokens is not None and aggregate_usage.completion_tokens is not None else CoverageState.PARTIAL,
         expected_record_count=len(document.events),
         captured_record_count=len(document.events),
         reasons=(
             "model calls and usage were observed by the Craftax policy harness",
             "raw provider transport was not captured",
         ),
-        metadata={"adapter": "craftax_native@1", "rollout_count": len(rollouts)},
+        metadata={"adapter": "craftax_native@2", "rollout_count": len(rollouts)},
     )
     lifecycle = TraceLifecycleV5(
         status=TraceStatus.COMPLETED,
@@ -160,7 +161,7 @@ def promote_craftax_document(
         model=next(iter(models)) if len(models) == 1 else None,
         provider=next(iter(providers)) if len(providers) == 1 else None,
         harness="suites.nonproduct.craftax",
-        transformation_chain=(*document.provenance.transformation_chain, "craftax_native@1"),
+        transformation_chain=(*document.provenance.transformation_chain, "craftax_native@2"),
         extra={**document.provenance.extra, "rollout_count": len(rollouts)},
     )
     identity = replace(
@@ -254,8 +255,8 @@ def _lane_record(
         {
             "call_index": int(event.payload.get("call_index") or 0),
             "event_id": event.event_id,
-            "prompt_tokens": int(event.payload.get("prompt_tokens") or 0),
-            "completion_tokens": int(event.payload.get("completion_tokens") or 0),
+            "prompt_tokens": _known_count(event.payload.get("prompt_tokens")),
+            "completion_tokens": _known_count(event.payload.get("completion_tokens")),
         }
         for event in lane_events
         if event.payload.get("kind") == "policy.call"
@@ -435,8 +436,8 @@ def _lane_entities(
             )
             messages.append(reply)
             predecessor = reply_id
-            prompt_tokens = int(event.payload.get("prompt_tokens") or 0)
-            completion_tokens = int(event.payload.get("completion_tokens") or 0)
+            prompt_tokens = _known_count(event.payload.get("prompt_tokens"))
+            completion_tokens = _known_count(event.payload.get("completion_tokens"))
             spans.append(
                 SpanV5(
                     span_id=span_id,
@@ -449,12 +450,12 @@ def _lane_entities(
                     input_message_ids=tuple(input_ids),
                     output_message_ids=(reply_id,),
                     usage=UsageV5(
-                        provenance=UsageProvenance.OBSERVED_HARNESS,
+                        provenance=UsageProvenance.OBSERVED_HARNESS if prompt_tokens is not None and completion_tokens is not None else UsageProvenance.PARTIAL,
                         prompt_tokens=prompt_tokens,
                         completion_tokens=completion_tokens,
-                        total_tokens=prompt_tokens + completion_tokens,
+                        total_tokens=prompt_tokens + completion_tokens if prompt_tokens is not None and completion_tokens is not None else None,
                         requests=1,
-                        unavailable_fields=("reasoning_tokens",),
+                        unavailable_fields=tuple(name for name, value in (("prompt_tokens", prompt_tokens), ("completion_tokens", completion_tokens), ("reasoning_tokens", None)) if value is None),
                         source_refs=(event.event_id,),
                     ),
                     detail={
@@ -593,17 +594,29 @@ def _aggregate_usage(
     source_digest: str,
 ) -> UsageV5:
     latest = [item.get("usage") or {} for item in rollouts]
+    def total(name):
+        values = [_known_count(item.get(name)) for item in latest]
+        return sum(value for value in values if value is not None) if values and all(value is not None for value in values) else None
+    costs = [item.get("estimated_usd") for item in latest]
+    known_costs = [known for value in costs if (known := _known_cost(value)) is not None]
     return UsageV5(
         provenance=UsageProvenance.PARTIAL,
-        prompt_tokens=sum(int(item.get("prompt_tokens") or 0) for item in latest),
-        completion_tokens=sum(int(item.get("completion_tokens") or 0) for item in latest),
-        cached_tokens=sum(int(item.get("cached_prompt_tokens") or 0) for item in latest),
-        total_tokens=sum(int(item.get("total_tokens") or 0) for item in latest),
-        requests=sum(int(item.get("calls") or 0) for item in latest),
-        cost_usd=sum(float(item.get("estimated_usd") or 0.0) for item in latest),
-        unavailable_fields=("reasoning_tokens", "raw_provider"),
-        source_refs=(source_digest,),
+        prompt_tokens=total("prompt_tokens"), completion_tokens=total("completion_tokens"),
+        cached_tokens=total("cached_prompt_tokens"), total_tokens=total("total_tokens"),
+        requests=total("calls"), cost_usd=sum(known_costs) if costs and len(costs) == len(known_costs) else None,
+        unavailable_fields=("reasoning_tokens", "raw_provider"), source_refs=(source_digest,),
     )
+
+
+def _known_count(value: Any) -> int | None:
+    return value if type(value) is int and value >= 0 else None
+
+
+def _known_cost(value: Any) -> float | None:
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0:
+        return float(value)
+    return None
+
 
 
 __all__ = ["CRAFTAX_EXTENSION_SCHEMA_VERSION", "promote_craftax_document"]

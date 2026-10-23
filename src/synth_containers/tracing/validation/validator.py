@@ -3407,7 +3407,7 @@ def validate_evidence(
                     annotation.annotation_id,
                 )
             else:
-                visibility_rank = {
+                visibility_rank: dict[str, int] = {
                     Visibility.PUBLIC: 0,
                     Visibility.OPERATOR: 1,
                     Visibility.PRIVATE: 2,
@@ -3415,7 +3415,7 @@ def validate_evidence(
                 document_visibility = str(document.visibility)
                 if (
                     document_visibility in visibility_rank
-                    and visibility_rank[str(annotation.visibility)]
+                    and visibility_rank[annotation.visibility]
                     < visibility_rank[document_visibility]
                 ):
                     finding(

@@ -1,6 +1,6 @@
 [project]
 name = "synth-containers"
-version = "0.4.5.dev2026102025"
+version = "0.4.5.dev2026102111"
 description = "Shared Synth container and environment runtime substrate"
 authors = [{name = "Synth Laboratories", email = "josh@usesynth.ai"}]
 readme = "README.md"
@@ -37,7 +37,7 @@ dev = [
     "pytest>=8.0.0",
     "twine>=5.0.0",
     "ruff>=0.6.0",
-    "ty>=0.0.32",
+    "ty==0.0.86",
 ]
 
 [dependency-groups]
@@ -47,13 +47,29 @@ dev = [
     "urllib3>=2.7.0",
     "twine>=5.0.0",
     "ruff>=0.6.0",
-    "ty>=0.0.32",
+    "ty==0.0.86",
     # Contract conformance tests (tests/test_metadata_contract.py) validate the
     # producer-generated golden fixtures against openapi/container-contract-v1.yaml.
     "pytest>=8.0.0",
     "pyyaml>=6.0.0",
     "jsonschema>=4.21.0",
 ]
+
+release-types = [
+    "synth-ai @ git+ssh://git@github.com/synth-laboratories/synth-ai.git@9ab8088abf81cdb42f0897ecbe22c68e8f47485f",
+    "harbor[daytona]==0.22.0",
+    "docker==7.1.0",
+    "daytona==0.210.0",
+    "tinker==0.34.0",
+    "transformers==5.20.2",
+    "renderers==0.1.12",
+]
+
+mitm-types = ["ty==0.0.86", "mitmproxy==12.2.3", "pytest>=8.0.0"]
+
+[tool.uv.dependency-groups]
+release-types = {requires-python = ">=3.12,<3.15"}
+mitm-types = {requires-python = ">=3.12,<3.15"}
 
 [project.scripts]
 synth-containers = "synth_containers.cli:main"
@@ -70,6 +86,14 @@ build-backend = "setuptools.build_meta"
 
 [tool.uv]
 package = true
+conflicts = [
+    [{group = "mitm-types"}, {group = "dev"}],
+    [{group = "mitm-types"}, {extra = "dev"}],
+    [{group = "mitm-types"}, {group = "release-types"}],
+    [{group = "mitm-types"}, {extra = "native-harbor"}],
+    [{group = "mitm-types"}, {extra = "native-harbor-docker"}],
+    [{group = "mitm-types"}, {extra = "native-harbor-daytona"}],
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

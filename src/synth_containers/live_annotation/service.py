@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from ..stream_cursor import StreamCursorError
 from ..event_log import CONTROL_SUBSCRIBED, RolloutEventLog, poll_payload, validate_rollout_id
 from .contract import (
     CONTROL_SCHEMA,
@@ -82,7 +83,7 @@ class LiveAnnotationService:
         *,
         model_caller_factory: ModelCallerFactory | None = None,
         limits: RunnerLimits | None = None,
-        spawn: Callable[[bytes, dict[str, Any]], IsolatedProtocolProcess] | None = None,
+        spawn: Callable[[bytes, dict[str, Any], dict[str, Any] | None], IsolatedProtocolProcess] | None = None,
     ) -> None:
         self.root = Path(storage_root) / "live_annotation"
         self.revisions: dict[str, ProtocolRevision] = {}
@@ -401,12 +402,14 @@ class LiveAnnotationService:
         self.logs[rollout_id] = recovered
         return recovered
 
-    def events_payload(self, rollout_id: str, after: int, limit: int = 1000) -> dict[str, Any]:
+    def events_payload(self, rollout_id: str, after: int, limit: int = 1000, *, scoped: bool = False, cursor: str | None = None) -> dict[str, Any]:
         log = self.log_for(rollout_id)
         if log is None:
             return {"error": "annotation_stream_not_found", "status_code": 404, "rollout_id": rollout_id}
         try:
-            payload = poll_payload(log, after=after, limit=limit, subject_id=rollout_id)
+            payload = poll_payload(log, after=after, limit=limit, subject_id=rollout_id, scoped=scoped, cursor=cursor)
+        except StreamCursorError as error:
+            return {"error": error.code, "status_code": error.status_code}
         except ValueError:
             return {"error": "invalid_page_limit", "status_code": 422}
         runner = self.runners.get(rollout_id)

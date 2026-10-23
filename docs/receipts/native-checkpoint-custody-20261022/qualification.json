@@ -1,0 +1,88 @@
+{
+  "backend_source": "9b4eab6e82dfcc8e62f93c29c2db546d6ed76133",
+  "containers_source": "48c090fc4bbfad0d216a96bcfb89c3205280e534",
+  "deployment": false,
+  "log_sha256": {
+    "backend_units": "7a916b8d972c889b236762766986242fd66a4047cc6d4b0f77ea6bd3731d8ec9",
+    "before_fix": "24e7b5e97a433a522510ceda8d54d716f8d8d35c4dc7c84aeb6cf153f745bd6d",
+    "installed_tests": "ba7a8c9d9dec029d10caba51409ae3f936cc846e7b0f862bce0784732821698a",
+    "native": "117af48d3697b3727bdcc1fd3765d971d13c6f9af07568822f7485c3c356fb38",
+    "source_tests": "0b9182fdc532ca93b5455e78c1c5b08a5a73bbd70dd6a3b4a138106112ac3aaa",
+    "typing": "3c687dfbc5540c869598cb442343cf0d7140dae2cfc72c7b84ee74a8182ae0d2"
+  },
+  "native_component": {
+    "checkpoint_byte_size": 33569,
+    "checkpoint_content_digest": "sha256:4985c17b69b2305eb6f5144a266e6a7aec18209f20edebb39e7ff70083613305",
+    "checkpoint_id": "cp-4b1bb5410c334e61a44cef100758a931_0001",
+    "checkpoint_sha256": "d1193c9b25d9e4e1a24d72744e4e6f0ae07f085431b57cf92b570c3430fd7b26",
+    "child_initial_checkpoint_recovered_from_file": true,
+    "child_instance_id": "64e38512a0f96a9f25017835e3ac7ee4e1cc6606e99d0a8607b4958832d17a20",
+    "cleanup_errors": [],
+    "controller_sdk": "0.4.5.dev2026102111",
+    "cut_step": 5,
+    "file_transport": "explicit owned Docker exec for tmpfs; archive-copy API is not used",
+    "image": "synth-rhodes-craftax@sha256:8f33bf128a3c48a457e9357688b7a41288b4b4714722a6ad725cfdcefa59a329",
+    "independently_absent_fixture_ids": [
+      "261c13a183056b854e31babfbd06b8744dab61ee3cf76fb3ed205ae7bfb6ce2e",
+      "64e38512a0f96a9f25017835e3ac7ee4e1cc6606e99d0a8607b4958832d17a20"
+    ],
+    "loaded_runtime_sdk": "0.4.5.dev2026102111",
+    "loaded_state_sha256": "c8e3ac040c2aba6f1c6478fee07bd92e19adc6a5ed509d85d027e2fa0a8d4359",
+    "observed_runtime_identity": {
+      "261c13a183056b854e31babfbd06b8744dab61ee3cf76fb3ed205ae7bfb6ce2e": {
+        "module_file": "/tmp/sdk/synth_containers/platform/state.py",
+        "state_sha256": "c8e3ac040c2aba6f1c6478fee07bd92e19adc6a5ed509d85d027e2fa0a8d4359",
+        "version": "0.4.5.dev2026102111",
+        "wheel_sha256": "ff3db4e552112777819d837fa82fe7ca299ba944a08812f95dce0cc33ec0c8ea"
+      },
+      "64e38512a0f96a9f25017835e3ac7ee4e1cc6606e99d0a8607b4958832d17a20": {
+        "module_file": "/tmp/sdk/synth_containers/platform/state.py",
+        "state_sha256": "c8e3ac040c2aba6f1c6478fee07bd92e19adc6a5ed509d85d027e2fa0a8d4359",
+        "version": "0.4.5.dev2026102111",
+        "wheel_sha256": "ff3db4e552112777819d837fa82fe7ca299ba944a08812f95dce0cc33ec0c8ea"
+      }
+    },
+    "operation_id": "4b1bb5410c334e61a44cef100758a931",
+    "paid_provider_calls": 0,
+    "parent_absence_before_child_creation": true,
+    "parent_instance_id": "261c13a183056b854e31babfbd06b8744dab61ee3cf76fb3ed205ae7bfb6ce2e",
+    "parent_steps": 30,
+    "parent_trace_digest": "sha256:6a21d80c87bc62193837ea8e6a1532bffe6866867e5a3b0a8227993f6ca80f24",
+    "restored_steps": 30,
+    "restored_trace_digest": "sha256:75fcb32eef5a6f746a01e2b11a92a6b7245c4f306767d5131516f8333051d542",
+    "runtime_base_sdk": "2104",
+    "scientific_rows_equal": 102,
+    "scope": "manual same-image native checkpoint file transfer, not Rhodes admission or portable checkpoint v1",
+    "sdk_wheel_sha256": "ff3db4e552112777819d837fa82fe7ca299ba944a08812f95dce0cc33ec0c8ea",
+    "source_profile": "cached image plus exact-wheel mount extracted before fresh runtime interpreter; no image build"
+  },
+  "not_qualified": [
+    "Rhodes checkpoint API/custody/grants/funding",
+    "portable-checkpoint-v1 conformance",
+    "newly baked image",
+    "cross-version or cross-process storage writers",
+    "permanent deleted-ID tombstones",
+    "full v0.24 acceptance"
+  ],
+  "paid_provider_calls": 0,
+  "schema_version": "synth.native-checkpoint-custody-qualification.v1",
+  "scientific_comparison_sha256": "ad2a9775471dd9faaa62f8163563e30addb8041359572086f429dbdbe7dfc651",
+  "sdk_version": "0.4.5.dev2026102111",
+  "source_wheel_installed_modules_equal": 308,
+  "tests": {
+    "backend_units": 524,
+    "before_fix_regressions": {
+      "failed": 12,
+      "passed": 2
+    },
+    "installed": 246,
+    "native_component": 1,
+    "native_seconds": 7.35,
+    "source": 246,
+    "typing_profiles": {
+      "main": "zero_diagnostics",
+      "mitm": "zero_diagnostics"
+    }
+  },
+  "wheel_sha256": "ff3db4e552112777819d837fa82fe7ca299ba944a08812f95dce0cc33ec0c8ea"
+}

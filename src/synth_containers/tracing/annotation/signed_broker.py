@@ -21,7 +21,7 @@ import json
 import os
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Generator, Any
 
 from ..canonical import canonical_bytes, record_id, utc_now
 from .broker import PaidComputeReservationV1, ReservationBindingV1, ReservationError
@@ -79,7 +79,7 @@ class SignedReservationBroker:
         self.reconcile_token = reconcile_token
 
     @contextlib.contextmanager
-    def _lock(self) -> Iterator[None]:
+    def _lock(self) -> Generator[None, None, None]:
         with (self.root / ".lock").open("a+") as handle:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
             try:
@@ -108,8 +108,8 @@ class SignedReservationBroker:
         with self._lock():
             return self._read(reservation_id)
 
-    def claim(self, token: str, *, binding: ReservationBindingV1, job_id: str) -> PaidComputeReservationV1:
-        payload = decode_signed_reservation(token, secret=self.secret)
+    def claim(self, reservation_id: str, *, binding: ReservationBindingV1, job_id: str) -> PaidComputeReservationV1:
+        payload = decode_signed_reservation(reservation_id, secret=self.secret)
         reservation_id = str(payload["reservation_id"])
         expected = ReservationBindingV1(**payload["binding"])
         with self._lock():

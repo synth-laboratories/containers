@@ -1,0 +1,33 @@
+{
+  "installed_module": "/Users/joshuapurtell/GitHub/workspaces/v024-rhodes-20261021/containers/.local/installed/lib/python3.13/site-packages/synth_containers/__init__.py",
+  "wheel_sha256": "79e39a305cee3695b8fd0c3240e59ffd2a96f6df1dcef4403d16f52a2e7e50f3",
+  "package_source_files_verified": 304,
+  "source_pythonpath": "unset",
+  "native_image": "sha256:1acb37093fad899f3f5c3f229d0d1d130b2aeb04759adea5d22872c115436117",
+  "seeds": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+  ],
+  "configured_parallelism": 4,
+  "observed_overlapping_rollouts": 4,
+  "native_steps_per_seed": 8,
+  "machine_events_equal_durable_events": 122,
+  "read_only_watch": "pass",
+  "archive_files_verified": 556,
+  "edited_policy_fork_parent_unchanged": true,
+  "ctrl_c_exit": 130,
+  "interrupted_prefix": 3,
+  "strict_resume_actions": 40,
+  "strict_resume_preserves_prefix": true,
+  "all_owned_engine_receipts_stopped": true,
+  "provider_calls": 0,
+  "rust_builds": 0
+}

@@ -404,3 +404,61 @@ def test_list_methods_still_accept_legacy_resource_keys() -> None:
             return await PoolClient(api_key="test", client=http).list_rollouts("pool-1")
 
     assert asyncio.run(run()) == [{"rollout_id": "legacy"}]
+
+def test_pool_sdk_configuration_uses_backend_wire_fields_for_all_writes():
+    seen = []
+
+    def handler(request):
+        seen.append((request.method, json.loads(request.content)))
+        return httpx.Response(200, json={"id": "pool", **seen[-1][1]})
+
+    async def exercise():
+        async with httpx.AsyncClient(
+            base_url="https://example.test", transport=httpx.MockTransport(handler)
+        ) as http:
+            client = PoolClient(api_key="test", client=http)
+            created = await client.create_pool(
+                name="craftax",
+                backend="arbitrary",
+                pool_config={"provider": "docker", "execution_mode": "queued"},
+                pool_metadata={"experiment": "cohort"},
+            )
+            assert created["provider"] == "docker" and created["metadata"] == {
+                "experiment": "cohort"
+            }
+            await client.update_pool(
+                "pool", pool_config={"execution_mode": "queued"}, pool_metadata={}
+            )
+            await client.replace_pool(
+                "pool",
+                {
+                    "name": "replacement",
+                    "backend": "arbitrary",
+                    "pool_config": {"provider": "docker"},
+                    "pool_metadata": {"experiment": "replacement"},
+                },
+            )
+
+    asyncio.run(exercise())
+    assert [method for method, _ in seen] == ["POST", "PATCH", "PUT"]
+    assert all("pool_config" not in body and "pool_metadata" not in body for _, body in seen)
+    assert seen[1][1] == {"execution_mode": "queued", "metadata": {}}
+
+
+@pytest.mark.parametrize(
+    "config", [{"backend": "harbor"}, {"capacity": 0}, {"metadata": {}}, {"pool_config": {}}, []]
+)
+def test_pool_config_refuses_conflicting_or_invalid_settings_before_http(config):
+    async def exercise():
+        def handler(request):
+            pytest.fail("invalid configuration reached HTTP")
+
+        async with httpx.AsyncClient(
+            base_url="https://example.test", transport=httpx.MockTransport(handler)
+        ) as http:
+            with pytest.raises(PoolClientError):
+                await PoolClient(api_key="test", client=http).create_pool(
+                    name="pool", backend="arbitrary", pool_config=config
+                )
+
+    asyncio.run(exercise())

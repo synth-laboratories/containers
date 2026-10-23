@@ -8,9 +8,9 @@ Do not use `nonsensitive/craftax_go_explore` (JAX). Do not serve a fixture world
 
 ## Up
 
-Needs the rust binary (or a crate it can build): sibling
-`craftax-runtime/gold_rust`, or pin
-`SYNTH_CRAFTAX_GOLD_BIN` / `SYNTH_CRAFTAX_GOLD_ROOT`.
+Direct module startup requires an explicitly qualified executable for that
+runtime in `SYNTH_CRAFTAX_GOLD_BIN`. It never builds a crate on startup. The
+Docker image supplies its qualified Linux ARM64 executable automatically.
 
 Prefer the module so Ctrl+C stops **both** rust and the façade. Catalog `up`
 runs the same command as a subprocess; a wrapper SIGTERM can leave rust
@@ -18,8 +18,7 @@ listening.
 
 ```bash
 export SYNTH_CONTAINER_IMAGE_CATALOG=/path/to/containers/images/craftax-gamebench-rust
-# optional: skip cargo if you already built
-# export SYNTH_CRAFTAX_GOLD_BIN=/path/to/gold_rust/target/release/craftax_gold
+export SYNTH_CRAFTAX_GOLD_BIN=/path/to/qualified/host-native/craftax_gold
 
 cd containers/images/craftax-gamebench-rust
 PYTHONPATH=. python -m craftax_gold --port 8080
@@ -31,15 +30,6 @@ Same stack through the catalog:
 synth-containers up craftax-gamebench-rust \
   --catalog /path/to/containers/images/craftax-gamebench-rust \
   --port 8080
-```
-
-Python:
-
-```python
-from craftax_gold import serve
-
-with serve(port=8080) as handle:
-    handle.health()
 ```
 
 `/health` is 200 only when rust gold is up (`gold_ok: true`). Otherwise 503.
@@ -54,13 +44,35 @@ stays `craftax_react`.
 `synth-containers serve --target craftax_react` is the wrong path (public
 `TARGETS` has no Craftax).
 
-The Docker build requires both source roots explicitly; there are no sibling
-checkout fallbacks:
+The runtime image consumes two explicit frozen contexts: `CRAFTAX_ENGINE_ARTIFACTS`
+and `CONTAINERS_WHEEL_CONTEXT`. It never compiles Rust during image assembly or
+startup. Prepare the engine from a clean, pinned `craftax-runtime` checkout:
 
 ```bash
-export CONTAINERS_ROOT=/path/to/clean/containers
-export CRAFTAX_RUNTIME_ROOT=/path/to/clean/craftax-runtime
+python scripts/prepare_craftax_runtime.py \
+  --source-root /path/to/clean/craftax-runtime \
+  --output-root "$PWD/.local/craftax-runtime-builds" \
+  --launcher /path/to/synth-dev/local_dev/scripts/core_dev_build.py \
+  --storage-guard /path/to/synth-dev/local_dev/scripts/storage_target_guard.py \
+  --mbx-linux-dir /path/to/qualified/linux-arm64-mbx
 ```
+
+The command reports its frozen runtime directory and retains source/compiler
+hashes, test/build logs and cleanup state. The compiler has a bounded lifetime,
+two CPUs, 8 GiB memory, the normal shared admission lane and an 8 GiB owned target
+guard. Source is read-only at the same path used by runtime data lookup. Existing
+shared mbx caches retain their 80 GiB policy. A retained uncertain operation is
+reconciled before replacement; no raw Cargo fallback is available.
+
+Set `CRAFTAX_ENGINE_ARTIFACTS` to that qualified runtime directory and
+`CONTAINERS_WHEEL_CONTEXT` to a directory containing exactly one qualified
+`synth-containers` wheel. The image verifies binary/data closure and compiler
+identity, installs dependencies from the hash-locked requirements, then installs
+that wheel without resolving another SDK version. These local ARM64 inputs do
+not establish hosted/AMD64 placement qualification. Runtime assembly refuses
+an AMD64 Python image paired with the ARM64 engine. On another host, select
+`--platform=linux/arm64` explicitly with a qualified emulation/build provider;
+otherwise this profile is unsupported there.
 
 Use this directory's dedicated `catalog.toml` for NanoHorizon and live evals.
 The parent `containers/images/catalog.toml` is a development inventory and may

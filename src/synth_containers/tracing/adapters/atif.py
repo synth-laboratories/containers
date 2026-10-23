@@ -194,7 +194,7 @@ def export_atif(document: TraceDocumentV5) -> dict[str, Any]:
             },
         }
         if root and document.coordination is not None:
-            result["extra"]["synth_coordination"] = document.coordination.to_dict()
+            result["extra"] = {**result["extra"], "synth_coordination": document.coordination.to_dict()}
         if subagents:
             result["subagent_trajectories"] = subagents
         return result
@@ -234,6 +234,8 @@ def _subagent_interaction(
             )
         )
     ]
+    if not candidates:
+        return None
     return min(
         candidates,
         key=lambda item: (
@@ -243,7 +245,6 @@ def _subagent_interaction(
             item.started_sequence,
             item.interaction_id,
         ),
-        default=None,
     )
 
 
@@ -573,17 +574,18 @@ def _message_step(document: TraceDocumentV5, message: MessageNodeV5) -> dict[str
     if tool_results:
         step["observation"] = {"results": tool_results}
     if model_spans:
-        usage = UsageV5()
+        usage: UsageV5 | None = None
         for span in model_spans:
             if span.usage is not None:
-                usage = usage.merged(span.usage)
-        metrics = _export_metrics(usage, model_spans[0].token_capture)
+                usage = span.usage if usage is None else usage.merged(span.usage)
+        metrics = _export_metrics(usage or UsageV5(), model_spans[0].token_capture)
         if metrics:
             step["metrics"] = metrics
         step["llm_call_count"] = len(model_spans)
+        sender = document.actor(message.sender_actor_id)
         model_name = (
             model_spans[-1].detail.get("model")
-            or (document.actor(message.sender_actor_id).model if document.actor(message.sender_actor_id) else None)
+            or (sender.model if sender is not None else None)
             or document.provenance.model
         )
         if model_name:
@@ -1477,7 +1479,9 @@ def _import_usage(metrics: Any) -> UsageV5 | None:
     if not isinstance(metrics, Mapping):
         return None
     extra = metrics.get("extra")
-    detail = extra if isinstance(extra, Mapping) else {}
+    detail = extra
+    if not isinstance(detail, Mapping):
+        detail = {}
     return UsageV5(
         provenance=UsageProvenance.OBSERVED_HARNESS,
         prompt_tokens=_optional_int(metrics.get("prompt_tokens")),
@@ -1530,7 +1534,9 @@ def _import_total_usage(payload: Mapping[str, Any]) -> UsageV5:
     final_metrics = payload.get("final_metrics")
     if isinstance(final_metrics, Mapping):
         extra = final_metrics.get("extra")
-        detail = extra if isinstance(extra, Mapping) else {}
+        detail = extra
+        if not isinstance(detail, Mapping):
+            detail = {}
         return UsageV5(
             provenance=UsageProvenance.OBSERVED_HARNESS,
             prompt_tokens=_optional_int(final_metrics.get("total_prompt_tokens")),
@@ -1543,14 +1549,12 @@ def _import_total_usage(payload: Mapping[str, Any]) -> UsageV5:
             wall_time_seconds=_optional_float(detail.get("wall_time_seconds")),
             cost_usd=_optional_float(final_metrics.get("total_cost_usd")),
         )
-    usage = UsageV5()
-    observed = False
+    usage: UsageV5 | None = None
     for step in payload.get("steps") or ():
         step_usage = _import_usage(step.get("metrics"))
         if step_usage is not None:
-            usage = usage.merged(step_usage)
-            observed = True
-    return usage if observed else UsageV5()
+            usage = step_usage if usage is None else usage.merged(step_usage)
+    return usage if usage is not None else UsageV5()
 
 
 def _optional_int(value: Any) -> int | None:

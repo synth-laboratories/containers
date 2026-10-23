@@ -32,7 +32,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterator, Protocol
+from typing import Any, Callable, Generator, Protocol
 
 from ..canonical import utc_now
 from ..models.standards import ProducerKind
@@ -263,12 +263,12 @@ class CodexAppServerRunner:
         proxy_enforces_reservation: bool = False,
         price_table: PriceTable | None = None,
     ) -> None:
-        self._factory = transport_factory or (
-            lambda cwd, model=None, effort=None: StdioAppServerTransport(
-                command=command, cwd=cwd, model=model, reasoning_effort=effort
-            )
-        )
-        self._factory_takes_model = transport_factory is None
+        def factory(cwd: Path, model: str | None, effort: str | None) -> AppServerTransport:
+            if transport_factory is not None:
+                return transport_factory(cwd)
+            return StdioAppServerTransport(command=command, cwd=cwd, model=model, reasoning_effort=effort)
+
+        self._factory = factory
         self.default_model = default_model
         self.default_effort = default_effort
         self.poll_seconds = poll_seconds
@@ -334,11 +334,7 @@ class CodexAppServerRunner:
         effort = job.request.reasoning_effort or self.default_effort
         token_ceiling = self.token_ceiling(limits, model)
         price = self.price_for(model)
-        transport = (
-            self._factory(context.workspace_dir, model, effort)
-            if self._factory_takes_model
-            else self._factory(context.workspace_dir)
-        )
+        transport = self._factory(context.workspace_dir, model, effort)
         next_id = 0
         pending: dict[int, str] = {}
         error: AnnotationJobErrorV1 | None = None
@@ -413,8 +409,8 @@ class CodexAppServerRunner:
                     billable = usage["inputTokens"] - int(usage.get("cachedInputTokens") or 0) + int(usage.get("outputTokens") or 0)
                 cost_usd: float | None = None
                 cost_status = COST_STATUS_UNAVAILABLE
-                if price is not None and isinstance(usage.get("inputTokens"), int):
-                    cost_usd, cost_status = self.price_table.cost(  # type: ignore[union-attr]
+                if price is not None and self.price_table is not None and isinstance(usage.get("inputTokens"), int):
+                    cost_usd, cost_status = self.price_table.cost(
                         model,
                         input_tokens=usage.get("inputTokens"),
                         output_tokens=usage.get("outputTokens"),
@@ -620,7 +616,7 @@ class CodexAppServerRunner:
 
 # -- scripted fake ------------------------------------------------------------------------
 
-AgentScript = Callable[[], "Iterator[tuple[str, dict[str, Any]]]"]
+AgentScript = Callable[[], "Generator[tuple[str, dict[str, Any]], Any, Any]"]
 
 
 class ScriptedAppServer:
@@ -652,7 +648,7 @@ class ScriptedAppServer:
         self.reject_thread_start = reject_thread_start
         self.sent: list[dict[str, Any]] = []
         self._outbox: list[dict[str, Any]] = []
-        self._gen: Iterator[tuple[str, dict[str, Any]]] | None = None
+        self._gen: Generator[tuple[str, dict[str, Any]], Any, Any] | None = None
         self._pending_call_id: str | None = None
         self._calls = 0
         self._closed = False

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from email.message import Message
+
 import base64
 import http.client
 import logging
@@ -19,7 +21,10 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 from urllib.parse import urljoin, urlparse, urlunparse
 
-from .paths import confined_origin_url
+from .paths import (
+    confined_origin_url,
+    confined_forward_path as _confined_forward_path,  # noqa: F401 - compatibility re-export
+)
 from .protocol import DataFrame, DataKind, SUBPROTOCOL, CHUNK_BYTES
 from .attachment import (
     Attachment,
@@ -170,6 +175,7 @@ class AttachedSynthTunnelLease:
     _ready_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
     _closing: threading.Event = field(default_factory=threading.Event, repr=False)
     _local_ready: bool = field(default=False, repr=False)
+    _health_path: str = field(default="health", repr=False)
     _agent_started: bool = field(default=False, repr=False)
     _agent_stopped: bool = field(default=False, repr=False)
     _control_plane_closed: bool = field(default=False, repr=False)
@@ -212,7 +218,7 @@ class AttachedSynthTunnelLease:
                     raise SynthTunnelRelayError("SynthTunnel lease is closed")
                 self._agent_started = True
         _wait_for_http_ok(
-            _join_health_url(self.public_url),
+            _join_health_url(self.public_url, self._health_path),
             headers={"Authorization": f"Bearer {self.worker_token}"},
             timeout_seconds=ready_timeout,
             cancel_event=self._closing,
@@ -307,9 +313,19 @@ class SynthTunnelProvider:
         metadata: Mapping[str, object],
         capabilities: Mapping[str, object],
         wait_ready: bool = True,
+        origin_authorization_header: str | None = None,
+        health_path: str = "health",
     ) -> AttachedSynthTunnelLease:
+        declared = (origin_authorization_header or "").strip().lower() or None
+        if declared is not None and (
+            declared in _LOCAL_ONLY_AUTH_HEADERS | _HOP_BY_HOP_HEADERS
+            or not re.fullmatch(r"x-[a-z0-9-]{1,64}", declared)
+        ):
+            raise ValueError("origin_authorization_header must be a custom x- header")
         target = _parse_local_target(local_url)
-        local_health_url = _join_health_url(target.base_url)
+        if not re.fullmatch(r"[a-z0-9][a-z0-9/_-]{0,63}", health_path):
+            raise ValueError("health_path must be a relative path such as 'healthz'")
+        local_health_url = _join_health_url(target.base_url, health_path)
         if wait_ready:
             _wait_for_http_ok(
                 local_health_url,
@@ -337,6 +353,7 @@ class SynthTunnelProvider:
                 max_in_flight_requests=self._max_in_flight_requests,
                 max_request_body_bytes=self._max_request_body_bytes,
                 max_websocket_streams=self._max_websocket_streams,
+                origin_authorization_header=declared,
             )
         except Exception as response_error:
             try:
@@ -357,6 +374,7 @@ class SynthTunnelProvider:
             _attach_timeout_seconds=self._attach_timeout_seconds,
             _ready_timeout_seconds=self._ready_timeout_seconds,
             _local_ready=wait_ready,
+            _health_path=health_path,
             route_token=_optional_text(response.get("route_token")),
             diagnostics_hint=_optional_text(response.get("diagnostics_hint")),
             _control_plane=self._control_plane,
@@ -424,6 +442,14 @@ class _SynthTunnelAgent:
             ],
         ] = {}
         self._attachment = attachment
+        self._local_only_headers = frozenset(
+            _LOCAL_ONLY_AUTH_HEADERS
+            | (
+                {attachment.origin_authorization_header}
+                if isinstance(attachment, LeaseAttachment) and attachment.origin_authorization_header
+                else set()
+            )
+        )
         if isinstance(attachment, ConnectorAttachment) and self._protocol != SUBPROTOCOL:
             raise SynthTunnelRelayError("connector attachment requires the binary v2 protocol")
         if agent_connect is not None:
@@ -507,6 +533,13 @@ class _SynthTunnelAgent:
         self, payload: Mapping[str, Any]
     ) -> tuple[_LocalTarget, tuple[tuple[str, str], ...], OriginPoolScope]:
         match self._attachment:
+            case LeaseAttachment(target=target, origin_authorization_header=declared) if declared:
+                origin_auth = tuple(
+                    ("Authorization", value)
+                    for key, value in _header_pairs(payload.get("headers"))
+                    if key.strip().lower() == declared
+                )
+                return target, origin_auth[:1], None
             case LeaseAttachment(target=target):
                 return target, (), None
             case ConnectorAttachment(connector=connector, targets=targets):
@@ -1255,7 +1288,7 @@ class _SynthTunnelAgent:
                 continue
             if (
                 name in _HOP_BY_HOP_HEADERS
-                or name in _LOCAL_ONLY_AUTH_HEADERS
+                or name in self._local_only_headers
                 or name in _WEBSOCKET_HANDSHAKE_HEADERS
             ):
                 continue
@@ -1317,7 +1350,7 @@ class _SynthTunnelAgent:
             request.connection_generation,
             request.origin_pool_scope,
             upstream.scheme,
-            upstream.hostname,
+            upstream.hostname or "",
             upstream.port,
         )
         connection, pool_epoch = self._origin_connections.borrow(
@@ -1353,7 +1386,7 @@ class _SynthTunnelAgent:
                 path += "?" + upstream.query
             connection.putrequest(request.method, path)
             for key, value in request.headers:
-                if key.lower() not in _HOP_BY_HOP_HEADERS | _LOCAL_ONLY_AUTH_HEADERS:
+                if key.lower() not in _HOP_BY_HOP_HEADERS | self._local_only_headers:
                     connection.putheader(key, value)
             for key, value in request.origin_headers:
                 connection.putheader(key, value)
@@ -1452,7 +1485,7 @@ class _SynthTunnelAgent:
             headers = {
                 key: value
                 for key, value in request.headers
-                if key.strip().lower() not in _HOP_BY_HOP_HEADERS | _LOCAL_ONLY_AUTH_HEADERS
+                if key.strip().lower() not in _HOP_BY_HOP_HEADERS | self._local_only_headers
             }
             headers.update(request.origin_headers)
             try:
@@ -1494,7 +1527,7 @@ class _SynthTunnelAgent:
         self,
         request_id: str,
         status_code: int,
-        headers: Mapping[str, Any],
+        headers: Mapping[str, Any] | Message,
         response: Any,
         request: _PendingRequest,
     ) -> None:
@@ -1634,13 +1667,14 @@ def _connect_websocket(
     subprotocols: Sequence[str] | None = None,
 ) -> Any:
     from websockets.sync.client import connect
+    from websockets.typing import Subprotocol
 
     if urlparse(url).scheme not in {"ws", "wss"}:
         raise SynthTunnelRelayError("SynthTunnel agent URL must use ws or wss")
     return connect(
         url,
         additional_headers=dict(headers),
-        subprotocols=subprotocols,
+        subprotocols=[Subprotocol(value) for value in subprotocols] if subprotocols is not None else None,
         open_timeout=3,
         # recv() reports remote closure only after the TCP closing handshake.
         # A retired gateway may not finish that handshake while cancelling a
@@ -1748,12 +1782,12 @@ def _close_origin(origin: Any, code: int, reason: str) -> None:
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(
         self,
-        request: urllib.request.Request,
-        file_pointer: Any,
+        req: urllib.request.Request,
+        fp: Any,
         code: int,
-        message: str,
-        headers: Mapping[str, str],
-        new_url: str,
+        msg: str,
+        headers: Any,
+        newurl: str,
     ) -> None:
         return None
 
@@ -1769,8 +1803,8 @@ class _OriginHTTPSHandler(urllib.request.HTTPSHandler):
         # hostname verification when its default context is created on demand.
         urllib.request.AbstractHTTPHandler.__init__(self)
 
-    def https_open(self, request: urllib.request.Request) -> Any:
-        return self.do_open(http.client.HTTPSConnection, request)
+    def https_open(self, req: urllib.request.Request) -> Any:
+        return self.do_open(http.client.HTTPSConnection, req)
 
 
 def _open_upstream(
@@ -1848,50 +1882,8 @@ def _wait_for_http_ok(
     raise SynthTunnelRelayError(f"timed out waiting for tunnel health: {last_error}")
 
 
-def _join_health_url(base_url: str) -> str:
-    return urljoin(base_url.rstrip("/") + "/", "health")
-
-
-# A worker-supplied forward path is only ever a path *under* the leased target.
-# Anything that carries a URI scheme (``http:``, ``file:``, ``ws:`` …) escapes it.
-_FORWARD_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*:")
-
-
-def _confined_forward_path(path: str) -> str:
-    """Reduce a worker-supplied forward path to a plain path under the target.
-
-    The rust gateway forwards ``/s/{route}/{*path}`` verbatim, so ``path`` is
-    attacker-controlled. ``urljoin`` treats a value that is itself an absolute
-    URL (``/http://evil/x``) or an authority (``//evil/x``) as replacing the
-    base, which is an SSRF primitive. Reject any scheme, authority, or upward
-    traversal and return only a relative path confined beneath the lease.
-    """
-
-    raw = str(path or "/").replace("\\", "/")
-    stripped = raw.lstrip("/")
-    if not stripped:
-        return "/"
-    # ``scheme://host`` / ``ws://…`` / ``file:///…`` — an absolute URL; a bare
-    # ``//authority``; or any ``scheme:`` prefix. None is a relative path.
-    if (
-        "://" in stripped
-        or stripped.startswith("//")
-        or _FORWARD_SCHEME_RE.match(stripped)
-    ):
-        return "/"
-    trailing = stripped.endswith("/")
-    segments: list[str] = []
-    for segment in stripped.split("/"):
-        if segment in ("", "."):
-            continue
-        if segment == "..":
-            # Refuse to let ``..`` climb above the lease's own path prefix.
-            return "/"
-        segments.append(segment)
-    result = "/" + "/".join(segments)
-    if trailing and not result.endswith("/"):
-        result += "/"
-    return result
+def _join_health_url(base_url: str, health_path: str = "health") -> str:
+    return urljoin(base_url.rstrip("/") + "/", health_path)
 
 
 def _local_upstream_url(target: _LocalTarget, path: str, query: str) -> str:
@@ -1953,6 +1945,12 @@ def _startup_error_detail(error: Exception) -> str:
             character.isalnum() or character in {"_", ".", "-"} for character in missing_module
         ):
             return f"ModuleNotFoundError({missing_module})"
+    # A relay that closes during attach says why only in its close frame.
+    received = getattr(error, "rcvd", None)
+    code = getattr(received, "code", None)
+    if isinstance(code, int):
+        reason = re.sub(r"[^A-Za-z0-9_. -]", "", str(getattr(received, "reason", "") or ""))[:80]
+        return f"{type(error).__name__}(close={code}{':' + reason if reason else ''})"
     return type(error).__name__
 
 
@@ -1968,9 +1966,10 @@ class SynthTunnelRelayAgent(_SynthTunnelAgent):
         max_in_flight_requests: int,
         max_request_body_bytes: int,
         max_websocket_streams: int = _DEFAULT_MAX_WEBSOCKET_STREAMS,
+        origin_authorization_header: str | None = None,
     ) -> None:
         super().__init__(
-            attachment=LeaseAttachment(lease_id, local_target),
+            attachment=LeaseAttachment(lease_id, local_target, origin_authorization_header),
             agent_connect=agent_connect,
             max_in_flight_requests=max_in_flight_requests,
             max_request_body_bytes=max_request_body_bytes,

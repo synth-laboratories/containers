@@ -30,7 +30,7 @@ import sqlite3
 import threading
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Iterator, TypeVar
+from typing import Generator, Any, TypeVar
 
 from ..canonical import content_digest, readable_json, utc_now
 from ..models.document import TraceDocumentV5
@@ -247,7 +247,7 @@ class AnnotationStore:
     # -- locking ------------------------------------------------------------------
 
     @contextlib.contextmanager
-    def lock(self) -> Iterator[None]:
+    def lock(self) -> Generator[None, None, None]:
         """Process-wide exclusive lock for job creation and head updates."""
 
         path = self.root / ".lock"

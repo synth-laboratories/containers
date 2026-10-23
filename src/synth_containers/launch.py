@@ -759,9 +759,12 @@ def down_image(
 
 def handle_for(record: RunRecord, *, backend: DockerBackend | None = None) -> ContainerHandle:
     docker = backend or SubprocessDocker()
+    def stop() -> None:
+        down_image(record.id, port=record.port, backend=docker)
+
     return ContainerHandle(
         url=record.url,
-        stop=lambda: down_image(record.id, port=record.port, backend=docker),
+        stop=stop,
         log_reader=lambda: docker.logs(record.container_name),
     )
 

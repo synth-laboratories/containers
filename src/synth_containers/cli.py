@@ -37,12 +37,37 @@ def _env_pairs(items: list[str] | None) -> dict[str, str]:
 
 def main(argv: list[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] == "rhodes":
+        from .rhodes_cli import main as rhodes_main
+
+        return rhodes_main(arguments[1:])
     if arguments and arguments[0] == "tunnel":
         from .tunnels.cli import main as tunnel_main
 
         return tunnel_main(arguments[1:])
+    if arguments and arguments[0] == "package":
+        from .package_cli import main as package_main
+
+        return package_main(arguments[1:])
+    if arguments and arguments[0] == "checkpoint":
+        from .checkpoints.cli import main as checkpoint_main
+
+        return checkpoint_main(arguments[1:])
+    if arguments and arguments[0] == "regrade":
+        from .grading_cli import main as grading_main
+
+        return grading_main(arguments[1:])
+    if arguments and arguments[0] == "eval":
+        from .eval_cli import main as eval_main
+
+        return eval_main(arguments[1:])
     parser = argparse.ArgumentParser(prog="synth-containers", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("rhodes", help="remote registry, committed events and rollout lifecycle")
+    sub.add_parser("package", help="plan or build a versioned container package")
+    sub.add_parser("checkpoint", help="inspect, export or preflight portable checkpoints")
+    sub.add_parser("regrade", help="describe, run and export immutable retained-evidence grading")
+    sub.add_parser("eval", help="portable evaluation lifecycle and retained results")
 
     serve = sub.add_parser("serve", help="run create_compat_app for a public target_id (demo path)")
     serve.add_argument("--target", default=os.environ.get("SYNTH_CONTAINER_TARGET", "openenv_echo"))

@@ -1,0 +1,97 @@
+scope = "repo:containers"
+
+[thresholds]
+max_linked_worktrees = 15
+max_local_branches = 20
+max_target_dir_gib = 8.0
+
+[[checks]]
+id = "container_package_and_partial_trace_contracts"
+description = "Package declaration checks and partial trace accounting preserve unknowns and authority boundaries"
+severity = "error"
+require_paths = ["tests/test_container_package.py", "tests/test_trace_v5_partial_accounting.py", ".venv/bin/python"]
+command = 'mkdir -p .local/tmp && TMPDIR="$PWD/.local/tmp" PYTHONPATH=src .venv/bin/python -m pytest -q tests/test_container_package.py tests/test_trace_v5_partial_accounting.py'
+command_timeout_seconds = 30
+remedy = "Restore package refusal/identity checks, partial usage, source-time basis and terminal outcome conformance; use the repo dev environment. Do not waive unknown evidence or runtime admission."
+
+[[checks]]
+id = "stream_replay_and_publication_boundaries"
+description = "Journal cursors retain scope, prefix integrity, atomic watermarks and explicit storage failure"
+severity = "error"
+require_paths = ["tests/test_stream_cursor.py", "tests/test_journal_contract_v2.py", ".venv/bin/python"]
+command = 'mkdir -p .local/tmp && TMPDIR="$PWD/.local/tmp" PYTHONPATH=src .venv/bin/python -m pytest -q tests/test_stream_cursor.py tests/test_journal_contract_v2.py'
+command_timeout_seconds = 30
+remedy = "Restore scoped replay, atomic snapshot/chain metadata, close-tail drain and uncertain-write fencing. Do not reset invalid cursors or treat transport EOF as run completion."
+
+[[checks]]
+id = "portable_checkpoint_continuation_boundaries"
+description = "Portable checkpoints retain byte closure, strict identity, explicit forks and resource unknowns"
+severity = "error"
+require_paths = ["tests/test_portable_checkpoint.py", ".venv/bin/python"]
+command = 'mkdir -p .local/tmp && TMPDIR="$PWD/.local/tmp" PYTHONPATH=src .venv/bin/python -m pytest -q tests/test_portable_checkpoint.py'
+command_timeout_seconds = 30
+remedy = "Restore complete portable closure, trusted-codec coverage, strict-position selection and explicit child funding. Compatibility must never grant execution authority or reset liabilities."
+
+[[checks]]
+id = "release_typing_profiles"
+description = "Every source checks against its actual locked core/native or MITM interfaces with zero diagnostics"
+severity = "error"
+require_paths = ["scripts/check-type-debt.py", ".local/release-types-main/bin/python", ".local/release-types-mitm/bin/python"]
+command = 'TMPDIR="$PWD/.local/tmp" .local/release-types-main/bin/python scripts/check-type-debt.py --check-only'
+command_timeout_seconds = 30
+remedy = "Prepare both locked release typing profiles and fix the source or dependency contract. Do not widen the historical baseline, suppress missing interfaces or lower application crypto requirements."
+
+[[checks]]
+id = "trace_semantics_and_crash_retention"
+description = "Trace sidecars preserve unknowns and explicit custody; corrupt complete records never become recoverable tails"
+severity = "error"
+require_paths = ["tests/test_trace_semantics_publication.py", ".local/release-types-main/bin/python"]
+command = 'TMPDIR="$PWD/.local/tmp" PYTHONPATH=src .local/release-types-main/bin/python -m pytest -q tests/test_trace_semantics_publication.py'
+command_timeout_seconds = 30
+remedy = "Restore digest-bound semantic profiles, fsynced prefix retention, immutable repair evidence and compute-free publication/index retry. Never discard corrupt complete records."
+
+[[checks]]
+id = "immutable_grading_recovery"
+description = "Grading keeps exact subject/rubric identity and reuses committed output after controller/publication failure"
+severity = "error"
+require_paths = ["tests/test_immutable_grading.py", ".local/release-types-main/bin/python"]
+command = 'TMPDIR="$PWD/.local/tmp" PYTHONPATH=src .local/release-types-main/bin/python -m pytest -q tests/test_immutable_grading.py tests/test_grading_craftax.py'
+command_timeout_seconds = 30
+remedy = "Restore evidence sufficiency refusal, immutable V5 judgments, explicit authority/correction and compute-free result publication. Never treat missing evidence as zero or execute submissions on the host."
+
+[[checks]]
+id = "portable_evaluation_and_native_continuation"
+description = "CLI declarations, native joint cuts, explicit forks, retention and JSON identities remain compatible"
+severity = "error"
+require_paths = ["tests/test_eval_exec_contract.py", ".local/release-types-main/bin/python"]
+command = 'TMPDIR="$PWD/.local/tmp" PYTHONPATH=src .local/release-types-main/bin/python -m pytest -q tests/test_eval_exec_contract.py tests/test_portable_checkpoint.py'
+command_timeout_seconds = 30
+remedy = "Restore exact candidate/configuration/source identity, strict checkpoint refusal, explicit child funding and retention roots. Native engine qualification remains separate from these provider-free contract tests."
+
+[[checks]]
+id = "craftax_prebuilt_runtime_custody"
+description = "Craftax runtime consumes exact qualified compiler bytes and never compiles at startup; cleanup preserves unknown and foreign ownership"
+severity = "error"
+require_paths = ["scripts/prepare_craftax_runtime.py", "images/craftax-gamebench-rust/verify_engine_artifact.py", "tests/test_craftax_compiler_custody.py", "images/craftax-gamebench-rust/tests/test_prebuilt_engine_artifact.py", ".local/release-types-main/bin/python"]
+command = 'TMPDIR="$PWD/.local/tmp" PYTHONPATH=src .local/release-types-main/bin/python -m pytest -q tests/test_craftax_compiler_custody.py images/craftax-gamebench-rust/tests/test_prebuilt_engine_artifact.py'
+command_timeout_seconds = 30
+remedy = "Restore frozen binary/data closure, pinned Linux mbx/profile identity, runtime refusal without a prepared binary, exact-ID absence checks and ambiguous-create/foreign-owner preservation. Do not introduce raw Cargo, runtime compilation or unconfirmed cleanup success."
+
+[[checks]]
+id = "rhodes_sdk_wire_protocol"
+description = "Rhodes wire envelopes and retry delays preserve server identity and backpressure"
+severity = "error"
+command_timeout_seconds = 30
+require_paths = ["tests/test_pools.py", "tests/test_rhodes_client.py", "tests/test_rhodes_cli.py", "tests/test_rhodes_watch.py", ".local/release-types-main/bin/python"]
+command = 'TMPDIR="$PWD/.local/tmp" PYTHONPATH=src .local/release-types-main/bin/python -m pytest -q tests/test_pools.py tests/test_rhodes_client.py tests/test_rhodes_cli.py tests/test_rhodes_watch.py'
+remedy = "Keep pool SDK convenience fields translated to canonical flat configuration and metadata; reject collisions and qualify installed SDK against the ordinary-role public API. Lease mutation envelopes and flat lease GET remain distinct. Honor bounded server Retry-After; surface longer waits to the queue and never replay unidentified mutations. Bound the full observer deadline and keep CLI original run/cursor identities; timeout never cancels."
+
+
+[[checks]]
+id = "native_checkpoint_custody"
+description = "Native checkpoint acknowledgment preserves target identity, immutable bytes, lost acknowledgments and retention/delete barriers"
+severity = "error"
+command_timeout_seconds = 30
+require_paths = ["tests/test_checkpoint_custody.py", ".local/release-types-main/bin/python"]
+command = 'TMPDIR="$PWD/.local/tmp" PYTHONPATH=src .local/release-types-main/bin/python -m pytest -q tests/test_checkpoint_custody.py tests/test_checkpoint_schedule.py tests/test_checkpoint_retention.py'
+remedy = "Keep producer facts separate from platform target/schema/digest, copy normalized cuts, reconcile original disk commits without overwrite, serialize ownership changes and confirm deletion barriers before forgetting memory. This is not portable checkpoint or Rhodes restore admission proof."

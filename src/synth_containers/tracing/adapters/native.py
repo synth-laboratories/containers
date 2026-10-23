@@ -38,7 +38,7 @@ from ..models.identity import (
 from ..models.document import TraceDocumentV5
 from ..models.spans import UsageProvenance, UsageV5
 from ..store.bundle import LocalTraceBundle
-from .codex_jsonl import import_codex_jsonl
+from .codex_jsonl import IMPORTER_NAME, IMPORTER_VERSION, import_codex_jsonl
 from .craftax import promote_craftax_document
 
 
@@ -233,8 +233,11 @@ def _import_codex(
                 **dict(item["body"]),
                 "native_kind": item["native_kind"],
                 "codex_id": item["codex_id"],
+                "_synth_import_time": item["source_time"],
+                "_synth_importer": {"name": IMPORTER_NAME, "version": IMPORTER_VERSION},
             },
             "source_id": str(item["codex_id"] or index),
+            "occurred_at": item["occurred_at"],
         }
         for index, item in enumerate(imported.events)
     ]

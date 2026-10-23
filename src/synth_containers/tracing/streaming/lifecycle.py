@@ -83,7 +83,9 @@ def capture_closed_count(events: list[dict[str, Any]]) -> int:
 
 def missing_coerced_to_zero(events: list[dict[str, Any]]) -> bool:
     for item in semantic(events):
-        payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+        payload = item.get("payload")
+        if not isinstance(payload, dict):
+            payload = {}
         if item.get("kind") == "reward_signal" and payload.get("value") is None:
             return True if payload.get("value") == 0 else False
         usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else None

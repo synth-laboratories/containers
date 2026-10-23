@@ -25,6 +25,7 @@ from typing import Any, Iterator
 from synth_containers.serde import JsonDataclassMixin
 
 from ..canonical import bytes_digest, canonical_text, content_digest, short_digest, utc_now
+from ..atomic import durable_write, sync_directory, durable_mkdir
 from .envelope import RawCaptureEnvelopeV1, RawRecordType, validate_envelope_payload
 from .redaction import assert_no_secrets
 
@@ -122,7 +123,7 @@ class RawSpool:
             raise ValueError(f"unsupported trace spool compression: {compression!r}")
         self.compression = compression
         self.segments_dir = self.root / "segments"
-        self.segments_dir.mkdir(parents=True, exist_ok=True)
+        durable_mkdir(self.segments_dir)
         self._sequence = 0
         self._generation = 0
         self._sealed: list[TraceSegmentManifestV1] = []
@@ -132,6 +133,7 @@ class RawSpool:
         self._high_water = -1
         self._latest_manifest: LiveManifestV1 | None = None
         self._closed_manifest: LiveManifestV1 | None = None
+        self._write_uncertain = False
         self._lock = threading.RLock()
         self._changed = threading.Condition(self._lock)
         self._resume()
@@ -146,7 +148,15 @@ class RawSpool:
                 raise RuntimeError(
                     "capture spool has an unmanifested partial; run synth-trace repair first"
                 )
+            if list(self.segments_dir.glob("*.jsonl")):
+                raise RuntimeError("capture has orphan sealed segments; explicit recovery is required")
             return
+        list(read_segments(self.root, manifest.segments))
+        if manifest.high_water_ordinal != max((item.last_ordinal for item in manifest.segments), default=-1):
+            raise ValueError("live manifest high-water contradicts its committed segments")
+        named = {item.relative_path for item in manifest.segments}
+        if any(str(path.relative_to(self.root)) not in named for path in self.segments_dir.glob("*.jsonl")):
+            raise RuntimeError("capture has orphan sealed segments; explicit recovery is required")
         self._generation = manifest.generation
         self._latest_manifest = manifest
         if manifest.metadata.get("closed") is True:
@@ -166,6 +176,8 @@ class RawSpool:
         """Append one raw record. The record is durable before this returns."""
 
         with self._lock:
+            if self._write_uncertain:
+                raise RuntimeError("capture writer is fenced after an uncertain write; reopen and repair")
             if self._closed_manifest is not None:
                 raise RuntimeError("capture spool is closed")
             assert_no_secrets(
@@ -182,21 +194,40 @@ class RawSpool:
                     f"envelope ordinal {envelope.ordinal} is not above high-water "
                     f"{self._high_water}"
                 )
-            if self._open_handle is None:
-                self._open_segment()
-            assert self._open_handle is not None
-            self._open_handle.write(canonical_text(envelope) + "\n")
-            self._open_handle.flush()
-            os.fsync(self._open_handle.fileno())
+            try:
+                if self._open_handle is None:
+                    self._open_segment()
+                assert self._open_handle is not None
+                self._open_handle.write(canonical_text(envelope) + "\n")
+                self._open_handle.flush()
+                os.fsync(self._open_handle.fileno())
+            except BaseException:
+                self._write_uncertain = True
+                raise
             self._open_records.append(envelope)
             self._high_water = max(self._high_water, int(envelope.ordinal))
             if len(self._open_records) >= self.max_segment_records:
-                self.rotate()
+                try:
+                    self.rotate()
+                except BaseException:
+                    self._write_uncertain = True
+                    raise
             self._changed.notify_all()
             return envelope
 
     def rotate(self) -> TraceSegmentManifestV1 | None:
         """Seal the open partial into an immutable segment and publish a manifest."""
+
+        with self._lock:
+            if self._write_uncertain:
+                raise RuntimeError("capture writer is fenced after an uncertain write")
+            try:
+                return self._rotate()
+            except BaseException:
+                self._write_uncertain = True
+                raise
+
+    def _rotate(self) -> TraceSegmentManifestV1 | None:
 
         with self._lock:
             if self._closed_manifest is not None:
@@ -217,6 +248,8 @@ class RawSpool:
                 return None
             manifest = self._seal_segment(partial_path, payload, records)
             self._publish_manifest()
+            partial_path.unlink()
+            sync_directory(self.segments_dir)
             return manifest
 
     def close(self) -> LiveManifestV1:
@@ -276,7 +309,9 @@ class RawSpool:
     def _open_segment(self) -> None:
         self._sequence += 1
         self._open_path = self.segments_dir / f"{self._sequence:06d}{PARTIAL_SUFFIX}"
-        self._open_handle = self._open_path.open("w", encoding="utf-8")
+        self._open_handle = self._open_path.open("x", encoding="utf-8")
+        self._open_path.chmod(0o600)
+        sync_directory(self.segments_dir)
 
     def _seal_segment(
         self,
@@ -288,8 +323,7 @@ class RawSpool:
         sequence = int(partial_path.stem)
         name = f"{sequence:06d}-{short_digest(digest)}.jsonl"
         final_path = self.segments_dir / name
-        partial_path.replace(final_path)
-        final_path.chmod(0o444)
+        _write_immutable(final_path, payload)
         manifest = TraceSegmentManifestV1(
             segment_id=f"seg_{short_digest(digest, length=16)}",
             capture_id=self.capture_id,
@@ -307,6 +341,13 @@ class RawSpool:
         return manifest
 
     def _publish_manifest(self, *, closed: bool = False) -> LiveManifestV1:
+        try:
+            return self._publish_manifest_unfenced(closed=closed)
+        except BaseException:
+            self._write_uncertain = True
+            raise
+
+    def _publish_manifest_unfenced(self, *, closed: bool = False) -> LiveManifestV1:
         self._generation += 1
         manifest = LiveManifestV1(
             capture_id=self.capture_id,
@@ -315,7 +356,7 @@ class RawSpool:
             segments=tuple(self._sealed),
             high_water_ordinal=self._high_water,
             open_partial=self._open_path.name if self._open_path else None,
-            metadata={"closed": closed},
+            metadata={**(self._latest_manifest.metadata if self._latest_manifest else {}), "closed": closed},
         ).sealed()
         manifests_dir = self.root / "manifests"
         manifests_dir.mkdir(parents=True, exist_ok=True)
@@ -331,9 +372,7 @@ class RawSpool:
             updated_at=manifest.updated_at,
         )
         latest = self.root / "latest.json"
-        temp = latest.with_suffix(".json.tmp")
-        temp.write_text(canonical_text(pointer) + "\n", encoding="utf-8")
-        temp.replace(latest)
+        durable_write(latest, (canonical_text(pointer) + "\n").encode(), replace=True)
         self._latest_manifest = manifest
         return manifest
 
@@ -560,136 +599,110 @@ class SpoolRepairV1(JsonDataclassMixin):
 
 
 def repair(root: Path, *, capture_id: str) -> SpoolRepairV1:
-    """Recover an interrupted spool without ever publishing a corrupt record.
+    """Recover only an unterminated tail, retaining its exact bytes and receipt.
 
-    Complete leading JSON lines are promoted into a sealed segment; an incomplete
-    trailing line is dropped and its byte count is reported.
+    Any malformed complete record refuses without modifying the spool. The old
+    partial stays present until the new immutable manifest is durably committed.
+    A retry after that commit verifies the same segment and finishes cleanup.
     """
-
-    segments_dir = Path(root) / "segments"
+    root = Path(root)
+    segments_dir = root / "segments"
     partials = sorted(segments_dir.glob(f"*{PARTIAL_SUFFIX}"))
     if not partials:
-        return SpoolRepairV1(
-            capture_id=capture_id,
-            repaired=False,
-            reason="no_partial_segment",
-            repaired_at=utc_now(),
-        )
-    if len(partials) > 1:
-        return SpoolRepairV1(
-            capture_id=capture_id,
-            repaired=False,
-            reason="multiple_partial_segments_require_manual_review",
-            repaired_at=utc_now(),
-        )
+        return SpoolRepairV1(capture_id=capture_id, repaired=False,
+                             reason="no_partial_segment", repaired_at=utc_now())
+    if len(partials) != 1:
+        return SpoolRepairV1(capture_id=capture_id, repaired=False,
+                             reason="multiple_partial_segments_require_manual_review", repaired_at=utc_now())
     partial = partials[0]
     payload = partial.read_bytes()
-    text = payload.decode("utf-8", errors="replace")
-    previous = load_live_manifest(Path(root), expected_capture_id=capture_id)
-    previous_ordinal = previous.high_water_ordinal if previous else -1
-    complete: list[str] = []
-    consumed = 0
-    for line in text.splitlines(keepends=True):
-        if not line.endswith("\n"):
-            break
-        stripped = line.strip()
-        if stripped:
-            try:
-                loaded = json.loads(stripped)
-                if not isinstance(loaded, dict):
-                    raise ValueError("raw envelope line is not an object")
-                envelope = validate_envelope_payload(
-                    loaded,
-                    expected_capture_id=capture_id,
-                    previous_ordinal=previous_ordinal,
-                )
-            except (json.JSONDecodeError, ValueError):
-                break
-            previous_ordinal = envelope.ordinal
-            complete.append(stripped)
-        consumed += len(line.encode("utf-8"))
-    truncated = len(payload) - consumed
-    if not complete:
-        partial.unlink(missing_ok=True)
-        return SpoolRepairV1(
-            capture_id=capture_id,
-            repaired=True,
-            recovered_records=0,
-            truncated_tail_bytes=truncated,
-            reason="partial_had_no_complete_records",
-            repaired_at=utc_now(),
-        )
-    recovered = ("\n".join(complete) + "\n").encode("utf-8")
-    digest = bytes_digest(recovered)
+    previous = load_live_manifest(root, expected_capture_id=capture_id)
+    prior_segments = previous.segments if previous else ()
+    # Verify the already committed prefix before changing any storage.
+    list(read_segments(root, prior_segments))
     sequence = int(partial.stem)
-    final_path = segments_dir / f"{sequence:06d}-{short_digest(digest)}.jsonl"
-    _write_immutable(final_path, recovered)
-    partial.unlink(missing_ok=True)
-    recovered_payloads = [json.loads(line) for line in complete]
-    segment = TraceSegmentManifestV1(
-        segment_id=f"seg_{short_digest(digest, length=16)}",
-        capture_id=capture_id,
-        sequence=sequence,
-        digest=digest,
-        record_count=len(recovered_payloads),
-        byte_size=len(recovered),
-        first_ordinal=int(recovered_payloads[0]["ordinal"]),
-        last_ordinal=int(recovered_payloads[-1]["ordinal"]),
-        first_occurred_at=str(recovered_payloads[0]["occurred_at"]),
-        last_occurred_at=str(recovered_payloads[-1]["occurred_at"]),
-        relative_path=f"segments/{final_path.name}",
-        truncated_tail_bytes=truncated,
-    ).sealed()
-    prior_segments = tuple(previous.segments) if previous else ()
-    if any(item.sequence == segment.sequence and item.digest != segment.digest for item in prior_segments):
-        raise ValueError(f"repair would replace sealed segment sequence {segment.sequence}")
-    segments = tuple(
-        sorted(
-            {
-                item.digest: item
-                for item in (*prior_segments, segment)
-            }.values(),
-            key=lambda item: item.sequence,
-        )
-    )
-    generation = (previous.generation if previous else 0) + 1
-    live = LiveManifestV1(
-        capture_id=capture_id,
-        generation=generation,
-        updated_at=utc_now(),
-        segments=segments,
-        high_water_ordinal=max(item.last_ordinal for item in segments),
-        open_partial=None,
-        metadata={"repair": True, "truncated_tail_bytes": truncated},
-    ).sealed()
-    manifests_dir = Path(root) / "manifests"
-    manifests_dir.mkdir(parents=True, exist_ok=True)
-    generation_path = manifests_dir / (
-        f"{generation:06d}-{short_digest(live.content_digest)}.json"
-    )
-    _write_immutable(generation_path, canonical_text(live).encode("utf-8") + b"\n")
-    pointer = LiveManifestPointerV1(
-        capture_id=capture_id,
-        generation=generation,
-        manifest_digest=live.content_digest,
-        relative_path=str(generation_path.relative_to(Path(root))),
-        updated_at=live.updated_at,
-    )
-    latest = Path(root) / "latest.json"
-    temp = latest.with_suffix(".json.tmp")
-    temp.write_text(canonical_text(pointer) + "\n", encoding="utf-8")
-    temp.replace(latest)
-    return SpoolRepairV1(
-        capture_id=capture_id,
-        repaired=True,
-        recovered_records=len(complete),
-        truncated_tail_bytes=truncated,
-        segment_digest=digest,
-        reason="promoted_complete_leading_records",
-        repaired_at=utc_now(),
-        segment=segment,
-        live_manifest_digest=live.content_digest,
-    )
+    prior_match = next((item for item in prior_segments if item.sequence == sequence), None)
+    if any(item.sequence > sequence for item in prior_segments):
+        raise ValueError("partial sequence precedes committed history")
+    previous_ordinal = max((item.last_ordinal for item in prior_segments
+                            if item.sequence < sequence), default=-1)
+    records: list[dict[str, Any]] = []
+    consumed = 0
+    for line in payload.splitlines(keepends=True):
+        if not line.endswith(b"\n"):
+            break
+        if not line.strip():
+            raise ValueError("corrupt complete record: blank raw envelope")
+        try:
+            loaded = json.loads(line.decode("utf-8"))
+            if not isinstance(loaded, dict):
+                raise ValueError("raw envelope line is not an object")
+            envelope = validate_envelope_payload(loaded, expected_capture_id=capture_id,
+                                                 previous_ordinal=previous_ordinal)
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+            raise ValueError(f"corrupt complete record at byte {consumed}; repair refused") from exc
+        previous_ordinal = envelope.ordinal
+        records.append(loaded)
+        consumed += len(line)
+    recovered = payload[:consumed]
+    truncated = len(payload) - consumed
+    segment = None
+    if records:
+        digest = bytes_digest(recovered)
+        segment = TraceSegmentManifestV1(
+            segment_id=f"seg_{short_digest(digest, length=16)}", capture_id=capture_id,
+            sequence=sequence, digest=digest, record_count=len(records), byte_size=len(recovered),
+            first_ordinal=records[0]["ordinal"], last_ordinal=records[-1]["ordinal"],
+            first_occurred_at=records[0]["occurred_at"], last_occurred_at=records[-1]["occurred_at"],
+            relative_path=f"segments/{sequence:06d}-{short_digest(digest)}.jsonl",
+            truncated_tail_bytes=truncated,
+        ).sealed()
+        if prior_match is not None:
+            if prior_match.digest != segment.digest:
+                raise ValueError("repair would replace committed segment bytes")
+            segment = prior_match
+        _write_immutable(root / segment.relative_path, recovered)
+    elif prior_match is not None:
+        raise ValueError("partial does not match its committed segment")
+    original_digest = bytes_digest(payload)
+    receipt_path = root / "repairs" / f"{short_digest(original_digest, length=64)}.json"
+    original_path = receipt_path.with_suffix(".bin")
+    _write_immutable(original_path, payload)
+    receipt = {
+        "schema_version": "synth.trace-spool-repair.v1", "capture_id": capture_id,
+        "original_digest": original_digest, "original_path": str(original_path.relative_to(root)),
+        "recovered_digest": bytes_digest(recovered), "recovered_records": len(records),
+        "truncated_tail_bytes": truncated, "truncated_tail_digest": bytes_digest(payload[consumed:]),
+        "segment_digest": segment.digest if segment else None,
+    }
+    _write_immutable(receipt_path, (canonical_text(receipt) + "\n").encode())
+    receipt_ref = str(receipt_path.relative_to(root))
+    prior_receipts = list((previous.metadata if previous else {}).get("repair_receipts") or [])
+    if receipt_ref not in prior_receipts:
+        segments = tuple(sorted((*prior_segments, segment) if segment and prior_match is None
+                                else prior_segments, key=lambda item: item.sequence))
+        live = LiveManifestV1(
+            capture_id=capture_id, generation=(previous.generation if previous else 0) + 1,
+            updated_at=utc_now(), segments=segments,
+            high_water_ordinal=max((item.last_ordinal for item in segments), default=-1),
+            metadata={**(previous.metadata if previous else {}), "repair": True,
+                      "repair_receipts": [*prior_receipts, receipt_ref]},
+        ).sealed()
+        generation_path = root / "manifests" / f"{live.generation:06d}-{short_digest(live.content_digest)}.json"
+        _write_immutable(generation_path, (canonical_text(live) + "\n").encode())
+        pointer = LiveManifestPointerV1(capture_id=capture_id, generation=live.generation,
+            manifest_digest=live.content_digest, relative_path=str(generation_path.relative_to(root)),
+            updated_at=live.updated_at)
+        durable_write(root / "latest.json", (canonical_text(pointer) + "\n").encode(), replace=True)
+    else:
+        assert previous is not None
+        live = previous
+    partial.unlink()
+    sync_directory(segments_dir)
+    return SpoolRepairV1(capture_id=capture_id, repaired=True, recovered_records=len(records),
+        truncated_tail_bytes=truncated, segment_digest=segment.digest if segment else None,
+        reason="promoted_complete_leading_records" if records else "partial_had_no_complete_records",
+        repaired_at=utc_now(), segment=segment, live_manifest_digest=live.content_digest)
 
 
 def _segment_from_payload(payload: dict[str, Any]) -> TraceSegmentManifestV1:
@@ -715,14 +728,7 @@ def _segment_from_payload(payload: dict[str, Any]) -> TraceSegmentManifestV1:
 
 
 def _write_immutable(path: Path, payload: bytes) -> None:
-    if path.exists():
-        if path.read_bytes() != payload:
-            raise FileExistsError(f"immutable trace object already exists with other bytes: {path}")
-        return
-    temp = path.with_suffix(path.suffix + ".tmp")
-    temp.write_bytes(payload)
-    temp.replace(path)
-    path.chmod(0o444)
+    durable_write(path, payload)
 
 
 def _safe_relative_path(root: Path, relative: str) -> Path:

@@ -11,7 +11,7 @@ def serve_inspection_tools(tools):
     path = '/mcp/' + secrets.token_urlsafe(32)
     lock = threading.Lock()
     class Handler(BaseHTTPRequestHandler):
-        def log_message(self, *args): pass
+        def log_message(self, format: str, *args): pass
         def do_POST(self):
             if self.path != path:
                 self.send_error(404)

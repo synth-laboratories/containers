@@ -16,6 +16,10 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Iterable
 
 from .tracing.capture.redaction import assert_no_secrets
+from .stream_cursor import (
+    StreamCursorError, StreamCursorV1, StreamWatermarkV1,
+    normalize_stream_kinds, resume_after, stream_scope,
+)
 
 
 CONTROL_SUBSCRIBED = "stream.subscribed"
@@ -42,6 +46,12 @@ def _validate_frame_name(name: str) -> str:
     if ".." in name or "/" in name or "\\" in name or not _FRAME_NAME.fullmatch(name):
         raise ValueError("frame name must be a URL-safe token")
     return name
+
+
+def _validate_event_kind(kind: str) -> str:
+    if not isinstance(kind, str) or not kind or any(ord(c) < 32 or ord(c) == 127 for c in kind):
+        raise ValueError("invalid_stream_event_kind")
+    return kind
 
 
 def _utc_now() -> str:
@@ -343,11 +353,25 @@ class RolloutEventLog:
 
     _released: bool = False
     _compacted: bool = False
+    _write_failed: bool = False
+
+    def _commit(self, row: dict[str, Any]) -> None:
+        if self._write_failed:
+            raise RuntimeError("event_log_recovery_required")
+        assert_no_secrets(row, where=f"rollout_event_log:{self.rollout_id}")
+        try:
+            self._persist(row)
+        except BaseException:
+            # The append may have reached disk despite a failed fsync. Reusing its
+            # sequence on retry would corrupt history. Recover into a new owner.
+            self._write_failed = True
+            raise
 
     def append_control(self, kind: str, payload: dict[str, Any]) -> LogEnvelope:
         with self._lock:
             if self.closed:
                 raise RuntimeError(f"event_log_closed:{self.rollout_id}")
+            _validate_event_kind(kind)
             frozen_payload = _normalized_payload(payload)
             envelope = LogEnvelope(
                 kind=kind,
@@ -357,15 +381,16 @@ class RolloutEventLog:
                 ts=_utc_now(),
                 digest=_digest(kind, None, frozen_payload),
             )
-            self._persist({"record": "envelope", "envelope": envelope.to_dict()})
+            self._commit({"record": "envelope", "envelope": envelope.to_dict()})
             self._items.append(envelope)
         self._notify()
-        return envelope
+        return deepcopy(envelope)
 
     def append(self, kind: str, payload: dict[str, Any]) -> LogEnvelope:
         with self._lock:
             if self.closed:
                 raise RuntimeError(f"event_log_closed:{self.rollout_id}")
+            _validate_event_kind(kind)
             frozen_payload = _normalized_payload(payload)
             next_sequence = self._high_water + 1
             envelope = LogEnvelope(
@@ -376,12 +401,12 @@ class RolloutEventLog:
                 ts=_utc_now(),
                 digest=_digest(kind, next_sequence, frozen_payload),
             )
-            self._persist({"record": "envelope", "envelope": envelope.to_dict()})
+            self._commit({"record": "envelope", "envelope": envelope.to_dict()})
             self._high_water = next_sequence
             self._chain_head = chain_extend(self.chain_head, envelope.digest)
             self._items.append(envelope)
         self._notify()
-        return envelope
+        return deepcopy(envelope)
 
     def compact(self) -> dict[str, Any]:
         """Shrink a closed log in RAM to errors plus a summary of the rest.
@@ -398,6 +423,8 @@ class RolloutEventLog:
         of per-step chatter.
         """
 
+        if self.journal_path is None:
+            return {"compacted": False, "reason": "not_persisted"}
         if self._released:
             return {"compacted": False, "reason": "released"}
         with self._lock:
@@ -465,13 +492,13 @@ class RolloutEventLog:
         """
 
         with self._lock:
-            if not self.closed or self._released:
+            if not self.closed or self._released or self.journal_path is None:
                 return
             self._items = []
             self._released = True
 
     def _rehydrate(self) -> None:
-        """Reload a released or compacted log on access; caller must not hold the lock.
+        """Reload a closed, released/compacted log under the reentrant writer lock.
 
         Reads restore full fidelity rather than serving the compacted view,
         because readers are not all ours: `craftax_gold/gepa.py` builds its
@@ -480,14 +507,24 @@ class RolloutEventLog:
         failing. Compaction therefore reclaims memory only until something
         actually asks -- which for old rollouts is usually never.
         """
-        restored = RolloutEventLog.recover(
-            rollout_id=self.rollout_id,
-            stream_id=self.stream_id,
-            journal_path=self.journal_path,
-        )
+        if self.journal_path is None or not self.journal_path.is_file():
+            raise StreamCursorError("stream_history_unavailable", status_code=410)
+        try:
+            restored = RolloutEventLog.recover(
+                rollout_id=self.rollout_id,
+                stream_id=self.stream_id,
+                journal_path=self.journal_path,
+            )
+        except (ValueError, UnicodeError) as error:
+            raise StreamCursorError("stream_history_corrupt") from error
+        except OSError as error:
+            raise StreamCursorError("stream_history_unavailable", status_code=503) from error
         with self._lock:
             if not (self._released or self._compacted):
                 return
+            if (restored.high_water != self._high_water or restored.chain_head != self.chain_head
+                    or restored.closed != self.closed):
+                raise StreamCursorError("stream_cursor_history_mismatch")
             self._items = restored._items
             self._released = False
             self._compacted = False
@@ -497,7 +534,7 @@ class RolloutEventLog:
             if self.closed:
                 return
             closed_at = _utc_now()
-            self._persist(
+            self._commit(
                 {
                     "record": "closed",
                     "high_water": self._high_water,
@@ -540,12 +577,18 @@ class RolloutEventLog:
         """
 
         with self._lock:
+            if self._write_failed:
+                raise StreamCursorError("stream_writer_recovery_required", status_code=503)
             if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 0:
                 raise ValueError("event_log_ack_must_be_non_negative_integer")
             acked = min(max(sequence, self.last_acked), self._high_water)
             if acked != self.last_acked:
+                try:
+                    self._persist_ack(acked)
+                except BaseException:
+                    self._write_failed = True
+                    raise
                 self.last_acked = acked
-                self._persist_ack()
             return self.last_acked
 
     def _ack_path(self) -> Path | None:
@@ -553,14 +596,14 @@ class RolloutEventLog:
             return None
         return self.journal_path.with_name(self.journal_path.name + ".ack.json")
 
-    def _persist_ack(self) -> None:
+    def _persist_ack(self, acked: int) -> None:
         path = self._ack_path()
         if path is None:
             return
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
         encoded = json.dumps(
-            {"rollout_id": self.rollout_id, "acked": self.last_acked, "ts": _utc_now()},
+            {"rollout_id": self.rollout_id, "acked": acked, "ts": _utc_now()},
             sort_keys=True,
             separators=(",", ":"),
         )
@@ -570,6 +613,12 @@ class RolloutEventLog:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, path)
+
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
 
     def subscribed_payload(self) -> dict[str, Any]:
         return {
@@ -582,9 +631,9 @@ class RolloutEventLog:
 
     def after(self, sequence: int) -> list[LogEnvelope]:
         """Semantic events with sequence > `sequence`, plus control records when sequence == 0."""
-        if self._released or self._compacted:
-            self._rehydrate()
         with self._lock:
+            if self._released or self._compacted:
+                self._rehydrate()
             out: list[LogEnvelope] = []
             for item in self._items:
                 if item.control:
@@ -593,7 +642,19 @@ class RolloutEventLog:
                     continue
                 if item.sequence is not None and item.sequence > sequence:
                     out.append(item)
-            return out
+            return deepcopy(out)
+
+    def _snapshot(self) -> tuple[tuple[LogEnvelope, ...], int, str, bool, int, bool]:
+        """Internal immutable-by-custody rows and one atomic publication watermark.
+
+        Append/after return detached copies, so these private rows can be serialized
+        outside the writer lock. Closed-log compaction never mutates an envelope.
+        """
+        with self._lock:
+            if self._released or self._compacted:
+                self._rehydrate()
+            return (tuple(self._items), self._high_water, self.chain_head, self.closed,
+                    self.last_acked, self._write_failed)
 
     def snapshot_key(self) -> str:
         return self.last_snapshot_key
@@ -645,7 +706,6 @@ class RolloutEventLog:
 
     def _persist(self, row: dict[str, Any]) -> None:
         """Durably append before making a record visible to poll/SSE/WS consumers."""
-        assert_no_secrets(row, where=f"rollout_event_log:{self.rollout_id}")
         if self.journal_path is None:
             return
         self.journal_path.parent.mkdir(parents=True, exist_ok=True)
@@ -655,6 +715,11 @@ class RolloutEventLog:
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
+        directory = os.open(self.journal_path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
 
     @classmethod
     def recover(
@@ -670,7 +735,10 @@ class RolloutEventLog:
             return log
         closed = False
         expected_sequence = 1
-        for line_number, line in enumerate(journal_path.read_text(encoding="utf-8").splitlines(), 1):
+        raw = journal_path.read_bytes()
+        if raw and not raw.endswith(b"\n"):
+            raise ValueError("event_log_incomplete_tail")
+        for line_number, line in enumerate(raw.decode("utf-8").splitlines(), 1):
             if not line.strip():
                 continue
             try:
@@ -764,36 +832,84 @@ def stream_descriptor(
 SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 
 
-def format_sse(envelope: LogEnvelope, extra: dict[str, Any] | None = None) -> str:
-    """One SSE record. ``id`` is the semantic sequence, or 0 for control records."""
+def format_sse(
+    envelope: LogEnvelope, extra: dict[str, Any] | None = None,
+    *, resume_cursor: StreamCursorV1 | None = None,
+) -> str:
+    """One SSE record; unsequenced controls never change Last-Event-ID."""
 
     row = envelope.to_dict()
     if extra:
+        if any(key in row and row[key] != value for key, value in extra.items()):
+            raise ValueError("stream_extra_overrides_native_event")
         row.update(extra)
-    sse_id = envelope.sequence if envelope.sequence is not None else 0
+    _validate_event_kind(row["kind"])
+    event_id = resume_cursor.encode() if resume_cursor is not None else envelope.sequence
+    sse_id = f"id: {event_id}\n" if envelope.sequence is not None else ""
     return (
-        f"id: {sse_id}\n"
+        sse_id +
         f"event: {row['kind']}\n"
         f"data: {json.dumps(row, separators=(',', ':'))}\n\n"
     )
 
 
+def legacy_poll_cursor(cursor: dict[str, Any], *, journal_state: bool = False) -> dict[str, Any]:
+    """Keep the original cursor shape unless the scoped profile is requested."""
+    keys = ("kind", "after", "high_water", "closed", "next", "has_more")
+    if journal_state:
+        keys += ("chain_head", "acked")
+    return {key: cursor[key] for key in keys}
+
+
 def poll_payload(
     log: RolloutEventLog,
     *,
-    after: int,
+    after: int = 0,
     limit: int = 1000,
     kinds: Iterable[str] | None = None,
     subject_id_field: str = "rollout_id",
     subject_id: str | None = None,
+    cursor: str | None = None,
+    scoped: bool = False,
 ) -> dict[str, Any]:
     """Page of envelopes after ``after``, optionally restricted to ``kinds``."""
 
-    if isinstance(limit, bool) or limit < 1 or limit > 10_000:
+    if type(scoped) is not bool:
+        raise StreamCursorError("invalid_stream_scope", status_code=422)
+    if type(limit) is not int or limit < 1 or limit > 10_000:
         raise ValueError("invalid_page_limit")
-    allowed = frozenset(kinds) if kinds is not None else None
+    allowed = normalize_stream_kinds(kinds)
+    identity = subject_id if subject_id is not None else log.rollout_id
+    if subject_id_field in {"schema", "kind", "ts", "control", "payload", "digest", "digest_schema", "sequence", "event_id"}:
+        raise StreamCursorError("invalid_stream_scope", status_code=422)
+    scope = stream_scope(log.stream_id, subject_id_field, identity, allowed)
+    if type(after) is not int or after < 0:
+        raise StreamCursorError("invalid_stream_after", status_code=422)
+    if cursor is not None:
+        if after != 0:
+            raise StreamCursorError("stream_cursor_conflicts_with_after", status_code=422)
+        after = resume_after(cursor, scope)
+    rows, high_water, chain_head, closed, acked, write_failed = log._snapshot()
+    if after > high_water:
+        raise StreamCursorError("stream_cursor_ahead")
+
+    def chain_at(sequence: int) -> str:
+        if sequence == high_water:
+            return chain_head
+        return chain_head_for(log.rollout_id, [
+            item.digest for item in rows if item.sequence is not None and item.sequence <= sequence
+        ])
+
+    if cursor is not None and StreamCursorV1.decode(cursor).chain_head != chain_at(after):
+        raise StreamCursorError("stream_cursor_history_mismatch")
     available = []
-    for item in log.after(after):
+    for item in rows:
+        if item.control:
+            if after == 0:
+                available.append(item)
+            continue
+        if item.sequence is None or item.sequence <= after:
+            continue
         if allowed is not None and not item.control and item.kind not in allowed:
             continue
         available.append(item)
@@ -801,22 +917,35 @@ def poll_payload(
     evidence = [item for item in available if item.sequence is not None]
     page = [*controls, *evidence[:limit]]
     envelopes = [item.to_dict() for item in page]
-    identity = subject_id if subject_id is not None else log.rollout_id
     for row in envelopes:
         row[subject_id_field] = identity
-    return {
+    next_sequence = max([after, *(item.sequence for item in page if item.sequence is not None)])
+    has_more = len(evidence) > limit
+    scanned_through = next_sequence if has_more else high_water
+    result = {
         subject_id_field: identity,
         "stream_id": log.stream_id,
         "cursor": {
             "kind": "sequence",
             "after": after,
-            "high_water": log.high_water,
-            "closed": log.closed,
-            "next": max([after, *(item.sequence for item in page if item.sequence is not None)], default=after),
-            "has_more": len(evidence) > limit,
+            "high_water": high_water,
+            "closed": closed,
+            "next": next_sequence,
+            "has_more": has_more,
+            "scanned_through": scanned_through,
+            "resume": StreamCursorV1(schema_version="synth.stream-cursor.v1", scope=scope, after=scanned_through,
+                                     chain_head=chain_at(scanned_through)).encode(),
+            "scope": scope.model_dump(),
+            "chain_head": chain_head,
+            "acked": acked,
+            "durability": "local_fsync" if log.persisted else "memory",
+            "writer_state": "recovery_required" if write_failed else "available",
         },
         "events": envelopes,
     }
+    if cursor is None and not scoped:
+        result["cursor"] = legacy_poll_cursor(result["cursor"])
+    return result
 
 
 async def iter_sse(
@@ -826,16 +955,40 @@ async def iter_sse(
     after: int = 0,
     extra: dict[str, Any] | None = None,
     kinds: Iterable[str] | None = None,
+    cursor: str | None = None,
+    scoped: bool = False,
 ) -> AsyncIterator[str]:
     """Replay then follow a log. Heartbeats keep Luna-idle streams open."""
 
-    allowed = frozenset(kinds) if kinds is not None else None
+    allowed = normalize_stream_kinds(kinds)
+    scope = stream_scope(log.stream_id, "rollout_id", log.rollout_id, allowed)
+    if cursor is not None:
+        validated = poll_payload(log, cursor=cursor, kinds=allowed, limit=1)
+        resolved_after = validated["cursor"]["after"]
+        if after not in (0, resolved_after):
+            raise StreamCursorError("stream_cursor_conflicts_with_after", status_code=422)
+        after, scoped = resolved_after, True
+    head: str | None = None
+    last_watermark: tuple[int, bool, bool] | None = None
     emitted_controls: set[str] = set()
     while not await request.is_disconnected():
+        rows, high_water, _, closed, _, write_failed = log._snapshot()
+        if type(after) is not int or after < 0 or after > high_water:
+            raise StreamCursorError("stream_cursor_ahead")
+        if scoped and head is None:
+            head = chain_head_for(log.rollout_id, [
+                row.digest for row in rows if row.sequence is not None and row.sequence <= after
+            ])
         emitted = False
-        for envelope in log.after(after):
+        for envelope in rows:
+            if envelope.sequence is not None and envelope.sequence <= after:
+                continue
+            if envelope.control and after > 0:
+                continue
             if envelope.sequence is not None:
                 after = envelope.sequence
+                if scoped:
+                    head = chain_extend(head or chain_genesis(log.rollout_id), envelope.digest)
             if allowed is not None and not envelope.control and envelope.kind not in allowed:
                 continue
             if envelope.control:
@@ -843,10 +996,26 @@ async def iter_sse(
                 if control_key in emitted_controls:
                     continue
                 emitted_controls.add(control_key)
-            yield format_sse(envelope, extra)
+            resume = StreamCursorV1(schema_version="synth.stream-cursor.v1", scope=scope, after=after, chain_head=head) if scoped and head else None
+            yield format_sse(envelope, extra, resume_cursor=resume)
             emitted = True
-        if log.closed:
+        if scoped and (high_water, closed, write_failed) != last_watermark:
+            watermark = StreamWatermarkV1(
+                schema_version="synth.stream-watermark.v1",
+                cursor=StreamCursorV1(schema_version="synth.stream-cursor.v1", scope=scope, after=after, chain_head=head or chain_genesis(log.rollout_id)),
+                high_water=high_water, closed=closed,
+                durability="local_fsync" if log.persisted else "memory",
+                writer_state="recovery_required" if write_failed else "available",
+            )
+            yield (f"id: {watermark.cursor.encode()}\nevent: stream.watermark\n"
+                   f"data: {watermark.model_dump_json()}\n\n")
+            last_watermark = high_water, closed, write_failed
+        if closed:
             break
+        if write_failed:
+            if scoped:
+                return
+            raise RuntimeError("event_log_recovery_required")
         if not emitted:
             yield ": heartbeat\n\n"
         await asyncio.sleep(0.05)

@@ -17,6 +17,8 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
 from ..event_log import SSE_HEADERS, RolloutEventLog, iter_sse
+from ..stream_cursor import StreamCursorError
+from .journal_pages import sse_resume_position
 from ..live_annotation.api import mount_live_annotation
 from .http_requests import (
     RequestParseError,
@@ -104,8 +106,8 @@ def create_compat_app(
             "hidden_cot": False,
         }
 
-    @app.get("/health")
-    async def health() -> dict[str, Any]:
+    @app.get("/health", response_model=dict[str, Any])
+    async def health() -> dict[str, Any] | JSONResponse:
         payload = {
             "status": "ok",
             "target": spec.target_id,
@@ -323,17 +325,23 @@ def create_compat_app(
         limit: int = Query(default=1000, ge=1, le=10_000),
         ack: int | None = Query(default=None, ge=0),
         wait_ms: int = Query(default=0, ge=0, le=10_000),
+        cursor: str | None = Query(default=None, max_length=4096),
+        kinds: list[str] | None = Query(default=None),
+        scoped: bool = Query(default=False),
     ) -> Any:
-        if wait_ms > 0:
+        result = platform.events_payload(rollout_id, after, limit, kinds=kinds, ack=ack, cursor=cursor, scoped=scoped)
+        if (wait_ms > 0 and "error" not in result
+                and not any(row.get("sequence") is not None for row in result["events"])):
+            scanned = result["cursor"].get("scanned_through", result["cursor"]["high_water"])
             deadline = time.monotonic() + wait_ms / 1000.0
             while True:
                 log = platform.logs.get(rollout_id)
-                if log is None or log.closed or log.high_water > after:
+                if log is None or log.closed or log.high_water > scanned or log._write_failed:
                     break
                 if time.monotonic() >= deadline:
                     break
                 await asyncio.sleep(0.05)
-        result = platform.events_payload(rollout_id, after, limit, ack=ack)
+            result = platform.events_payload(rollout_id, after, limit, kinds=kinds, ack=ack, cursor=cursor, scoped=scoped)
         return _platform_response(result, default_status=404)
 
     @app.get("/rollouts/{rollout_id}/frames/{step}.png")
@@ -359,18 +367,25 @@ def create_compat_app(
         return FileResponse(frame_path, media_type="image/png")
 
     @app.get("/rollouts/{rollout_id}/stream")
-    async def sse(rollout_id: str, request: Request) -> StreamingResponse:
+    async def sse(
+        rollout_id: str, request: Request,
+        cursor: str | None = Query(default=None, max_length=4096),
+        scoped: bool = Query(default=False),
+        kinds: list[str] | None = Query(default=None),
+    ) -> StreamingResponse:
         log = platform.logs.get(rollout_id)
         if log is None or not platform.transport_is_bound(rollout_id, "sse"):
             raise HTTPException(status_code=404, detail=f"telemetry_not_enabled:{rollout_id}")
-        raw_last = request.headers.get("last-event-id", "0")
         try:
-            after = int(raw_last)
-        except ValueError:
-            # Invalid Last-Event-ID is a cursor reset, not a failed request: resume from sequence 0.
-            after = 0
+            after, resume, scoped = sse_resume_position(
+                log, last_event_id=request.headers.get("last-event-id"),
+                cursor=cursor, scoped=scoped, kinds=kinds,
+            )
+        except StreamCursorError as error:
+            raise HTTPException(status_code=error.status_code, detail=error.code) from error
         return StreamingResponse(
-            iter_sse(log, request, after=after, extra={"rollout_id": rollout_id}),
+            iter_sse(log, request, after=after, extra={"rollout_id": rollout_id},
+                     kinds=kinds, cursor=resume, scoped=scoped),
             media_type="text/event-stream",
             headers=SSE_HEADERS,
         )
@@ -421,20 +436,28 @@ def create_compat_app(
         rollout_id: str,
         after: int = Query(default=0, ge=0),
         limit: int = Query(default=1000, ge=1, le=10_000),
+        cursor: str | None = Query(default=None, max_length=4096),
+        scoped: bool = Query(default=False),
     ) -> Any:
-        result = platform.events_payload(rollout_id, after, limit, kinds=tuple(REWARD_STREAM_KINDS))
+        result = platform.events_payload(rollout_id, after, limit, kinds=tuple(REWARD_STREAM_KINDS), cursor=cursor, scoped=scoped)
         return _platform_response(result, default_status=404)
 
     @app.get("/rollouts/{rollout_id}/reward/stream")
-    async def reward_sse(rollout_id: str, request: Request) -> StreamingResponse:
+    async def reward_sse(
+        rollout_id: str, request: Request,
+        cursor: str | None = Query(default=None, max_length=4096),
+        scoped: bool = Query(default=False),
+    ) -> StreamingResponse:
         log = platform.logs.get(rollout_id)
         if log is None or not platform.transport_is_bound(rollout_id, "sse"):
             raise HTTPException(status_code=404, detail=f"telemetry_not_enabled:{rollout_id}")
-        raw_last = request.headers.get("last-event-id", "0")
         try:
-            after = int(raw_last)
-        except ValueError:
-            after = 0
+            after, resume, scoped = sse_resume_position(
+                log, last_event_id=request.headers.get("last-event-id"),
+                cursor=cursor, scoped=scoped, kinds=REWARD_STREAM_KINDS,
+            )
+        except StreamCursorError as error:
+            raise HTTPException(status_code=error.status_code, detail=error.code) from error
         return StreamingResponse(
             iter_sse(
                 log,
@@ -442,6 +465,8 @@ def create_compat_app(
                 after=after,
                 extra={"rollout_id": rollout_id},
                 kinds=REWARD_STREAM_KINDS,
+                cursor=resume,
+                scoped=scoped,
             ),
             media_type="text/event-stream",
             headers=SSE_HEADERS,

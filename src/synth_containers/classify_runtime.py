@@ -43,7 +43,7 @@ class ClassifyRow:
     id: str
     text: str
     label: str
-    metadata: Mapping[str, Any] = None  # type: ignore[assignment]
+    metadata: Mapping[str, Any] | None = None
 
     def observation(self, *, labels: Sequence[str], seed: int, split: str) -> dict[str, Any]:
         return {

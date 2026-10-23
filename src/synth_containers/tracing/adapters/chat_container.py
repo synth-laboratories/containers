@@ -99,7 +99,9 @@ def promote_chat_rollout(document: TraceDocumentV5, sealed_digest: str | None = 
 
     for event in _ordered(document):
         kind = str(event.event_type)
-        payload = event.payload if isinstance(event.payload, dict) else {}
+        payload = event.payload
+        if not isinstance(payload, dict):
+            payload = {}
         if kind == "observation" and (turns := _conversation(payload)):
             inputs_for_call: list[str] = []
             for position, (role, content) in enumerate(turns):
@@ -119,7 +121,11 @@ def promote_chat_rollout(document: TraceDocumentV5, sealed_digest: str | None = 
         elif kind == "action":
             span_id = record_id("span", kind="chat_model_call", scope=(trace_id, session_id), key=call_index)
             reply_id = record_id("msg", kind="chat_reply", scope=(session_id,), key=call_index)
-            text = payload.get("text") if isinstance(payload.get("text"), str) else payload.get("content") if isinstance(payload.get("content"), str) else str(payload.get("label") or "")
+            text = payload.get("text")
+            if not isinstance(text, str):
+                text = payload.get("content")
+            if not isinstance(text, str):
+                text = str(payload.get("label") or "")
             add(reply_id, MessageRole.ASSISTANT, text, event.occurred_at, span_id=span_id, metadata={"call_index": call_index, "source_event_id": event.event_id, "label": payload.get("label")})
             prompt_ids = (pending_prompt[0] if isinstance(pending_prompt[0], tuple) else (pending_prompt[0],)) if pending_prompt else ()
             inputs = tuple(i for i in ((system_id,) if system_id else ()) + prompt_ids if i)

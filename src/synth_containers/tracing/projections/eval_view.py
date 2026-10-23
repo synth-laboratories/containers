@@ -201,8 +201,8 @@ def project_eval_view(
                 many = payload.get("actions")
                 if isinstance(many, list):
                     planned.extend(str(x) for x in many)
-                elif _name(payload):
-                    planned.append(_name(payload))  # type: ignore[arg-type]
+                elif (proposed_name := _name(payload)) is not None:
+                    planned.append(proposed_name)
             elif _kind(e) == "achievement_unlocked":
                 ach = inner.get("achievement") or payload.get("achievement")
                 if isinstance(ach, str) and ach:

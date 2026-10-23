@@ -839,8 +839,11 @@ class Container:
                     raise HTTPException(status_code=404, detail=f"unknown_rollout:{rollout_id}")
                 updated, first_request = request_cancellation(record.payload, _now())
                 if record.payload["status"] == "in_doubt":
+                    previous_metadata = record.payload.get("metadata")
+                    current_metadata = updated.get("metadata")
+                    callback_task = previous_metadata.get("callback_task", "lost") if isinstance(previous_metadata, dict) else "lost"
                     updated = {**updated, "status": "in_doubt", "success_status": "unknown",
-                               "metadata": {**updated["metadata"], "callback_task": record.payload.get("metadata", {}).get("callback_task", "lost")}}
+                               "metadata": {**(current_metadata if isinstance(current_metadata, dict) else {}), "callback_task": callback_task}}
                 record = AsyncRolloutRecord(payload=updated)
                 save_record(rollout_id, record)
                 # Keep custody until the task exits. A repeated request must not

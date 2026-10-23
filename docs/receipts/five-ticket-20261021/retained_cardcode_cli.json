@@ -1,0 +1,12 @@
+{
+  "interface": "synth-containers eval describe/run/results and regrade inspect/export",
+  "benchmark": "CardCodeBench captured native observations",
+  "native_cases": 18,
+  "mean": 1.0,
+  "describe_evidence_sufficiency": true,
+  "provider_calls": 0,
+  "original_agent_generation_calls": 0,
+  "rust_builds": 0,
+  "execution": "completed",
+  "retained_export": true
+}

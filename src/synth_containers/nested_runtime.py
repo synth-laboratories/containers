@@ -22,10 +22,10 @@ import contextlib
 import json
 import os
 import shutil
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Generator, Any
 
 from .event_log import RolloutEventLog
 from .nested import (
@@ -616,7 +616,7 @@ class NestedTrialRuntime:
 
 
 @contextlib.contextmanager
-def _environment(overrides: Mapping[str, str]) -> Iterator[None]:
+def _environment(overrides: Mapping[str, str]) -> Generator[None, None, None]:
     """Apply `overrides` to this process for the duration of the block.
 
     The agent harness runs as a subprocess that inherits this environment, so

@@ -1,0 +1,59 @@
+{
+  "schema_version": "synth.local-qualification.v1",
+  "ticket": "SYN-4923",
+  "qualified_source_commit": "e5aab521017e21b07b16e1cfd3bbf9e0733526d3",
+  "pinned_dev_base": "e8b14e82fcc419c097f86fed3e451e8ea3d7ed6e",
+  "draft_pr": "https://github.com/synth-laboratories/containers/pull/37",
+  "profiles": [
+    "main: ty 0.0.86, cryptography 50.0.1, Harbor 0.22.0, Daytona 0.210.0, synth-ai git@9ab8088abf81cdb42f0897ecbe22c68e8f47485f",
+    "mitm: ty 0.0.86, mitmproxy 12.2.3, cryptography 48.0.1"
+  ],
+  "uv_lock_sha256": "f79a103d471157177d2c3ad55f7335be1e9b2bbf70d80a8738fa97be133959ca",
+  "fresh_source_gate": {
+    "source_commit": "e5aab521017e21b07b16e1cfd3bbf9e0733526d3",
+    "fresh_source_default_gate": "pass",
+    "injected_error_returncode": 1,
+    "restored_default_returncode": 0,
+    "profiles": [
+      "main",
+      "mitm"
+    ],
+    "baseline_changed": false
+  },
+  "regression_suite": {
+    "passed": 1530,
+    "skipped": 12,
+    "deselected": 1,
+    "failures": 0,
+    "errors": 0,
+    "live_test_excluded": "tests/test_harbor_docker.py::test_harbor_docker_live_agent_and_verifier_are_distinct"
+  },
+  "installed_http": {
+    "wheel_sha256": "4ca726ec6e7bda7041509ef2fb1289fe7ec45344e4a4a28e5bce1a61892fe3bb",
+    "installed_module": "/Users/joshuapurtell/GitHub/workspaces/v024-rhodes-20261021/containers/.local/installed/lib/python3.13/site-packages/synth_containers/__init__.py",
+    "cwd": "/Users/joshuapurtell/GitHub/Pressure/artifacts/agent-runs/dec300d6-2d97-46dc-ad64-ebde3cd1420a/containers-multi-agent/five-ticket-completion-20261021",
+    "source_pythonpath": "unset",
+    "package_source_files_verified": 289,
+    "native_events_replayed_exactly": 13,
+    "poll_pages": 7,
+    "scoped_sse_and_poll_exchange": "pass",
+    "wrong_scope_and_invalid_header": "pass",
+    "journal_bytes_unchanged_by_reads": true,
+    "provider_calls": 0,
+    "journal_sha256": "547b38851a6a2d29507e8416d8bb764deac8f81adbe7046b891274adb0c2f727",
+    "owned_server_stopped": true,
+    "server_exit_code": -15
+  },
+  "historical_baseline_changed": false,
+  "provider_calls": 0,
+  "package_publication": false,
+  "deployment": false,
+  "dev_merge": false,
+  "evidence_directory": "/Users/joshuapurtell/GitHub/Pressure/artifacts/agent-runs/dec300d6-2d97-46dc-ad64-ebde3cd1420a/containers-multi-agent/five-ticket-completion-20261021",
+  "remaining_scope": [
+    "SYN-4918",
+    "SYN-4921",
+    "SYN-4922",
+    "SYN-4919"
+  ]
+}

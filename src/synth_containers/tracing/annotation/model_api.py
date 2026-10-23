@@ -176,8 +176,8 @@ class ModelApiRunner:
         if result is not None:
             if result.cost_usd is not None:
                 cost, cost_status = result.cost_usd, "reported"
-            elif self.price_for(model) is not None and isinstance(result.input_tokens, int):
-                cost, cost_status = self.price_table.cost(  # type: ignore[union-attr]
+            elif self.price_table is not None and self.price_for(model) is not None and isinstance(result.input_tokens, int):
+                cost, cost_status = self.price_table.cost(
                     model,
                     input_tokens=result.input_tokens,
                     output_tokens=result.output_tokens,

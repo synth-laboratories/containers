@@ -1,0 +1,82 @@
+{
+  "backend_source": "f61c3e23a",
+  "containers_source": "da9ae1cf8eb19ce8389356dcacae90f322bab108",
+  "deployment": false,
+  "log_sha256": {
+    "backend_units": "923ef554ded189fd4b1485b29966545277a6a57ae744719710931b89be342556",
+    "installed_tests": "99caf12857fc65b3ade521816e9fbb065dbe8f478632b6cd0b6ee101f4e63e63",
+    "native": "3891cc4942898003d22c27b0226f02598491de08bcef4a562fff9574d69bfb72",
+    "source_tests": "20490d798b164653bf4d71c465462c0f84634cefa1deaf949aedc640ea05d0b1",
+    "typing": "3c687dfbc5540c869598cb442343cf0d7140dae2cfc72c7b84ee74a8182ae0d2"
+  },
+  "native_fixture": {
+    "database_operation": "56f2d1ff90ac4da6a8598fd60f8bb516",
+    "independently_absent_instance_ids": [
+      "b2d3ee5f7019d0cd1a67b3a113d088626fbb5a3f8bfbbeb9ccb338e71463a1a1",
+      "2ac48fb7a9a75875fd5850de126997872a94c2218ca41782aae4a3a53277744d",
+      "904196135b37b39cfcb3ddfc3cf8b885b33029ef7b50fb495106f4848f0e14cf",
+      "5a749b9886fdef317194b20da6d3413d9c390fbcecb6a05ed4aa02f3572471b6",
+      "b362c16856b99675e93dba7c0755d88e31718a30bde411653886d0436d26a8a0"
+    ],
+    "migration_heads": [
+      "20261022_rhodes_lease_admit"
+    ],
+    "storage_operation": "0aecfaca824645f5883c5971dced651b"
+  },
+  "not_qualified": [
+    "adaptive parallelism convergence",
+    "hosted provider throttle behavior",
+    "enrolled Swarms canary",
+    "optimizer caller matrix",
+    "all v0.24 acceptance"
+  ],
+  "paid_provider_calls": 0,
+  "real_installed_http": {
+    "long_delay": {
+      "attempts": 1,
+      "elapsed_seconds": 0.0014096670201979578,
+      "retry_after": "120"
+    },
+    "operation_id": "fddba7716a5f4011914ba38066732a6d",
+    "provider_model_calls": 0,
+    "server_confirmed_stopped": true,
+    "short_delay": {
+      "attempts": 2,
+      "minimum_server_delay_seconds": 1,
+      "observed_delay_seconds": 1.004694124974776
+    },
+    "transport": "real loopback HTTP",
+    "unidentified_mutation": {
+      "attempts": 1,
+      "retried": false,
+      "status": 503
+    }
+  },
+  "retry_policy": {
+    "adaptive_concurrency": "not_implemented_by_this_change",
+    "delay": "max(server Retry-After, local backoff)",
+    "inline_max_seconds": 30,
+    "long_delay": "surface original refusal; no early retry",
+    "statuses": [
+      429,
+      503
+    ],
+    "unidentified_mutation_replay": "unchanged/refused"
+  },
+  "runtime_image_sdk": "0.4.5.dev2026102104; runtime image unchanged",
+  "schema_version": "synth.rhodes-sdk-backpressure-qualification.v1",
+  "sdk_version": "0.4.5.dev2026102108",
+  "source_wheel_installed_modules_equal": 306,
+  "tests": {
+    "backend_units": 507,
+    "installed": 85,
+    "native_process_cases": 23,
+    "native_seconds": 71.32,
+    "source": 85,
+    "typing_profiles": {
+      "main": "zero_diagnostics",
+      "mitm": "zero_diagnostics"
+    }
+  },
+  "wheel_sha256": "03948835ad4c992c302f7ed672e4cbc986c7ce9fb45eac6ea293a802d26332a6"
+}

@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 
 from ..canonical import bytes_digest
+from ..atomic import durable_write, durable_mkdir
 from .base import BlobMetadataV1, BlobPutResultV1
 
 
@@ -21,7 +22,7 @@ class FilesystemBlobStore:
 
     def __init__(self, root: Path) -> None:
         self.root = Path(root)
-        self.root.mkdir(parents=True, exist_ok=True)
+        durable_mkdir(self.root)
 
     def path_for(self, digest: str) -> Path:
         algorithm, _, hexed = digest.partition(":")
@@ -54,14 +55,10 @@ class FilesystemBlobStore:
                     metadata=dict(metadata or {}),
                 ),
             )
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temp = path.with_suffix(".tmp")
-        temp.write_bytes(content)
-        temp.replace(path)
-        path.chmod(0o444)
+        created = durable_write(path, content)
         return BlobPutResultV1(
             digest=digest,
-            created=True,
+            created=created,
             metadata=BlobMetadataV1(
                 digest=digest,
                 byte_size=len(content),

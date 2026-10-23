@@ -1,0 +1,52 @@
+{
+  "native_image": "sha256:1acb37093fad899f3f5c3f229d0d1d130b2aeb04759adea5d22872c115436117",
+  "baseline_actions": 8,
+  "faults": [
+    {
+      "fault": "dispatch",
+      "retained_prefix": 3,
+      "actions_match": 8,
+      "next_action_and_final_state_match": true,
+      "calls_after_resume": 9,
+      "baseline_calls": 8,
+      "guard_cleanup_after_process_death": true
+    },
+    {
+      "fault": "action",
+      "retained_prefix": 3,
+      "actions_match": 8,
+      "next_action_and_final_state_match": true,
+      "calls_after_resume": 9,
+      "baseline_calls": 8,
+      "guard_cleanup_after_process_death": true
+    },
+    {
+      "fault": "reward",
+      "retained_prefix": 4,
+      "actions_match": 8,
+      "next_action_and_final_state_match": true,
+      "calls_after_resume": 8,
+      "baseline_calls": 8,
+      "guard_cleanup_after_process_death": true
+    },
+    {
+      "fault": "commit",
+      "retained_prefix": 3,
+      "actions_match": 8,
+      "next_action_and_final_state_match": true,
+      "calls_after_resume": 8,
+      "baseline_calls": 8,
+      "guard_cleanup_after_process_death": true
+    }
+  ],
+  "edited_policy_fork": {
+    "parent_unchanged": true,
+    "last_child_action": "noop",
+    "linked_parent": "fault-reward",
+    "cumulative_calls": 8
+  },
+  "provider_calls": 0,
+  "rust_builds": 0,
+  "paid_jobs": 0,
+  "all_owned_engines_stopped": true
+}
