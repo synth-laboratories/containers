@@ -36,7 +36,8 @@ from uuid import uuid4
 from .pools import PoolClientError, PoolRolloutTimeout
 from .rhodes_client import RhodesClient, RhodesRequestError
 
-HARBOR_SNAPSHOT_PREFIX = "synth-pool-harbor-"
+# Backend snapshot-ledger names, plus the pre-ledger names older backends create.
+HARBOR_SNAPSHOT_PREFIXES = ("synth-harbor-", "synth-pool-harbor-")
 TERMINAL = {"completed", "failed", "cancelled"}
 
 
@@ -227,7 +228,7 @@ class DaytonaObserver:
             names.update(
                 str(item.name)
                 for item in items
-                if str(getattr(item, "name", "")).startswith(HARBOR_SNAPSHOT_PREFIX)
+                if str(getattr(item, "name", "")).startswith(HARBOR_SNAPSHOT_PREFIXES)
             )
             if len(items) < 100:
                 return names
@@ -393,6 +394,8 @@ class Run:
             "agent_and_verifier_ran_on_daytona": len(r.get("daytona_sandboxes_seen") or ()) >= 2,
             "pool_deleted": r.get("pool_deleted") is True,
             "no_daytona_sandbox_left": r.get("leaked_sandboxes") == [],
+            # The leak check is only meaningful if it saw the build's snapshot.
+            "snapshot_observed": bool(r.get("snapshots_created")),
             "no_daytona_snapshot_left": r.get("leaked_snapshots") == [],
         }
         r["passed"] = all(r["checks"].values()) and not r["errors"]
