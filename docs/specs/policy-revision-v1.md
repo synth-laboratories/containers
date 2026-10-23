@@ -60,7 +60,7 @@ generic prompt adapters do not advertise this component. Demo selection is not
 an untyped JSON string inside `prompt_fields` in the new protocol.
 
 `code_bundle` specifies language, canonical relative file paths, entrypoint,
-serve-contract version and optional dependency digest. The current executable
+serve-contract version, optional dependency digest, pinned build reference and state-schema reference. The current executable
 adapter accepts one Python file, no external dependencies, and
 `process_observation_action.v1`: load a callable, acknowledge readiness over
 JSONL, answer observation/action requests, and close. Startup has a bounded
@@ -68,6 +68,8 @@ deadline and failed/hanging children are reaped. This is a process boundary,
 not a general hostile-code sandbox. Rust and multi-file/dependency builds require
 an admitted isolated build adapter, pinned build inputs, mbx and build receipts;
 they currently refuse rather than invoking an arbitrary host command.
+
+`policy_set` carries a digest-pinned topology reference and a complete seat-to-revision map. It is schema-defined, but publication refuses until an atomic roster adapter is registered. Reuse CISPO PolicySetRevision semantics rather than inventing a competing roster identity.
 
 `config` is immutable adapter-specific data. `model` is identity only.
 `weights_ref`, `renderer_ref`, `sampler_ref` and `protocol` use digest-pinned

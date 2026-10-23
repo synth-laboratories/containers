@@ -63,6 +63,28 @@
           ],
           "default": null,
           "title": "Dependency Digest"
+        },
+        "build_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArtifactRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "state_schema_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArtifactRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -192,9 +214,42 @@
             }
           ],
           "default": null
+        },
+        "policy_set": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PolicySet"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "title": "Components",
+      "type": "object"
+    },
+    "PolicySet": {
+      "additionalProperties": false,
+      "properties": {
+        "topology_ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "members": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "minProperties": 1,
+          "title": "Members",
+          "type": "object"
+        }
+      },
+      "required": [
+        "topology_ref",
+        "members"
+      ],
+      "title": "PolicySet",
       "type": "object"
     },
     "PolicyManifest": {

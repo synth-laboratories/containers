@@ -34,6 +34,8 @@ def registry_for(platform: CompatPlatform) -> PolicyRevisionRegistry:
                 or len(bundle.files) != 1
                 or bundle.serve_contract != "process_observation_action.v1"
                 or bundle.dependency_digest is not None
+                or bundle.build_ref is not None
+                or bundle.state_schema_ref is not None
             ):
                 raise PolicyRevisionError("policy_code_contract_unsupported", status=409)
             code = bundle.files[bundle.entrypoint].encode()

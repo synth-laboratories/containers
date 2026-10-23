@@ -44,6 +44,8 @@ class CodeBundle(ClosedModel):
     files: dict[str, str]
     serve_contract: str = Field(min_length=1)
     dependency_digest: Digest | None = None
+    build_ref: ArtifactRef | None = None
+    state_schema_ref: ArtifactRef | None = None
 
     @model_validator(mode="after")
     def validate_files(self) -> CodeBundle:
@@ -58,6 +60,22 @@ class CodeBundle(ClosedModel):
         return self
 
 
+class PolicySet(ClosedModel):
+    topology_ref: ArtifactRef
+    members: dict[str, str] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_members(self) -> PolicySet:
+        import re
+
+        if any(
+            not seat.strip() or re.fullmatch(r"polrev_[0-9a-f]{64}", revision) is None
+            for seat, revision in self.members.items()
+        ):
+            raise ValueError("policy set requires named seats and full immutable revision IDs")
+        return self
+
+
 class Components(ClosedModel):
     prompt_fields: dict[str, str] | None = None
     module_demos: dict[str, list[str]] | None = None
@@ -68,6 +86,7 @@ class Components(ClosedModel):
     renderer_ref: ArtifactRef | None = None
     sampler_ref: ArtifactRef | None = None
     protocol: ArtifactRef | None = None
+    policy_set: PolicySet | None = None
 
 
 class PolicyManifest(ClosedModel):
@@ -106,12 +125,22 @@ class PolicyManifest(ClosedModel):
         check(self.components.config)
         check(self.components.model)
         check(self.source)
-        for ref in (
+        refs = [
             self.components.weights_ref,
             self.components.renderer_ref,
             self.components.sampler_ref,
             self.components.protocol,
-        ):
+        ]
+        if self.components.policy_set:
+            refs.append(self.components.policy_set.topology_ref)
+        if self.components.code_bundle:
+            refs.extend(
+                [
+                    self.components.code_bundle.build_ref,
+                    self.components.code_bundle.state_schema_ref,
+                ]
+            )
+        for ref in refs:
             if ref and ("?" in ref.uri or "@" in ref.uri or "#" in ref.uri):
                 raise ValueError("artifact URIs must not contain credentials or signed queries")
         if len(content_bytes(self.model_dump(mode="json", exclude_none=True))) > 2_097_152:
