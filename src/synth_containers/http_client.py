@@ -59,6 +59,21 @@ class HTTPContainerClient:
     async def aclose(self) -> None:
         await self._client.aclose()
 
+    async def publish_policy_revision(self, manifest: dict[str, Any]) -> dict[str, Any]:
+        return await self._request("POST", "/policy-revisions", payload=manifest)
+
+    async def prepare_policy_revision(
+        self, revision_id: str, *, operation_id: str, timeout_s: int = 10,
+        profile: str = "next_rollout_update.v1",
+    ) -> dict[str, Any]:
+        return await self._request(
+            "POST", f"/policy-revisions/{quote(revision_id, safe='')}/prepare",
+            payload={"operation_id": operation_id, "profile": profile, "timeout_s": timeout_s},
+        )
+
+    async def inspect_policy_revision(self, revision_id: str) -> dict[str, Any]:
+        return await self._request("GET", f"/policy-revisions/{quote(revision_id, safe='')}")
+
     async def __aenter__(self) -> "HTTPContainerClient":
         return self
 

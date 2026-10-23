@@ -410,6 +410,17 @@ def create_reference_app(
     storage_root: str | Path | None = None,
 ) -> FastAPI:
     app = FastAPI(title=title)
+    from .policy_revision import (
+        PolicyRevisionError, PolicyRevisionRegistry, mount_policy_revisions,
+    )
+    from .prompt_revision import prompt_adapter
+
+    revision_registry = PolicyRevisionRegistry(
+        {"prompt_program": prompt_adapter(runtime)}
+        if (getattr(runtime, "policy_revision_prompt_fields", False) is True
+            and callable(getattr(runtime, "program", None))) else {}
+    )
+    mount_policy_revisions(app, revision_registry)
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
     telemetry_by_rollout: dict[str, dict[str, Any]] = {}
     prepared_identity_by_rollout: dict[str, dict[str, Any]] = {}
@@ -424,6 +435,11 @@ def create_reference_app(
         else Path(tempfile.mkdtemp(prefix="synth-containers-reference-events-"))
     )
 
+    def _with_policy_binding(rollout_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        admitted = start_responses.get(rollout_id, {})
+        return {**payload, **{key: admitted[key] for key in ("policy_revision_id", "policy_binding")
+                             if key in admitted}}
+
     def _new_event_log(rollout_id: str, stream_id: str) -> RolloutEventLog:
         journal_name = hashlib.sha256(rollout_id.encode("utf-8")).hexdigest()
         return RolloutEventLog(
@@ -436,7 +452,8 @@ def create_reference_app(
         result = await runtime.get_execution_state(rollout_id=rollout_id)
         if result is None:
             result = await runtime.get_execution(rollout_id=rollout_id)
-        return _coerce_state_payload(runtime, result) if result is not None else None
+        return (_with_policy_binding(rollout_id, _coerce_state_payload(runtime, result))
+                if result is not None else None)
 
     def _append_snapshot(log: RolloutEventLog, payload: dict[str, Any]) -> None:
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
@@ -489,7 +506,10 @@ def create_reference_app(
     @app.get("/metadata")
     @app.get("/info")
     async def metadata() -> dict[str, Any]:
-        return _with_optimizer_contracts(metadata_to_http_payload(_metadata(runtime)), runtime)
+        return {
+            **_with_optimizer_contracts(metadata_to_http_payload(_metadata(runtime)), runtime),
+            "policy_revision": revision_registry.capability(),
+        }
 
     @app.get("/task_info")
     async def task_info(request: Request) -> dict[str, Any]:
@@ -539,6 +559,19 @@ def create_reference_app(
 
     async def _rollout_locked(request: RolloutRequestModel) -> dict[str, Any]:
         payload = request.model_dump(mode="json", exclude_none=True)
+        revision_binding = None
+        if request.policy_revision_id:
+            if request.candidate or request.candidate_overlay or request.policy is not None:
+                raise HTTPException(status_code=422, detail={"error": "policy_inline_forbidden"})
+            try:
+                manifest, revision_binding = revision_registry.resolve(request.policy_revision_id)
+            except PolicyRevisionError as exc:
+                raise HTTPException(status_code=exc.status, detail={"error": exc.code}) from exc
+            # Only the internal runtime adapter sees the resolved prompt. The
+            # HTTP caller sends the immutable revision id, never the candidate.
+            payload["candidate"] = dict(manifest.components.prompt_fields or {})
+            payload["candidate_overlay"] = {"candidate": payload["candidate"], "metadata": {}}
+            payload.update(manifest.components.config or {})
         # The prepare response allocates the public rollout id. Existing managed
         # runtimes key execution by trace_correlation_id, so carry that id through
         # when the caller did not provide a separate correlation id.
@@ -589,6 +622,9 @@ def create_reference_app(
                 )
         result = await runtime.submit_rollout(request=payload)
         response = _coerce_rollout_payload(result)
+        if revision_binding is not None:
+            response["policy_revision_id"] = request.policy_revision_id
+            response["policy_binding"] = revision_binding
         if isinstance(telemetry, dict) and telemetry.get("enabled"):
             rollout_id = str(
                 response.get("rollout_id")
@@ -797,7 +833,7 @@ def create_reference_app(
                     ),
                 }
             raise HTTPException(status_code=404, detail=f"unknown_rollout:{rollout_id}")
-        payload = _coerce_rollout_payload(result)
+        payload = _with_policy_binding(rollout_id, _coerce_rollout_payload(result))
         payload.setdefault("started", True)
         return payload
 
@@ -808,7 +844,7 @@ def create_reference_app(
             result = await runtime.get_execution(rollout_id=rollout_id)
         if result is None:
             raise HTTPException(status_code=404, detail=f"unknown_rollout:{rollout_id}")
-        return _coerce_state_payload(runtime, result)
+        return _with_policy_binding(rollout_id, _coerce_state_payload(runtime, result))
 
     @app.get("/rollouts/{rollout_id}/summary")
     async def get_rollout_summary(rollout_id: str) -> dict[str, Any]:

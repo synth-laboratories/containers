@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import queue
+import signal
 import subprocess
 import sys
 import tempfile
@@ -98,7 +100,7 @@ def choose_actions(*, observation_text, session, valid_actions, engine, seed, pl
 class IsolatedPolicyProcess:
     """Spawn a child Python over JSONL. Isolation receipt is process-level."""
 
-    def __init__(self, code: bytes) -> None:
+    def __init__(self, code: bytes, *, startup_timeout_s: float = 10) -> None:
         self._sandbox = tempfile.TemporaryDirectory(prefix="synth-policy-")
         root = Path(self._sandbox.name)
         policy = root / "policy.py"
@@ -119,6 +121,7 @@ class IsolatedPolicyProcess:
                 "PYTHONDONTWRITEBYTECODE": "1",
             },
             close_fds=True,
+            start_new_session=True,
         )
         if self._proc.stdin is None or self._proc.stdout is None:
             raise RuntimeError("isolated_policy_pipes")
@@ -126,12 +129,28 @@ class IsolatedPolicyProcess:
         self._stdout = self._proc.stdout
         self._lock = threading.Lock()
         self._request_id = 0
-        ready = self._stdout.readline()
-        if not ready:
-            raise RuntimeError(f"isolated_policy_startup_failed:rc={self._proc.poll()}")
-        payload = json.loads(ready)
-        if payload.get("op") != "ready" or payload.get("ok") is not True:
-            raise RuntimeError("isolated_policy_not_ready")
+        readiness: queue.Queue[str] = queue.Queue(maxsize=1)
+        threading.Thread(
+            target=lambda: readiness.put(self._stdout.readline(65_537)), daemon=True
+        ).start()
+        try:
+            try:
+                ready = readiness.get(timeout=startup_timeout_s)
+            except queue.Empty as exc:
+                raise TimeoutError("isolated_policy_startup_timeout") from exc
+            if not ready or len(ready) > 65_536:
+                raise RuntimeError("isolated_policy_startup_failed")
+            payload = json.loads(ready)
+            if payload.get("op") != "ready" or payload.get("ok") is not True:
+                raise RuntimeError("isolated_policy_not_ready")
+        except BaseException:
+            try:
+                os.killpg(self._proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            self._proc.wait(timeout=2)
+            self._sandbox.cleanup()
+            raise
         self.isolation_receipt = {
             "contract": "process_observation_action.v1",
             "platform": sys.platform,

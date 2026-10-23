@@ -17,6 +17,87 @@ servers:
   - url: http://localhost
     description: Local development
 paths:
+  /policy-revisions:
+    post:
+      operationId: publishPolicyRevision
+      summary: Publish immutable policy content without selecting it
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: './policy-revision-v1.json#/$defs/PolicyManifest'
+      responses:
+        '200':
+          description: Immutable revision receipt; publication is not readiness
+          content:
+            application/json:
+              schema:
+                $ref: './policy-revision-v1.json#/$defs/RevisionReceipt'
+        '409':
+          description: Unsupported adapter or component
+        '422':
+          description: Invalid manifest or forbidden credential
+  /policy-revisions/{revision_id}:
+    parameters:
+      - in: path
+        name: revision_id
+        required: true
+        schema: {type: string}
+    get:
+      operationId: inspectPolicyRevision
+      summary: Read preparation state and actual binding without source
+      responses:
+        '200':
+          description: Revision state and binding receipt
+          content:
+            application/json:
+              schema:
+                $ref: './policy-revision-v1.json#/$defs/RevisionReceipt'
+        '404': {description: Unknown revision}
+    put:
+      operationId: publishExpectedPolicyRevision
+      summary: Publish with expected content-derived ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: './policy-revision-v1.json#/$defs/PolicyManifest'
+      responses:
+        '200':
+          description: Immutable revision receipt
+          content:
+            application/json:
+              schema:
+                $ref: './policy-revision-v1.json#/$defs/RevisionReceipt'
+        '409': {description: Expected ID conflicts or component unsupported}
+        '422': {description: Invalid manifest}
+  /policy-revisions/{revision_id}/prepare:
+    parameters:
+      - in: path
+        name: revision_id
+        required: true
+        schema: {type: string}
+    post:
+      operationId: preparePolicyRevision
+      summary: Prepare a revision under an advertised profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: './policy-revision-v1.json#/$defs/PrepareRequest'
+      responses:
+        '200':
+          description: Inspect state=ready or state=failed; HTTP success is not readiness
+          content:
+            application/json:
+              schema:
+                $ref: './policy-revision-v1.json#/$defs/RevisionReceipt'
+        '404': {description: Unknown revision}
+        '409': {description: Unsupported profile or operation identity conflict}
+        '422': {description: Invalid preparation arguments}
   /:
     get:
       operationId: getRoot
@@ -1359,6 +1440,9 @@ components:
     RolloutRequest:
       type: object
       properties:
+        policy_revision_id:
+          type: string
+          description: Prepared immutable revision; do not send inline candidate or policy with this pin.
         rollout_id:
           type: string
           description: Optional client-supplied rollout identifier. Runtimes may use this as the execution id; otherwise they generate one and return it in the rollout response.

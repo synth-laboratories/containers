@@ -95,3 +95,11 @@ command_timeout_seconds = 30
 require_paths = ["tests/test_checkpoint_custody.py", ".local/release-types-main/bin/python"]
 command = 'TMPDIR="$PWD/.local/tmp" PYTHONPATH=src .local/release-types-main/bin/python -m pytest -q tests/test_checkpoint_custody.py tests/test_checkpoint_schedule.py tests/test_checkpoint_retention.py'
 remedy = "Keep producer facts separate from platform target/schema/digest, copy normalized cuts, reconcile original disk commits without overwrite, serialize ownership changes and confirm deletion barriers before forgetting memory. This is not portable checkpoint or Rhodes restore admission proof."
+
+[[checks]]
+id = "policy_revision_contract_bytes"
+description = "Policy revision request schemas, HTTP routes and retained content IDs agree"
+severity = "error"
+command = "python3 scripts/check-policy-revision-contract.py"
+require_paths = ["docs/specs/policy-revision-v1.md", "openapi/policy-revision-v1.json", "tests/fixtures/policy-revision-v1.json"]
+remedy = "Reconcile the producer schema and retained canonical bytes; run the policy-revision conformance slice before changing advertised semantics."

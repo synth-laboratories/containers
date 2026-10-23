@@ -1,0 +1,145 @@
+{
+  "schema": "policy-revision.cross-language-http.v1",
+  "provider_calls": 0,
+  "paid_cost_usd": 0,
+  "applied_prompts": [
+    "Policy A",
+    "Policy B",
+    "Policy A"
+  ],
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/metadata",
+      "body": null
+    },
+    {
+      "method": "POST",
+      "path": "/policy-revisions",
+      "body": {
+        "components": {
+          "config": {
+            "policy": {
+              "model": "fixture",
+              "provider": "fixture"
+            }
+          },
+          "prompt_fields": {
+            "stage2_system": "Policy A"
+          }
+        },
+        "harness": "prompt_program",
+        "name": "prompt",
+        "namespace": "optimizers",
+        "schema_version": "synth.policy-revision.v1"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/policy-revisions/polrev_b83fb785e4bf18545bea799d26abd083edfed0da886c6fa59ece78da4d5cfa1c/prepare",
+      "body": {
+        "operation_id": "optimizers-prepare-polrev_b83fb785e4bf18545bea799d26abd083edfed0da886c6fa59ece78da4d5cfa1c",
+        "profile": "next_rollout_update.v1",
+        "timeout_s": 10
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/rollout",
+      "body": {
+        "policy_revision_id": "polrev_b83fb785e4bf18545bea799d26abd083edfed0da886c6fa59ece78da4d5cfa1c",
+        "rollout_id": "conformance_0",
+        "submission_mode": "sync",
+        "task": {
+          "label": "card_arrival",
+          "task_id": "train:0",
+          "text": "Card delivery"
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/rollouts/conformance_0",
+      "body": null
+    },
+    {
+      "method": "POST",
+      "path": "/policy-revisions",
+      "body": {
+        "components": {
+          "config": {
+            "policy": {
+              "model": "fixture",
+              "provider": "fixture"
+            }
+          },
+          "prompt_fields": {
+            "stage2_system": "Policy B"
+          }
+        },
+        "harness": "prompt_program",
+        "name": "prompt",
+        "namespace": "optimizers",
+        "schema_version": "synth.policy-revision.v1"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/policy-revisions/polrev_28257ccaaad4ebf6b9dc216b5a63c874c9efa27f56e999fca9fb59d267c311a5/prepare",
+      "body": {
+        "operation_id": "optimizers-prepare-polrev_28257ccaaad4ebf6b9dc216b5a63c874c9efa27f56e999fca9fb59d267c311a5",
+        "profile": "next_rollout_update.v1",
+        "timeout_s": 10
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/rollout",
+      "body": {
+        "policy_revision_id": "polrev_28257ccaaad4ebf6b9dc216b5a63c874c9efa27f56e999fca9fb59d267c311a5",
+        "rollout_id": "conformance_1",
+        "submission_mode": "sync",
+        "task": {
+          "label": "card_arrival",
+          "task_id": "train:0",
+          "text": "Card delivery"
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/rollouts/conformance_1",
+      "body": null
+    },
+    {
+      "method": "POST",
+      "path": "/rollout",
+      "body": {
+        "policy_revision_id": "polrev_b83fb785e4bf18545bea799d26abd083edfed0da886c6fa59ece78da4d5cfa1c",
+        "rollout_id": "conformance_2",
+        "submission_mode": "sync",
+        "task": {
+          "label": "card_arrival",
+          "task_id": "train:0",
+          "text": "Card delivery"
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/rollouts/conformance_2",
+      "body": null
+    }
+  ],
+  "rust_result": {
+    "revisions": [
+      "polrev_b83fb785e4bf18545bea799d26abd083edfed0da886c6fa59ece78da4d5cfa1c",
+      "polrev_28257ccaaad4ebf6b9dc216b5a63c874c9efa27f56e999fca9fb59d267c311a5",
+      "polrev_b83fb785e4bf18545bea799d26abd083edfed0da886c6fa59ece78da4d5cfa1c"
+    ],
+    "schema": "policy-revision.conformance.v1"
+  },
+  "containers_version": "0.4.6.dev2026102302",
+  "producer_source_sha256": "32cc4acc45e33d8abc77a786e0debb8da018c9befd8d632754599715d0a37cf4",
+  "cleanup_complete": true
+}
