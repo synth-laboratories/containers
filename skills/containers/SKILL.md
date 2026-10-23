@@ -338,3 +338,16 @@ process with a new session, closed inherited descriptors and redirected stdio
 avoids that wait. This is transport setup; keep the policy's native agent loop.
 Retain separate evidence for failed startup attempts and successful provider
 qualification, including network policy readback and exact sandbox deletion.
+
+Boat v1 remote Docker adapters register images as
+`boat://sandboxes/<seed-id>/images/sha256:<64hex>` with provider `boat`.
+This is a seed-scoped OCI configuration ID, not a registry manifest digest.
+Fork a credential-free seed, then inspect the exact Docker image ID in the fork
+before running the task container. Boat's VM-ready state can precede Docker's
+restored image inventory; wait for that concrete image instead of rebuilding or
+substituting a tag. Keep task containers at `--network none`, pass no provider
+credentials or Docker socket, and preserve separate verifier custody. Use the
+file API for binary/log transfers: detached-command status output is a tail.
+Boat lifecycle/API details belong in the adapter; verify current provider limits
+and distinguish a stopped reusable seed from deleted per-rollout VMs. Do not
+claim catalog or parallel qualification from an underlying sandbox smoke alone.
