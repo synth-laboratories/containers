@@ -286,6 +286,48 @@ def test_validate_qualifies_the_release_before_any_pool(tmp_path):
     assert validate["case"]["policy_ref"] == {"harness": "scripted_react", "config": "engine_acceptance"}
 
 
+class HealthBenchRhodes(ValidatingRhodes):
+    """Canned native HTTP chat results; no model or provider is contacted."""
+
+    async def get_rollout(self, rollout_id):
+        result = await super().get_rollout(rollout_id)
+        result["score"] = 0.75
+        result["result"].update(
+            reward=0.75,
+            task_instance_id="healthbench2:" + rollout_id.removeprefix("run-"),
+            policy_ref={"harness": "chat_completion", "config": "healthbench_canned"},
+        )
+        return result
+
+
+def test_healthbench_http_release_preserves_seeds_and_chat_policy_through_cleanup(tmp_path):
+    client = HealthBenchRhodes("passed")
+    report = asyncio.run(lifecycle(
+        tmp_path, client, "--release-id", "healthbench-release", "--validate",
+        "--validation-seed", "2", "--image-kind", "healthbench_eval",
+        "--harness", "chat_completion", "--policy-config", "healthbench_canned",
+        "--seeds", "0-2", "--parallel", "1", "--max-steps", "1",
+    ).run())
+    assert report["passed"], report["checks"]
+    validate = next(body for name, body in client.calls if name == "validate")
+    assert validate["case"]["seed"] == 2
+    assert validate["case"]["policy_ref"] == {
+        "harness": "chat_completion", "config": "healthbench_canned",
+    }
+    submitted = [body["payload"] for name, body in client.calls if name == "submit"]
+    assert {body["seed"] for body in submitted} == {0, 1, 2}
+    assert all(body["policy_ref"] == validate["case"]["policy_ref"] for body in submitted)
+    assert all(body["max_steps"] == 1 and "task" not in body for body in submitted)
+    deployments = [body["payload"] for name, body in client.calls if name == "create_deployment"]
+    assert all(body["environment_release_id"] == "healthbench-release" for body in deployments)
+    assert all(body["image_kinds"] == ["healthbench_eval"] and "env_vars" not in body for body in deployments)
+    assert [seed["score"] for seed in report["seeds"]] == [0.75, 0.75, 0.75]
+    assert report["checks"]["trace_archives_reopen_after_cleanup"]
+    names = [name for name, _ in client.calls]
+    assert names.index("publication_asset") > max(i for i, name in enumerate(names) if name == "delete_pool")
+    assert client.deployments == {} and set(client.leases.values()) == {"released"}
+
+
 def test_failed_validation_leaves_release_unqualified_and_refuses(tmp_path):
     client = ValidatingRhodes("failed")
     report = asyncio.run(lifecycle(
