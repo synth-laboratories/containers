@@ -6,7 +6,8 @@ import subprocess
 import sys
 import zipfile
 
-repo = Path(__file__).resolve().parents[2]
+repo = next(parent for parent in Path(__file__).resolve().parents
+            if (parent / "src/synth_containers").is_dir())
 sys.path.append(str(Path(sys.base_prefix) / 'lib/python3.12/site-packages'))
 sys.path.append('/Users/joshuapurtell/GitHub/workspaces/containers-hardening-20261020/.venv-native312/lib/python3.12/site-packages')
 import synth_containers

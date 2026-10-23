@@ -15,7 +15,7 @@ import uvicorn
 
 root = Path('/Users/joshuapurtell/GitHub')
 cb = root / 'workspaces/cookbooks-policy-revisions-20261023/cookbooks/optimizers/gepa/banking77_container'
-out = Path(__file__).resolve().parent
+out = root / 'workspaces/containers-policy-revisions-20261023/artifacts/policy-revision-20261023'
 os.environ['BANKING77_STREAM_ROOT'] = str(out / ('wire-store-' + uuid.uuid4().hex))
 sys.path.insert(0, str(cb))
 spec = importlib.util.spec_from_file_location('fixture_loader', cb / 'test_contract.py')
