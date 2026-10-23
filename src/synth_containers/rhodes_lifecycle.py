@@ -189,7 +189,7 @@ class Lifecycle:
             "name": f"rhodes-lifecycle-{self.run_id}-lane{lane}",
             "backend": "arbitrary",
             "project_id": self.args.project_id,
-            "provider": "docker",
+            "provider": self.args.provider,
             "metadata": {"rhodes_lifecycle_run": self.run_id, "lane": lane},
         }
         pool = await self.client.create_project_pool(body)
@@ -208,8 +208,9 @@ class Lifecycle:
                 pool_id, record.task_id, operation="create",
                 idempotency_key=self.key("deploy", record.seed),
                 payload={
-                    "provider": "docker",
+                    "provider": args.provider,
                     "interface_mode": "synth_http",
+                    **_limits(args),
                     # Observed leases admit only a kind the task itself declares.
                     "image_kinds": [args.image_kind],
                     # A registered release pins image, port and health path server-side.
@@ -397,7 +398,9 @@ class Lifecycle:
                 )
                 self.registry["validation"] = finished
                 self.log(f"registry validation {finished['state']}")
-            verdict = await self.client.environment_compatibility(self.release_id, provider="docker")
+            verdict = await self.client.environment_compatibility(
+                self.release_id, provider=self.args.provider
+            )
         except (RhodesRequestError, PoolClientError, ValueError, PoolRolloutTimeout) as error:
             self.registry.update(mode="release", release_id=self.release_id, error=_refusal(error))
             self.log(f"registry refused {_refusal(error)}")
@@ -513,8 +516,9 @@ class Lifecycle:
             # Only a "supported" verdict is a support claim; unqualified stays unqualified.
             "release_support": (self.registry.get("compatibility") or {}).get("status"),
             "seeds": [asdict(r) for r in records],
+            "provider": self.args.provider,
             # This driver observes the public API only. It does not qualify
-            # hosted providers, warm reset, money settlement or Swarms adoption.
+            # warm reset, money settlement or Swarms adoption.
             "scope": "public_api_lifecycle_observation",
         }
         (self.out / "report.json").write_text(
@@ -540,6 +544,16 @@ class Lifecycle:
         return report
 
 
+def _limits(args: argparse.Namespace) -> dict[str, Any]:
+    """Explicit container limits; a hosted deploy matching validation reuses its snapshot."""
+    limits = {
+        key: value
+        for key, value in (("cpu_cores", args.cpu_cores), ("memory_mb", args.memory_mb))
+        if value is not None
+    }
+    return {"limits": limits} if limits else {}
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m synth_containers.rhodes_lifecycle")
     parser.add_argument("--backend-url", default=os.environ.get("SYNTH_BACKEND_URL"))
@@ -561,6 +575,9 @@ def _parser() -> argparse.ArgumentParser:
         "--allow-unqualified", action="store_true",
         help="run an unqualified release; the report still records it as unqualified",
     )
+    parser.add_argument("--provider", choices=["docker", "daytona"], default="docker")
+    parser.add_argument("--cpu-cores", type=float, default=None)
+    parser.add_argument("--memory-mb", type=int, default=None)
     parser.add_argument("--image-kind", default="craftax_eval")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--seeds", type=_seeds, default=_seeds("0-9"))
