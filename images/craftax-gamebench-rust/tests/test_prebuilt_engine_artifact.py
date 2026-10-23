@@ -71,8 +71,33 @@ def test_runtime_boot_refuses_missing_binary_instead_of_compiling(monkeypatch):
         stack.resolve_binary()
 
 
-@pytest.mark.parametrize("machine", ["x86_64", "amd64", "armv7l", "unknown"])
-def test_runtime_architecture_must_match_the_prepared_engine(tmp_path,monkeypatch,machine):
+@pytest.mark.parametrize("machine", ["armv7l", "unknown"])
+def test_unsupported_runtime_architecture_refuses(tmp_path,monkeypatch,machine):
     monkeypatch.setattr(module.platform,"machine",lambda:machine)
-    with pytest.raises(ValueError,match="requires an ARM64 runtime image"):
+    with pytest.raises(ValueError,match="requires an ARM64 or AMD64 runtime image"):
+        module.verify(tmp_path)
+
+
+@pytest.mark.parametrize("machine", ["x86_64", "amd64"])
+def test_amd64_runtime_refuses_the_arm64_engine(tmp_path,monkeypatch,machine):
+    artifact(tmp_path)
+    monkeypatch.setattr(module.platform,"machine",lambda:machine)
+    with pytest.raises(ValueError):
+        module.verify(tmp_path)
+
+
+def test_amd64_artifact_verifies_on_amd64_runtime(tmp_path,monkeypatch):
+    monkeypatch.setattr(module.platform,"machine",lambda:"x86_64")
+    manifest = artifact(tmp_path)
+    header = b"\x7fELF\x02\x01" + b"\0" * 12 + (62).to_bytes(2, "little")
+    (tmp_path / "craftax_gold").write_bytes(header + b"unit fixture only")
+    manifest.update(platform="linux/amd64",
+        mbx_sha256="1eb4922ffc5250bfe9326344f00a970fcd542f3574ad70d9ef58a4bec06e7be8",
+        binary_sha256=hashlib.sha256((tmp_path / "craftax_gold").read_bytes()).hexdigest())
+    (tmp_path / "build-inputs.json").write_text(json.dumps(manifest))
+    assert module.verify(tmp_path) == manifest
+    (tmp_path / "craftax_gold").write_bytes(b"\x7fELF\x02\x01" + b"\0" * 12 + (183).to_bytes(2, "little"))
+    manifest["binary_sha256"] = hashlib.sha256((tmp_path / "craftax_gold").read_bytes()).hexdigest()
+    (tmp_path / "build-inputs.json").write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="linux/amd64"):
         module.verify(tmp_path)

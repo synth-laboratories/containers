@@ -1,0 +1,384 @@
+# Publish the Craftax GameBench Rust HTTP image (images/craftax-gamebench-rust) to the PRIVATE
+# package ghcr.io/synth-laboratories/rhodes-craftax as one multi-arch tag (linux/amd64 + linux/arm64).
+#
+# CI mirror of scripts/prepare_craftax_runtime.py (which is path-bound to the developer Mac):
+#   1. clean checkout of the PUBLIC synth-laboratories/craftax-runtime at a pinned 40-hex commit;
+#   2. compile `craftax_gold` with mbx only (no raw cargo, no sccache, owned CARGO_TARGET_DIR) inside
+#      RUST_IMAGE with the source read-only at /opt/gamebench/tasks/craftax-singleplayer, so the
+#      compiled-in CARGO_MANIFEST_DIR/.. task root matches the runtime image layout;
+#   3. assemble the frozen craftax_engine context (binary + defaults/ + shared/assets/craftax/ +
+#      build-inputs.json) that verify_engine_artifact.py checks;
+#   4. build exactly one synth-containers wheel from the containers ref (containers_wheel context);
+#   5. runtime-only image assembly, push by digest per arch, then a manifest-list tag.
+# Each arch builds natively (ubuntu-latest amd64, ubuntu-24.04-arm arm64; no QEMU).
+#   gh workflow run publish-craftax-image.yml -R synth-laboratories/containers -f ref=dev
+name: publish-craftax-image
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: containers ref (branch, tag or SHA) whose images/craftax-gamebench-rust to build
+        required: false
+        default: dev
+      craftax_runtime_sha:
+        description: Exact 40-hex synth-laboratories/craftax-runtime commit to compile
+        required: false
+        default: 338356c859e56dd1450ec3a839ad9d14903efb7d
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-craftax-image-${{ inputs.ref }}-${{ inputs.craftax_runtime_sha }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/synth-laboratories/rhodes-craftax
+  ARTIFACT_PREFIX: image-metadata-rhodes-craftax
+  SOURCE_URL: https://github.com/synth-laboratories/containers
+  CRAFTAX_RUNTIME_REPO: synth-laboratories/craftax-runtime
+  CRAFTAX_RUNTIME_SHA: ${{ inputs.craftax_runtime_sha }}
+  # Same compiler image as scripts/prepare_craftax_runtime.py RUST_IMAGE.
+  RUST_IMAGE: rust:1.97-slim-bookworm@sha256:2775a09d208ff0d7c1f50490c45b62db929e87ba1dcbc3f2132ac71a704bcdd3
+  SOURCE_MOUNT: /opt/gamebench/tasks/craftax-singleplayer
+
+jobs:
+  build:
+    name: build (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    outputs:
+      sha: ${{ steps.src.outputs.sha }}
+    env:
+      ARCH: ${{ matrix.arch }}
+      PLATFORM: ${{ matrix.platform }}
+    steps:
+      - name: Check out containers
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          path: containers
+          persist-credentials: false
+
+      - name: Check out pinned craftax-runtime
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.CRAFTAX_RUNTIME_REPO }}
+          ref: ${{ env.CRAFTAX_RUNTIME_SHA }}
+          path: craftax-runtime
+          persist-credentials: false
+
+      - name: Resolve source identity
+        id: src
+        run: |
+          set -euo pipefail
+          [[ "$CRAFTAX_RUNTIME_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::craftax_runtime_sha must be 40 lowercase hex"; exit 1; }
+          sha="$(git -C containers rev-parse HEAD)"
+          runtime_sha="$(git -C craftax-runtime rev-parse HEAD)"
+          test "$runtime_sha" = "$CRAFTAX_RUNTIME_SHA" || { echo "::error::craftax-runtime HEAD $runtime_sha != pin"; exit 1; }
+          test -z "$(git -C containers status --porcelain)" || { echo "::error::containers checkout is dirty"; exit 1; }
+          test -z "$(git -C craftax-runtime status --porcelain)" || { echo "::error::craftax-runtime checkout is dirty"; exit 1; }
+          test -f containers/images/craftax-gamebench-rust/verify_engine_artifact.py \
+            || { echo "::error::ref $sha has no runtime-only craftax-gamebench-rust image (use dev)"; exit 1; }
+          test "$(uname -m)" = "$([ "$ARCH" = amd64 ] && echo x86_64 || echo aarch64)" \
+            || { echo "::error::runner arch $(uname -m) does not match matrix arch $ARCH"; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "runtime_sha=$runtime_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Cargo and mbx state
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/mbx-cache/cargo-home/registry/index
+            ${{ runner.temp }}/mbx-cache/cargo-home/registry/cache
+            ${{ runner.temp }}/mbx-cache/cargo-home/git/db
+            ${{ runner.temp }}/mbx-cache/mbx
+            ${{ runner.temp }}/mbx-cache/mbx-bin
+          key: craftax-mbx-${{ matrix.arch }}-${{ hashFiles('craftax-runtime/gold_rust/Cargo.lock') }}-${{ env.CRAFTAX_RUNTIME_SHA }}
+          restore-keys: |
+            craftax-mbx-${{ matrix.arch }}-${{ hashFiles('craftax-runtime/gold_rust/Cargo.lock') }}-
+            craftax-mbx-${{ matrix.arch }}-
+
+      - name: Compile craftax_gold with mbx
+        id: compile
+        run: |
+          set -euo pipefail
+          case "$ARCH" in
+            amd64)
+              mbx_arch=x86_64
+              mbx_tar_sha=1ed3fd18da0decc106a6242d1b724e6a4b8d0f6173b8abe4d4d68c929ed47120
+              mbx_bin_sha=1eb4922ffc5250bfe9326344f00a970fcd542f3574ad70d9ef58a4bec06e7be8
+              ;;
+            arm64)
+              mbx_arch=aarch64
+              mbx_tar_sha=8a29bf0682d31767405cd606e7153385d8d3ec8b498bf089e554375a8842de3c
+              mbx_bin_sha=3b7408c71fae119b09c506ab47daff6cba6476c5e7140111959824bd72e63331
+              ;;
+            *) echo "::error::unsupported arch $ARCH"; exit 1 ;;
+          esac
+          out="$RUNNER_TEMP/craftax-compile"
+          mkdir -p "$RUNNER_TEMP/mbx-bin" "$RUNNER_TEMP/mbx-cache/mbx-bin" "$RUNNER_TEMP/mbx-cache/cargo-home" \
+            "$RUNNER_TEMP/mbx-cache/mbx" "$out/target" "$out/tmp" "$out/home"
+          if [ -f "$RUNNER_TEMP/mbx-cache/mbx-bin/mbx" ] && printf '%s  %s\n' "$mbx_bin_sha" "$RUNNER_TEMP/mbx-cache/mbx-bin/mbx" | sha256sum -c -; then
+            cp "$RUNNER_TEMP/mbx-cache/mbx-bin/mbx" "$RUNNER_TEMP/mbx-bin/mbx"
+          else
+            curl -fSL --retry 5 --retry-all-errors --retry-delay 2 "https://github.com/jdx/mr-boxington/releases/download/v1.21.0/mbx-${mbx_arch}-unknown-linux-gnu.tar.gz" -o "$RUNNER_TEMP/mbx.tar.gz"
+            printf '%s  %s\n' "$mbx_tar_sha" "$RUNNER_TEMP/mbx.tar.gz" | sha256sum -c -
+            tar -xzf "$RUNNER_TEMP/mbx.tar.gz" -C "$RUNNER_TEMP/mbx-bin"
+            printf '%s  %s\n' "$mbx_bin_sha" "$RUNNER_TEMP/mbx-bin/mbx" | sha256sum -c -
+            cp "$RUNNER_TEMP/mbx-bin/mbx" "$RUNNER_TEMP/mbx-cache/mbx-bin/mbx"
+          fi
+          chmod 0755 "$RUNNER_TEMP/mbx-bin/mbx"
+          manifest="$SOURCE_MOUNT/gold_rust/Cargo.toml"
+          # Same compile script as scripts/prepare_craftax_runtime.py: lib tests, then the binary.
+          docker run --rm --platform "$PLATFORM" \
+            --mount "type=bind,src=$PWD/craftax-runtime,dst=$SOURCE_MOUNT,readonly" \
+            --mount "type=bind,src=$out,dst=$out" \
+            --mount "type=bind,src=$out/tmp,dst=/tmp/craftax-mbx" \
+            --mount "type=bind,src=$RUNNER_TEMP/mbx-bin,dst=/mbx,readonly" \
+            --mount "type=bind,src=$RUNNER_TEMP/mbx-cache/cargo-home,dst=/var/cache/cargo" \
+            --mount "type=bind,src=$RUNNER_TEMP/mbx-cache/mbx,dst=/var/cache/mbx" \
+            --workdir "$SOURCE_MOUNT" \
+            --env CARGO_TARGET_DIR="$out/target" \
+            --env HOME="$out/home" \
+            --env CARGO_HOME=/var/cache/cargo \
+            --env MBX_CACHE_DIR=/var/cache/mbx \
+            --env MBX_TARGET_VIEWS=0 \
+            --env RUSTC_WRAPPER= \
+            --env CARGO_BUILD_RUSTC_WRAPPER= \
+            --env TMPDIR=/tmp/craftax-mbx \
+            --env MBX_GC_MAX_TOTAL_SIZE=80GiB \
+            --env MBX_GC_MIN_FREE_SIZE=20GiB \
+            --env MBX_GC_INTERVAL=10m \
+            --env MANIFEST="$manifest" \
+            --env HOST_UID="$(id -u)" \
+            --env HOST_GID="$(id -g)" \
+            "$RUST_IMAGE" timeout --signal=TERM --kill-after=10 1500 /bin/sh -ec '
+              apt-get update
+              apt-get install -y --no-install-recommends python3 pkg-config ca-certificates
+              /mbx/mbx --version
+              /mbx/mbx test --locked --release --manifest-path "$MANIFEST" --lib
+              /mbx/mbx build --locked --release --manifest-path "$MANIFEST" --bin craftax_gold
+              chown -R "$HOST_UID:$HOST_GID" /var/cache/cargo /var/cache/mbx "'"$out"'"
+            '
+          echo "binary=$out/target/release/craftax_gold" >> "$GITHUB_OUTPUT"
+          echo "mbx_sha256=$mbx_bin_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Assemble frozen craftax_engine context
+        id: engine
+        env:
+          BINARY: ${{ steps.compile.outputs.binary }}
+          MBX_SHA256: ${{ steps.compile.outputs.mbx_sha256 }}
+        run: |
+          set -euo pipefail
+          python3 -B - <<'PY'
+          import importlib.util, json, os, pathlib, shutil
+          spec = importlib.util.spec_from_file_location("prep", "containers/scripts/prepare_craftax_runtime.py")
+          prep = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(prep)
+          source = pathlib.Path("craftax-runtime").resolve()
+          inputs = prep.source_inputs(source)
+          if prep.RUST_IMAGE != os.environ["RUST_IMAGE"]:
+              raise ValueError("compiler image differs from scripts/prepare_craftax_runtime.py")
+          platform = os.environ["PLATFORM"]
+          elf_machine = {"linux/amd64": 62, "linux/arm64": 183}[platform]
+          binary = pathlib.Path(os.environ["BINARY"])
+          header = binary.read_bytes()[:20]
+          if len(header) != 20 or header[:6] != b"\x7fELF\x02\x01" or int.from_bytes(header[18:20], "little") != elf_machine:
+              raise ValueError(f"Linux {platform} engine required")
+          runtime = pathlib.Path(os.environ["RUNNER_TEMP"]) / "craftax-engine"
+          runtime.mkdir()
+          shutil.copy2(binary, runtime / "craftax_gold")
+          for directory in ("defaults", "shared/assets/craftax"):
+              for relative in inputs:
+                  if relative.startswith(directory + "/"):
+                      destination = runtime / relative
+                      destination.parent.mkdir(parents=True, exist_ok=True)
+                      shutil.copy2(source / relative, destination)
+          binary_sha = prep.digest(runtime / "craftax_gold")
+          manifest = {
+              "schema_version": "synth.craftax.compiler-artifact.v1",
+              "source_revision": os.environ["CRAFTAX_RUNTIME_SHA"],
+              "source_input_sha256": inputs,
+              "platform": platform,
+              "rust_image": prep.RUST_IMAGE,
+              "mbx_sha256": os.environ["MBX_SHA256"],
+              "binary_sha256": binary_sha,
+          }
+          (runtime / "build-inputs.json").write_text(json.dumps(manifest, sort_keys=True) + "\n")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"dir={runtime}\n")
+              out.write(f"binary_sha256={binary_sha}\n")
+          print(json.dumps({k: v for k, v in manifest.items() if k != "source_input_sha256"}, sort_keys=True))
+          PY
+
+      - name: Build synth-containers wheel
+        id: wheel
+        run: |
+          set -euo pipefail
+          wheel_dir="$RUNNER_TEMP/containers-wheel"
+          mkdir -p "$wheel_dir"
+          python3 -m pip wheel --no-deps --wheel-dir "$wheel_dir" ./containers
+          test "$(find "$wheel_dir" -maxdepth 1 -name '*.whl' | wc -l)" = 1 || { echo "::error::expected exactly one wheel"; exit 1; }
+          wheel="$(find "$wheel_dir" -maxdepth 1 -name '*.whl')"
+          echo "dir=$wheel_dir" >> "$GITHUB_OUTPUT"
+          echo "name=$(basename "$wheel")" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(sha256sum "$wheel" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: containers/images/craftax-gamebench-rust
+          file: containers/images/craftax-gamebench-rust/Dockerfile
+          platforms: ${{ matrix.platform }}
+          provenance: false
+          build-contexts: |
+            craftax_engine=${{ steps.engine.outputs.dir }}
+            containers_wheel=${{ steps.wheel.outputs.dir }}
+          labels: |
+            org.opencontainers.image.source=${{ env.SOURCE_URL }}
+            org.opencontainers.image.revision=${{ steps.src.outputs.sha }}
+            ai.usesynth.craftax-runtime.revision=${{ steps.src.outputs.runtime_sha }}
+            ai.usesynth.craftax-gold.sha256=${{ steps.engine.outputs.binary_sha256 }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Smoke the pushed image
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cid="$(docker run -d --platform "$PLATFORM" -p 127.0.0.1:18080:8080 "$IMAGE@$IMAGE_DIGEST")"
+          trap 'docker logs "$cid" 2>&1 | tail -50; docker rm -f "$cid" >/dev/null' EXIT
+          for _ in $(seq 1 90); do
+            if curl -fsS --max-time 2 http://127.0.0.1:18080/health; then echo; exit 0; fi
+            sleep 1
+          done
+          echo "::error::/health did not answer within 90 s"
+          exit 1
+
+      - name: Record arch digest
+        env:
+          SHA: ${{ steps.src.outputs.sha }}
+          RUNTIME_SHA: ${{ steps.src.outputs.runtime_sha }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          BINARY_SHA: ${{ steps.engine.outputs.binary_sha256 }}
+          WHEEL: ${{ steps.wheel.outputs.name }}
+          WHEEL_SHA: ${{ steps.wheel.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          test -n "$DIGEST" || { echo "::error::build-push-action returned no digest ($ARCH)"; exit 1; }
+          jq -n --arg repo "$IMAGE" --arg sha "$SHA" --arg runtime_sha "$RUNTIME_SHA" \
+            --arg arch "$ARCH" --arg platform "$PLATFORM" --arg digest "$DIGEST" \
+            --arg binary_sha "$BINARY_SHA" --arg wheel "$WHEEL" --arg wheel_sha "$WHEEL_SHA" \
+            '{kind:"arch", repo:$repo, containers_sha:$sha, craftax_runtime_sha:$runtime_sha, arch:$arch,
+              platform:$platform, digest:$digest, ref:"\($repo)@\($digest)", craftax_gold_sha256:$binary_sha,
+              containers_wheel:$wheel, containers_wheel_sha256:$wheel_sha}' > image-metadata.json
+          cp "${{ steps.engine.outputs.dir }}/build-inputs.json" build-inputs.json
+          cat image-metadata.json
+          {
+            echo "### \`$IMAGE\` $PLATFORM"
+            echo
+            echo "| field | value |"
+            echo "|---|---|"
+            echo "| pin (single-platform manifest) | \`$IMAGE@$DIGEST\` |"
+            echo "| containers sha | \`$SHA\` |"
+            echo "| craftax-runtime sha | \`$RUNTIME_SHA\` |"
+            echo "| craftax_gold sha256 | \`$BINARY_SHA\` |"
+            echo "| wheel | \`$WHEEL\` \`$WHEEL_SHA\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload arch image metadata
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ env.ARTIFACT_PREFIX }}-${{ steps.src.outputs.sha }}-${{ matrix.arch }}
+          path: |
+            image-metadata.json
+            build-inputs.json
+          if-no-files-found: error
+
+  merge:
+    name: merge manifest
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SHA: ${{ needs.build.outputs.sha }}
+    steps:
+      - name: Download arch metadata
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: ${{ env.ARTIFACT_PREFIX }}-${{ needs.build.outputs.sha }}-*
+          path: arch-metadata
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and verify multi-arch tag
+        run: |
+          set -euo pipefail
+          test -n "$SHA" || { echo "::error::build jobs reported no source sha"; exit 1; }
+          tag="$IMAGE:git-$SHA-craftax-${CRAFTAX_RUNTIME_SHA:0:12}"
+          jq -s '.' arch-metadata/*/image-metadata.json > arches.json
+          for arch in amd64 arm64; do
+            n="$(jq --arg a "$arch" --arg s "$SHA" '[.[] | select(.arch == $a and .containers_sha == $s)] | length' arches.json)"
+            test "$n" = 1 || { echo "::error::expected 1 $arch digest for $SHA, found $n"; exit 1; }
+          done
+          refs="$(jq -r '.[].ref' arches.json)"
+          # shellcheck disable=SC2086
+          docker buildx imagetools create -t "$tag" $refs
+          docker buildx imagetools inspect "$tag" --format '{{json .Manifest}}' > manifest.json
+          digest="$(jq -r '.digest' manifest.json)"
+          platforms="$(jq -c '[.manifests[] | .platform | select(.os != "unknown") | "\(.os)/\(.architecture)"] | sort' manifest.json)"
+          test "$platforms" = '["linux/amd64","linux/arm64"]' \
+            || { echo "::error::manifest $digest platforms $platforms, want linux/amd64+linux/arm64"; exit 1; }
+          jq -n --arg repo "$IMAGE" --arg sha "$SHA" --arg tag "$tag" --arg digest "$digest" \
+            --argjson platforms "$platforms" --slurpfile arches arches.json \
+            '{kind:"manifest_list", repo:$repo, containers_sha:$sha, tag:$tag, digest:$digest,
+              ref:"\($repo)@\($digest)", platforms:$platforms, arches:$arches[0]}' > image-metadata.json
+          {
+            echo "### Published \`$IMAGE\` (multi-arch)"
+            echo
+            echo "| field | value |"
+            echo "|---|---|"
+            echo "| tag | \`$tag\` |"
+            echo "| index pin | \`$IMAGE@$digest\` |"
+            jq -r '.[] | "| \(.arch) manifest | `\(.digest)` (craftax_gold \(.craftax_gold_sha256)) |"' arches.json
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat image-metadata.json
+
+      - name: Upload image metadata
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ env.ARTIFACT_PREFIX }}-${{ env.SHA }}
+          path: image-metadata.json
+          if-no-files-found: error
