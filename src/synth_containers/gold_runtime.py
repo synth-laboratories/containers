@@ -16,7 +16,7 @@ factory map.
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, ClassVar
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -76,6 +76,8 @@ class GoldRuntime:
 
     ``task_payload(seed, max_steps)`` is the only game-specific input.
     """
+
+    policy_revision_code_contract: ClassVar[str] = "process_observation_action.v1"
 
     environment_ref: str
     task_payload: Callable[[int, int], dict[str, Any]]

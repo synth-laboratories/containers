@@ -10,6 +10,7 @@ import threading
 import time as time
 import uuid
 from copy import deepcopy
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,9 @@ from .affordances import bind_recipe
 from .journal_retention import journal_retention, retention_ttl_seconds
 from .journal_pages import journal_events_payload
 from .http_requests import CreateRolloutRequest, ISOLATED_POLICY_HARNESS, NANOHORIZON_HARNESS
+from .http_requests import PolicyRefSpec
+from .policy_revisions import registry_for
+from ..policy_revision import PolicyRevisionError
 from .policy_process import DEFAULT_HEURISTIC, IsolatedPolicyProcess
 from .reward_plan import PlanOutcome, classify_plan_outcome
 from .runtime import runtime_for
@@ -116,6 +120,7 @@ class CompatPlatform:
         # independent of the lock used by status and rollout readers.
         self._policy_mutation_lock = threading.RLock()
         self._seed_default_policies()
+        self.revision_registry = registry_for(self)
         self._recover_checkpoints()
         self._recover_completed_rollouts()
 
@@ -629,6 +634,7 @@ class CompatPlatform:
         }
         policy_refs = self._advertised_policy_refs()
         payload = {
+            "policy_revision": self.revision_registry.capability(),
             "world_ref": self.spec.world_ref,
             "environment_ref": self.spec.environment_ref,
             "policy_ref": policy_refs[0],
@@ -853,6 +859,20 @@ class CompatPlatform:
     def _start_rollout_locked(
         self, request: CreateRolloutRequest, *, defer_sync: bool = False
     ) -> dict[str, Any]:
+        if request.policy_revision_id and len(request.policy_revision_id) == 71:
+            try:
+                _, binding = self.revision_registry.resolve(request.policy_revision_id)
+            except PolicyRevisionError as exc:
+                return {"error": exc.code, "status_code": exc.status}
+            declared = binding["policy_ref"]
+            supplied = request.policy_ref
+            if supplied.code is not None or (
+                supplied.harness is not None and supplied.harness != declared["harness"]
+            ) or (supplied.config is not None and supplied.config != declared["config"]):
+                return {"error": "policy_binding_conflict", "status_code": 409}
+            request = replace(request, policy_ref=PolicyRefSpec(
+                harness=declared["harness"], config=declared["config"], code=None
+            ))
         slot = request.slot
         if slot in {"live", "jobs"}:
             return {
@@ -963,7 +983,11 @@ class CompatPlatform:
             and not registered.config
             for seed in self.spec.policy_seeds
         )
-        if harness == ISOLATED_POLICY_HARNESS and config_id and not declared_isolated_seed:
+        revision_config = (request.policy_revision_id == config_id
+                           and bool(config_id) and len(str(config_id)) == 71)
+        if harness == ISOLATED_POLICY_HARNESS and config_id and not (
+            declared_isolated_seed or revision_config
+        ):
             return {
                 "error": "bind_refused",
                 "status_code": 403,

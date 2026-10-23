@@ -124,8 +124,12 @@ def parse_create_rollout(
     raw = require_json_object(body, operation=operation)
     telemetry = _parse_telemetry(raw, operation=operation)
     policy_ref = _parse_policy_ref(raw, operation=operation)
-    if require_policy_pin:
+    if require_policy_pin and not raw.get("policy_revision_id"):
         _require_policy_pin(policy_ref, operation=operation)
+    if raw.get("policy_revision_id") and any(
+        raw.get(key) for key in ("candidate", "candidate_overlay", "policy", "code")
+    ):
+        raise RequestParseError("policy revision pins cannot contain inline candidates")
     recipe = _optional_object(raw, "recipe", operation=operation)
     metadata = _optional_object(raw, "metadata", operation=operation)
     if metadata is None:
