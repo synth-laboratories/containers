@@ -1,0 +1,65 @@
+{
+  "schema": "policy-revision.qualification.v1",
+  "producer_source_commit": "d5e2b48b93213a95d3c5fde9fbca85e7237f028c",
+  "wheel": "synth_containers-0.4.6.dev2026102302-py3-none-any.whl",
+  "wheel_sha256": "eafb803dfefbc6645d430de202df200b1d0efcf76d5b527ce82d3b9ba854a818",
+  "packaged_python_files_matched": 314,
+  "implemented_profiles": [
+    "next_rollout_update.v1"
+  ],
+  "unadvertised_profiles": [
+    "policy_set_update.v1",
+    "checkpoint_fork_with_policy.v1",
+    "live_actor_update.v1",
+    "recoverable_*"
+  ],
+  "checks": {
+    "installed_containers": {
+      "passed": 67
+    },
+    "rust_transport": {
+      "passed": 3
+    },
+    "gelo_http_fixtures": {
+      "passed": 8
+    },
+    "sft_http_fixtures": {
+      "passed": 9
+    },
+    "cookbook_contract": {
+      "passed": 11
+    },
+    "rust_python_actual_http": {
+      "passed": true,
+      "rollouts": 3,
+      "actual_prompts": [
+        "Policy A",
+        "Policy B",
+        "Policy A"
+      ]
+    },
+    "new_python_module_types": "passed",
+    "ruff_and_diff": "passed",
+    "preserved_existing_pressure_checks": 10
+  },
+  "provider_calls": 0,
+  "charge_usd": 0,
+  "charge_final": true,
+  "owned_fixture_cleanup_complete": true,
+  "source_candidates_only": true,
+  "acceptance_not_claimed": [
+    "merged dev installation",
+    "MIPRO demo adapter",
+    "GELO checkpoint fork qualification",
+    "atomic MAPO/CISPO roster",
+    "OHCO live/recoverable activation",
+    "REB013 contract migration and three cold OpenRouter golds",
+    "Evals campaign cohort migration",
+    "hosted deployment"
+  ],
+  "feedback": {
+    "proposal": "ba022f04-54f1-4e9f-b0de-547b7658bd76",
+    "reb013_correction": "79f1761a-2c5b-44bb-86bc-56ddfc92b582",
+    "check_preservation_mistake": "2c6726a9-e1a3-4a13-9bce-d6d61a9a2df2"
+  }
+}
