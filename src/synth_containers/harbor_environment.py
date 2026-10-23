@@ -36,6 +36,7 @@ HARBOR_ENVIRONMENT_RELEASE_SCHEMA = "synth.harbor-environment-release.v1"
 _PINNED_IMAGE = re.compile(r"^.+@sha256:[0-9a-f]{64}$")
 _LOCAL_IMAGE_ID = re.compile(r"^sha256:[0-9a-f]{64}$")
 _DAYTONA_SNAPSHOT = re.compile(r"^daytona://snapshots/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/daytona-[0-9a-f]{64}:daytona$")
+_MODAL_IMAGE = re.compile(r"^modal://images/im-[A-Za-z0-9]+$")
 _BOAT_IMAGE = re.compile(r"^boat://sandboxes/bx_[23456789abcdefghjkmnpqrstuvwxyz]{8}/images/sha256:[0-9a-f]{64}$")
 _IDENTIFIER = re.compile(r"[^a-z0-9._-]+")
 _ISOLATED_NETWORKS = frozenset({"no-network", "none", "isolated", ""})
@@ -315,6 +316,8 @@ def register_harbor_environment(
             provider.provider_id == "daytona" and _DAYTONA_SNAPSHOT.fullmatch(image)
         ) or (
             provider.provider_id == "boat" and _BOAT_IMAGE.fullmatch(image)
+        ) or (
+            provider.provider_id == "modal" and _MODAL_IMAGE.fullmatch(image)
         ))
 
     if not pinned(agent_image):

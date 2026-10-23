@@ -351,3 +351,12 @@ file API for binary/log transfers: detached-command status output is a tail.
 Boat lifecycle/API details belong in the adapter; verify current provider limits
 and distinguish a stopped reusable seed from deleted per-rollout VMs. Do not
 claim catalog or parallel qualification from an underlying sandbox smoke alone.
+
+Modal sandbox adapters register immutable provider image IDs as
+`modal://images/im-<id>` with provider `modal`; do not substitute mutable registry
+tags or pretend these are OCI digests. Resolve the exact ID before launch, block
+outbound networking, pass no secrets/volumes/OIDC identity, and drop privileges
+for policy execution. Keep credentials on the host relay. Verify termination by
+polling the owned sandbox ID; a terminate request alone is not cleanup evidence.
+Capacity qualification must retain both roles for every requested concurrent task.
+Use sandbox-specific non-preemptible pricing, not normal function rates.
