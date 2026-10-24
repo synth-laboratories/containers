@@ -8,7 +8,7 @@ names as nullable (``cost.usd``, index ``provider``/``effort`` and unknown token
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, fields, is_dataclass
+from dataclasses import dataclass, fields, is_dataclass
 from typing import Any
 
 from synth_containers.serde import JsonDataclassMixin, jsonable
