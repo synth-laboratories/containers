@@ -77,6 +77,12 @@ After confirming the version and inspecting the generated artifacts:
 uv publish dist/*
 ```
 
+The `0.4.6` candidate adds typed eval trace views and static export inventories.
+The `v0.4.5` tag was created before complete qualification; that version remains
+unpublished and is superseded without moving the tag. The optional external
+evals catalog integration requires `SYNTH_EVALS_IMAGE_CATALOG`; unit
+catalog fixtures always run.
+
 This repository no longer carries a GitHub Actions publish workflow; publish
 only artifacts built from a tree that passed every gate above. Never create a
 public version tag before all release gates pass. Published versions are
