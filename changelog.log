@@ -1,5 +1,12 @@
 # synth-containers changelog
 
+## 2026-10-24 — 0.4.6 release candidate
+
+* Add typed eval trace views and projections, with explicit public export inventories.
+* Preserve export names and ordering while fixing lint and optional action-name narrowing.
+* Keep the package version and dependency lock consistent; use an explicit optional external catalog test input.
+* Supersede the unpublished 0.4.5 candidate; its tag remains immutable.
+
 ## 2026-09-29 — published 0.4.4
 
 * Require patched AnyIO >=4.14.2 for TLS hostname validation and process-pool handling.

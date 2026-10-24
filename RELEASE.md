@@ -50,7 +50,7 @@ part of the release flow; see `docs/internal/local-dev-build.md`.
 - Include the PyPI version in one bullet when a package was published.
 - Keep unreleased or blocked work explicit and short.
 
-## Published 0.4.4 and local publishing credentials
+## Published releases and local publishing credentials
 
 `0.4.4` is published from the qualified source tagged `v0.4.4`. Its PyPI
 wheel SHA-256 is
@@ -76,6 +76,12 @@ After confirming the version and inspecting the generated artifacts:
 ```bash
 uv publish dist/*
 ```
+
+The `0.4.6` candidate adds typed eval trace views and static export inventories.
+The `v0.4.5` tag was created before complete qualification; that version remains
+unpublished and is superseded without moving the tag. The optional external
+evals catalog integration requires `SYNTH_CONTAINERS_EVALS_IMAGES_ROOT`; unit
+catalog fixtures always run.
 
 This repository no longer carries a GitHub Actions publish workflow; publish
 only artifacts built from a tree that passed every gate above. Never create a

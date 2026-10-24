@@ -362,9 +362,13 @@ def test_socket_mount_without_nested_is_refused(tmp_path: Path) -> None:
 
 
 def test_evals_images_catalog_loads() -> None:
-    root = Path("/Users/joshuapurtell/GitHub/evals/containers/images")
-    if not (root / "catalog.toml").is_file():
-        pytest.skip("evals checkout images catalog is not present")
+    import os
+
+    configured_root = os.environ.get("SYNTH_CONTAINERS_EVALS_IMAGES_ROOT")
+    if not configured_root:
+        pytest.skip("optional external evals catalog root is not configured")
+    root = Path(configured_root)
+    assert (root / "catalog.toml").is_file(), "configured evals catalog must exist"
     specs = load_catalog(root)
     assert set(specs) >= {
         "banking77",
