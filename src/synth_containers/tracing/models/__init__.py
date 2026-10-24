@@ -10,6 +10,8 @@ from .actors import (
     Visibility,
 )
 from .artifacts import ArtifactCompleteness, ArtifactRefV5, ArtifactRole
+from . import eval_view as _eval_view
+from .eval_view import *  # noqa: F401,F403
 from .completeness import (
     CaptureStatus,
     TerminationV5,
@@ -156,6 +158,11 @@ from .standards import (
     aggregate_rubric_score,
 )
 
+
+
+from .eval_view_validate import EvalViewError, validate_eval_index, validate_eval_view  # noqa: E402
+
+
 __all__ = [
     "BUNDLE_SCHEMA_VERSION",
     "EVIDENCE_BUNDLE_SCHEMA_VERSION",
@@ -297,4 +304,53 @@ __all__ = [
     "mint_trace_id",
     "resolve_selector",
     "selector_for",
+    "CHECK_STATUSES",
+    "COST_BASES",
+    "EVALUATOR_KINDS",
+    "EVALUATOR_VERDICTS",
+    "EVAL_INDEX_SCHEMA_VERSION",
+    "EVAL_SOURCE_SCHEMA",
+    "EVAL_VIEW_SCHEMA_VERSION",
+    "EVAL_VIEW_V1_SCHEMA_VERSION",
+    "EvalActionV2",
+    "EvalArtifactV2",
+    "EvalCheckV2",
+    "EvalCostV2",
+    "EvalEnvironmentV2",
+    "EvalEvaluatorV2",
+    "EvalExecutedActionV2",
+    "EvalFlagV2",
+    "EvalFrameV2",
+    "EvalIndexCostV1",
+    "EvalIndexRowV1",
+    "EvalIndexTaskV1",
+    "EvalIndexTokensV1",
+    "EvalIndexV1",
+    "EvalIntegrityV2",
+    "EvalMediaLocationV2",
+    "EvalMediaV2",
+    "EvalPricingV2",
+    "EvalRejectedActionV2",
+    "EvalReproduceV2",
+    "EvalRunV2",
+    "EvalStepContentV2",
+    "EvalStepTokensV2",
+    "EvalStepV2",
+    "EvalTaskV2",
+    "EvalTimingV2",
+    "EvalToolCallV2",
+    "EvalTraceViewV2",
+    "EvalUsageV2",
+    "FLAG_CODES",
+    "FLAG_SEVERITIES",
+    "INTEGRITY_STATUSES",
+    "MEDIA_KINDS",
+    "MEDIA_PROVENANCE",
+    "MEDIA_STATUSES",
+    "RENDERERS",
+    "RUN_STATUSES",
+    "STEP_KINDS",
+    "EvalViewError",
+    "validate_eval_index",
+    "validate_eval_view"
 ]
