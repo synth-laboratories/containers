@@ -241,6 +241,20 @@ startup_timeout_seconds = 120
 Use environment variables for secrets. Never write API keys into TOML, README,
 event logs, traces, or sample artifacts.
 
+## Running Local Rollouts
+
+- `synth-containers up IMAGE --env KEY` forwards `KEY` from the host shell.
+  When it only lives in a dotenv file, add `--env-file PATH`; the file supplies
+  values for bare `--env KEY` forwards and nothing else.
+- Built-in harnesses (`react`, `single_call`, `responses_react`, ...) need only
+  `POST /policy-configs`. `PUT /policy` is for code-backed harnesses.
+- A rollout takes minutes. Run `synth-containers rollout --config NAME --seeds
+  2001 2002 ... --out progress.json` from your own terminal; a short tool-call
+  wall clock that drops the `/complete` connection used to mark finished
+  rollouts `failed`. Count a rollout by `reward_status == "scored"`.
+- A catalog entry with a missing build context is skipped with a warning; ask
+  for it by id to see the error.
+
 ## Capability Metadata
 
 Use `synth_containers` vocabulary where possible:
