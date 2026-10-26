@@ -1426,8 +1426,12 @@ class CompatPlatform:
         try:
             self._simulate(pin, log)
         except BaseException:
-            pin.status = "failed"
-            pin.terminal = True
+            # A runtime that already recorded its outcome keeps it: a client
+            # disconnect or post-episode error must not rewrite a scored
+            # rollout as failed.
+            if not pin.terminal:
+                pin.status = "failed"
+                pin.terminal = True
             raise
 
     def _simulate(self, pin: RolloutPin, log: RolloutEventLog) -> None:

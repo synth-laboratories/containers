@@ -401,3 +401,21 @@ def test_annotation_storage_volume_uses_env(tmp_path: Path, monkeypatch, healthy
     up_image("banking77", catalog=tmp_path, backend=backend, port=8134)
     assert storage.is_dir()
     assert f"{storage}:/var/lib/synth/storage" in backend.ran[-1][1]
+
+
+def test_stale_build_context_skips_only_that_entry(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _write_catalog(tmp_path)
+    image_toml = tmp_path / "banking77" / "image.toml"
+    image_toml.write_text(
+        image_toml.read_text(encoding="utf-8") + '\n[build_contexts]\ngone = "../missing-checkout"\n',
+        encoding="utf-8",
+    )
+    catalog = tmp_path / "catalog.toml"
+    catalog.write_text(
+        catalog.read_text(encoding="utf-8") + '\n[[image]]\nid = "banking77-copy"\npath = "banking77"\n',
+        encoding="utf-8",
+    )
+    # Both entries share the stale context here, so nothing loads but the call
+    # no longer raises and names the skipped entries.
+    assert load_catalog(tmp_path) == {}
+    assert "skipping catalog entry banking77" in capsys.readouterr().err

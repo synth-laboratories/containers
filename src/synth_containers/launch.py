@@ -21,6 +21,7 @@ import re
 import shutil
 import socket
 import subprocess
+import sys
 import time
 import tomllib
 
@@ -106,6 +107,10 @@ def default_catalog_root() -> Path | None:
     return None
 
 
+# Entries skipped by load_catalog, so asking for one by id still reports why.
+_SKIPPED_ENTRIES: dict[str, str] = {}
+
+
 def load_catalog(root: str | Path | None = None) -> dict[str, ImageSpec]:
     catalog_root = Path(root).expanduser().resolve() if root is not None else default_catalog_root()
     if catalog_root is None:
@@ -126,7 +131,19 @@ def load_catalog(root: str | Path | None = None) -> dict[str, ImageSpec]:
     for raw in rows:
         if not isinstance(raw, dict):
             raise LaunchError("container_image_catalog_invalid")
-        spec = _spec_from_row(catalog_root, raw)
+        try:
+            spec = _spec_from_row(catalog_root, raw)
+        except LaunchError as exc:
+            # A stale checkout path in one entry must not hide every other
+            # image; policy violations (forbidden command, tagged name) still
+            # abort the load.
+            if not str(exc).startswith("container_image_build_context_missing:"):
+                raise
+            image_id = str(raw.get("id") or "").strip()
+            if image_id not in _SKIPPED_ENTRIES:
+                _SKIPPED_ENTRIES[image_id] = str(exc)
+                print(f"synth-containers: skipping catalog entry {image_id or '?'}: {exc}", file=sys.stderr)
+            continue
         if spec.id in specs:
             raise LaunchError(f"container_image_id_duplicate:{spec.id}")
         specs[spec.id] = spec
@@ -140,6 +157,8 @@ def get_image_spec(image_id: str, *, catalog: str | Path | None = None) -> Image
     specs = load_catalog(catalog)
     spec = specs.get(image_id)
     if spec is None:
+        if image_id in _SKIPPED_ENTRIES:
+            raise LaunchError(_SKIPPED_ENTRIES[image_id])
         raise LaunchError(f"container_image_unknown:{image_id}")
     return spec
 
