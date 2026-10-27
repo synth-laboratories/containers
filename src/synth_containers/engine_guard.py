@@ -21,6 +21,9 @@ def engine_port(request: dict) -> int:
     return port
 
 
+CREATE_TIMEOUT_SECONDS = 180
+
+
 def docker_run_argv(request: dict, name: str) -> list[str]:
     """Owned allocation shape; isolation limits are fixed, only command/port vary."""
     port = engine_port(request)
@@ -40,9 +43,12 @@ def main():
     record = Path(request["receipt"])
     record.parent.mkdir(parents=True, exist_ok=True)
     identifier = None
+    started = time.monotonic()
     try:
+        # A loaded daemon can take tens of seconds to create a container; the
+        # wall is generous and the measured duration is retained in the receipt.
         result = subprocess.run(docker_run_argv(request, name),
-            text=True, capture_output=True, check=True, timeout=30)
+            text=True, capture_output=True, check=True, timeout=CREATE_TIMEOUT_SECONDS)
         identifier = result.stdout.strip()
         port = subprocess.run(["docker", "port", identifier, f"{engine_port(request)}/tcp"], text=True,
             capture_output=True, check=True, timeout=5).stdout.strip().splitlines()[0].rsplit(":", 1)[1]
@@ -62,9 +68,10 @@ def main():
         # closed by normal finally cleanup, Ctrl-C and abrupt process death.
         sys.stdin.read()
     finally:
-        result = subprocess.run(["docker", "rm", "-f", identifier or name], capture_output=True, timeout=15)
+        result = subprocess.run(["docker", "rm", "-f", identifier or name], capture_output=True, timeout=CREATE_TIMEOUT_SECONDS)
         durable_write(record, content_bytes({"container": identifier, "name": name,
-            "cleanup": "stopped" if result.returncode == 0 else "unconfirmed", "returncode": result.returncode}))
+            "cleanup": "stopped" if result.returncode == 0 else "unconfirmed", "returncode": result.returncode,
+            "create_seconds": round(time.monotonic() - started, 3)}))
 
 
 if __name__ == "__main__":
