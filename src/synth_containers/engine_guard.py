@@ -14,6 +14,26 @@ from synth_containers.tracing.atomic import durable_write
 from synth_containers.package_models import content_bytes
 
 
+def engine_port(request: dict) -> int:
+    port = request.get("port", 8098)
+    if type(port) is not int or not 1 <= port <= 65535:
+        raise ValueError("engine port outside 1..65535")
+    return port
+
+
+def docker_run_argv(request: dict, name: str) -> list[str]:
+    """Owned allocation shape; isolation limits are fixed, only command/port vary."""
+    port = engine_port(request)
+    command = request.get("command")
+    if command is not None and (not command or any(type(a) is not str or not a for a in command)):
+        raise ValueError("engine command must be non-empty strings")
+    return ["docker", "run", "--pull", "never", "-d", "--name", name,
+        "--label", "ai.synth.eval.owner=" + request["owner"],
+        "--read-only", "--tmpfs", "/tmp:rw,size=67108864", "--memory", str(request["memory_mb"]) + "m",
+        "--cpus", str(request["cpu"]), "--pids-limit", "128",
+        "-p", f"127.0.0.1::{port}", "-e", f"PORT={port}", request["image"], *(command or ())]
+
+
 def main():
     request = json.loads(sys.stdin.readline())
     name = "synth-eval-" + uuid4().hex[:16]
@@ -21,14 +41,10 @@ def main():
     record.parent.mkdir(parents=True, exist_ok=True)
     identifier = None
     try:
-        result = subprocess.run(["docker", "run", "--pull", "never", "-d", "--name", name,
-            "--label", "ai.synth.eval.owner=" + request["owner"],
-            "--read-only", "--tmpfs", "/tmp:rw,size=67108864", "--memory", str(request["memory_mb"]) + "m",
-            "--cpus", str(request["cpu"]), "--pids-limit", "128",
-            "-p", "127.0.0.1::8098", "-e", "PORT=8098", request["image"]],
+        result = subprocess.run(docker_run_argv(request, name),
             text=True, capture_output=True, check=True, timeout=30)
         identifier = result.stdout.strip()
-        port = subprocess.run(["docker", "port", identifier, "8098/tcp"], text=True,
+        port = subprocess.run(["docker", "port", identifier, f"{engine_port(request)}/tcp"], text=True,
             capture_output=True, check=True, timeout=5).stdout.strip().splitlines()[0].rsplit(":", 1)[1]
         url = "http://127.0.0.1:" + port
         with httpx.Client(timeout=1, trust_env=False) as client:
