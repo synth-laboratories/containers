@@ -14,6 +14,8 @@ import time
 import tomllib
 from uuid import uuid4
 
+from .native_engine import NativeEngineError
+
 from .eval_models import EvaluationPlanV1, EvaluationRunDeclarationV1, ScriptedCandidateV1, CandidateBindingV1
 from .eval_run import (describe_evaluation, execute_evaluation, export_evaluation, fork_evaluation,
                        local_execution_source_digest, local_execution_dependencies_digest)
@@ -103,6 +105,23 @@ class TerminalProgress:
             self.stream.write("\x1b[2K\n")
         self.previous_lines = max(len(lines), self.previous_lines)
         self.stream.flush()
+
+
+_PUBLIC_TEXT = re.compile(r"[a-zA-Z0-9_.:; /=-]{1,512}")
+
+
+def _public(text) -> str | None:
+    """Only plain diagnostic text is public; private payloads and provider text are not."""
+    return text if isinstance(text, str) and _PUBLIC_TEXT.fullmatch(text) else None
+
+
+def refusal_payload(exc: BaseException) -> dict:
+    """Public refusal record: a typed engine failure keeps its code, stage, name, last state and cause."""
+    payload = {"error": "evaluation_refused", "reason": _public(str(exc)) or type(exc).__name__}
+    if isinstance(exc, NativeEngineError):
+        payload.update({"reason": exc.code, "stage": exc.stage, "name": exc.name, "last_state": exc.last_state,
+                        "cause": _public(exc.cause) if exc.cause is not None else None})
+    return payload
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -218,9 +237,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(output, sort_keys=True))
         return 0
     except (ValueError, OSError, RuntimeError) as exc:
-        # Avoid private payloads or provider text in public errors.
-        reason = str(exc) if re.fullmatch(r"[a-zA-Z0-9_.:; /-]{1,512}", str(exc)) else type(exc).__name__
-        print(json.dumps({"error": "evaluation_refused", "reason": reason}), file=sys.stderr)
+        print(json.dumps(refusal_payload(exc), sort_keys=True), file=sys.stderr)
         return 2
     except KeyboardInterrupt:
         return 130
