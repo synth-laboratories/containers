@@ -1,0 +1,109 @@
+{
+  "samples": [
+    {
+      "at": "2026-10-28T16:06:56.187778+00:00",
+      "load": "12:06  up 5 days, 52 mins, 58 users, load averages: 49.84 56.53 60.75",
+      "owned_containers": [],
+      "owned_running": 0,
+      "phases": {
+        "restart-1": "dispatched"
+      }
+    },
+    {
+      "at": "2026-10-28T16:06:58.275995+00:00",
+      "load": "12:06  up 5 days, 52 mins, 58 users, load averages: 49.84 56.53 60.75",
+      "owned_containers": [],
+      "owned_running": 0,
+      "phases": {
+        "restart-1": "running"
+      }
+    },
+    {
+      "at": "2026-10-28T16:07:00.385104+00:00",
+      "load": "12:07  up 5 days, 52 mins, 58 users, load averages: 48.97 56.24 60.62",
+      "owned_containers": [],
+      "owned_running": 0,
+      "phases": {
+        "restart-1": "running"
+      }
+    },
+    {
+      "at": "2026-10-28T16:07:02.505593+00:00",
+      "load": "12:07  up 5 days, 52 mins, 58 users, load averages: 48.97 56.24 60.62",
+      "owned_containers": [],
+      "owned_running": 0,
+      "phases": {
+        "restart-1": "running"
+      }
+    },
+    {
+      "at": "2026-10-28T16:07:04.781132+00:00",
+      "load": "12:07  up 5 days, 52 mins, 58 users, load averages: 50.17 56.37 60.64",
+      "owned_containers": [],
+      "owned_running": 0,
+      "phases": {
+        "restart-1": "running"
+      }
+    },
+    {
+      "at": "2026-10-28T16:07:06.955196+00:00",
+      "load": "12:07  up 5 days, 52 mins, 58 users, load averages: 50.17 56.37 60.64",
+      "owned_containers": [],
+      "owned_running": 0,
+      "phases": {
+        "restart-1": "running"
+      }
+    },
+    {
+      "at": "2026-10-28T16:07:09.169975+00:00",
+      "load": "12:07  up 5 days, 52 mins, 58 users, load averages: 50.00 56.23 60.57",
+      "owned_containers": [],
+      "owned_running": 0,
+      "phases": {
+        "restart-1": "running"
+      }
+    },
+    {
+      "at": "2026-10-28T16:07:11.349093+00:00",
+      "load": "12:07  up 5 days, 52 mins, 58 users, load averages: 50.00 56.23 60.57",
+      "owned_containers": [],
+      "owned_running": 0,
+      "phases": {
+        "restart-1": "running"
+      }
+    },
+    {
+      "at": "2026-10-28T16:07:13.539497+00:00",
+      "load": "12:07  up 5 days, 52 mins, 58 users, load averages: 50.00 56.23 60.57",
+      "owned_containers": [
+        "synth-eval-bae8b819946949cb created"
+      ],
+      "owned_running": 0,
+      "phases": {
+        "restart-1": "running"
+      }
+    },
+    {
+      "at": "2026-10-28T16:07:15.654735+00:00",
+      "load": "12:07  up 5 days, 52 mins, 58 users, load averages: 50.00 56.13 60.51",
+      "owned_containers": [
+        "synth-eval-bae8b819946949cb created"
+      ],
+      "owned_running": 0,
+      "phases": {
+        "restart-1": "running"
+      }
+    },
+    {
+      "at": "2026-10-28T16:07:17.883863+00:00",
+      "load": "12:07  up 5 days, 52 mins, 58 users, load averages: 50.00 56.13 60.51",
+      "owned_containers": [
+        "synth-eval-bae8b819946949cb running"
+      ],
+      "owned_running": 1,
+      "phases": {
+        "restart-1": "running"
+      }
+    }
+  ]
+}

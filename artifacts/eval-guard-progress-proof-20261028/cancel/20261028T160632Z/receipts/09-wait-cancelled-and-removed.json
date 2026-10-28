@@ -1,0 +1,33 @@
+{
+  "samples": [
+    {
+      "at": "2026-10-28T16:06:46.920022+00:00",
+      "load": "12:06  up 5 days, 52 mins, 58 users, load averages: 52.85 57.35 61.09",
+      "owned_containers": [
+        "synth-eval-8ca676a7d12e47b4 running"
+      ],
+      "owned_running": 1,
+      "phases": {
+        "cancel-1": "running"
+      }
+    },
+    {
+      "at": "2026-10-28T16:06:49.525557+00:00",
+      "load": "12:06  up 5 days, 52 mins, 58 users, load averages: 49.74 56.63 60.81",
+      "owned_containers": [],
+      "owned_running": 0,
+      "phases": {
+        "cancel-1": "running"
+      }
+    },
+    {
+      "at": "2026-10-28T16:06:51.611741+00:00",
+      "load": "12:06  up 5 days, 52 mins, 58 users, load averages: 49.74 56.63 60.81",
+      "owned_containers": [],
+      "owned_running": 0,
+      "phases": {
+        "cancel-1": "cancelled"
+      }
+    }
+  ]
+}

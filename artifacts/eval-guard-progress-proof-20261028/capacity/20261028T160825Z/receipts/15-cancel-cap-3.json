@@ -1,0 +1,195 @@
+{
+  "at": "2026-10-28T16:09:15.134916+00:00",
+  "elapsed_s": 9.399,
+  "is_error": false,
+  "request": {
+    "operation_id": "cap-3",
+    "project_id": "wave4-capacity"
+  },
+  "structured": {
+    "panel": {
+      "config": {
+        "environment": "local",
+        "origin": "local workspace",
+        "path": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/evidence/forge-local-f6950b54-14aa-49f1-9184-ab70a7c086cc/forge/c2b2b746db684785/view.json",
+        "product": "forge",
+        "refreshSeconds": 2,
+        "resource": "[\"local\",\"wave4-capacity\"]",
+        "target": "forge-local-f6950b54-14aa-49f1-9184-ab70a7c086cc",
+        "title": "Forge \u00b7 forge-local-f6950b54-14aa-49f1-9184-ab70a7c086cc"
+      },
+      "evidencePath": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/evidence/forge-local-f6950b54-14aa-49f1-9184-ab70a7c086cc/forge/c2b2b746db684785/operations/5d0ac92b-3122-466d-abfc-57f7f13c499a.json",
+      "kind": "synth",
+      "operationId": "5d0ac92b-3122-466d-abfc-57f7f13c499a"
+    },
+    "result": {
+      "service": "configured",
+      "status": {
+        "cancel": {
+          "cli": {
+            "exit_code": 0,
+            "stderr": "",
+            "stdout": "{\"cancel\": \"requested\", \"execution\": \"not_observed\", \"run_id\": \"eval-db987aaefb0f448cafa0b07caf4499c2\"}\n"
+          },
+          "phase_before": "running",
+          "requested_at": "2026-10-28T16:09:05.765840+00:00"
+        },
+        "declaration": {
+          "candidate_label": "catalog.scripted-noop.r1",
+          "candidate_path": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/root/projects/wave4-capacity/catalog-candidates/cad6310977a40d119979c4991e8417730593995bc2a4e6b02f4c0a34567652ff.toml",
+          "candidate_sha256": "cad6310977a40d119979c4991e8417730593995bc2a4e6b02f4c0a34567652ff",
+          "containers_bin": "/Users/joshuapurtell/GitHub/workspaces/containers-local-eval-witness-20261027/.venv/bin/synth-containers",
+          "declared_at": "2026-10-28T16:08:38.924194+00:00",
+          "operation_id": "cap-3",
+          "plan_path": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/plans/cap-3.toml",
+          "plan_sha256": "bc5d15fd134dd4f9ae7db675b821d0f50325b864fa920e6e695030595f5843ef",
+          "schema": "synth.local-eval-operation.v1"
+        },
+        "dispatch": {
+          "command": "/Users/joshuapurtell/GitHub/workspaces/containers-local-eval-witness-20261027/.venv/bin/synth-containers eval run /Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/plans/cap-3.toml --candidate catalog.scripted-noop.r1=/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/root/projects/wave4-capacity/catalog-candidates/cad6310977a40d119979c4991e8417730593995bc2a4e6b02f4c0a34567652ff.toml --root /Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/root/projects/wave4-capacity/evaluations/cap-3/run --format json",
+          "dispatched_at": "2026-10-28T16:08:42.215582+00:00",
+          "pid": 92442
+        },
+        "observed_at": "2026-10-28T16:09:07.818002+00:00",
+        "operation_id": "cap-3",
+        "phase": "running",
+        "preflight": {
+          "blockers": [],
+          "exit_code": 0,
+          "observed_at": "2026-10-28T16:08:42.210776+00:00",
+          "supported": true
+        },
+        "process": {
+          "alive": true,
+          "exit_code": null,
+          "owner_lock_held": true,
+          "pid": 92442
+        },
+        "refusal": null,
+        "run": {
+          "cleanup": null,
+          "engine_receipts": [],
+          "events": {
+            "count": 1,
+            "last_at": "2026-10-28T16:08:44.840607Z",
+            "last_kind": "eval.run.submitted"
+          },
+          "execution": null,
+          "lanes": [],
+          "provider_calls": null,
+          "root": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/root/projects/wave4-capacity/evaluations/cap-3/run",
+          "run_id": "eval-db987aaefb0f448cafa0b07caf4499c2"
+        },
+        "unreadable_files": []
+      },
+      "submission": {
+        "attempt": {
+          "attempt_id": "attempt-4d0070e4-c881-475e-9f75-bd6a5e5a19d1",
+          "deadline_at": 1793207318.92355,
+          "kind": "initial",
+          "note": null,
+          "operation_id": "cap-3",
+          "state": "cancel_requested",
+          "updated_at": "2026-10-28T16:09:05.764239+00:00"
+        },
+        "cleanup": null,
+        "ledger": {
+          "cancel": {
+            "cli": {
+              "exit_code": 0,
+              "stderr": "",
+              "stdout": "{\"cancel\": \"requested\", \"execution\": \"not_observed\", \"run_id\": \"eval-db987aaefb0f448cafa0b07caf4499c2\"}\n"
+            },
+            "phase_before": "running",
+            "requested_at": "2026-10-28T16:09:05.765840+00:00"
+          },
+          "declaration": {
+            "candidate_label": "catalog.scripted-noop.r1",
+            "candidate_path": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/root/projects/wave4-capacity/catalog-candidates/cad6310977a40d119979c4991e8417730593995bc2a4e6b02f4c0a34567652ff.toml",
+            "candidate_sha256": "cad6310977a40d119979c4991e8417730593995bc2a4e6b02f4c0a34567652ff",
+            "containers_bin": "/Users/joshuapurtell/GitHub/workspaces/containers-local-eval-witness-20261027/.venv/bin/synth-containers",
+            "declared_at": "2026-10-28T16:08:38.924194+00:00",
+            "operation_id": "cap-3",
+            "plan_path": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/plans/cap-3.toml",
+            "plan_sha256": "bc5d15fd134dd4f9ae7db675b821d0f50325b864fa920e6e695030595f5843ef",
+            "schema": "synth.local-eval-operation.v1"
+          },
+          "dispatch": {
+            "command": "/Users/joshuapurtell/GitHub/workspaces/containers-local-eval-witness-20261027/.venv/bin/synth-containers eval run /Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/plans/cap-3.toml --candidate catalog.scripted-noop.r1=/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/root/projects/wave4-capacity/catalog-candidates/cad6310977a40d119979c4991e8417730593995bc2a4e6b02f4c0a34567652ff.toml --root /Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/root/projects/wave4-capacity/evaluations/cap-3/run --format json",
+            "dispatched_at": "2026-10-28T16:08:42.215582+00:00",
+            "pid": 92442
+          },
+          "observed_at": "2026-10-28T16:09:07.818002+00:00",
+          "operation_id": "cap-3",
+          "phase": "running",
+          "preflight": {
+            "blockers": [],
+            "exit_code": 0,
+            "observed_at": "2026-10-28T16:08:42.210776+00:00",
+            "supported": true
+          },
+          "process": {
+            "alive": true,
+            "exit_code": null,
+            "owner_lock_held": true,
+            "pid": 92442
+          },
+          "refusal": null,
+          "run": {
+            "cleanup": null,
+            "engine_receipts": [],
+            "events": {
+              "count": 1,
+              "last_at": "2026-10-28T16:08:44.840607Z",
+              "last_kind": "eval.run.submitted"
+            },
+            "execution": null,
+            "lanes": [],
+            "provider_calls": null,
+            "root": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/root/projects/wave4-capacity/evaluations/cap-3/run",
+            "run_id": "eval-db987aaefb0f448cafa0b07caf4499c2"
+          },
+          "unreadable_files": []
+        },
+        "operation_id": "cap-3",
+        "receipt": {
+          "admission": {
+            "active_before": 2,
+            "free_disk_bytes": 87278690304
+          },
+          "attempt_id": "attempt-4d0070e4-c881-475e-9f75-bd6a5e5a19d1",
+          "kind": "initial",
+          "operation_id": "cap-3",
+          "request_digest": "sha256:d32c91ef6ef8765036e5ab2751259a25355fdf967d4d426420db0d15a6e27255",
+          "rerun_of": null
+        },
+        "request_digest": "sha256:d32c91ef6ef8765036e5ab2751259a25355fdf967d4d426420db0d15a6e27255",
+        "rerun_of": null
+      }
+    },
+    "root": {
+      "path": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/root",
+      "root_id": "f6950b54-14aa-49f1-9184-ab70a7c086cc",
+      "schema": "synth.local-forge-root.v1",
+      "storage": "local"
+    },
+    "workspace": {
+      "evidence": {
+        "path": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/root/projects/wave4-capacity/evidence",
+        "store_id": "110647e7-472f-4530-ac74-ee456e5513da"
+      },
+      "provenance": "local-declared",
+      "scope": {
+        "organization_id": "local",
+        "project_id": "wave4-capacity"
+      },
+      "storage": "local",
+      "sync": "not configured",
+      "workspace_id": "69456563-3ba6-46c6-947f-58f1a71869c9"
+    }
+  },
+  "text": [
+    "{\"result\": {\"service\": \"configured\", \"submission\": {\"operation_id\": \"cap-3\", \"receipt\": {\"admission\": {\"active_before\": 2, \"free_disk_bytes\": 87278690304}, \"attempt_id\": \"attempt-4d0070e4-c881-475e-9f75-bd6a5e5a19d1\", \"kind\": \"initial\", \"operation_id\": \"cap-3\", \"request_digest\": \"sha256:d32c91ef6ef8765036e5ab2751259a25355fdf967d4d426420db0d15a6e27255\", \"rerun_of\": null}, \"request_digest\": \"sha256:d32c91ef6ef8765036e5ab2751259a25355fdf967d4d426420db0d15a6e27255\", \"rerun_of\": null, \"attempt\": {\"attempt_id\": \"attempt-4d0070e4-c881-475e-9f75-bd6a5e5a19d1\", \"operation_id\": \"cap-3\", \"kind\": \"initial\", \"state\": \"cancel_requested\", \"deadline_at\": 1793207318.92355, \"note\": null, \"updated_at\": \"2026-10-28T16:09:05.764239+00:00\"}, \"cleanup\": null, \"ledger\": {\"operation_id\": \"cap-3\", \"phase\": \"running\", \"declaration\": {\"candidate_label\": \"catalog.scripted-noop.r1\", \"candidate_path\": \"/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/root/projects/wave4-capacity/catalog-candidates/cad6310977a40d119979c4991e8417730593995bc2a4e6b02f4c0a34567652ff.toml\", \"candidate_sha256\": \"cad6310977a40d119979c4991e8417730593995bc2a4e6b02f4c0a34567652ff\", \"containers_bin\": \"/Users/joshuapurtell/GitHub/workspaces/containers-local-eval-witness-20261027/.venv/bin/synth-containers\", \"declared_at\": \"2026-10-28T16:08:38.924194+00:00\", \"operation_id\": \"cap-3\", \"plan_path\": \"/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/plans/cap-3.toml\", \"plan_sha256\": \"bc5d15fd134dd4f9ae7db675b821d0f50325b864fa920e6e695030595f5843ef\", \"schema\": \"synth.local-eval-operation.v1\"}, \"preflight\": {\"exit_code\": 0, \"supported\": true, \"blockers\": [], \"observed_at\": \"2026-10-28T16:08:42.210776+00:00\"}, \"refusal\": null, \"dispatch\": {\"command\": \"/Users/joshuapurtell/GitHub/workspaces/containers-local-eval-witness-20261027/.venv/bin/synth-containers eval run /Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/plans/cap-3.toml --candidate catalog.scripted-noop.r1=/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/root/projects/wave4-capacity/catalog-candidates/cad6310977a40d119979c4991e8417730593995bc2a4e6b02f4c0a34567652ff.toml --root /Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/root/projects/wave4-capacity/evaluations/cap-3/run --format json\", \"dispatched_at\": \"2026-10-28T16:08:42.215582+00:00\", \"pid\": 92442}, \"cancel\": {\"cli\": {\"exit_code\": 0, \"stderr\": \"\", \"stdout\": \"{\\\"cancel\\\": \\\"requested\\\", \\\"execution\\\": \\\"not_observed\\\", \\\"run_id\\\": \\\"eval-db987aaefb0f448cafa0b07caf4499c2\\\"}\\n\"}, \"phase_before\": \"running\", \"requested_at\": \"2026-10-28T16:09:05.765840+00:00\"}, \"process\": {\"pid\": 92442, \"alive\": true, \"exit_code\": null, \"owner_lock_held\": true}, \"run\": {\"root\": \"/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/root/projects/wave4-capacity/evaluations/cap-3/run\", \"run_id\": \"eval-db987aaefb0f448cafa0b07caf4499c2\", \"execution\": null, \"cleanup\": null, \"provider_calls\": null, \"events\": {\"count\": 1, \"last_kind\": \"eval.run.submitted\", \"last_at\": \"2026-10-28T16:08:44.840607Z\"}, \"lanes\": [], \"engine_receipts\": []}, \"unreadable_files\": [], \"observed_at\": \"2026-10-28T16:09:07.818002+00:00\"}}, \"status\": {\"operation_id\": \"cap-3\", \"phase\": \"running\", \"declaration\": {\"candidate_label\": \"catalog.scripted-noop.r1\", \"candidate_path\": \"/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/root/projects/wave4-capacity/catalog-candidates/cad6310977a40d119979c4991e8417730593995bc2a4e6b02f4c0a34567652ff.toml\", \"candidate_sha256\": \"cad6310977a40d119979c4991e8417730593995bc2a4e6b02f4c0a34567652ff\", \"containers_bin\": \"/Users/joshuapurtell/GitHub/workspaces/containers-local-eval-witness-20261027/.venv/bin/synth-containers\", \"declared_at\": \"2026-10-28T16:08:38.924194+00:00\", \"operation_id\": \"cap-3\", \"plan_path\": \"/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/plans/cap-3.toml\", \"plan_sha256\": \"bc5d15fd134dd4f9ae7db675b821d0f50325b864fa920e6e695030595f5843ef\", \"schema\": \"synth.local-eval-operation.v1\"}, \"preflight\": {\"exit_code\": 0, \"supported\": true, \"blockers\": [], \"observed_at\": \"2026-10-28T16:08:42.210776+00:00\"}, \"refusal\": null, \"dispatch\": {\"command\": \"/Users/joshuapurtell/GitHub/workspaces/containers-local-eval-witness-20261027/.venv/bin/synth-containers eval run /Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/plans/cap-3.toml --candidate catalog.scripted-noop.r1=/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/root/projects/wave4-capacity/catalog-candidates/cad6310977a40d119979c4991e8417730593995bc2a4e6b02f4c0a34567652ff.toml --root /Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/root/projects/wave4-capacity/evaluations/cap-3/run --format json\", \"dispatched_at\": \"2026-10-28T16:08:42.215582+00:00\", \"pid\": 92442}, \"cancel\": {\"cli\": {\"exit_code\": 0, \"stderr\": \"\", \"stdout\": \"{\\\"cancel\\\": \\\"requested\\\", \\\"execution\\\": \\\"not_observed\\\", \\\"run_id\\\": \\\"eval-db987aaefb0f448cafa0b07caf4499c2\\\"}\\n\"}, \"phase_before\": \"running\", \"requested_at\": \"2026-10-28T16:09:05.765840+00:00\"}, \"process\": {\"pid\": 92442, \"alive\": true, \"exit_code\": null, \"owner_lock_held\": true}, \"run\": {\"root\": \"/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/root/projects/wave4-capacity/evaluations/cap-3/run\", \"run_id\": \"eval-db987aaefb0f448cafa0b07caf4499c2\", \"execution\": null, \"cleanup\": null, \"provider_calls\": null, \"events\": {\"count\": 1, \"last_kind\": \"eval.run.submitted\", \"last_at\": \"2026-10-28T16:08:44.840607Z\"}, \"lanes\": [], \"engine_receipts\": []}, \"unreadable_files\": [], \"observed_at\": \"2026-10-28T16:09:07.818002+00:00\"}}, \"root\": {\"storage\": \"local\", \"root_id\": \"f6950b54-14aa-49f1-9184-ab70a7c086cc\", \"path\": \"/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/root\", \"schema\": \"synth.local-forge-root.v1\"}, \"workspace\": {\"storage\": \"local\", \"workspace_id\": \"69456563-3ba6-46c6-947f-58f1a71869c9\", \"scope\": {\"organization_id\": \"local\", \"project_id\": \"wave4-capacity\"}, \"provenance\": \"local-declared\", \"sync\": \"not configured\", \"evidence\": {\"store_id\": \"110647e7-472f-4530-ac74-ee456e5513da\", \"path\": \"/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/root/projects/wave4-capacity/evidence\"}}, \"panel\": {\"kind\": \"synth\", \"config\": {\"title\": \"Forge \\u00b7 forge-local-f6950b54-14aa-49f1-9184-ab70a7c086cc\", \"path\": \"/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/evidence/forge-local-f6950b54-14aa-49f1-9184-ab70a7c086cc/forge/c2b2b746db684785/view.json\", \"target\": \"forge-local-f6950b54-14aa-49f1-9184-ab70a7c086cc\", \"environment\": \"local\", \"origin\": \"local workspace\", \"product\": \"forge\", \"resource\": \"[\\\"local\\\",\\\"wave4-capacity\\\"]\", \"refreshSeconds\": 2}, \"operationId\": \"5d0ac92b-3122-466d-abfc-57f7f13c499a\", \"evidencePath\": \"/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/evidence/forge-local-f6950b54-14aa-49f1-9184-ab70a7c086cc/forge/c2b2b746db684785/operations/5d0ac92b-3122-466d-abfc-57f7f13c499a.json\"}}"
+  ],
+  "tool": "local_eval_cancel"
+}

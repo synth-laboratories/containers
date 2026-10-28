@@ -1,0 +1,32 @@
+{
+  "samples": [
+    {
+      "at": "2026-10-28T16:09:28.921012+00:00",
+      "load": "12:09  up 5 days, 54 mins, 58 users, load averages: 57.82 57.36 60.37",
+      "owned_containers": [
+        "synth-eval-234afaa1923d4f51 running",
+        "synth-eval-5d2daf8050764250 dead",
+        "synth-eval-f49e622b5abd4502 running"
+      ],
+      "owned_running": 2,
+      "phases": {
+        "cap-1": "cancelled",
+        "cap-2": "running",
+        "cap-3": "running",
+        "cap-4": "running"
+      }
+    },
+    {
+      "at": "2026-10-28T16:09:35.594464+00:00",
+      "load": "12:09  up 5 days, 54 mins, 58 users, load averages: 58.15 57.44 60.38",
+      "owned_containers": [],
+      "owned_running": 0,
+      "phases": {
+        "cap-1": "cancelled",
+        "cap-2": "cancelled",
+        "cap-3": "cancelled",
+        "cap-4": "cancelled"
+      }
+    }
+  ]
+}

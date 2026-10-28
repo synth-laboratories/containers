@@ -1,0 +1,46 @@
+"schema_version" = "synth.evaluation-plan.v1"
+"benchmark" = "craftax"
+"adapter" = "local-gold-scripted-v1"
+"source_digest" = "sha256:1729ac053186c9892c1869defa69dbea7e941f023e6bcec780a61b79edbbb1ce"
+"dependencies_digest" = "sha256:63945f3f46a39490db272aceca3b91e0e69009d91a45ba1d2c96d9a61ab0266b"
+"scorer_digest" = "sha256:d6e5361542c3084107f138a2ca255bf3d3b0cf9877afbb654472ccbc7519e4c8"
+"image_digest" = "sha256:d82b2771566e9b3bcddb21b2e25e66b1e76aa0e5bc47d17b82af66d3fce61cfc"
+"engine_command" = ["/opt/gamebench/tasks/craftax-singleplayer/gold_rust/target/release/craftax_gold", "--host", "0.0.0.0", "--port", "8098"]
+"engine_port" = 8098
+"seeds" = [0]
+"replicates" = 1
+"parallelism" = 1
+"checkpoint_every_steps" = 3
+"cpu" = 1.0
+"memory_mb" = 512
+"capture" = "native-state-actions-rewards-v1"
+"annotations" = "disabled"
+"trusted_scorer_source_digests" = []
+["task"]
+"schema" = "gamebench.task.craftax.v1"
+"task_id" = "containers-craftax-scripted-v1"
+"scenario_id" = "classic"
+"variant" = "classic"
+["task"."world"]
+"classic" = true
+
+["task"."rules"]
+"base" = "symbolic_survival"
+"upstream_do_resurrection" = false
+
+["task"."readouts"]
+"profile" = "symbolic_compact"
+
+
+["limits"]
+"steps" = 3000
+"calls" = 6000
+"active_seconds" = 900.0
+"clock_policy" = "absolute_deadline"
+"deadline_at" = "2026-10-28T16:25:42Z"
+"provider_cost_ceiling_usd" = "0"
+
+["credentials"]
+
+["metadata"]
+
