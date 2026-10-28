@@ -1,0 +1,58 @@
+{
+  "at": "2026-10-28T16:09:35.919074+00:00",
+  "elapsed_s": 0.309,
+  "is_error": false,
+  "request": {
+    "project_id": "wave4-capacity"
+  },
+  "structured": {
+    "panel": {
+      "config": {
+        "environment": "local",
+        "origin": "local workspace",
+        "path": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/evidence/forge-local-f6950b54-14aa-49f1-9184-ab70a7c086cc/forge/c2b2b746db684785/view.json",
+        "product": "forge",
+        "refreshSeconds": 2,
+        "resource": "[\"local\",\"wave4-capacity\"]",
+        "target": "forge-local-f6950b54-14aa-49f1-9184-ab70a7c086cc",
+        "title": "Forge \u00b7 forge-local-f6950b54-14aa-49f1-9184-ab70a7c086cc"
+      },
+      "evidencePath": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/evidence/forge-local-f6950b54-14aa-49f1-9184-ab70a7c086cc/forge/c2b2b746db684785/operations/1a9fdff7-112f-4f64-ac16-102419f33ec9.json",
+      "kind": "synth",
+      "operationId": "1a9fdff7-112f-4f64-ac16-102419f33ec9"
+    },
+    "result": {
+      "lifecycle": {
+        "pid": 90506,
+        "still_active": [],
+        "stopped": true,
+        "waited_seconds": 0.006,
+        "was_running": true
+      }
+    },
+    "root": {
+      "path": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/root",
+      "root_id": "f6950b54-14aa-49f1-9184-ab70a7c086cc",
+      "schema": "synth.local-forge-root.v1",
+      "storage": "local"
+    },
+    "workspace": {
+      "evidence": {
+        "path": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/root/projects/wave4-capacity/evidence",
+        "store_id": "110647e7-472f-4530-ac74-ee456e5513da"
+      },
+      "provenance": "local-declared",
+      "scope": {
+        "organization_id": "local",
+        "project_id": "wave4-capacity"
+      },
+      "storage": "local",
+      "sync": "not configured",
+      "workspace_id": "69456563-3ba6-46c6-947f-58f1a71869c9"
+    }
+  },
+  "text": [
+    "{\"result\": {\"lifecycle\": {\"stopped\": true, \"pid\": 90506, \"was_running\": true, \"waited_seconds\": 0.006, \"still_active\": []}}, \"root\": {\"storage\": \"local\", \"root_id\": \"f6950b54-14aa-49f1-9184-ab70a7c086cc\", \"path\": \"/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/root\", \"schema\": \"synth.local-forge-root.v1\"}, \"workspace\": {\"storage\": \"local\", \"workspace_id\": \"69456563-3ba6-46c6-947f-58f1a71869c9\", \"scope\": {\"organization_id\": \"local\", \"project_id\": \"wave4-capacity\"}, \"provenance\": \"local-declared\", \"sync\": \"not configured\", \"evidence\": {\"store_id\": \"110647e7-472f-4530-ac74-ee456e5513da\", \"path\": \"/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/root/projects/wave4-capacity/evidence\"}}, \"panel\": {\"kind\": \"synth\", \"config\": {\"title\": \"Forge \\u00b7 forge-local-f6950b54-14aa-49f1-9184-ab70a7c086cc\", \"path\": \"/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/evidence/forge-local-f6950b54-14aa-49f1-9184-ab70a7c086cc/forge/c2b2b746db684785/view.json\", \"target\": \"forge-local-f6950b54-14aa-49f1-9184-ab70a7c086cc\", \"environment\": \"local\", \"origin\": \"local workspace\", \"product\": \"forge\", \"resource\": \"[\\\"local\\\",\\\"wave4-capacity\\\"]\", \"refreshSeconds\": 2}, \"operationId\": \"1a9fdff7-112f-4f64-ac16-102419f33ec9\", \"evidencePath\": \"/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/evidence/forge-local-f6950b54-14aa-49f1-9184-ab70a7c086cc/forge/c2b2b746db684785/operations/1a9fdff7-112f-4f64-ac16-102419f33ec9.json\"}}"
+  ],
+  "tool": "local_eval_service_down"
+}

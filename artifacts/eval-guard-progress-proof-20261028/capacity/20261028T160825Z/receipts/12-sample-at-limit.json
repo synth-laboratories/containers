@@ -1,0 +1,16 @@
+{
+  "samples": [
+    {
+      "at": "2026-10-28T16:08:50.484371+00:00",
+      "load": "12:08  up 5 days, 54 mins, 58 users, load averages: 60.68 57.75 60.65",
+      "owned_containers": [],
+      "owned_running": 0,
+      "phases": {
+        "cap-1": "running",
+        "cap-2": "running",
+        "cap-3": "running",
+        "cap-4": "running"
+      }
+    }
+  ]
+}

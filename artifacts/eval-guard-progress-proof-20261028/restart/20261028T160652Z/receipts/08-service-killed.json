@@ -1,0 +1,8 @@
+{
+  "at": "2026-10-28T16:08:18.119575+00:00",
+  "load": "12:08  up 5 days, 53 mins, 58 users, load averages: 54.32 56.41 60.32",
+  "owned_containers": [],
+  "pid": 78639,
+  "service_json": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/root/projects/wave4-restart/evaluations/.service/service.json",
+  "signal": "SIGKILL"
+}

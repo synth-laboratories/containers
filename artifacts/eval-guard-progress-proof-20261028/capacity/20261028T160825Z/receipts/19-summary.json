@@ -1,0 +1,37 @@
+{
+  "docker_ps_owner_label_final": [],
+  "finished_at": "2026-10-28T16:09:36.934019+00:00",
+  "load_end": "12:09  up 5 days, 54 mins, 58 users, load averages: 58.15 57.44 60.38",
+  "load_start": "12:08  up 5 days, 53 mins, 58 users, load averages: 55.87 56.64 60.33",
+  "mode": "capacity",
+  "result": {
+    "containers_after": [],
+    "excess_operation": "cap-5",
+    "excess_refusal": [
+      "{\"cause\": \"4 active runs at the bound of 4; nothing was queued\", \"code\": \"concurrency_exhausted\", \"detail\": {\"active\": 4, \"bound\": 4}, \"service\": \"synth-local-eval\", \"stage\": \"admission\"}"
+    ],
+    "excess_refused": true,
+    "final_phases": {
+      "cap-1": "cancelled",
+      "cap-2": "cancelled",
+      "cap-3": "cancelled",
+      "cap-4": "cancelled"
+    },
+    "first_four_errors": {
+      "cap-1": false,
+      "cap-2": false,
+      "cap-3": false,
+      "cap-4": false
+    },
+    "max_owned_running_observed": 2,
+    "proved": true,
+    "submitted": [
+      "cap-1",
+      "cap-2",
+      "cap-3",
+      "cap-4",
+      "cap-5"
+    ]
+  },
+  "started_at": "2026-10-28T16:08:28.785091+00:00"
+}

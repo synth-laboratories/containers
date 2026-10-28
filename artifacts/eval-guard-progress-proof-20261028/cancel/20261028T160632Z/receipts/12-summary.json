@@ -1,0 +1,16 @@
+{
+  "docker_ps_owner_label_final": [],
+  "finished_at": "2026-10-28T16:06:52.213363+00:00",
+  "load_end": "12:06  up 5 days, 52 mins, 58 users, load averages: 49.74 56.63 60.81",
+  "load_start": "12:06  up 5 days, 51 mins, 58 users, load averages: 54.43 57.79 61.28",
+  "mode": "cancel",
+  "result": {
+    "attempt_state": "cancelled",
+    "containers_after": [],
+    "final_phase": "cancelled",
+    "operation": "cancel-1",
+    "proved": true,
+    "source": "service"
+  },
+  "started_at": "2026-10-28T16:06:34.679794+00:00"
+}

@@ -1,0 +1,183 @@
+{
+  "at": "2026-10-28T16:06:56.116540+00:00",
+  "elapsed_s": 0.765,
+  "is_error": false,
+  "request": {
+    "candidate_label": "catalog.scripted-noop.r1",
+    "candidate_path": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/root/projects/wave4-restart/catalog-candidates/cad6310977a40d119979c4991e8417730593995bc2a4e6b02f4c0a34567652ff.toml",
+    "operation_id": "restart-1",
+    "plan_path": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/plans/restart-1.toml",
+    "project_id": "wave4-restart"
+  },
+  "structured": {
+    "panel": {
+      "config": {
+        "environment": "local",
+        "origin": "local workspace",
+        "path": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/evidence/forge-local-1605cbc4-593a-4dd6-8d4c-babac0ca4744/forge/c46a9d7c622d2fc0/view.json",
+        "product": "forge",
+        "refreshSeconds": 2,
+        "resource": "[\"local\",\"wave4-restart\"]",
+        "target": "forge-local-1605cbc4-593a-4dd6-8d4c-babac0ca4744",
+        "title": "Forge \u00b7 forge-local-1605cbc4-593a-4dd6-8d4c-babac0ca4744"
+      },
+      "evidencePath": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/evidence/forge-local-1605cbc4-593a-4dd6-8d4c-babac0ca4744/forge/c46a9d7c622d2fc0/operations/f242af5f-ecda-41f5-b96d-7c535df12f5b.json",
+      "kind": "synth",
+      "operationId": "f242af5f-ecda-41f5-b96d-7c535df12f5b"
+    },
+    "result": {
+      "service": "configured",
+      "status": {
+        "cancel": null,
+        "declaration": {
+          "candidate_label": "catalog.scripted-noop.r1",
+          "candidate_path": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/root/projects/wave4-restart/catalog-candidates/cad6310977a40d119979c4991e8417730593995bc2a4e6b02f4c0a34567652ff.toml",
+          "candidate_sha256": "cad6310977a40d119979c4991e8417730593995bc2a4e6b02f4c0a34567652ff",
+          "containers_bin": "/Users/joshuapurtell/GitHub/workspaces/containers-local-eval-witness-20261027/.venv/bin/synth-containers",
+          "declared_at": "2026-10-28T16:06:55.363828+00:00",
+          "operation_id": "restart-1",
+          "plan_path": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/plans/restart-1.toml",
+          "plan_sha256": "d56da7cabbf440209e5b8a1355624a3f0de8dfedbdebe132c4fdc80606a30b7c",
+          "schema": "synth.local-eval-operation.v1"
+        },
+        "dispatch": {
+          "command": "/Users/joshuapurtell/GitHub/workspaces/containers-local-eval-witness-20261027/.venv/bin/synth-containers eval run /Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/plans/restart-1.toml --candidate catalog.scripted-noop.r1=/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/root/projects/wave4-restart/catalog-candidates/cad6310977a40d119979c4991e8417730593995bc2a4e6b02f4c0a34567652ff.toml --root /Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/root/projects/wave4-restart/evaluations/restart-1/run --format json",
+          "dispatched_at": "2026-10-28T16:06:56.075842+00:00",
+          "pid": 78741
+        },
+        "observed_at": "2026-10-28T16:06:56.077314+00:00",
+        "operation_id": "restart-1",
+        "phase": "dispatched",
+        "preflight": {
+          "blockers": [],
+          "exit_code": 0,
+          "observed_at": "2026-10-28T16:06:56.070647+00:00",
+          "supported": true
+        },
+        "process": {
+          "alive": true,
+          "exit_code": null,
+          "owner_lock_held": null,
+          "pid": 78741
+        },
+        "refusal": null,
+        "run": {
+          "cleanup": null,
+          "engine_receipts": [],
+          "events": {
+            "count": 0,
+            "last_at": null,
+            "last_kind": null
+          },
+          "execution": null,
+          "lanes": [],
+          "provider_calls": null,
+          "root": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/root/projects/wave4-restart/evaluations/restart-1/run",
+          "run_id": null
+        },
+        "unreadable_files": []
+      },
+      "submission": {
+        "attempt": {
+          "attempt_id": "attempt-ce5c10aa-007a-4d32-ab74-eba3cbe41f48",
+          "deadline_at": 1793207215.362,
+          "kind": "initial",
+          "note": null,
+          "operation_id": "restart-1",
+          "state": "dispatched",
+          "updated_at": "2026-10-28T16:06:56.077510+00:00"
+        },
+        "cleanup": null,
+        "ledger": {
+          "cancel": null,
+          "declaration": {
+            "candidate_label": "catalog.scripted-noop.r1",
+            "candidate_path": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/root/projects/wave4-restart/catalog-candidates/cad6310977a40d119979c4991e8417730593995bc2a4e6b02f4c0a34567652ff.toml",
+            "candidate_sha256": "cad6310977a40d119979c4991e8417730593995bc2a4e6b02f4c0a34567652ff",
+            "containers_bin": "/Users/joshuapurtell/GitHub/workspaces/containers-local-eval-witness-20261027/.venv/bin/synth-containers",
+            "declared_at": "2026-10-28T16:06:55.363828+00:00",
+            "operation_id": "restart-1",
+            "plan_path": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/plans/restart-1.toml",
+            "plan_sha256": "d56da7cabbf440209e5b8a1355624a3f0de8dfedbdebe132c4fdc80606a30b7c",
+            "schema": "synth.local-eval-operation.v1"
+          },
+          "dispatch": {
+            "command": "/Users/joshuapurtell/GitHub/workspaces/containers-local-eval-witness-20261027/.venv/bin/synth-containers eval run /Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/plans/restart-1.toml --candidate catalog.scripted-noop.r1=/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/root/projects/wave4-restart/catalog-candidates/cad6310977a40d119979c4991e8417730593995bc2a4e6b02f4c0a34567652ff.toml --root /Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/root/projects/wave4-restart/evaluations/restart-1/run --format json",
+            "dispatched_at": "2026-10-28T16:06:56.075842+00:00",
+            "pid": 78741
+          },
+          "observed_at": "2026-10-28T16:06:56.077314+00:00",
+          "operation_id": "restart-1",
+          "phase": "dispatched",
+          "preflight": {
+            "blockers": [],
+            "exit_code": 0,
+            "observed_at": "2026-10-28T16:06:56.070647+00:00",
+            "supported": true
+          },
+          "process": {
+            "alive": true,
+            "exit_code": null,
+            "owner_lock_held": null,
+            "pid": 78741
+          },
+          "refusal": null,
+          "run": {
+            "cleanup": null,
+            "engine_receipts": [],
+            "events": {
+              "count": 0,
+              "last_at": null,
+              "last_kind": null
+            },
+            "execution": null,
+            "lanes": [],
+            "provider_calls": null,
+            "root": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/root/projects/wave4-restart/evaluations/restart-1/run",
+            "run_id": null
+          },
+          "unreadable_files": []
+        },
+        "operation_id": "restart-1",
+        "receipt": {
+          "admission": {
+            "active_before": 0,
+            "free_disk_bytes": 87732580352
+          },
+          "attempt_id": "attempt-ce5c10aa-007a-4d32-ab74-eba3cbe41f48",
+          "kind": "initial",
+          "operation_id": "restart-1",
+          "request_digest": "sha256:ea7471afc5d891bb504d24cb3f29c677f34b348d0b8e5c8accaddf8bdb069a60",
+          "rerun_of": null
+        },
+        "replay": false,
+        "request_digest": "sha256:ea7471afc5d891bb504d24cb3f29c677f34b348d0b8e5c8accaddf8bdb069a60",
+        "rerun_of": null
+      }
+    },
+    "root": {
+      "path": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/root",
+      "root_id": "1605cbc4-593a-4dd6-8d4c-babac0ca4744",
+      "schema": "synth.local-forge-root.v1",
+      "storage": "local"
+    },
+    "workspace": {
+      "evidence": {
+        "path": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/root/projects/wave4-restart/evidence",
+        "store_id": "d39c12e7-6432-4b93-8f0c-6cdcd384163a"
+      },
+      "provenance": "local-declared",
+      "scope": {
+        "organization_id": "local",
+        "project_id": "wave4-restart"
+      },
+      "storage": "local",
+      "sync": "not configured",
+      "workspace_id": "2489ba9d-fb65-4ecd-b672-504ef9edbd4e"
+    }
+  },
+  "text": [
+    "{\"result\": {\"service\": \"configured\", \"submission\": {\"replay\": false, \"operation_id\": \"restart-1\", \"receipt\": {\"admission\": {\"active_before\": 0, \"free_disk_bytes\": 87732580352}, \"attempt_id\": \"attempt-ce5c10aa-007a-4d32-ab74-eba3cbe41f48\", \"kind\": \"initial\", \"operation_id\": \"restart-1\", \"request_digest\": \"sha256:ea7471afc5d891bb504d24cb3f29c677f34b348d0b8e5c8accaddf8bdb069a60\", \"rerun_of\": null}, \"request_digest\": \"sha256:ea7471afc5d891bb504d24cb3f29c677f34b348d0b8e5c8accaddf8bdb069a60\", \"rerun_of\": null, \"attempt\": {\"attempt_id\": \"attempt-ce5c10aa-007a-4d32-ab74-eba3cbe41f48\", \"operation_id\": \"restart-1\", \"kind\": \"initial\", \"state\": \"dispatched\", \"deadline_at\": 1793207215.362, \"note\": null, \"updated_at\": \"2026-10-28T16:06:56.077510+00:00\"}, \"cleanup\": null, \"ledger\": {\"operation_id\": \"restart-1\", \"phase\": \"dispatched\", \"declaration\": {\"candidate_label\": \"catalog.scripted-noop.r1\", \"candidate_path\": \"/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/root/projects/wave4-restart/catalog-candidates/cad6310977a40d119979c4991e8417730593995bc2a4e6b02f4c0a34567652ff.toml\", \"candidate_sha256\": \"cad6310977a40d119979c4991e8417730593995bc2a4e6b02f4c0a34567652ff\", \"containers_bin\": \"/Users/joshuapurtell/GitHub/workspaces/containers-local-eval-witness-20261027/.venv/bin/synth-containers\", \"declared_at\": \"2026-10-28T16:06:55.363828+00:00\", \"operation_id\": \"restart-1\", \"plan_path\": \"/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/plans/restart-1.toml\", \"plan_sha256\": \"d56da7cabbf440209e5b8a1355624a3f0de8dfedbdebe132c4fdc80606a30b7c\", \"schema\": \"synth.local-eval-operation.v1\"}, \"preflight\": {\"exit_code\": 0, \"supported\": true, \"blockers\": [], \"observed_at\": \"2026-10-28T16:06:56.070647+00:00\"}, \"refusal\": null, \"dispatch\": {\"command\": \"/Users/joshuapurtell/GitHub/workspaces/containers-local-eval-witness-20261027/.venv/bin/synth-containers eval run /Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/plans/restart-1.toml --candidate catalog.scripted-noop.r1=/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/root/projects/wave4-restart/catalog-candidates/cad6310977a40d119979c4991e8417730593995bc2a4e6b02f4c0a34567652ff.toml --root /Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/root/projects/wave4-restart/evaluations/restart-1/run --format json\", \"dispatched_at\": \"2026-10-28T16:06:56.075842+00:00\", \"pid\": 78741}, \"cancel\": null, \"process\": {\"pid\": 78741, \"alive\": true, \"exit_code\": null, \"owner_lock_held\": null}, \"run\": {\"root\": \"/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/root/projects/wave4-restart/evaluations/restart-1/run\", \"run_id\": null, \"execution\": null, \"cleanup\": null, \"provider_calls\": null, \"events\": {\"count\": 0, \"last_kind\": null, \"last_at\": null}, \"lanes\": [], \"engine_receipts\": []}, \"unreadable_files\": [], \"observed_at\": \"2026-10-28T16:06:56.077314+00:00\"}}, \"status\": {\"operation_id\": \"restart-1\", \"phase\": \"dispatched\", \"declaration\": {\"candidate_label\": \"catalog.scripted-noop.r1\", \"candidate_path\": \"/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/root/projects/wave4-restart/catalog-candidates/cad6310977a40d119979c4991e8417730593995bc2a4e6b02f4c0a34567652ff.toml\", \"candidate_sha256\": \"cad6310977a40d119979c4991e8417730593995bc2a4e6b02f4c0a34567652ff\", \"containers_bin\": \"/Users/joshuapurtell/GitHub/workspaces/containers-local-eval-witness-20261027/.venv/bin/synth-containers\", \"declared_at\": \"2026-10-28T16:06:55.363828+00:00\", \"operation_id\": \"restart-1\", \"plan_path\": \"/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/plans/restart-1.toml\", \"plan_sha256\": \"d56da7cabbf440209e5b8a1355624a3f0de8dfedbdebe132c4fdc80606a30b7c\", \"schema\": \"synth.local-eval-operation.v1\"}, \"preflight\": {\"exit_code\": 0, \"supported\": true, \"blockers\": [], \"observed_at\": \"2026-10-28T16:06:56.070647+00:00\"}, \"refusal\": null, \"dispatch\": {\"command\": \"/Users/joshuapurtell/GitHub/workspaces/containers-local-eval-witness-20261027/.venv/bin/synth-containers eval run /Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/plans/restart-1.toml --candidate catalog.scripted-noop.r1=/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/root/projects/wave4-restart/catalog-candidates/cad6310977a40d119979c4991e8417730593995bc2a4e6b02f4c0a34567652ff.toml --root /Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/root/projects/wave4-restart/evaluations/restart-1/run --format json\", \"dispatched_at\": \"2026-10-28T16:06:56.075842+00:00\", \"pid\": 78741}, \"cancel\": null, \"process\": {\"pid\": 78741, \"alive\": true, \"exit_code\": null, \"owner_lock_held\": null}, \"run\": {\"root\": \"/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/root/projects/wave4-restart/evaluations/restart-1/run\", \"run_id\": null, \"execution\": null, \"cleanup\": null, \"provider_calls\": null, \"events\": {\"count\": 0, \"last_kind\": null, \"last_at\": null}, \"lanes\": [], \"engine_receipts\": []}, \"unreadable_files\": [], \"observed_at\": \"2026-10-28T16:06:56.077314+00:00\"}}, \"root\": {\"storage\": \"local\", \"root_id\": \"1605cbc4-593a-4dd6-8d4c-babac0ca4744\", \"path\": \"/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/root\", \"schema\": \"synth.local-forge-root.v1\"}, \"workspace\": {\"storage\": \"local\", \"workspace_id\": \"2489ba9d-fb65-4ecd-b672-504ef9edbd4e\", \"scope\": {\"organization_id\": \"local\", \"project_id\": \"wave4-restart\"}, \"provenance\": \"local-declared\", \"sync\": \"not configured\", \"evidence\": {\"store_id\": \"d39c12e7-6432-4b93-8f0c-6cdcd384163a\", \"path\": \"/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/root/projects/wave4-restart/evidence\"}}, \"panel\": {\"kind\": \"synth\", \"config\": {\"title\": \"Forge \\u00b7 forge-local-1605cbc4-593a-4dd6-8d4c-babac0ca4744\", \"path\": \"/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/evidence/forge-local-1605cbc4-593a-4dd6-8d4c-babac0ca4744/forge/c46a9d7c622d2fc0/view.json\", \"target\": \"forge-local-1605cbc4-593a-4dd6-8d4c-babac0ca4744\", \"environment\": \"local\", \"origin\": \"local workspace\", \"product\": \"forge\", \"resource\": \"[\\\"local\\\",\\\"wave4-restart\\\"]\", \"refreshSeconds\": 2}, \"operationId\": \"f242af5f-ecda-41f5-b96d-7c535df12f5b\", \"evidencePath\": \"/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/evidence/forge-local-1605cbc4-593a-4dd6-8d4c-babac0ca4744/forge/c46a9d7c622d2fc0/operations/f242af5f-ecda-41f5-b96d-7c535df12f5b.json\"}}"
+  ],
+  "tool": "local_eval_start"
+}

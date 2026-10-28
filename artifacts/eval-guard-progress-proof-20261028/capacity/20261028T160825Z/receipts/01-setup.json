@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-28T16:08:28.662685+00:00",
+  "containers_before": [],
+  "eval_identities": {
+    "dependencies_digest": "sha256:63945f3f46a39490db272aceca3b91e0e69009d91a45ba1d2c96d9a61ab0266b",
+    "source_digest": "sha256:1729ac053186c9892c1869defa69dbea7e941f023e6bcec780a61b79edbbb1ce"
+  },
+  "init_rc": 0,
+  "load": "12:08  up 5 days, 53 mins, 58 users, load averages: 55.87 56.64 60.33",
+  "mode": "capacity",
+  "root": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/root",
+  "steps": 3000
+}
