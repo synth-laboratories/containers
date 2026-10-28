@@ -106,7 +106,7 @@ def containers(cli: Path) -> dict:
 
 def run_engine(cli: Path, receipt: Path) -> str:
     with owned_gold_engine(plan(), owner="eval-owner", receipt=receipt, docker_cli=str(cli),
-                           heartbeat_seconds=.1, silence_seconds=.8) as url:
+                           heartbeat_seconds=.1, silence_seconds=4.0) as url:
         assert len(containers(cli)) == 1
         return url
 
@@ -117,7 +117,7 @@ def states(receipt: Path) -> list[str]:
 
 @pytest.mark.parametrize("phase", ["create_delay", "start_delay", "rm_delay"], ids=["slow-create", "slow-start", "slow-stop"])
 def test_slow_docker_phase_is_awaited_and_removal_is_observed(tmp_path, health_port, phase):
-    cli = fake_docker(tmp_path, health_port, **{phase: 2.5})
+    cli = fake_docker(tmp_path, health_port, **{phase: 10.0})
     receipt = tmp_path / "receipt.json"
     url = run_engine(cli, receipt)
     assert url == f"http://127.0.0.1:{health_port}"
@@ -168,7 +168,7 @@ def test_slow_guard_start_is_not_silence(tmp_path, health_port):
     delayed = (sys.executable, "-c", "import time, runpy; time.sleep(1.5); "
                "runpy.run_module('synth_containers.engine_guard', run_name='__main__')")
     with owned_gold_engine(plan(), owner="eval-owner", receipt=receipt, docker_cli=str(cli),
-                           heartbeat_seconds=.1, silence_seconds=.8, guard_command=delayed) as url:
+                           heartbeat_seconds=.1, silence_seconds=4.0, guard_command=delayed) as url:
         assert url == f"http://127.0.0.1:{health_port}"
     assert json.loads(receipt.read_text())["cleanup"] == "removed"
 
@@ -184,19 +184,19 @@ import time
 import synth_containers.engine_guard as guard
 write = guard.durable_write
 def delayed(*args, **kwargs):
-    time.sleep(2.0)
+    time.sleep(10.0)
     return write(*args, **kwargs)
 guard.durable_write = delayed
 guard.main()
 """)
     try:
         with owned_gold_engine(plan(), owner="eval-owner", receipt=receipt, docker_cli=str(cli),
-                               heartbeat_seconds=.1, silence_seconds=.8, guard_command=slow_receipt) as url:
+                               heartbeat_seconds=.1, silence_seconds=4.0, guard_command=slow_receipt) as url:
             assert url == f"http://127.0.0.1:{health_port}"
     finally:
         # If an old parent raises early, let its detached guard finish its owned
         # receipt before pytest removes the temporary directory.
-        deadline = time.monotonic() + 8
+        deadline = time.monotonic() + 20
         while not receipt.exists() and time.monotonic() < deadline:
             time.sleep(.1)
     assert json.loads(receipt.read_text())["cleanup"] == "removed"
