@@ -4,9 +4,15 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, SerializerFunctionWrapHandler, model_serializer, model_validator
 
 from .package_models import Digest, Name, PackageModel, content_digest
+
+DEFAULT_ENGINE_PORT = 8098
+# Optional engine fields are absent from the canonical dump while unset, so
+# plans that do not declare them keep their pre-existing digests.
+_OMITTED_WHEN_UNSET = ("engine_command", "engine_port")
+EngineArgument = Annotated[str, Field(min_length=1, max_length=4096)]
 
 
 class ScriptedCandidateV1(PackageModel):
@@ -61,9 +67,31 @@ class EvaluationPlanV1(PackageModel):
     grading_plan: str | None = None
     grading_bundle: str | None = None
     trusted_scorer_source_digests: tuple[Digest, ...] = ()
+    # Explicit container command for the owned local gold engine; None keeps
+    # the image's default CMD. The port is where the engine listens inside the
+    # container (also exported as PORT); None means DEFAULT_ENGINE_PORT.
+    engine_command: Annotated[tuple[EngineArgument, ...], Field(min_length=1, max_length=64)] | None = None
+    engine_port: Annotated[int, Field(strict=True, ge=1, le=65535)] | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_engine(self, handler: SerializerFunctionWrapHandler):
+        data = handler(self)
+        for key in _OMITTED_WHEN_UNSET:
+            if data.get(key, 0) is None:
+                del data[key]
+        return data
+
+    @property
+    def effective_engine_port(self) -> int:
+        return DEFAULT_ENGINE_PORT if self.engine_port is None else self.engine_port
 
     @model_validator(mode="after")
     def consistent(self):
+        if self.engine_command is not None and any(
+                not arg.strip() or any(ord(c) < 32 for c in arg) for arg in self.engine_command):
+            raise ValueError("engine_command entries must be non-empty printable strings")
+        if (self.engine_command is not None or self.engine_port is not None) and self.adapter != "local-gold-scripted-v1":
+            raise ValueError("engine_command/engine_port apply only to the local gold engine adapter")
         if len(set(self.seeds)) != len(self.seeds) or any(type(seed) is not int or seed < 0 for seed in self.seeds):
             raise ValueError("seeds must be unique nonnegative integers")
         if self.credentials:

@@ -10,6 +10,12 @@ import subprocess
 import sys
 
 
+def guard_request(plan, *, owner: str, receipt: Path) -> dict:
+    return {"owner": owner, "receipt": str(receipt.absolute()), "image": plan.image_digest,
+        "cpu": plan.cpu, "memory_mb": plan.memory_mb, "port": plan.effective_engine_port,
+        "command": list(plan.engine_command) if plan.engine_command is not None else None}
+
+
 @contextmanager
 def owned_gold_engine(plan, *, owner: str, receipt: Path):
     process = subprocess.Popen([sys.executable, "-m", "synth_containers.engine_guard"],
@@ -18,8 +24,7 @@ def owned_gold_engine(plan, *, owner: str, receipt: Path):
     assert process.stdin is not None and process.stdout is not None and process.stderr is not None
     allocation_observed = False
     try:
-        process.stdin.write(json.dumps({"owner": owner, "receipt": str(receipt.absolute()),
-            "image": plan.image_digest, "cpu": plan.cpu, "memory_mb": plan.memory_mb}) + "\n")
+        process.stdin.write(json.dumps(guard_request(plan, owner=owner, receipt=receipt)) + "\n")
         process.stdin.flush()
         with selectors.DefaultSelector() as selector:
             selector.register(process.stdout, selectors.EVENT_READ)

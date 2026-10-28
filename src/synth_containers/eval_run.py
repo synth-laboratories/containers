@@ -74,6 +74,10 @@ def describe_evaluation(plan: EvaluationPlanV1, candidates: tuple[CandidateBindi
         "rollouts": len(candidates) * len(plan.seeds) * plan.replicates if candidates else 1,
         "aggregate_maximum_provider_cost_usd": "0", "supported": not blockers, "blockers": blockers,
         "retained_grading": grading,
+        "engine": {"image": plan.image_digest, "port": plan.effective_engine_port,
+            "command": list(plan.engine_command) if plan.engine_command is not None else None,
+            "command_source": "plan" if plan.engine_command is not None else "image-default"}
+            if plan.adapter == "local-gold-scripted-v1" else None,
         "capabilities": {"foreground": True, "detached": False, "watch": True,
             "strict_continue": plan.adapter == "local-gold-scripted-v1", "fork": plan.adapter == "local-gold-scripted-v1",
             "provider_calls": False, "credentials_consumed": [], "admission": "local-owner-resource-pins"}}
