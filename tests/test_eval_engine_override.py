@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from synth_containers.engine_guard import docker_run_argv
+from synth_containers.engine_guard import docker_create_argv
 from synth_containers.eval_models import EvaluationPlanV1, EvaluationRunDeclarationV1
 from synth_containers.eval_run import describe_evaluation
 from synth_containers.native_engine import guard_request
@@ -57,7 +57,7 @@ def test_guard_request_and_docker_argv_shape(tmp_path):
     request = guard_request(plan(engine_command=COMMAND, engine_port=9000), owner="eval-x", receipt=tmp_path / "r.json")
     assert json.loads(json.dumps(request)) == request
     assert request["port"] == 9000 and request["command"] == COMMAND
-    argv = docker_run_argv(request, "synth-eval-n")
+    argv = docker_create_argv(request, "synth-eval-n")
     image = argv.index(D)
     assert argv[image + 1:] == COMMAND
     head = argv[:image]
@@ -70,7 +70,7 @@ def test_guard_request_and_docker_argv_shape(tmp_path):
 def test_default_guard_request_keeps_image_cmd_and_8098(tmp_path):
     request = guard_request(plan(), owner="o", receipt=Path("r.json"))
     assert request["command"] is None and request["port"] == 8098
-    argv = docker_run_argv(request, "n")
+    argv = docker_create_argv(request, "n")
     assert argv[-1] == D and "127.0.0.1::8098" in argv and "PORT=8098" in argv
 
 
@@ -79,7 +79,7 @@ def test_default_guard_request_keeps_image_cmd_and_8098(tmp_path):
 def test_guard_refuses_malformed_requests(request_update):
     request = {"owner": "o", "image": D, "cpu": 1, "memory_mb": 512, **request_update}
     with pytest.raises(ValueError):
-        docker_run_argv(request, "n")
+        docker_create_argv(request, "n")
 
 
 def test_describe_shows_effective_engine():
