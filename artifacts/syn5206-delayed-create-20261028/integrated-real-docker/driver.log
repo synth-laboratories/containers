@@ -1,0 +1,61 @@
+guard hello; waiting for injected create delay
+parent pipe closed; create_entered=True
+guard event: {"event": "state", "state": "allocating", "phase": null, "at": 1793214042.660675}
+guard event: {"event": "state", "state": "creating", "phase": null, "at": 1793214042.6607301}
+guard event: {"event": "heartbeat", "state": null, "phase": "creating", "at": 1793214042.9648519}
+guard event: {"event": "heartbeat", "state": null, "phase": "creating", "at": 1793214043.969961}
+guard event: {"event": "heartbeat", "state": null, "phase": "creating", "at": 1793214044.971072}
+guard event: {"event": "heartbeat", "state": null, "phase": "creating", "at": 1793214045.975969}
+guard event: {"event": "heartbeat", "state": null, "phase": "creating", "at": 1793214046.98}
+guard event: {"event": "heartbeat", "state": null, "phase": "creating", "at": 1793214047.981236}
+guard event: {"event": "heartbeat", "state": null, "phase": "creating", "at": 1793214048.984451}
+guard event: {"event": "heartbeat", "state": null, "phase": "creating", "at": 1793214049.989185}
+guard event: {"event": "heartbeat", "state": null, "phase": "creating", "at": 1793214050.99311}
+guard event: {"event": "heartbeat", "state": null, "phase": "creating", "at": 1793214051.995561}
+guard event: {"event": "heartbeat", "state": null, "phase": "creating", "at": 1793214052.996324}
+guard event: {"event": "heartbeat", "state": null, "phase": "creating", "at": 1793214053.9974668}
+guard event: {"event": "heartbeat", "state": null, "phase": "creating", "at": 1793214054.997865}
+guard event: {"event": "heartbeat", "state": null, "phase": "creating", "at": 1793214056.001813}
+guard event: {"event": "heartbeat", "state": null, "phase": "creating", "at": 1793214057.006915}
+guard event: {"event": "heartbeat", "state": null, "phase": "observe", "at": 1793214058.013404}
+guard event: {"event": "heartbeat", "state": null, "phase": "observe", "at": 1793214059.020052}
+guard event: {"event": "state", "state": "created", "phase": null, "at": 1793214059.020448}
+guard event: {"event": "heartbeat", "state": null, "phase": "limits", "at": 1793214060.026659}
+guard event: {"event": "state", "state": "limits_verified", "phase": null, "at": 1793214060.0271978}
+guard event: {"event": "state", "state": "failed", "phase": null, "at": 1793214060.0272908}
+guard event: {"event": "state", "state": "stopping", "phase": null, "at": 1793214060.027325}
+guard event: {"event": "heartbeat", "state": null, "phase": "stopping", "at": 1793214061.0339122}
+guard event: {"event": "heartbeat", "state": null, "phase": "stopping", "at": 1793214062.0362391}
+guard event: {"event": "heartbeat", "state": null, "phase": "observe", "at": 1793214063.0414221}
+guard event: {"event": "state", "state": "removed", "phase": null, "at": 1793214063.041837}
+guard event: {"event": "heartbeat", "state": null, "phase": "receipt", "at": 1793214064.0462}
+guard event: {"event": "heartbeat", "state": null, "phase": "receipt", "at": 1793214065.046815}
+guard event: {"event": "heartbeat", "state": null, "phase": "receipt", "at": 1793214066.0482922}
+guard event: {"event": "heartbeat", "state": null, "phase": "receipt", "at": 1793214067.053544}
+guard event: {"event": "heartbeat", "state": null, "phase": "receipt", "at": 1793214068.0556931}
+guard event: {"event": "receipt", "state": null, "phase": null, "at": null}
+guard still running; awaiting owned cleanup
+{
+  "owner": "slowcreate-c8c715a62d0545d280cf42b66456bb5a",
+  "guard_pid": 97381,
+  "parent_pipe_closed_at": 1793214042.964649,
+  "injected_delay_seconds": 8,
+  "create_entered_before_close": true,
+  "guard_exit": 0,
+  "cleanup": "removed",
+  "error": "native_engine_startup_cancelled",
+  "create_seconds": 14.347,
+  "transitions": [
+    "allocating",
+    "creating",
+    "created",
+    "limits_verified",
+    "failed",
+    "stopping",
+    "removed"
+  ],
+  "containers_immediately_after": [],
+  "containers_after_3s": [],
+  "receipt_heartbeats": 5,
+  "proved": true
+}

@@ -112,7 +112,7 @@ def containers(cli: Path) -> dict:
 
 def run_engine(cli: Path, receipt: Path) -> str:
     with owned_gold_engine(plan(), owner="eval-owner", receipt=receipt, docker_cli=str(cli),
-                           heartbeat_seconds=.1, silence_seconds=.8) as url:
+                           heartbeat_seconds=.1, silence_seconds=4.0) as url:
         assert len(containers(cli)) == 1
         return url
 
@@ -123,7 +123,7 @@ def states(receipt: Path) -> list[str]:
 
 @pytest.mark.parametrize("phase", ["create_delay", "start_delay", "rm_delay"], ids=["slow-create", "slow-start", "slow-stop"])
 def test_slow_docker_phase_is_awaited_and_removal_is_observed(tmp_path, health_port, phase):
-    cli = fake_docker(tmp_path, health_port, **{phase: 2.5})
+    cli = fake_docker(tmp_path, health_port, **{phase: 10.0})
     receipt = tmp_path / "receipt.json"
     url = run_engine(cli, receipt)
     assert url == f"http://127.0.0.1:{health_port}"
@@ -174,9 +174,152 @@ def test_slow_guard_start_is_not_silence(tmp_path, health_port):
     delayed = (sys.executable, "-c", "import time, runpy; time.sleep(1.5); "
                "runpy.run_module('synth_containers.engine_guard', run_name='__main__')")
     with owned_gold_engine(plan(), owner="eval-owner", receipt=receipt, docker_cli=str(cli),
-                           heartbeat_seconds=.1, silence_seconds=.8, guard_command=delayed) as url:
+                           heartbeat_seconds=.1, silence_seconds=4.0, guard_command=delayed) as url:
         assert url == f"http://127.0.0.1:{health_port}"
     assert json.loads(receipt.read_text())["cleanup"] == "removed"
+
+
+def test_slow_durable_cleanup_receipt_remains_observable(tmp_path, health_port):
+    """Removal alone is not a durable receipt; keep reporting while it is saved."""
+    import time
+
+    cli = fake_docker(tmp_path, health_port)
+    receipt = tmp_path / "receipt.json"
+    slow_receipt = (sys.executable, "-c", """
+import time
+import synth_containers.engine_guard as guard
+write = guard.durable_write
+def delayed(*args, **kwargs):
+    time.sleep(10.0)
+    return write(*args, **kwargs)
+guard.durable_write = delayed
+guard.main()
+""")
+    try:
+        with owned_gold_engine(plan(), owner="eval-owner", receipt=receipt, docker_cli=str(cli),
+                               heartbeat_seconds=.1, silence_seconds=4.0, guard_command=slow_receipt) as url:
+            assert url == f"http://127.0.0.1:{health_port}"
+    finally:
+        # If an old parent raises early, let its detached guard finish its owned
+        # receipt before pytest removes the temporary directory.
+        deadline = time.monotonic() + 20
+        while not receipt.exists() and time.monotonic() < deadline:
+            time.sleep(.1)
+    assert json.loads(receipt.read_text())["cleanup"] == "removed"
+    assert containers(cli) == {}
+
+
+def test_guard_silent_after_removal_remains_typed_and_unconfirmed(tmp_path):
+    """A removed event without a durable receipt cannot become a false success."""
+    import time
+
+    receipt = tmp_path / "receipt.json"
+    silent = (sys.executable, "-c", """
+import json, sys, time
+print(json.dumps({'event':'hello','name':'guard-test'}), flush=True)
+sys.stdin.readline()
+print(json.dumps({'event':'state','name':'guard-test','state':'ready','url':'http://127.0.0.1:1'}), flush=True)
+sys.stdin.read()
+print(json.dumps({'event':'state','name':'guard-test','state':'removed','observed':'absent'}), flush=True)
+time.sleep(2.0)
+""")
+    try:
+        with pytest.raises(NativeEngineError) as refused:
+            with owned_gold_engine(plan(), owner="eval-owner", receipt=receipt, silence_seconds=.3,
+                                   guard_command=silent):
+                pass
+        assert refused.value.code == "native_engine_cleanup_unconfirmed"
+        assert refused.value.cause == "guard_silent_after_cleanup"
+        record = json.loads(receipt.read_text())
+        assert record["cleanup"] == "unconfirmed" and record["recorded_by"] == "parent"
+        assert record["reason"] == "guard_silent_after_cleanup"
+    finally:
+        # The guard is deliberately not killed by the parent; give this fake
+        # process time to finish before the temporary test workspace disappears.
+        time.sleep(2.2)
+
+
+def test_receipt_persistence_emits_progress_until_durable_write_finishes(tmp_path, monkeypatch):
+    import time
+    from synth_containers import engine_guard
+
+    receipt = tmp_path / "receipt.json"
+    original = engine_guard.durable_write
+    def delayed(*args, **kwargs):
+        time.sleep(.5)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(engine_guard, "durable_write", delayed)
+    reporter = engine_guard.GuardReporter(name="guard-test", heartbeat=.05)
+    events = []
+    monkeypatch.setattr(reporter, "emit", events.append)
+    engine_guard.persist_receipt(reporter, receipt, {"cleanup": "removed"})
+    assert json.loads(receipt.read_text()) == {"cleanup": "removed"}
+    assert any(event.get("event") == "heartbeat" and event.get("phase") == "receipt" for event in events)
+
+
+def test_guard_exits_after_removal_without_receipt_retains_unconfirmed(tmp_path):
+    """A removal observation without a durable guard receipt needs a sweep record."""
+    receipt = tmp_path / "receipt.json"
+    no_receipt = (sys.executable, "-c", """
+import json, sys
+print(json.dumps({'event':'hello','name':'guard-test'}), flush=True)
+sys.stdin.readline()
+print(json.dumps({'event':'state','name':'guard-test','state':'ready','url':'http://127.0.0.1:1'}), flush=True)
+sys.stdin.read()
+print(json.dumps({'event':'state','name':'guard-test','state':'removed','observed':'absent'}), flush=True)
+""")
+    with pytest.raises(NativeEngineError) as refused:
+        with owned_gold_engine(plan(), owner="eval-owner", receipt=receipt, silence_seconds=2.0,
+                               guard_command=no_receipt):
+            pass
+    assert refused.value.code == "native_engine_cleanup_unconfirmed"
+    record = json.loads(receipt.read_text())
+    assert record["cleanup"] == "unconfirmed" and record["recorded_by"] == "parent"
+    assert record["name"] == "guard-test" and record["reason"] == "guard_exited_0"
+
+
+def test_foreign_guard_receipt_never_proves_owned_cleanup(tmp_path):
+    receipt = tmp_path / "receipt.json"
+    foreign = (sys.executable, "-c", """
+import json, pathlib, sys
+print(json.dumps({'event':'hello','name':'guard-test'}), flush=True)
+request = json.loads(sys.stdin.readline())
+print(json.dumps({'event':'state','name':'guard-test','state':'ready','url':'http://127.0.0.1:1'}), flush=True)
+sys.stdin.read()
+pathlib.Path(request['receipt']).write_text(json.dumps({'recorded_by':'guard','owner':'other-owner','name':'guard-test','cleanup':'removed'}))
+print(json.dumps({'event':'state','name':'guard-test','state':'removed','observed':'absent'}), flush=True)
+""")
+    with pytest.raises(NativeEngineError) as refused:
+        with owned_gold_engine(plan(), owner="eval-owner", receipt=receipt, silence_seconds=2.0,
+                               guard_command=foreign):
+            pass
+    assert refused.value.code == "native_engine_cleanup_unconfirmed"
+    record = json.loads(receipt.read_text())
+    assert record["cleanup"] == "unconfirmed" and record["owner"] == "eval-owner"
+    assert record["recorded_by"] == "parent"
+
+
+@pytest.mark.parametrize("cleanup", ["missing", None, "unknown"])
+def test_malformed_owned_guard_receipt_retains_unconfirmed(tmp_path, cleanup):
+    receipt = tmp_path / "receipt.json"
+    malformed = (sys.executable, "-c", f"""
+import json, pathlib, sys
+print(json.dumps({{'event':'hello','name':'guard-test'}}), flush=True)
+request = json.loads(sys.stdin.readline())
+print(json.dumps({{'event':'state','name':'guard-test','state':'ready','url':'http://127.0.0.1:1'}}), flush=True)
+sys.stdin.read()
+record = {{'recorded_by':'guard','owner':'eval-owner','name':'guard-test'}}
+if {cleanup!r} != 'missing': record['cleanup'] = {cleanup!r}
+pathlib.Path(request['receipt']).write_text(json.dumps(record))
+print(json.dumps({{'event':'state','name':'guard-test','state':'removed','observed':'absent'}}), flush=True)
+""")
+    with pytest.raises(NativeEngineError) as refused:
+        with owned_gold_engine(plan(), owner="eval-owner", receipt=receipt, silence_seconds=4.0,
+                               guard_command=malformed):
+            pass
+    assert refused.value.code == "native_engine_cleanup_unconfirmed"
+    record = json.loads(receipt.read_text())
+    assert record["cleanup"] == "unconfirmed" and record["recorded_by"] == "parent"
 
 
 def test_declared_limits_are_observed_and_recorded(tmp_path, health_port):

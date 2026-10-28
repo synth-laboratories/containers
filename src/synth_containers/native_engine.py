@@ -153,8 +153,17 @@ def owned_gold_engine(plan, *, owner: str, receipt: Path, docker_cli: str = "doc
             process.stderr.close()
             raise NativeEngineError("native_engine_cleanup_unconfirmed", stage="cleanup", name=channel.name,
                 last_state=channel.last_state, cause="guard_silent")
-        while channel.next_event() is not None:
-            pass
+        try:
+            while channel.next_event() is not None:
+                pass
+        except TimeoutError:
+            # A removal observation is not a durable receipt. Do not terminate
+            # the guard, which may still be persisting its authoritative record.
+            _parent_receipt(receipt, channel, owner, "guard_silent_after_cleanup")
+            process.stdout.close()
+            process.stderr.close()
+            raise NativeEngineError("native_engine_cleanup_unconfirmed", stage="cleanup", name=channel.name,
+                last_state=channel.last_state, cause="guard_silent_after_cleanup") from None
         process.wait()
         errors = process.stderr.read(65536)
         process.stdout.close()
@@ -162,9 +171,15 @@ def owned_gold_engine(plan, *, owner: str, receipt: Path, docker_cli: str = "doc
         if terminal is None:
             from .tracing.atomic import durable_write
             durable_write(receipt.with_suffix(".stderr"), errors, replace=True)
-            if not receipt.exists() or json.loads(receipt.read_bytes()).get("recorded_by") != "guard":
-                _parent_receipt(receipt, channel, owner, f"guard_exited_{process.returncode}")
-        recorded = json.loads(receipt.read_bytes()) if receipt.exists() else {"cleanup": "unconfirmed"}
+        try:
+            recorded = json.loads(receipt.read_bytes())
+        except (OSError, ValueError):
+            recorded = None
+        if (not isinstance(recorded, dict) or recorded.get("recorded_by") != "guard"
+                or recorded.get("owner") != owner or recorded.get("name") != channel.name
+                or recorded.get("cleanup") not in ("removed", "not_allocated", "unconfirmed")):
+            _parent_receipt(receipt, channel, owner, f"guard_exited_{process.returncode}")
+            recorded = json.loads(receipt.read_bytes())
         if recorded["cleanup"] not in ("removed", "not_allocated"):
             raise NativeEngineError("native_engine_cleanup_unconfirmed", stage="cleanup", name=channel.name,
                 last_state=recorded.get("last_observed_state", channel.last_state), cause=recorded.get("reason"))

@@ -1,0 +1,35 @@
+{"event": "hello", "name": "synth-eval-812b5a489afe4280", "pid": 97381, "at": 1793214042.652742}
+{"event": "state", "name": "synth-eval-812b5a489afe4280", "state": "allocating", "at": 1793214042.660675, "observed": null, "owner": "slowcreate-c8c715a62d0545d280cf42b66456bb5a", "label": "ai.synth.eval.owner=slowcreate-c8c715a62d0545d280cf42b66456bb5a"}
+{"event": "state", "name": "synth-eval-812b5a489afe4280", "state": "creating", "at": 1793214042.6607301, "observed": null}
+{"event": "heartbeat", "name": "synth-eval-812b5a489afe4280", "phase": "creating", "at": 1793214042.9648519, "elapsed": 0.304, "observed": null}
+{"event": "heartbeat", "name": "synth-eval-812b5a489afe4280", "phase": "creating", "at": 1793214043.969961, "elapsed": 1.309, "observed": null}
+{"event": "heartbeat", "name": "synth-eval-812b5a489afe4280", "phase": "creating", "at": 1793214044.971072, "elapsed": 2.31, "observed": null}
+{"event": "heartbeat", "name": "synth-eval-812b5a489afe4280", "phase": "creating", "at": 1793214045.975969, "elapsed": 3.315, "observed": null}
+{"event": "heartbeat", "name": "synth-eval-812b5a489afe4280", "phase": "creating", "at": 1793214046.98, "elapsed": 4.319, "observed": null}
+{"event": "heartbeat", "name": "synth-eval-812b5a489afe4280", "phase": "creating", "at": 1793214047.981236, "elapsed": 5.321, "observed": null}
+{"event": "heartbeat", "name": "synth-eval-812b5a489afe4280", "phase": "creating", "at": 1793214048.984451, "elapsed": 6.324, "observed": null}
+{"event": "heartbeat", "name": "synth-eval-812b5a489afe4280", "phase": "creating", "at": 1793214049.989185, "elapsed": 7.329, "observed": null}
+{"event": "heartbeat", "name": "synth-eval-812b5a489afe4280", "phase": "creating", "at": 1793214050.99311, "elapsed": 8.332, "observed": null}
+{"event": "heartbeat", "name": "synth-eval-812b5a489afe4280", "phase": "creating", "at": 1793214051.995561, "elapsed": 9.335, "observed": null}
+{"event": "heartbeat", "name": "synth-eval-812b5a489afe4280", "phase": "creating", "at": 1793214052.996324, "elapsed": 10.336, "observed": null}
+{"event": "heartbeat", "name": "synth-eval-812b5a489afe4280", "phase": "creating", "at": 1793214053.9974668, "elapsed": 11.337, "observed": null}
+{"event": "heartbeat", "name": "synth-eval-812b5a489afe4280", "phase": "creating", "at": 1793214054.997865, "elapsed": 12.337, "observed": null}
+{"event": "heartbeat", "name": "synth-eval-812b5a489afe4280", "phase": "creating", "at": 1793214056.001813, "elapsed": 13.341, "observed": null}
+{"event": "heartbeat", "name": "synth-eval-812b5a489afe4280", "phase": "creating", "at": 1793214057.006915, "elapsed": 14.346, "observed": null}
+{"event": "heartbeat", "name": "synth-eval-812b5a489afe4280", "phase": "observe", "at": 1793214058.013404, "elapsed": 1.005, "observed": null}
+{"event": "heartbeat", "name": "synth-eval-812b5a489afe4280", "phase": "observe", "at": 1793214059.020052, "elapsed": 1.006, "observed": null}
+{"event": "state", "name": "synth-eval-812b5a489afe4280", "state": "created", "at": 1793214059.020448, "observed": "created", "container": "4fac344eda3aa6edcfba142da6ec3e5ac78ec1e974747839442a972cbd8b83a8", "create_seconds": 14.347}
+{"event": "heartbeat", "name": "synth-eval-812b5a489afe4280", "phase": "limits", "at": 1793214060.026659, "elapsed": 1.006, "observed": "created"}
+{"event": "state", "name": "synth-eval-812b5a489afe4280", "state": "limits_verified", "at": 1793214060.0271978, "observed": "created", "limits": {"declared": {"cpu": 1, "memory_mb": 512, "nano_cpus": 1000000000, "memory_bytes": 536870912, "memory_swap_bytes": 536870912, "network_mode": "bridge", "egress": "unrestricted_bridge"}, "observed": {"cpu": 1.0, "memory_mb": 512, "nano_cpus": 1000000000, "memory_bytes": 536870912, "memory_swap_bytes": 536870912, "network_mode": "bridge", "pids_limit": 128, "readonly_rootfs": true, "egress": "unrestricted_bridge"}, "egress": "unrestricted_bridge", "egress_reason": "published loopback port requires a bridge network; Docker cannot publish from none/internal"}}
+{"event": "state", "name": "synth-eval-812b5a489afe4280", "state": "failed", "at": 1793214060.0272908, "observed": "created", "error": "native_engine_startup_cancelled", "code": null, "limits": {"declared": {"cpu": 1, "memory_mb": 512, "nano_cpus": 1000000000, "memory_bytes": 536870912, "memory_swap_bytes": 536870912, "network_mode": "bridge", "egress": "unrestricted_bridge"}, "observed": {"cpu": 1.0, "memory_mb": 512, "nano_cpus": 1000000000, "memory_bytes": 536870912, "memory_swap_bytes": 536870912, "network_mode": "bridge", "pids_limit": 128, "readonly_rootfs": true, "egress": "unrestricted_bridge"}, "egress": "unrestricted_bridge", "egress_reason": "published loopback port requires a bridge network; Docker cannot publish from none/internal"}}
+{"event": "state", "name": "synth-eval-812b5a489afe4280", "state": "stopping", "at": 1793214060.027325, "observed": "created"}
+{"event": "heartbeat", "name": "synth-eval-812b5a489afe4280", "phase": "stopping", "at": 1793214061.0339122, "elapsed": 1.007, "observed": "created"}
+{"event": "heartbeat", "name": "synth-eval-812b5a489afe4280", "phase": "stopping", "at": 1793214062.0362391, "elapsed": 2.009, "observed": "created"}
+{"event": "heartbeat", "name": "synth-eval-812b5a489afe4280", "phase": "observe", "at": 1793214063.0414221, "elapsed": 1.005, "observed": "created"}
+{"event": "state", "name": "synth-eval-812b5a489afe4280", "state": "removed", "at": 1793214063.041837, "observed": "absent"}
+{"event": "heartbeat", "name": "synth-eval-812b5a489afe4280", "phase": "receipt", "at": 1793214064.0462, "elapsed": 1.004, "observed": "absent"}
+{"event": "heartbeat", "name": "synth-eval-812b5a489afe4280", "phase": "receipt", "at": 1793214065.046815, "elapsed": 2.004, "observed": "absent"}
+{"event": "heartbeat", "name": "synth-eval-812b5a489afe4280", "phase": "receipt", "at": 1793214066.0482922, "elapsed": 3.006, "observed": "absent"}
+{"event": "heartbeat", "name": "synth-eval-812b5a489afe4280", "phase": "receipt", "at": 1793214067.053544, "elapsed": 4.011, "observed": "absent"}
+{"event": "heartbeat", "name": "synth-eval-812b5a489afe4280", "phase": "receipt", "at": 1793214068.0556931, "elapsed": 5.013, "observed": "absent"}
+{"event": "receipt", "name": "synth-eval-812b5a489afe4280", "cleanup": "removed"}

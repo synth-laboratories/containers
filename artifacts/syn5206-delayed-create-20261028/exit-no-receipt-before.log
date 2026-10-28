@@ -1,0 +1,54 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+______ test_guard_exits_after_removal_without_receipt_retains_unconfirmed ______
+
+tmp_path = PosixPath('/Users/joshuapurtell/GitHub/.tmp/pytest-of-joshuapurtell/pytest-2341/test_guard_exits_after_removal0')
+
+    def test_guard_exits_after_removal_without_receipt_retains_unconfirmed(tmp_path):
+        """A removal observation without a durable guard receipt needs a sweep record."""
+        receipt = tmp_path / "receipt.json"
+        no_receipt = (sys.executable, "-c", """
+    import json, sys
+    print(json.dumps({'event':'hello','name':'guard-test'}), flush=True)
+    sys.stdin.readline()
+    print(json.dumps({'event':'state','name':'guard-test','state':'ready','url':'http://127.0.0.1:1'}), flush=True)
+    sys.stdin.read()
+    print(json.dumps({'event':'state','name':'guard-test','state':'removed','observed':'absent'}), flush=True)
+    """)
+        with pytest.raises(NativeEngineError) as refused:
+            with owned_gold_engine(plan(), owner="eval-owner", receipt=receipt, silence_seconds=2.0,
+                                   guard_command=no_receipt):
+                pass
+        assert refused.value.code == "native_engine_cleanup_unconfirmed"
+>       record = json.loads(receipt.read_text())
+                            ^^^^^^^^^^^^^^^^^^^
+
+tests/test_engine_guard_progress.py:270: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/pathlib/_local.py:546: in read_text
+    return PathBase.read_text(self, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/pathlib/_abc.py:632: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = PosixPath('/Users/joshuapurtell/GitHub/.tmp/pytest-of-joshuapurtell/pytest-2341/test_guard_exits_after_removal0/receipt.json')
+mode = 'r', buffering = -1, encoding = 'locale', errors = None, newline = None
+
+    def open(self, mode='r', buffering=-1, encoding=None,
+             errors=None, newline=None):
+        """
+        Open the file pointed to by this path and return a file object, as
+        the built-in open() function does.
+        """
+        if "b" not in mode:
+            encoding = io.text_encoding(encoding)
+>       return io.open(self, mode, buffering, encoding, errors, newline)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       FileNotFoundError: [Errno 2] No such file or directory: '/Users/joshuapurtell/GitHub/.tmp/pytest-of-joshuapurtell/pytest-2341/test_guard_exits_after_removal0/receipt.json'
+
+../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/pathlib/_local.py:537: FileNotFoundError
+=========================== short test summary info ============================
+FAILED tests/test_engine_guard_progress.py::test_guard_exits_after_removal_without_receipt_retains_unconfirmed
+1 failed in 1.56s

@@ -1,0 +1,63 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+_________ test_malformed_owned_guard_receipt_retains_unconfirmed[None] _________
+
+tmp_path = PosixPath('/Users/joshuapurtell/GitHub/.tmp/pytest-of-joshuapurtell/pytest-2469/test_malformed_owned_guard_rec0')
+cleanup = None
+
+    @pytest.mark.parametrize("cleanup", [None, "unknown"])
+    def test_malformed_owned_guard_receipt_retains_unconfirmed(tmp_path, cleanup):
+        receipt = tmp_path / "receipt.json"
+        malformed = (sys.executable, "-c", f"""
+    import json, pathlib, sys
+    print(json.dumps({{'event':'hello','name':'guard-test'}}), flush=True)
+    request = json.loads(sys.stdin.readline())
+    print(json.dumps({{'event':'state','name':'guard-test','state':'ready','url':'http://127.0.0.1:1'}}), flush=True)
+    sys.stdin.read()
+    pathlib.Path(request['receipt']).write_text(json.dumps({{'recorded_by':'guard','owner':'eval-owner','name':'guard-test','cleanup':{cleanup!r}}}))
+    print(json.dumps({{'event':'state','name':'guard-test','state':'removed','observed':'absent'}}), flush=True)
+    """)
+        with pytest.raises(NativeEngineError) as refused:
+            with owned_gold_engine(plan(), owner="eval-owner", receipt=receipt, silence_seconds=4.0,
+                                   guard_command=malformed):
+                pass
+        assert refused.value.code == "native_engine_cleanup_unconfirmed"
+        record = json.loads(receipt.read_text())
+>       assert record["cleanup"] == "unconfirmed" and record["recorded_by"] == "parent"
+E       AssertionError: assert (None == 'unconfirmed')
+
+tests/test_engine_guard_progress.py:320: AssertionError
+_______ test_malformed_owned_guard_receipt_retains_unconfirmed[unknown] ________
+
+tmp_path = PosixPath('/Users/joshuapurtell/GitHub/.tmp/pytest-of-joshuapurtell/pytest-2469/test_malformed_owned_guard_rec1')
+cleanup = 'unknown'
+
+    @pytest.mark.parametrize("cleanup", [None, "unknown"])
+    def test_malformed_owned_guard_receipt_retains_unconfirmed(tmp_path, cleanup):
+        receipt = tmp_path / "receipt.json"
+        malformed = (sys.executable, "-c", f"""
+    import json, pathlib, sys
+    print(json.dumps({{'event':'hello','name':'guard-test'}}), flush=True)
+    request = json.loads(sys.stdin.readline())
+    print(json.dumps({{'event':'state','name':'guard-test','state':'ready','url':'http://127.0.0.1:1'}}), flush=True)
+    sys.stdin.read()
+    pathlib.Path(request['receipt']).write_text(json.dumps({{'recorded_by':'guard','owner':'eval-owner','name':'guard-test','cleanup':{cleanup!r}}}))
+    print(json.dumps({{'event':'state','name':'guard-test','state':'removed','observed':'absent'}}), flush=True)
+    """)
+        with pytest.raises(NativeEngineError) as refused:
+            with owned_gold_engine(plan(), owner="eval-owner", receipt=receipt, silence_seconds=4.0,
+                                   guard_command=malformed):
+                pass
+        assert refused.value.code == "native_engine_cleanup_unconfirmed"
+        record = json.loads(receipt.read_text())
+>       assert record["cleanup"] == "unconfirmed" and record["recorded_by"] == "parent"
+E       AssertionError: assert ('unknown' == 'unconfirmed'
+E         
+E         - unconfirmed
+E         + unknown)
+
+tests/test_engine_guard_progress.py:320: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_engine_guard_progress.py::test_malformed_owned_guard_receipt_retains_unconfirmed[None]
+FAILED tests/test_engine_guard_progress.py::test_malformed_owned_guard_receipt_retains_unconfirmed[unknown]
+2 failed, 16 deselected in 2.05s

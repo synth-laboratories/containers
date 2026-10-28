@@ -1,5 +1,13 @@
 # SYN-5165 / SYN-5206 wave-4 real-Docker qualification (2026-10-28, lane D)
 
+**Evidence correction:** The old restart driver recorded an empty attempts
+list and nevertheless accepted `len <= 1`; its signal timestamp was recorded
+after a wait loop. The retained final completion and cleanup do not establish
+exact-once dispatch or signal-time state. A fresh separately retained local
+proof records a running engine before signal and one service-store attempt;
+see `artifacts/codex-gate-a-20261028/RESTART-PROOF.md` in the shared workspace.
+The historical text and receipts below are preserved.
+
 **Evidence correction:** The historical restart receipt below recorded
 `attempts_for_op: []`; its driver read a nonexistent `attempts` field from
 `local_eval_list` and accepted zero as at most one. Its signal receipt was

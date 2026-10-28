@@ -15,6 +15,7 @@ from pathlib import Path
 import selectors
 import subprocess
 import sys
+import threading
 import time
 from uuid import uuid4
 
@@ -221,6 +222,31 @@ def handshake(name: str) -> None:
     sys.stdout.flush()
 
 
+def persist_receipt(reporter: GuardReporter, record: Path, document: dict) -> None:
+    """Keep the parent informed while durable receipt I/O is still in progress."""
+    finished = threading.Event()
+    errors: list[BaseException] = []
+
+    def write() -> None:
+        try:
+            durable_write(record, content_bytes(document), replace=True)
+        except BaseException as error:
+            errors.append(error)
+        finally:
+            finished.set()
+
+    writer = threading.Thread(target=write, name="engine-receipt-writer")
+    writer.start()
+    started = time.monotonic()
+    while not finished.wait(reporter.heartbeat):
+        reporter.emit({"event": "heartbeat", "name": reporter.name, "phase": "receipt",
+                       "at": time.time(), "elapsed": round(time.monotonic() - started, 3),
+                       "observed": reporter.last_observed})
+    writer.join()
+    if errors:
+        raise errors[0]
+
+
 def main():
     name = "synth-eval-" + uuid4().hex[:16]
     handshake(name)
@@ -277,10 +303,10 @@ def main():
         reporter.state("failed", error=error, code=code, limits=limits)
     finally:
         cleanup, returncode = remove(reporter, docker, name)
-        durable_write(record, content_bytes({"container": identifier, "name": name, "owner": request["owner"],
+        persist_receipt(reporter, record, {"container": identifier, "name": name, "owner": request["owner"],
             "label": f"{OWNER_LABEL}={request['owner']}", "cleanup": cleanup, "returncode": returncode,
             "last_observed_state": reporter.last_observed, "transitions": reporter.transitions,
-            "create_seconds": create_seconds, "error": error, "code": code, "limits": limits, "recorded_by": "guard"}), replace=True)
+            "create_seconds": create_seconds, "error": error, "code": code, "limits": limits, "recorded_by": "guard"})
         reporter.emit({"event": "receipt", "name": name, "cleanup": cleanup})
 
 

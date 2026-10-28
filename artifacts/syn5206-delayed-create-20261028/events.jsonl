@@ -1,0 +1,23 @@
+{"event": "hello", "name": "synth-eval-5427b83c95db404a", "pid": 25343, "at": 1793212354.225031}
+{"event": "state", "name": "synth-eval-5427b83c95db404a", "state": "allocating", "at": 1793212354.2308748, "observed": null, "owner": "slowcreate-1c4157b0cfaa4be4b7344b4505aa0bd2", "label": "ai.synth.eval.owner=slowcreate-1c4157b0cfaa4be4b7344b4505aa0bd2"}
+{"event": "state", "name": "synth-eval-5427b83c95db404a", "state": "creating", "at": 1793212354.230926, "observed": null}
+{"event": "heartbeat", "name": "synth-eval-5427b83c95db404a", "phase": "creating", "at": 1793212354.543885, "elapsed": 0.313, "observed": null}
+{"event": "heartbeat", "name": "synth-eval-5427b83c95db404a", "phase": "creating", "at": 1793212355.5491211, "elapsed": 1.318, "observed": null}
+{"event": "heartbeat", "name": "synth-eval-5427b83c95db404a", "phase": "creating", "at": 1793212356.551214, "elapsed": 2.32, "observed": null}
+{"event": "heartbeat", "name": "synth-eval-5427b83c95db404a", "phase": "creating", "at": 1793212357.5523882, "elapsed": 3.321, "observed": null}
+{"event": "heartbeat", "name": "synth-eval-5427b83c95db404a", "phase": "creating", "at": 1793212358.557083, "elapsed": 4.326, "observed": null}
+{"event": "heartbeat", "name": "synth-eval-5427b83c95db404a", "phase": "creating", "at": 1793212359.5632918, "elapsed": 5.332, "observed": null}
+{"event": "heartbeat", "name": "synth-eval-5427b83c95db404a", "phase": "creating", "at": 1793212360.5651698, "elapsed": 6.334, "observed": null}
+{"event": "heartbeat", "name": "synth-eval-5427b83c95db404a", "phase": "creating", "at": 1793212361.569294, "elapsed": 7.338, "observed": null}
+{"event": "heartbeat", "name": "synth-eval-5427b83c95db404a", "phase": "creating", "at": 1793212362.571124, "elapsed": 8.34, "observed": null}
+{"event": "heartbeat", "name": "synth-eval-5427b83c95db404a", "phase": "creating", "at": 1793212363.5757089, "elapsed": 9.345, "observed": null}
+{"event": "heartbeat", "name": "synth-eval-5427b83c95db404a", "phase": "creating", "at": 1793212364.584459, "elapsed": 10.354, "observed": null}
+{"event": "heartbeat", "name": "synth-eval-5427b83c95db404a", "phase": "observe", "at": 1793212365.63067, "elapsed": 1.033, "observed": null}
+{"event": "heartbeat", "name": "synth-eval-5427b83c95db404a", "phase": "observe", "at": 1793212366.638873, "elapsed": 1.007, "observed": null}
+{"event": "state", "name": "synth-eval-5427b83c95db404a", "state": "created", "at": 1793212366.6393652, "observed": "created", "container": "6a10ced7b2ea1e9e474d2f3f98ce23d7c362067c4959929e4d4012c0bbeab0a4", "create_seconds": 10.366}
+{"event": "state", "name": "synth-eval-5427b83c95db404a", "state": "failed", "at": 1793212366.639423, "observed": "created", "error": "native_engine_startup_cancelled"}
+{"event": "state", "name": "synth-eval-5427b83c95db404a", "state": "stopping", "at": 1793212366.639447, "observed": "created"}
+{"event": "heartbeat", "name": "synth-eval-5427b83c95db404a", "phase": "stopping", "at": 1793212367.650194, "elapsed": 1.011, "observed": "created"}
+{"event": "heartbeat", "name": "synth-eval-5427b83c95db404a", "phase": "observe", "at": 1793212368.6562848, "elapsed": 1.006, "observed": "created"}
+{"event": "state", "name": "synth-eval-5427b83c95db404a", "state": "removed", "at": 1793212368.6566179, "observed": "absent"}
+{"event": "receipt", "name": "synth-eval-5427b83c95db404a", "cleanup": "removed"}

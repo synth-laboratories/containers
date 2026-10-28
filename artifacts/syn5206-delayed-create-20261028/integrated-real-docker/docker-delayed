@@ -1,0 +1,6 @@
+#!/bin/sh
+if [ "$1" = create ]; then
+  date -u +%FT%TZ > /Users/joshuapurtell/GitHub/artifacts/codex-gate-a-20261028/slow-create-integrated/create-entered.txt
+  sleep 8
+fi
+exec /opt/homebrew/bin/docker "$@"

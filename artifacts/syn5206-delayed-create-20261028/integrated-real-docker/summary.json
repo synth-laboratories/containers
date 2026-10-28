@@ -1,0 +1,24 @@
+{
+  "owner": "slowcreate-c8c715a62d0545d280cf42b66456bb5a",
+  "guard_pid": 97381,
+  "parent_pipe_closed_at": 1793214042.964649,
+  "injected_delay_seconds": 8,
+  "create_entered_before_close": true,
+  "guard_exit": 0,
+  "cleanup": "removed",
+  "error": "native_engine_startup_cancelled",
+  "create_seconds": 14.347,
+  "transitions": [
+    "allocating",
+    "creating",
+    "created",
+    "limits_verified",
+    "failed",
+    "stopping",
+    "removed"
+  ],
+  "containers_immediately_after": [],
+  "containers_after_3s": [],
+  "receipt_heartbeats": 5,
+  "proved": true
+}

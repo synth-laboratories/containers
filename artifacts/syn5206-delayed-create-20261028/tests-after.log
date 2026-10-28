@@ -1,0 +1,193 @@
+..F...F.....................                                             [100%]
+=================================== FAILURES ===================================
+_____ test_slow_docker_phase_is_awaited_and_removal_is_observed[slow-stop] _____
+
+tmp_path = PosixPath('/Users/joshuapurtell/GitHub/.tmp/pytest-of-joshuapurtell/pytest-2309/test_slow_docker_phase_is_awai2')
+health_port = 63350, phase = 'rm_delay'
+
+    @pytest.mark.parametrize("phase", ["create_delay", "start_delay", "rm_delay"], ids=["slow-create", "slow-start", "slow-stop"])
+    def test_slow_docker_phase_is_awaited_and_removal_is_observed(tmp_path, health_port, phase):
+        cli = fake_docker(tmp_path, health_port, **{phase: 2.5})
+        receipt = tmp_path / "receipt.json"
+>       url = run_engine(cli, receipt)
+              ^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_engine_guard_progress.py:122: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_engine_guard_progress.py:108: in run_engine
+    with owned_gold_engine(plan(), owner="eval-owner", receipt=receipt, docker_cli=str(cli),
+../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/contextlib.py:148: in __exit__
+    next(self.gen)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+plan = EvaluationPlanV1(schema_version='synth.evaluation-plan.v1', benchmark='craftax', adapter='local-gold-scripted-v1', sou...ta={}, grading_plan=None, grading_bundle=None, trusted_scorer_source_digests=(), engine_command=None, engine_port=None)
+owner = 'eval-owner'
+receipt = PosixPath('/Users/joshuapurtell/GitHub/.tmp/pytest-of-joshuapurtell/pytest-2309/test_slow_docker_phase_is_awai2/receipt.json')
+docker_cli = '/Users/joshuapurtell/GitHub/.tmp/pytest-of-joshuapurtell/pytest-2309/test_slow_docker_phase_is_awai2/docker/docker'
+heartbeat_seconds = 0.1, silence_seconds = 0.8
+guard_command = ('/Users/joshuapurtell/GitHub/worktrees/codex-eval-containers-20261028/.venv/bin/python', '-m', 'synth_containers.engine_guard')
+
+    @contextmanager
+    def owned_gold_engine(plan, *, owner: str, receipt: Path, docker_cli: str = "docker",
+                          heartbeat_seconds: float = DEFAULT_HEARTBEAT_SECONDS,
+                          silence_seconds: float = DEFAULT_SILENCE_SECONDS,
+                          guard_command: tuple[str, ...] = DEFAULT_GUARD_COMMAND):
+        process = subprocess.Popen(list(guard_command),
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            start_new_session=True)
+        assert process.stdin is not None and process.stdout is not None and process.stderr is not None
+        channel = GuardChannel(process.stdout.fileno(), silence_seconds)
+        silent = False
+        try:
+            request = guard_request(plan, owner=owner, receipt=receipt, docker_cli=docker_cli,
+                heartbeat_seconds=heartbeat_seconds)
+            process.stdin.write((json.dumps(request) + "\n").encode())
+            process.stdin.flush()
+            try:
+                ready = channel.until(("ready", "failed"))
+            except TimeoutError:
+                silent = True
+                raise NativeEngineError("native_engine_guard_silent", stage="startup", name=channel.name,
+                    last_state=channel.last_state) from None
+            if ready is None:
+                # EOF: the guard closed its report stream by exiting.
+                raise NativeEngineError("native_engine_startup_failed", stage="startup", name=channel.name,
+                    last_state=channel.last_state, cause=f"guard_exited_{process.wait()}"
+                    + ("" if channel.handshaken else "_before_hello"))
+            if ready["state"] != "ready":
+                raise NativeEngineError("native_engine_startup_failed", stage="startup", name=channel.name,
+                    last_state=channel.last_state, cause=ready.get("error"))
+            yield ready["url"]
+        finally:
+            process.stdin.close()
+            terminal = None
+            if not silent:
+                try:
+                    terminal = channel.until(TERMINAL_CLEANUP_STATES)
+                except TimeoutError:
+                    silent = True
+            if silent:
+                # Preserve guard custody: terminating it could strand the container.
+                # The guard overwrites this receipt if it later confirms removal.
+                _parent_receipt(receipt, channel, owner, "guard_silent")
+                process.stdout.close()
+                process.stderr.close()
+                raise NativeEngineError("native_engine_cleanup_unconfirmed", stage="cleanup", name=channel.name,
+                    last_state=channel.last_state, cause="guard_silent")
+            try:
+                while channel.next_event() is not None:
+                    pass
+            except TimeoutError:
+                # A removal observation is not a durable receipt. Do not terminate
+                # the guard, which may still be persisting its authoritative record.
+                _parent_receipt(receipt, channel, owner, "guard_silent_after_cleanup")
+                process.stdout.close()
+                process.stderr.close()
+>               raise NativeEngineError("native_engine_cleanup_unconfirmed", stage="cleanup", name=channel.name,
+                    last_state=channel.last_state, cause="guard_silent_after_cleanup") from None
+E               synth_containers.native_engine.NativeEngineError: native_engine_cleanup_unconfirmed: stage=cleanup name=synth-eval-81d947a9a2334afe last_state=removed cause=guard_silent_after_cleanup
+
+src/synth_containers/native_engine.py:162: NativeEngineError
+_____________ test_slow_durable_cleanup_receipt_remains_observable _____________
+
+tmp_path = PosixPath('/Users/joshuapurtell/GitHub/.tmp/pytest-of-joshuapurtell/pytest-2309/test_slow_durable_cleanup_rece0')
+health_port = 63610
+
+    def test_slow_durable_cleanup_receipt_remains_observable(tmp_path, health_port):
+        """Removal alone is not a durable receipt; keep reporting while it is saved."""
+        import time
+    
+        cli = fake_docker(tmp_path, health_port)
+        receipt = tmp_path / "receipt.json"
+        slow_receipt = (sys.executable, "-c", """
+    import time
+    import synth_containers.engine_guard as guard
+    write = guard.durable_write
+    def delayed(*args, **kwargs):
+        time.sleep(2.0)
+        return write(*args, **kwargs)
+    guard.durable_write = delayed
+    guard.main()
+    """)
+        try:
+>           with owned_gold_engine(plan(), owner="eval-owner", receipt=receipt, docker_cli=str(cli),
+                                   heartbeat_seconds=.1, silence_seconds=.8, guard_command=slow_receipt) as url:
+
+tests/test_engine_guard_progress.py:193: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/contextlib.py:148: in __exit__
+    next(self.gen)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+plan = EvaluationPlanV1(schema_version='synth.evaluation-plan.v1', benchmark='craftax', adapter='local-gold-scripted-v1', sou...ta={}, grading_plan=None, grading_bundle=None, trusted_scorer_source_digests=(), engine_command=None, engine_port=None)
+owner = 'eval-owner'
+receipt = PosixPath('/Users/joshuapurtell/GitHub/.tmp/pytest-of-joshuapurtell/pytest-2309/test_slow_durable_cleanup_rece0/receipt.json')
+docker_cli = '/Users/joshuapurtell/GitHub/.tmp/pytest-of-joshuapurtell/pytest-2309/test_slow_durable_cleanup_rece0/docker/docker'
+heartbeat_seconds = 0.1, silence_seconds = 0.8
+guard_command = ('/Users/joshuapurtell/GitHub/worktrees/codex-eval-containers-20261028/.venv/bin/python', '-c', '\nimport time\nimport...gs, **kwargs):\n    time.sleep(2.0)\n    return write(*args, **kwargs)\nguard.durable_write = delayed\nguard.main()\n')
+
+    @contextmanager
+    def owned_gold_engine(plan, *, owner: str, receipt: Path, docker_cli: str = "docker",
+                          heartbeat_seconds: float = DEFAULT_HEARTBEAT_SECONDS,
+                          silence_seconds: float = DEFAULT_SILENCE_SECONDS,
+                          guard_command: tuple[str, ...] = DEFAULT_GUARD_COMMAND):
+        process = subprocess.Popen(list(guard_command),
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            start_new_session=True)
+        assert process.stdin is not None and process.stdout is not None and process.stderr is not None
+        channel = GuardChannel(process.stdout.fileno(), silence_seconds)
+        silent = False
+        try:
+            request = guard_request(plan, owner=owner, receipt=receipt, docker_cli=docker_cli,
+                heartbeat_seconds=heartbeat_seconds)
+            process.stdin.write((json.dumps(request) + "\n").encode())
+            process.stdin.flush()
+            try:
+                ready = channel.until(("ready", "failed"))
+            except TimeoutError:
+                silent = True
+                raise NativeEngineError("native_engine_guard_silent", stage="startup", name=channel.name,
+                    last_state=channel.last_state) from None
+            if ready is None:
+                # EOF: the guard closed its report stream by exiting.
+                raise NativeEngineError("native_engine_startup_failed", stage="startup", name=channel.name,
+                    last_state=channel.last_state, cause=f"guard_exited_{process.wait()}"
+                    + ("" if channel.handshaken else "_before_hello"))
+            if ready["state"] != "ready":
+                raise NativeEngineError("native_engine_startup_failed", stage="startup", name=channel.name,
+                    last_state=channel.last_state, cause=ready.get("error"))
+            yield ready["url"]
+        finally:
+            process.stdin.close()
+            terminal = None
+            if not silent:
+                try:
+                    terminal = channel.until(TERMINAL_CLEANUP_STATES)
+                except TimeoutError:
+                    silent = True
+            if silent:
+                # Preserve guard custody: terminating it could strand the container.
+                # The guard overwrites this receipt if it later confirms removal.
+                _parent_receipt(receipt, channel, owner, "guard_silent")
+                process.stdout.close()
+                process.stderr.close()
+                raise NativeEngineError("native_engine_cleanup_unconfirmed", stage="cleanup", name=channel.name,
+                    last_state=channel.last_state, cause="guard_silent")
+            try:
+                while channel.next_event() is not None:
+                    pass
+            except TimeoutError:
+                # A removal observation is not a durable receipt. Do not terminate
+                # the guard, which may still be persisting its authoritative record.
+                _parent_receipt(receipt, channel, owner, "guard_silent_after_cleanup")
+                process.stdout.close()
+                process.stderr.close()
+>               raise NativeEngineError("native_engine_cleanup_unconfirmed", stage="cleanup", name=channel.name,
+                    last_state=channel.last_state, cause="guard_silent_after_cleanup") from None
+E               synth_containers.native_engine.NativeEngineError: native_engine_cleanup_unconfirmed: stage=cleanup name=synth-eval-71a0597ebc144f20 last_state=removed cause=guard_silent_after_cleanup
+
+src/synth_containers/native_engine.py:162: NativeEngineError
+=========================== short test summary info ============================
+FAILED tests/test_engine_guard_progress.py::test_slow_docker_phase_is_awaited_and_removal_is_observed[slow-stop]
+FAILED tests/test_engine_guard_progress.py::test_slow_durable_cleanup_receipt_remains_observable
+2 failed, 26 passed in 45.38s

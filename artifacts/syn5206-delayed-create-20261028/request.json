@@ -1,0 +1,17 @@
+{
+  "owner": "slowcreate-1c4157b0cfaa4be4b7344b4505aa0bd2",
+  "receipt": "/Users/joshuapurtell/GitHub/artifacts/codex-gate-a-20261028/slow-create/engine-receipt.json",
+  "image": "sha256:d82b2771566e9b3bcddb21b2e25e66b1e76aa0e5bc47d17b82af66d3fce61cfc",
+  "cpu": 1,
+  "memory_mb": 512,
+  "port": 8098,
+  "command": [
+    "/opt/gamebench/tasks/craftax-singleplayer/gold_rust/target/release/craftax_gold",
+    "--host",
+    "0.0.0.0",
+    "--port",
+    "8098"
+  ],
+  "docker_cli": "/Users/joshuapurtell/GitHub/artifacts/codex-gate-a-20261028/slow-create/docker-delayed",
+  "heartbeat_seconds": 1
+}
