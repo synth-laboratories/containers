@@ -2,7 +2,9 @@
 
 import json
 
-from synth_containers.eval_cli import refusal_payload
+import pytest
+
+from synth_containers.eval_cli import candidates_from, refusal_payload
 from synth_containers.native_engine import NativeEngineError
 
 
@@ -38,3 +40,19 @@ def test_limits_mismatch_keeps_declared_and_observed():
     assert payload["reason"] == "native_engine_limits_mismatch" and payload["stage"] == "limits"
     assert payload["limits"] == limits
     json.dumps(payload)
+
+
+def test_candidate_model_table_is_a_typed_refusal(tmp_path):
+    """SYN-5210: a catalog-bound [model] table is refused by name, not as a bare ValidationError."""
+    (tmp_path / "m.toml").write_text('actions = ["noop"]\nkind = "scripted-actions-v1"\n\n'
+                                     '[model]\nprovider = "openai"\nroute = "gpt-6-luna"\nweights = "hosted"\n')
+    with pytest.raises(ValueError) as refused:
+        candidates_from(["catalog-p-r1=m.toml"], relative=tmp_path)
+    payload = refusal_payload(refused.value)
+    assert payload["reason"].startswith("candidate_model_binding_unsupported: candidate catalog-p-r1 declares a model")
+    (tmp_path / "bad.toml").write_text('kind = "scripted-actions-v1"\n')
+    with pytest.raises(ValueError) as invalid:
+        candidates_from(["x=bad.toml"], relative=tmp_path)
+    assert refusal_payload(invalid.value)["reason"] == "candidate_invalid: candidate x field actions missing"
+    (tmp_path / "ok.toml").write_text('actions = ["noop"]\nkind = "scripted-actions-v1"\n')
+    assert candidates_from(["x=ok.toml"], relative=tmp_path)[0].content.actions == ("noop",)
