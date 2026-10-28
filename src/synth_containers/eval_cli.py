@@ -131,12 +131,25 @@ def _public(text) -> str | None:
     return text if isinstance(text, str) and _PUBLIC_TEXT.fullmatch(text) else None
 
 
+def _public_limits(limits: dict) -> dict:
+    """Declared and observed limits are numbers and fixed Docker identifiers only."""
+    def scalars(side):
+        if not isinstance(side, dict):
+            return None
+        return {key: value if isinstance(value, (int, float, bool)) or value is None else _public(value)
+                for key, value in side.items() if isinstance(key, str)}
+    return {"declared": scalars(limits.get("declared")), "observed": scalars(limits.get("observed")),
+            "egress": _public(limits.get("egress"))}
+
+
 def refusal_payload(exc: BaseException) -> dict:
     """Public refusal record: a typed engine failure keeps its code, stage, name, last state and cause."""
     payload = {"error": "evaluation_refused", "reason": _public(str(exc)) or type(exc).__name__}
     if isinstance(exc, NativeEngineError):
         payload.update({"reason": exc.code, "stage": exc.stage, "name": exc.name, "last_state": exc.last_state,
                         "cause": _public(exc.cause) if exc.cause is not None else None})
+        if exc.limits is not None:
+            payload["limits"] = _public_limits(exc.limits)
     return payload
 
 

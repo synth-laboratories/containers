@@ -63,7 +63,8 @@ def test_guard_request_and_docker_argv_shape(tmp_path):
     head = argv[:image]
     for fixed in (["--pull", "never"], ["--read-only"], ["--tmpfs", "/tmp:rw,size=67108864"],
                   ["--pids-limit", "128"], ["-p", "127.0.0.1::9000"], ["-e", "PORT=9000"],
-                  ["--label", "ai.synth.eval.owner=eval-x"], ["--memory", "512m"]):
+                  ["--label", "ai.synth.eval.owner=eval-x"], ["--memory", "512m"], ["--memory-swap", "512m"],
+                  ["--cpus", "1"], ["--network", "bridge"]):
         assert any(head[i:i + len(fixed)] == fixed for i in range(len(head))), fixed
 
 
@@ -87,3 +88,17 @@ def test_describe_shows_effective_engine():
     assert default == {"image": D, "port": 8098, "command": None, "command_source": "image-default"}
     declared = describe_evaluation(plan(engine_command=COMMAND), ())["engine"]
     assert declared["command"] == COMMAND and declared["command_source"] == "plan" and declared["port"] == 8098
+
+
+@pytest.mark.parametrize("missing", ["cpu", "memory_mb"])
+def test_guard_refuses_undeclared_limits(missing):
+    request = {"owner": "o", "image": D, "cpu": 1, "memory_mb": 512, missing: None}
+    with pytest.raises(ValueError, match=f"limits_undeclared: missing {missing}"):
+        docker_create_argv(request, "n")
+
+
+def test_plan_egress_capability_and_refusal():
+    assert "egress" not in plan().model_dump(mode="json")
+    assert plan(egress="unrestricted_bridge").egress == "unrestricted_bridge"
+    with pytest.raises(ValueError, match="egress_unsupported: declared=none"):
+        plan(egress="none")

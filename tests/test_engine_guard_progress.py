@@ -37,8 +37,14 @@ command, args = sys.argv[1], sys.argv[2:]
 if command == "create":
     name = args[args.index("--name") + 1]
     labels = dict(args[i + 1].split("=", 1) for i, a in enumerate(args) if a == "--label")
+    flag = lambda key: args[args.index(key) + 1] if key in args else None
+    mib = lambda text: int(text[:-1]) * 1048576 if text else 0
+    host = {"NanoCpus": round(float(flag("--cpus") or 0) * 1e9), "Memory": mib(flag("--memory")),
+        "MemorySwap": mib(flag("--memory-swap")), "NetworkMode": flag("--network") or "default",
+        "PidsLimit": int(flag("--pids-limit") or 0), "ReadonlyRootfs": "--read-only" in args}
+    host.update(config.get("host_config_override", {}))
     time.sleep(config.get("create_delay", 0))
-    state = load(); state[name] = {"id": "id-" + name, "status": "created", "labels": labels}; save(state)
+    state = load(); state[name] = {"id": "id-" + name, "status": "created", "labels": labels, "host": host}; save(state)
     print("id-" + name)
 elif command == "start":
     time.sleep(config.get("start_delay", 0))
@@ -50,7 +56,7 @@ elif command == "inspect":
     entry = load().get(args[-1])
     if entry is None:
         sys.exit(1)
-    print(entry["status"])
+    print(json.dumps(entry["host"]) if "HostConfig" in args[1] else entry["status"])
 elif command == "ps":
     key, value = args[args.index("--filter") + 1].removeprefix("label=").split("=", 1)
     for entry in load().values():
@@ -171,3 +177,37 @@ def test_slow_guard_start_is_not_silence(tmp_path, health_port):
                            heartbeat_seconds=.1, silence_seconds=.8, guard_command=delayed) as url:
         assert url == f"http://127.0.0.1:{health_port}"
     assert json.loads(receipt.read_text())["cleanup"] == "removed"
+
+
+def test_declared_limits_are_observed_and_recorded(tmp_path, health_port):
+    """SYN-5209: the guard reads HostConfig back after create and records declared vs observed."""
+    cli = fake_docker(tmp_path, health_port)
+    receipt = tmp_path / "receipt.json"
+    run_engine(cli, receipt)
+    record = json.loads(receipt.read_text())
+    limits = record["limits"]
+    assert limits["declared"]["nano_cpus"] == limits["observed"]["nano_cpus"] == 1_000_000_000
+    assert limits["declared"]["memory_bytes"] == limits["observed"]["memory_bytes"] == 512 * 1048576
+    assert limits["observed"]["memory_swap_bytes"] == limits["observed"]["memory_bytes"]
+    assert limits["observed"]["network_mode"] == "bridge" and limits["egress"] == "unrestricted_bridge"
+    assert limits["observed"]["cpu"] == 1 and limits["observed"]["memory_mb"] == 512
+    assert "limits_verified" in states(receipt) and record["code"] is None
+
+
+@pytest.mark.parametrize("override", [{"Memory": 0}, {"MemorySwap": -1}, {"NanoCpus": 0}, {"NetworkMode": "host"}],
+                         ids=["memory-dropped", "swap-unlimited", "cpu-dropped", "host-network"])
+def test_limits_mismatch_is_typed_startup_failure_and_container_removed(tmp_path, health_port, override):
+    cli = fake_docker(tmp_path, health_port, host_config_override=override)
+    receipt = tmp_path / "receipt.json"
+    with pytest.raises(NativeEngineError) as caught:
+        run_engine(cli, receipt)
+    error = caught.value
+    assert error.code == "native_engine_limits_mismatch" and error.stage == "limits"
+    assert error.limits["declared"]["memory_bytes"] == 512 * 1048576
+    key = next(iter(override))
+    observed_key = {"Memory": "memory_bytes", "MemorySwap": "memory_swap_bytes", "NanoCpus": "nano_cpus",
+                    "NetworkMode": "network_mode"}[key]
+    assert error.limits["observed"][observed_key] == override[key]
+    record = json.loads(receipt.read_text())
+    assert record["code"] == "native_engine_limits_mismatch" and record["cleanup"] == "removed"
+    assert "ready" not in states(receipt) and containers(cli) == {}

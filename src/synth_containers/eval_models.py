@@ -11,7 +11,9 @@ from .package_models import Digest, Name, PackageModel, content_digest
 DEFAULT_ENGINE_PORT = 8098
 # Optional engine fields are absent from the canonical dump while unset, so
 # plans that do not declare them keep their pre-existing digests.
-_OMITTED_WHEN_UNSET = ("engine_command", "engine_port")
+_OMITTED_WHEN_UNSET = ("engine_command", "engine_port", "egress")
+# The only engine egress the local engine can honestly provide (see engine_guard).
+SUPPORTED_EGRESS = ("unrestricted_bridge",)
 EngineArgument = Annotated[str, Field(min_length=1, max_length=4096)]
 
 
@@ -72,6 +74,9 @@ class EvaluationPlanV1(PackageModel):
     # container (also exported as PORT); None means DEFAULT_ENGINE_PORT.
     engine_command: Annotated[tuple[EngineArgument, ...], Field(min_length=1, max_length=64)] | None = None
     engine_port: Annotated[int, Field(strict=True, ge=1, le=65535)] | None = None
+    # Declared engine egress. None or "unrestricted_bridge" acknowledge the only
+    # capability the local engine has; any restriction is refused, never ignored.
+    egress: str | None = None
 
     @model_serializer(mode="wrap")
     def _omit_unset_engine(self, handler: SerializerFunctionWrapHandler):
@@ -87,6 +92,8 @@ class EvaluationPlanV1(PackageModel):
 
     @model_validator(mode="after")
     def consistent(self):
+        if self.egress is not None and self.egress not in SUPPORTED_EGRESS:
+            raise ValueError(f"egress_unsupported: declared={self.egress} supported=unrestricted_bridge")
         if self.engine_command is not None and any(
                 not arg.strip() or any(ord(c) < 32 for c in arg) for arg in self.engine_command):
             raise ValueError("engine_command entries must be non-empty printable strings")

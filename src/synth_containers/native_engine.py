@@ -30,8 +30,10 @@ DEFAULT_GUARD_COMMAND = (sys.executable, "-m", "synth_containers.engine_guard")
 class NativeEngineError(RuntimeError):
     """Typed engine failure; ``str()`` starts with the stable code."""
 
-    def __init__(self, code: str, *, stage: str, name: str | None, last_state: str | None, cause: str | None = None):
+    def __init__(self, code: str, *, stage: str, name: str | None, last_state: str | None, cause: str | None = None,
+                 limits: dict | None = None):
         self.code, self.stage, self.name, self.last_state, self.cause = code, stage, name, last_state, cause
+        self.limits = limits
         super().__init__(f"{code}: stage={stage} name={name} last_state={last_state}" + (f" cause={cause}" if cause else ""))
 
 
@@ -131,8 +133,9 @@ def owned_gold_engine(plan, *, owner: str, receipt: Path, docker_cli: str = "doc
                 last_state=channel.last_state, cause=f"guard_exited_{process.wait()}"
                 + ("" if channel.handshaken else "_before_hello"))
         if ready["state"] != "ready":
-            raise NativeEngineError("native_engine_startup_failed", stage="startup", name=channel.name,
-                last_state=channel.last_state, cause=ready.get("error"))
+            code = ready.get("code")
+            raise NativeEngineError(code or "native_engine_startup_failed", stage="limits" if code else "startup",
+                name=channel.name, last_state=channel.last_state, cause=ready.get("error"), limits=ready.get("limits"))
         yield ready["url"]
     finally:
         process.stdin.close()
