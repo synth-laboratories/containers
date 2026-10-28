@@ -42,7 +42,7 @@ def guard_request(plan, *, owner: str, receipt: Path, docker_cli: str = "docker"
     return {"owner": owner, "receipt": str(receipt.absolute()), "image": plan.image_digest,
         "cpu": plan.cpu, "memory_mb": plan.memory_mb, "port": plan.effective_engine_port,
         "command": list(plan.engine_command) if plan.engine_command is not None else None,
-        "docker_cli": docker_cli, "heartbeat_seconds": heartbeat_seconds}
+        "egress": plan.egress, "docker_cli": docker_cli, "heartbeat_seconds": heartbeat_seconds}
 
 
 @dataclass
@@ -134,7 +134,8 @@ def owned_gold_engine(plan, *, owner: str, receipt: Path, docker_cli: str = "doc
                 + ("" if channel.handshaken else "_before_hello"))
         if ready["state"] != "ready":
             code = ready.get("code")
-            raise NativeEngineError(code or "native_engine_startup_failed", stage="limits" if code else "startup",
+            raise NativeEngineError(code or "native_engine_startup_failed",
+                stage=ready.get("stage") or ("limits" if code else "startup"),
                 name=channel.name, last_state=channel.last_state, cause=ready.get("error"), limits=ready.get("limits"))
         yield ready["url"]
     finally:

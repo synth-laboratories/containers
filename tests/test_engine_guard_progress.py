@@ -34,17 +34,55 @@ def save(state):
 with open(root / "calls.log", "a") as log:
     log.write(json.dumps(sys.argv[1:]) + "\n")
 command, args = sys.argv[1], sys.argv[2:]
-if command == "create":
+networks_path = root / "networks.json"
+def load_networks():
+    return json.loads(networks_path.read_text()) if networks_path.exists() else {}
+def save_networks(state):
+    networks_path.write_text(json.dumps(state))
+if command == "image":
+    if config.get("sidecar_image_missing"):
+        sys.exit(1)
+    print("sha256:" + "b" * 64)
+elif command == "network":
+    sub, rest = args[0], args[1:]
+    nets = load_networks()
+    if sub == "create":
+        labels = dict(rest[i + 1].split("=", 1) for i, a in enumerate(rest) if a == "--label")
+        nets[rest[-1]] = {"id": "net-" + rest[-1], "labels": labels, "internal": "--internal" in rest}
+        save_networks(nets)
+        print("net-" + rest[-1])
+    elif sub == "connect":
+        state = load(); state[rest[1]]["networks"][rest[0]] = {"IPAddress": "10.9.0.3"}; save(state)
+    elif sub == "inspect":
+        print(json.dumps(nets[rest[-1]]["internal"]))
+    elif sub == "ls":
+        key, value = rest[rest.index("--filter") + 1].removeprefix("label=").split("=", 1)
+        for entry in nets.values():
+            if entry["labels"].get(key) == value:
+                print(entry["id"])
+    elif sub == "rm":
+        if config.get("network_rm_fails"):
+            sys.stderr.write("network has active endpoints\n")
+            sys.exit(1)
+        nets.pop(rest[-1], None); save_networks(nets)
+elif command == "create":
     name = args[args.index("--name") + 1]
     labels = dict(args[i + 1].split("=", 1) for i, a in enumerate(args) if a == "--label")
     flag = lambda key: args[args.index(key) + 1] if key in args else None
     mib = lambda text: int(text[:-1]) * 1048576 if text else 0
+    network = flag("--network") or "default"
+    bindings = {flag("-p").rsplit(":", 1)[1] + "/tcp": [{"HostIp": "127.0.0.1", "HostPort": ""}]} if "-p" in args else {}
     host = {"NanoCpus": round(float(flag("--cpus") or 0) * 1e9), "Memory": mib(flag("--memory")),
-        "MemorySwap": mib(flag("--memory-swap")), "NetworkMode": flag("--network") or "default",
-        "PidsLimit": int(flag("--pids-limit") or 0), "ReadonlyRootfs": "--read-only" in args}
-    host.update(config.get("host_config_override", {}))
+        "MemorySwap": mib(flag("--memory-swap")), "NetworkMode": network,
+        "PidsLimit": int(flag("--pids-limit") or 0), "ReadonlyRootfs": "--read-only" in args, "PortBindings": bindings}
+    if not name.endswith("-fwd"):
+        host.update(config.get("host_config_override", {}))
+    networks = {network: {"IPAddress": "10.9.0.2"}}
+    if not name.endswith("-fwd"):
+        networks.update({extra: {"IPAddress": "172.17.0.9"} for extra in config.get("engine_networks_extra", [])})
     time.sleep(config.get("create_delay", 0))
-    state = load(); state[name] = {"id": "id-" + name, "status": "created", "labels": labels, "host": host}; save(state)
+    state = load(); state[name] = {"id": "id-" + name, "status": "created", "labels": labels, "host": host,
+        "networks": networks, "argv": args}; save(state)
     print("id-" + name)
 elif command == "start":
     time.sleep(config.get("start_delay", 0))
@@ -56,7 +94,15 @@ elif command == "inspect":
     entry = load().get(args[-1])
     if entry is None:
         sys.exit(1)
-    print(json.dumps(entry["host"]) if "HostConfig" in args[1] else entry["status"])
+    template = args[1]
+    if "PortBindings" in template:
+        print(json.dumps(entry["host"]["PortBindings"]))
+    elif "Networks" in template:
+        print(json.dumps(entry["networks"]))
+    elif "HostConfig" in template:
+        print(json.dumps(entry["host"]))
+    else:
+        print(entry["status"])
 elif command == "ps":
     key, value = args[args.index("--filter") + 1].removeprefix("label=").split("=", 1)
     for entry in load().values():

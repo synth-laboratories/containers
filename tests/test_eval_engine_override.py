@@ -100,5 +100,6 @@ def test_guard_refuses_undeclared_limits(missing):
 def test_plan_egress_capability_and_refusal():
     assert "egress" not in plan().model_dump(mode="json")
     assert plan(egress="unrestricted_bridge").egress == "unrestricted_bridge"
-    with pytest.raises(ValueError, match="egress_unsupported: declared=none"):
-        plan(egress="none")
+    assert plan(egress="none").egress == "none"
+    with pytest.raises(ValueError, match="egress_unsupported: declared=host supported=unrestricted_bridge,none"):
+        plan(egress="host")

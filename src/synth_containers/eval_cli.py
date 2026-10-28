@@ -123,7 +123,7 @@ class TerminalProgress:
         self.stream.flush()
 
 
-_PUBLIC_TEXT = re.compile(r"[a-zA-Z0-9_.:; /=-]{1,512}")
+_PUBLIC_TEXT = re.compile(r"[a-zA-Z0-9_.:; /=+()-]{1,512}")
 
 
 def _public(text) -> str | None:
@@ -181,6 +181,7 @@ def main(argv: list[str] | None = None) -> int:
             sub.add_argument("--candidate", action="append", default=[])
             sub.add_argument("--child-budget", type=Path, required=True)
     commands.add_parser("identities")
+    commands.add_parser("egress-capability")
     commands.add_parser("schema")
     example = commands.add_parser("example")
     example.add_argument("--image", required=True)
@@ -189,6 +190,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "identities":
             output = {"source_digest": local_execution_source_digest(), "dependencies_digest": local_execution_dependencies_digest()}
+        elif args.command == "egress-capability":
+            from .engine_egress import egress_capability
+            output = egress_capability()
         elif args.command == "schema":
             output = EvaluationPlanV1.model_json_schema()
         elif args.command == "example":
