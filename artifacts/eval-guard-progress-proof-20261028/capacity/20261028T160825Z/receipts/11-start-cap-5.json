@@ -1,0 +1,17 @@
+{
+  "at": "2026-10-28T16:08:49.518378+00:00",
+  "elapsed_s": 0.027,
+  "is_error": true,
+  "request": {
+    "candidate_label": "catalog.scripted-noop.r1",
+    "candidate_path": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/root/projects/wave4-capacity/catalog-candidates/cad6310977a40d119979c4991e8417730593995bc2a4e6b02f4c0a34567652ff.toml",
+    "operation_id": "cap-5",
+    "plan_path": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/capacity/20261028T160825Z/plans/cap-5.toml",
+    "project_id": "wave4-capacity"
+  },
+  "structured": null,
+  "text": [
+    "{\"cause\": \"4 active runs at the bound of 4; nothing was queued\", \"code\": \"concurrency_exhausted\", \"detail\": {\"active\": 4, \"bound\": 4}, \"service\": \"synth-local-eval\", \"stage\": \"admission\"}"
+  ],
+  "tool": "local_eval_start"
+}
