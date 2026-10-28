@@ -176,7 +176,8 @@ def owned_gold_engine(plan, *, owner: str, receipt: Path, docker_cli: str = "doc
         except (OSError, ValueError):
             recorded = None
         if (not isinstance(recorded, dict) or recorded.get("recorded_by") != "guard"
-                or recorded.get("owner") != owner or recorded.get("name") != channel.name):
+                or recorded.get("owner") != owner or recorded.get("name") != channel.name
+                or recorded.get("cleanup") not in ("removed", "not_allocated", "unconfirmed")):
             _parent_receipt(receipt, channel, owner, f"guard_exited_{process.returncode}")
             recorded = json.loads(receipt.read_bytes())
         if recorded["cleanup"] not in ("removed", "not_allocated"):

@@ -299,6 +299,29 @@ print(json.dumps({'event':'state','name':'guard-test','state':'removed','observe
     assert record["recorded_by"] == "parent"
 
 
+@pytest.mark.parametrize("cleanup", ["missing", None, "unknown"])
+def test_malformed_owned_guard_receipt_retains_unconfirmed(tmp_path, cleanup):
+    receipt = tmp_path / "receipt.json"
+    malformed = (sys.executable, "-c", f"""
+import json, pathlib, sys
+print(json.dumps({{'event':'hello','name':'guard-test'}}), flush=True)
+request = json.loads(sys.stdin.readline())
+print(json.dumps({{'event':'state','name':'guard-test','state':'ready','url':'http://127.0.0.1:1'}}), flush=True)
+sys.stdin.read()
+record = {{'recorded_by':'guard','owner':'eval-owner','name':'guard-test'}}
+if {cleanup!r} != 'missing': record['cleanup'] = {cleanup!r}
+pathlib.Path(request['receipt']).write_text(json.dumps(record))
+print(json.dumps({{'event':'state','name':'guard-test','state':'removed','observed':'absent'}}), flush=True)
+""")
+    with pytest.raises(NativeEngineError) as refused:
+        with owned_gold_engine(plan(), owner="eval-owner", receipt=receipt, silence_seconds=4.0,
+                               guard_command=malformed):
+            pass
+    assert refused.value.code == "native_engine_cleanup_unconfirmed"
+    record = json.loads(receipt.read_text())
+    assert record["cleanup"] == "unconfirmed" and record["recorded_by"] == "parent"
+
+
 def test_declared_limits_are_observed_and_recorded(tmp_path, health_port):
     """SYN-5209: the guard reads HostConfig back after create and records declared vs observed."""
     cli = fake_docker(tmp_path, health_port)
