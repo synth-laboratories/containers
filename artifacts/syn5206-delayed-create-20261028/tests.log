@@ -1,0 +1,44 @@
+F.........................                                               [100%]
+=================================== FAILURES ===================================
+____ test_slow_docker_phase_is_awaited_and_removal_is_observed[slow-create] ____
+
+tmp_path = PosixPath('/Users/joshuapurtell/GitHub/.tmp/pytest-of-joshuapurtell/pytest-2296/test_slow_docker_phase_is_awai0')
+health_port = 61169, phase = 'create_delay'
+
+    @pytest.mark.parametrize("phase", ["create_delay", "start_delay", "rm_delay"], ids=["slow-create", "slow-start", "slow-stop"])
+    def test_slow_docker_phase_is_awaited_and_removal_is_observed(tmp_path, health_port, phase):
+        cli = fake_docker(tmp_path, health_port, **{phase: 2.5})
+        receipt = tmp_path / "receipt.json"
+>       url = run_engine(cli, receipt)
+              ^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_engine_guard_progress.py:122: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_engine_guard_progress.py:108: in run_engine
+    with owned_gold_engine(plan(), owner="eval-owner", receipt=receipt, docker_cli=str(cli),
+../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/contextlib.py:148: in __exit__
+    next(self.gen)
+src/synth_containers/native_engine.py:153: in owned_gold_engine
+    while channel.next_event() is not None:
+          ^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = GuardChannel(fd=15, silence_seconds=0.8, buffer=b'', eof=False, name='synth-eval-8760573a3aa54d4e', last_state='remove...': 'state', 'name': 'synth-eval-8760573a3aa54d4e', 'state': 'removed', 'at': 1793213032.627841, 'observed': 'absent'}])
+
+    def next_event(self) -> dict | None:
+        """Next event; None at EOF. Raises TimeoutError when the guard stops reporting."""
+        with selectors.DefaultSelector() as selector:
+            selector.register(self.fd, selectors.EVENT_READ)
+            while b"\n" not in self.buffer:
+                if self.eof:
+                    return None
+                # Before the hello, block until the guard reports or exits (EOF):
+                # a slow interpreter start is progress, not silence.
+                if not selector.select(timeout=self.silence_seconds if self.handshaken else None):
+>                   raise TimeoutError("guard_silent")
+E                   TimeoutError: guard_silent
+
+src/synth_containers/native_engine.py:69: TimeoutError
+=========================== short test summary info ============================
+FAILED tests/test_engine_guard_progress.py::test_slow_docker_phase_is_awaited_and_removal_is_observed[slow-create]
+1 failed, 25 passed in 30.67s

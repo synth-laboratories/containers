@@ -150,8 +150,17 @@ def owned_gold_engine(plan, *, owner: str, receipt: Path, docker_cli: str = "doc
             process.stderr.close()
             raise NativeEngineError("native_engine_cleanup_unconfirmed", stage="cleanup", name=channel.name,
                 last_state=channel.last_state, cause="guard_silent")
-        while channel.next_event() is not None:
-            pass
+        try:
+            while channel.next_event() is not None:
+                pass
+        except TimeoutError:
+            # A removal observation is not a durable receipt. Do not terminate
+            # the guard, which may still be persisting its authoritative record.
+            _parent_receipt(receipt, channel, owner, "guard_silent_after_cleanup")
+            process.stdout.close()
+            process.stderr.close()
+            raise NativeEngineError("native_engine_cleanup_unconfirmed", stage="cleanup", name=channel.name,
+                last_state=channel.last_state, cause="guard_silent_after_cleanup") from None
         process.wait()
         errors = process.stderr.read(65536)
         process.stdout.close()

@@ -1,0 +1,55 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_____________ test_slow_durable_cleanup_receipt_remains_observable _____________
+
+tmp_path = PosixPath('/Users/joshuapurtell/GitHub/.tmp/pytest-of-joshuapurtell/pytest-2302/test_slow_durable_cleanup_rece0')
+health_port = 62482
+
+    def test_slow_durable_cleanup_receipt_remains_observable(tmp_path, health_port):
+        """Removal alone is not a durable receipt; keep reporting while it is saved."""
+        import time
+    
+        cli = fake_docker(tmp_path, health_port)
+        receipt = tmp_path / "receipt.json"
+        slow_receipt = (sys.executable, "-c", """
+    import time
+    import synth_containers.engine_guard as guard
+    write = guard.durable_write
+    def delayed(*args, **kwargs):
+        time.sleep(2.0)
+        return write(*args, **kwargs)
+    guard.durable_write = delayed
+    guard.main()
+    """)
+        try:
+>           with owned_gold_engine(plan(), owner="eval-owner", receipt=receipt, docker_cli=str(cli),
+                                   heartbeat_seconds=.1, silence_seconds=.8, guard_command=slow_receipt) as url:
+
+tests/test_engine_guard_progress.py:193: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/contextlib.py:148: in __exit__
+    next(self.gen)
+src/synth_containers/native_engine.py:153: in owned_gold_engine
+    while channel.next_event() is not None:
+          ^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = GuardChannel(fd=15, silence_seconds=0.8, buffer=b'', eof=False, name='synth-eval-372f54a47bd445e1', last_state='remove...t': 'state', 'name': 'synth-eval-372f54a47bd445e1', 'state': 'removed', 'at': 1793213105.84738, 'observed': 'absent'}])
+
+    def next_event(self) -> dict | None:
+        """Next event; None at EOF. Raises TimeoutError when the guard stops reporting."""
+        with selectors.DefaultSelector() as selector:
+            selector.register(self.fd, selectors.EVENT_READ)
+            while b"\n" not in self.buffer:
+                if self.eof:
+                    return None
+                # Before the hello, block until the guard reports or exits (EOF):
+                # a slow interpreter start is progress, not silence.
+                if not selector.select(timeout=self.silence_seconds if self.handshaken else None):
+>                   raise TimeoutError("guard_silent")
+E                   TimeoutError: guard_silent
+
+src/synth_containers/native_engine.py:69: TimeoutError
+=========================== short test summary info ============================
+FAILED tests/test_engine_guard_progress.py::test_slow_durable_cleanup_receipt_remains_observable
+1 failed in 6.13s
