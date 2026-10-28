@@ -56,3 +56,14 @@ def test_candidate_model_table_is_a_typed_refusal(tmp_path):
     assert refusal_payload(invalid.value)["reason"] == "candidate_invalid: candidate x field actions missing"
     (tmp_path / "ok.toml").write_text('actions = ["noop"]\nkind = "scripted-actions-v1"\n')
     assert candidates_from(["x=ok.toml"], relative=tmp_path)[0].content.actions == ("noop",)
+
+
+def test_egress_refusal_keeps_typed_code_stage_and_observed_egress():
+    limits = {"declared": {"network_mode": "synth-eval-abc-net", "egress": "none"},
+              "observed": {"network_mode": "synth-eval-abc-net"}, "egress": "none(internal+sidecar)"}
+    exc = NativeEngineError("egress_isolation_unsupported", stage="egress", name="synth-eval-abc",
+                            last_state="failed", cause="sidecar image alpine:3.20 not present locally", limits=limits)
+    payload = refusal_payload(exc)
+    assert payload["reason"] == "egress_isolation_unsupported" and payload["stage"] == "egress"
+    assert payload["cause"] == "sidecar image alpine:3.20 not present locally"
+    assert payload["limits"] == limits

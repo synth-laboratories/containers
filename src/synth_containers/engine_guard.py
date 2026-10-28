@@ -22,17 +22,21 @@ from uuid import uuid4
 import httpx
 from synth_containers.tracing.atomic import durable_write
 from synth_containers.package_models import content_bytes
+from synth_containers.engine_egress import (BRIDGE_NETWORK, EGRESS_NONE, OBSERVED_NONE, SIDECAR_IMAGE,
+    EgressMismatch, EgressNames, EgressUnsupported, engine_address, network_create_argv, network_names,
+    parse_json, requested_egress, sidecar_create_argv, verify_isolation)
 
 OWNER_LABEL = "ai.synth.eval.owner"
 ALLOCATION_LABEL = "ai.synth.eval.allocation"
 DEFAULT_HEARTBEAT_SECONDS = 1.0
 TERMINAL_CLEANUP_STATES = ("removed", "unconfirmed")
-# The engine publishes a loopback port the parent connects to. Docker cannot
-# publish a port from ``--network none`` or an ``--internal`` network, so the
-# engine runs on the default bridge with unrestricted egress. This is a stated
-# capability, recorded on every receipt, not an enforced restriction.
+# Declared egress ``unrestricted_bridge`` (the default): the engine publishes its
+# loopback port from the default bridge and has unrestricted egress, a stated
+# capability recorded on every receipt. Declared egress ``none``: the engine is
+# alone on an owned internal network and reached through a forwarding sidecar
+# (see engine_egress); the receipt records the observed placement.
 EGRESS_CAPABILITY = "unrestricted_bridge"
-EGRESS_NETWORK_MODE = "bridge"
+EGRESS_NETWORK_MODE = BRIDGE_NETWORK
 HOST_CONFIG_FORMAT = "{{json .HostConfig}}"
 
 
@@ -40,6 +44,8 @@ class LimitsMismatch(RuntimeError):
     """Docker did not apply the declared limits; never downgraded to a warning."""
 
     code = "native_engine_limits_mismatch"
+
+    stage = "limits"
 
     def __init__(self, declared: dict, observed: dict | None, cause: str):
         self.declared, self.observed, self.cause = declared, observed, cause
@@ -53,8 +59,11 @@ def engine_port(request: dict) -> int:
     return port
 
 
-def declared_limits(request: dict) -> dict:
-    """Declared limits in Docker's own HostConfig units; refuses an undeclared field."""
+def declared_limits(request: dict, network: str | None = None) -> dict:
+    """Declared limits in Docker's own HostConfig units; refuses an undeclared field.
+
+    ``network`` is the owned internal network when the declared egress is ``none``.
+    """
     missing = [key for key in ("cpu", "memory_mb") if request.get(key) is None]
     if missing:
         raise ValueError("limits_undeclared: missing " + ",".join(missing))
@@ -64,9 +73,13 @@ def declared_limits(request: dict) -> dict:
     if type(memory_mb) is not int or not 128 <= memory_mb <= 8192:
         raise ValueError("limits_invalid: memory_mb outside 128..8192")
     memory = memory_mb * 1024 * 1024
+    egress = requested_egress(request)
+    if egress == EGRESS_NONE and not network:
+        raise ValueError("egress_network_missing: declared egress none needs an owned internal network")
     return {"cpu": cpu, "memory_mb": memory_mb, "nano_cpus": round(cpu * 1_000_000_000),
-        "memory_bytes": memory, "memory_swap_bytes": memory, "network_mode": EGRESS_NETWORK_MODE,
-        "egress": EGRESS_CAPABILITY}
+        "memory_bytes": memory, "memory_swap_bytes": memory,
+        "network_mode": network if egress == EGRESS_NONE else EGRESS_NETWORK_MODE,
+        "egress": egress}
 
 
 def observed_limits(host_config: dict) -> dict:
@@ -77,6 +90,7 @@ def observed_limits(host_config: dict) -> dict:
         "nano_cpus": nano, "memory_bytes": memory, "memory_swap_bytes": host_config.get("MemorySwap"),
         "network_mode": host_config.get("NetworkMode"), "pids_limit": host_config.get("PidsLimit"),
         "readonly_rootfs": host_config.get("ReadonlyRootfs"),
+        "port_bindings": host_config.get("PortBindings") or None,
         "egress": EGRESS_CAPABILITY if host_config.get("NetworkMode") in ("bridge", "default") else None}
 
 
@@ -84,8 +98,10 @@ def verify_limits(declared: dict, observed: dict) -> None:
     for key in ("nano_cpus", "memory_bytes", "memory_swap_bytes"):
         if observed.get(key) != declared[key]:
             raise LimitsMismatch(declared, observed, f"{key} declared={declared[key]} observed={observed.get(key)}")
-    if observed.get("network_mode") not in ("bridge", "default"):
-        raise LimitsMismatch(declared, observed, f"network_mode declared=bridge observed={observed.get('network_mode')}")
+    accepted = ("bridge", "default") if declared["network_mode"] == EGRESS_NETWORK_MODE else (declared["network_mode"],)
+    if observed.get("network_mode") not in accepted:
+        raise LimitsMismatch(declared, observed,
+            f"network_mode declared={declared['network_mode']} observed={observed.get('network_mode')}")
 
 
 def inspect_limits(reporter: "GuardReporter", docker: str, name: str, declared: dict) -> dict:
@@ -103,10 +119,13 @@ def inspect_limits(reporter: "GuardReporter", docker: str, name: str, declared: 
     return observed
 
 
-def docker_create_argv(request: dict, name: str, docker: str = "docker") -> list[str]:
-    """Owned allocation shape; isolation limits are fixed, only command/port vary."""
+def docker_create_argv(request: dict, name: str, docker: str = "docker", network: str | None = None) -> list[str]:
+    """Owned allocation shape; isolation limits are fixed, only command/port/egress vary.
+
+    With declared egress ``none`` the engine joins ``network`` and publishes nothing.
+    """
     port = engine_port(request)
-    limits = declared_limits(request)
+    limits = declared_limits(request, network)
     command = request.get("command")
     if command is not None and (not command or any(type(a) is not str or not a for a in command)):
         raise ValueError("engine command must be non-empty strings")
@@ -115,7 +134,8 @@ def docker_create_argv(request: dict, name: str, docker: str = "docker") -> list
         "--read-only", "--tmpfs", "/tmp:rw,size=67108864", "--memory", f"{limits['memory_mb']}m",
         "--memory-swap", f"{limits['memory_mb']}m", "--cpus", str(request["cpu"]), "--pids-limit", "128",
         "--network", limits["network_mode"],
-        "-p", f"127.0.0.1::{port}", "-e", f"PORT={port}", request["image"], *(command or ())]
+        *(() if limits["egress"] == EGRESS_NONE else ("-p", f"127.0.0.1::{port}")),
+        "-e", f"PORT={port}", request["image"], *(command or ())]
 
 
 @dataclass
@@ -178,6 +198,20 @@ def observe(reporter: GuardReporter, docker: str, name: str) -> str | None:
     return (inspected.stdout.strip() or None) if inspected.returncode == 0 else None
 
 
+def observe_network(reporter: GuardReporter, docker: str, network: str) -> str | None:
+    """``present`` or ``absent`` for the exact owned network; None when unobservable."""
+    listed = reporter.await_process([docker, "network", "ls", "-q", "--filter", f"label={ALLOCATION_LABEL}={network}"],
+        "observe")
+    if listed.returncode != 0:
+        return None
+    return "present" if listed.stdout.strip() else "absent"
+
+
+def inspect_json(reporter: GuardReporter, docker: str, target: list[str], template: str, phase: str):
+    inspected = reporter.await_process([docker, *target[:-1], "inspect", "-f", template, target[-1]], phase)
+    return parse_json(inspected.stdout) if inspected.returncode == 0 else None
+
+
 def await_ready(reporter: GuardReporter, docker: str, name: str, url: str) -> None:
     """Health polling continues while the container is running; exit is terminal."""
     with httpx.Client(timeout=1, trust_env=False) as client:
@@ -199,21 +233,54 @@ def await_ready(reporter: GuardReporter, docker: str, name: str, url: str) -> No
     raise RuntimeError("native_engine_startup_cancelled")
 
 
-def remove(reporter: GuardReporter, docker: str, name: str) -> tuple[str, int | None]:
-    """Remove the labelled allocation and confirm by observation; retries while Docker answers."""
-    reporter.state("stopping")
-    returncode = None
+def remove_container(reporter: GuardReporter, docker: str, name: str) -> tuple[str, int | None]:
+    """Remove one labelled container and confirm by observation; retries while Docker answers."""
     while True:
         returncode = reporter.await_process([docker, "rm", "-f", name], "stopping").returncode
         status = observe(reporter, docker, name)
         if status == "absent":
-            reporter.state("removed", observed="absent")
-            return "removed", returncode
+            return "absent", returncode
         if status is None:
-            reporter.state("unconfirmed", observed=reporter.last_observed, reason="docker_unobservable")
-            return "unconfirmed", returncode
-        reporter.state("stopping", observed=status)
+            return "unobservable", returncode
+        reporter.state("stopping", observed=status, resource=name)
         time.sleep(reporter.heartbeat)
+
+
+def remove_network(reporter: GuardReporter, docker: str, network: str) -> tuple[str, int | None]:
+    """Remove the owned network; a refused removal of a still-present network is reported, not retried."""
+    while True:
+        removed = reporter.await_process([docker, "network", "rm", network], "stopping")
+        status = observe_network(reporter, docker, network)
+        if status in ("absent", None):
+            return status or "unobservable", removed.returncode
+        if removed.returncode != 0:
+            return "present", removed.returncode
+        reporter.state("stopping", observed=reporter.last_observed, resource=network)
+        time.sleep(reporter.heartbeat)
+
+
+def remove(reporter: GuardReporter, docker: str, name: str, names: EgressNames | None = None
+           ) -> tuple[str, int | None, list[str]]:
+    """Remove sidecar, engine, then network; ``removed`` only when every owned resource is observed absent."""
+    reporter.state("stopping")
+    steps = [] if names is None else [(names.sidecar, remove_container)]
+    steps.append((name, remove_container))
+    if names is not None:
+        steps.append((names.network, remove_network))
+    remaining, returncode = [], None
+    for resource, remover in steps:
+        status, code = remover(reporter, docker, resource)
+        if resource == name:
+            returncode = code
+        if status != "absent":
+            remaining.append(f"{resource}:{status}")
+    if not remaining:
+        reporter.state("removed", observed="absent")
+        return "removed", returncode, remaining
+    reporter.state("unconfirmed", observed=reporter.last_observed,
+        reason="docker_unobservable" if all(item.endswith(":unobservable") for item in remaining) else "resources_remain",
+        remaining=remaining)
+    return "unconfirmed", returncode, remaining
 
 
 def handshake(name: str) -> None:
@@ -247,6 +314,58 @@ def persist_receipt(reporter: GuardReporter, record: Path, document: dict) -> No
         raise errors[0]
 
 
+def require_sidecar_image(reporter: GuardReporter, docker: str, image: str) -> str:
+    """Detect, never assume: the forwarder image must already be local (it is never pulled)."""
+    inspected = reporter.await_process([docker, "image", "inspect", "-f", "{{.Id}}", image], "egress")
+    identifier = inspected.stdout.strip()
+    if inspected.returncode != 0 or not identifier.startswith("sha256:"):
+        raise EgressUnsupported(EGRESS_NONE, f"sidecar image {image} not present locally")
+    return identifier
+
+
+def isolate(reporter: GuardReporter, docker: str, request: dict, names: EgressNames, owner_label: str,
+            egress: dict) -> str:
+    """Engine is created and started on the internal network; start the sidecar and verify placement.
+
+    Returns the parent-reachable loopback URL published by the sidecar.
+    """
+    port = engine_port(request)
+    declared = {"network": names.network, "engine_port": port, "sidecar_image": egress["sidecar"]["image"]}
+    engine_networks = inspect_json(reporter, docker, [names.engine], "{{json .NetworkSettings.Networks}}", "egress")
+    address = engine_address(engine_networks, names.network)
+    if address is None:
+        raise EgressMismatch(declared, {"engine_networks": network_names(engine_networks)}, "engine_address observed=none")
+    reporter.state("sidecar_creating", resource=names.sidecar)
+    created = reporter.await_process(sidecar_create_argv(docker, names, owner_label, ALLOCATION_LABEL, port, address,
+        egress["sidecar"]["image_id"]), "sidecar")
+    if created.returncode != 0:
+        raise RuntimeError("native_engine_sidecar_create_failed: " + created.stderr.strip()[-512:])
+    egress["sidecar"]["container"] = created.stdout.strip()
+    connected = reporter.await_process([docker, "network", "connect", names.network, names.sidecar], "sidecar")
+    if connected.returncode != 0:
+        raise RuntimeError("native_engine_sidecar_connect_failed: " + connected.stderr.strip()[-512:])
+    started = reporter.await_process([docker, "start", names.sidecar], "sidecar")
+    if started.returncode != 0:
+        raise RuntimeError("native_engine_sidecar_start_failed: " + started.stderr.strip()[-512:])
+    engine_host = inspect_json(reporter, docker, [names.engine], "{{json .HostConfig.PortBindings}}", "egress")
+    sidecar_networks = inspect_json(reporter, docker, [names.sidecar], "{{json .NetworkSettings.Networks}}", "egress")
+    sidecar_bindings = inspect_json(reporter, docker, [names.sidecar], "{{json .HostConfig.PortBindings}}", "egress")
+    internal = inspect_json(reporter, docker, ["network", names.network], "{{json .Internal}}", "egress")
+    observed = {"network_internal": internal, "engine_networks": network_names(engine_networks),
+        "engine_port_bindings": engine_host or None, "engine_address": address,
+        "sidecar_networks": network_names(sidecar_networks), "sidecar_port_bindings": sidecar_bindings}
+    egress["observed_placement"] = observed
+    verify_isolation(declared, observed, port)
+    mapped = reporter.await_process([docker, "port", names.sidecar, f"{port}/tcp"], "port")
+    if mapped.returncode != 0 or not mapped.stdout.strip():
+        raise RuntimeError("native_engine_port_unmapped: " + mapped.stderr.strip()[-512:])
+    host_port = mapped.stdout.strip().splitlines()[0].rsplit(":", 1)[1]
+    egress["forwarding"] = {"host": f"127.0.0.1:{host_port}", "sidecar": f"{names.sidecar}:{port}",
+        "engine": f"{address}:{port}"}
+    egress["observed"] = OBSERVED_NONE
+    return "http://127.0.0.1:" + host_port
+
+
 def main():
     name = "synth-eval-" + uuid4().hex[:16]
     handshake(name)
@@ -261,12 +380,32 @@ def main():
     create_seconds = None
     error = None
     code = None
+    stage = None
+    owner_label = f"{OWNER_LABEL}={request['owner']}"
+    names = None
+    egress = {"declared": request.get("egress") or EGRESS_CAPABILITY, "observed": None}
     limits = {"declared": None, "observed": None, "egress": EGRESS_CAPABILITY,
         "egress_reason": "published loopback port requires a bridge network; Docker cannot publish from none/internal"}
-    reporter.state("allocating", owner=request["owner"], label=f"{OWNER_LABEL}={request['owner']}")
+    reporter.state("allocating", owner=request["owner"], label=owner_label)
     try:
-        limits["declared"] = declared_limits(request)
-        argv = docker_create_argv(request, name, docker)
+        declared_egress = requested_egress(request)
+        if declared_egress == EGRESS_NONE:
+            names = EgressNames(name)
+            limits["egress"] = None
+            limits["egress_reason"] = (f"engine alone on internal network {names.network}; parent reaches it "
+                f"through sidecar {names.sidecar} on bridge and {names.network}")
+            image = request.get("sidecar_image") or SIDECAR_IMAGE
+            egress.update(network={"name": names.network, "id": None},
+                sidecar={"name": names.sidecar, "image": image, "image_id": None, "container": None})
+            egress["sidecar"]["image_id"] = require_sidecar_image(reporter, docker, image)
+        limits["declared"] = declared_limits(request, names.network if names else None)
+        argv = docker_create_argv(request, name, docker, names.network if names else None)
+        if names is not None:
+            reporter.state("network_creating", resource=names.network)
+            network = reporter.await_process(network_create_argv(docker, names, owner_label, ALLOCATION_LABEL), "network")
+            if network.returncode != 0:
+                raise RuntimeError("native_engine_network_create_failed: " + network.stderr.strip()[-512:])
+            egress["network"]["id"] = network.stdout.strip()
         reporter.state("creating")
         created = reporter.await_process(argv, "creating")
         create_seconds = round(time.monotonic() - started, 3)
@@ -284,10 +423,16 @@ def main():
         if start.returncode != 0:
             raise RuntimeError("native_engine_start_failed: " + start.stderr.strip()[-512:])
         reporter.state("running", observed=observe(reporter, docker, name))
-        mapped = reporter.await_process([docker, "port", name, f"{engine_port(request)}/tcp"], "port")
-        if mapped.returncode != 0 or not mapped.stdout.strip():
-            raise RuntimeError("native_engine_port_unmapped: " + mapped.stderr.strip()[-512:])
-        url = "http://127.0.0.1:" + mapped.stdout.strip().splitlines()[0].rsplit(":", 1)[1]
+        if names is not None:
+            url = isolate(reporter, docker, request, names, owner_label, egress)
+            limits["egress"] = OBSERVED_NONE
+            reporter.state("egress_verified", egress=egress)
+        else:
+            mapped = reporter.await_process([docker, "port", name, f"{engine_port(request)}/tcp"], "port")
+            if mapped.returncode != 0 or not mapped.stdout.strip():
+                raise RuntimeError("native_engine_port_unmapped: " + mapped.stderr.strip()[-512:])
+            url = "http://127.0.0.1:" + mapped.stdout.strip().splitlines()[0].rsplit(":", 1)[1]
+            egress["observed"] = EGRESS_CAPABILITY
         await_ready(reporter, docker, name, url)
         reporter.state("ready", url=url, container=identifier)
         # The controlling invocation alone holds this pipe's write end. It is
@@ -297,16 +442,28 @@ def main():
     except Exception as failure:  # reported to the parent; cleanup below still runs
         error = str(failure)
         if isinstance(failure, LimitsMismatch):
-            code, limits["observed"] = failure.code, failure.observed
-        elif isinstance(failure, ValueError) and error.startswith(("limits_undeclared", "limits_invalid")):
+            code, stage, limits["observed"] = failure.code, failure.stage, failure.observed
+        elif isinstance(failure, EgressMismatch):
+            code, stage = failure.code, failure.stage
+            egress["observed_placement"] = failure.observed
+        elif isinstance(failure, EgressUnsupported):
+            code, stage = failure.code, failure.stage
+            egress["reason"] = failure.reason
+        elif isinstance(failure, ValueError) and error.startswith(("limits_undeclared", "limits_invalid", "egress_")):
             code = error.split(":", 1)[0]
-        reporter.state("failed", error=error, code=code, limits=limits)
+            stage = "egress" if code.startswith("egress_") else "limits"
+        limits["egress_detail"] = egress
+        reporter.state("failed", error=error, code=code, stage=stage, limits=limits)
     finally:
-        cleanup, returncode = remove(reporter, docker, name)
+        cleanup, returncode, remaining = remove(reporter, docker, name, names)
+        limits["egress_detail"] = egress
         persist_receipt(reporter, record, {"container": identifier, "name": name, "owner": request["owner"],
-            "label": f"{OWNER_LABEL}={request['owner']}", "cleanup": cleanup, "returncode": returncode,
+            "label": owner_label, "cleanup": cleanup, "remaining": remaining, "returncode": returncode,
+            "containers": {"engine": identifier, "sidecar": (egress.get("sidecar") or {}).get("container")},
+            "network": egress.get("network"), "egress": egress,
             "last_observed_state": reporter.last_observed, "transitions": reporter.transitions,
-            "create_seconds": create_seconds, "error": error, "code": code, "limits": limits, "recorded_by": "guard"})
+            "create_seconds": create_seconds, "error": error, "code": code, "stage": stage, "limits": limits,
+            "recorded_by": "guard"})
         reporter.emit({"event": "receipt", "name": name, "cleanup": cleanup})
 
 
