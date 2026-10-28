@@ -14,6 +14,8 @@ import time
 import tomllib
 from uuid import uuid4
 
+from pydantic import ValidationError
+
 from .native_engine import NativeEngineError
 
 from .eval_models import EvaluationPlanV1, EvaluationRunDeclarationV1, ScriptedCandidateV1, CandidateBindingV1
@@ -42,6 +44,20 @@ def _example_toml(value: dict, prefix: tuple[str, ...] = ()) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _scripted_candidate(label: str, document) -> ScriptedCandidateV1:
+    """Typed candidate refusal: a model table is named, not reported as a bare ValidationError."""
+    if isinstance(document, dict) and "model" in document:
+        raise ValueError(f"candidate_model_binding_unsupported: candidate {_public(label) or 'label'} declares a model "
+                         "table; local-gold-scripted-v1 executes scripted-actions-v1 candidates and runs no model")
+    try:
+        return ScriptedCandidateV1.model_validate(document)
+    except ValidationError as exc:
+        first = exc.errors()[0]
+        field = ".".join(str(part) for part in first["loc"]) or "candidate"
+        raise ValueError(f"candidate_invalid: candidate {_public(label) or 'label'} field "
+                         f"{_public(field) or 'unnamed'} {first['type']}") from exc
+
+
 def candidates_from(items: list[str], *, relative: Path) -> tuple[CandidateBindingV1, ...]:
     result = []
     for item in items:
@@ -51,7 +67,7 @@ def candidates_from(items: list[str], *, relative: Path) -> tuple[CandidateBindi
         path = Path(name)
         if not path.is_absolute():
             path = relative / path
-        result.append(CandidateBindingV1(label=label, content=ScriptedCandidateV1.model_validate(read_config(path))))
+        result.append(CandidateBindingV1(label=label, content=_scripted_candidate(label, read_config(path))))
     if len({item.label for item in result}) != len(result):
         raise ValueError("candidate_labels_must_be_unique")
     return tuple(result)
