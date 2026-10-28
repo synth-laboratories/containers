@@ -249,3 +249,45 @@ def test_receipt_persistence_emits_progress_until_durable_write_finishes(tmp_pat
     engine_guard.persist_receipt(reporter, receipt, {"cleanup": "removed"})
     assert json.loads(receipt.read_text()) == {"cleanup": "removed"}
     assert any(event.get("event") == "heartbeat" and event.get("phase") == "receipt" for event in events)
+
+
+def test_guard_exits_after_removal_without_receipt_retains_unconfirmed(tmp_path):
+    """A removal observation without a durable guard receipt needs a sweep record."""
+    receipt = tmp_path / "receipt.json"
+    no_receipt = (sys.executable, "-c", """
+import json, sys
+print(json.dumps({'event':'hello','name':'guard-test'}), flush=True)
+sys.stdin.readline()
+print(json.dumps({'event':'state','name':'guard-test','state':'ready','url':'http://127.0.0.1:1'}), flush=True)
+sys.stdin.read()
+print(json.dumps({'event':'state','name':'guard-test','state':'removed','observed':'absent'}), flush=True)
+""")
+    with pytest.raises(NativeEngineError) as refused:
+        with owned_gold_engine(plan(), owner="eval-owner", receipt=receipt, silence_seconds=2.0,
+                               guard_command=no_receipt):
+            pass
+    assert refused.value.code == "native_engine_cleanup_unconfirmed"
+    record = json.loads(receipt.read_text())
+    assert record["cleanup"] == "unconfirmed" and record["recorded_by"] == "parent"
+    assert record["name"] == "guard-test" and record["reason"] == "guard_exited_0"
+
+
+def test_foreign_guard_receipt_never_proves_owned_cleanup(tmp_path):
+    receipt = tmp_path / "receipt.json"
+    foreign = (sys.executable, "-c", """
+import json, pathlib, sys
+print(json.dumps({'event':'hello','name':'guard-test'}), flush=True)
+request = json.loads(sys.stdin.readline())
+print(json.dumps({'event':'state','name':'guard-test','state':'ready','url':'http://127.0.0.1:1'}), flush=True)
+sys.stdin.read()
+pathlib.Path(request['receipt']).write_text(json.dumps({'recorded_by':'guard','owner':'other-owner','name':'guard-test','cleanup':'removed'}))
+print(json.dumps({'event':'state','name':'guard-test','state':'removed','observed':'absent'}), flush=True)
+""")
+    with pytest.raises(NativeEngineError) as refused:
+        with owned_gold_engine(plan(), owner="eval-owner", receipt=receipt, silence_seconds=2.0,
+                               guard_command=foreign):
+            pass
+    assert refused.value.code == "native_engine_cleanup_unconfirmed"
+    record = json.loads(receipt.read_text())
+    assert record["cleanup"] == "unconfirmed" and record["owner"] == "eval-owner"
+    assert record["recorded_by"] == "parent"
