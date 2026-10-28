@@ -20,8 +20,11 @@ import time
 from .engine_guard import DEFAULT_HEARTBEAT_SECONDS, OWNER_LABEL, TERMINAL_CLEANUP_STATES
 
 # Liveness bound on guard *reporting*, not on Docker work: the guard heartbeats
-# every DEFAULT_HEARTBEAT_SECONDS while any Docker call is in flight.
+# every DEFAULT_HEARTBEAT_SECONDS while any Docker call is in flight. It applies
+# only after the guard's ``hello`` handshake; before it, interpreter start-up on a
+# loaded host is not silence, and the parent waits for the hello or guard exit.
 DEFAULT_SILENCE_SECONDS = 120.0
+DEFAULT_GUARD_COMMAND = (sys.executable, "-m", "synth_containers.engine_guard")
 
 
 class NativeEngineError(RuntimeError):
@@ -50,6 +53,7 @@ class GuardChannel:
     eof: bool = False
     name: str | None = None
     last_state: str | None = None
+    handshaken: bool = False
     events: list[dict] = field(default_factory=list)
 
     def next_event(self) -> dict | None:
@@ -59,7 +63,9 @@ class GuardChannel:
             while b"\n" not in self.buffer:
                 if self.eof:
                     return None
-                if not selector.select(timeout=self.silence_seconds):
+                # Before the hello, block until the guard reports or exits (EOF):
+                # a slow interpreter start is progress, not silence.
+                if not selector.select(timeout=self.silence_seconds if self.handshaken else None):
                     raise TimeoutError("guard_silent")
                 chunk = os.read(self.fd, 65536)
                 if not chunk:
@@ -69,6 +75,8 @@ class GuardChannel:
         line, self.buffer = self.buffer.split(b"\n", 1)
         event = json.loads(line)
         self.name = event.get("name", self.name)
+        if event.get("event") == "hello":
+            self.handshaken = True
         if event.get("event") == "state":
             self.last_state = event["state"]
             self.events.append(event)
@@ -82,11 +90,15 @@ class GuardChannel:
 
 
 def _parent_receipt(receipt: Path, channel: GuardChannel, owner: str, reason: str) -> None:
-    """The guard did not record cleanup; retain what a later sweep needs to find the allocation."""
+    """The guard did not record cleanup; retain what a later sweep needs to find the allocation.
+
+    A guard that never sent its hello did no Docker work, so nothing was allocated.
+    """
     from .tracing.atomic import durable_write
     from .package_models import content_bytes
+    cleanup = "unconfirmed" if channel.handshaken else "not_allocated"
     durable_write(receipt, content_bytes({"container": None, "name": channel.name, "owner": owner,
-        "label": f"{OWNER_LABEL}={owner}", "cleanup": "unconfirmed", "reason": reason,
+        "label": f"{OWNER_LABEL}={owner}", "cleanup": cleanup, "reason": reason,
         "last_observed_state": channel.last_state, "transitions": channel.events, "recorded_by": "parent",
         "recorded_at": time.time()}), replace=True)
 
@@ -94,8 +106,9 @@ def _parent_receipt(receipt: Path, channel: GuardChannel, owner: str, reason: st
 @contextmanager
 def owned_gold_engine(plan, *, owner: str, receipt: Path, docker_cli: str = "docker",
                       heartbeat_seconds: float = DEFAULT_HEARTBEAT_SECONDS,
-                      silence_seconds: float = DEFAULT_SILENCE_SECONDS):
-    process = subprocess.Popen([sys.executable, "-m", "synth_containers.engine_guard"],
+                      silence_seconds: float = DEFAULT_SILENCE_SECONDS,
+                      guard_command: tuple[str, ...] = DEFAULT_GUARD_COMMAND):
+    process = subprocess.Popen(list(guard_command),
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         start_new_session=True)
     assert process.stdin is not None and process.stdout is not None and process.stderr is not None
@@ -112,9 +125,14 @@ def owned_gold_engine(plan, *, owner: str, receipt: Path, docker_cli: str = "doc
             silent = True
             raise NativeEngineError("native_engine_guard_silent", stage="startup", name=channel.name,
                 last_state=channel.last_state) from None
-        if ready is None or ready["state"] != "ready":
+        if ready is None:
+            # EOF: the guard closed its report stream by exiting.
             raise NativeEngineError("native_engine_startup_failed", stage="startup", name=channel.name,
-                last_state=channel.last_state, cause=None if ready is None else ready.get("error"))
+                last_state=channel.last_state, cause=f"guard_exited_{process.wait()}"
+                + ("" if channel.handshaken else "_before_hello"))
+        if ready["state"] != "ready":
+            raise NativeEngineError("native_engine_startup_failed", stage="startup", name=channel.name,
+                last_state=channel.last_state, cause=ready.get("error"))
         yield ready["url"]
     finally:
         process.stdin.close()
@@ -144,6 +162,6 @@ def owned_gold_engine(plan, *, owner: str, receipt: Path, docker_cli: str = "doc
             if not receipt.exists() or json.loads(receipt.read_bytes()).get("recorded_by") != "guard":
                 _parent_receipt(receipt, channel, owner, f"guard_exited_{process.returncode}")
         recorded = json.loads(receipt.read_bytes()) if receipt.exists() else {"cleanup": "unconfirmed"}
-        if recorded["cleanup"] != "removed":
+        if recorded["cleanup"] not in ("removed", "not_allocated"):
             raise NativeEngineError("native_engine_cleanup_unconfirmed", stage="cleanup", name=channel.name,
                 last_state=recorded.get("last_observed_state", channel.last_state), cause=recorded.get("reason"))

@@ -2,8 +2,9 @@
 
 A fake Docker CLI (a script on disk, injected as ``docker_cli``) simulates a
 loaded daemon: slow create, slow start, slow stop, and a guard killed mid-way.
-The parent's reporting-liveness bound is set far below each slow phase, so a
-pass proves waiting is progress-bound rather than wall-bound.
+The parent's post-handshake reporting-liveness bound is set far below each slow
+phase, so a pass proves waiting is progress-bound rather than wall-bound. Guard
+interpreter start-up precedes the hello handshake and is never counted as silence.
 """
 
 from __future__ import annotations
@@ -144,3 +145,29 @@ def test_guard_dying_mid_way_records_unconfirmed_with_findable_name(tmp_path, he
     assert list(stranded) == [record["name"]] == [caught.value.name]
     assert stranded[record["name"]]["labels"]["ai.synth.eval.owner"] == "eval-owner"
     assert record["label"] == "ai.synth.eval.owner=eval-owner"
+
+
+def test_guard_dying_before_handshake_is_exited_not_silent(tmp_path):
+    receipt = tmp_path / "receipt.json"
+    slow_then_die = (sys.executable, "-c", "import time, sys; time.sleep(1.5); sys.exit(3)")
+    with pytest.raises(NativeEngineError) as caught:
+        with owned_gold_engine(plan(), owner="eval-owner", receipt=receipt, heartbeat_seconds=.1,
+                               silence_seconds=.2, guard_command=slow_then_die):
+            pass
+    assert caught.value.code == "native_engine_startup_failed"
+    assert caught.value.cause == "guard_exited_3_before_hello"
+    record = json.loads(receipt.read_text())
+    assert record["cleanup"] == "not_allocated" and record["reason"] == "guard_exited_3"
+    assert record["recorded_by"] == "parent" and record["name"] is None
+
+
+def test_slow_guard_start_is_not_silence(tmp_path, health_port):
+    """Interpreter start-up slower than the silence budget still reaches ready."""
+    cli = fake_docker(tmp_path, health_port)
+    receipt = tmp_path / "receipt.json"
+    delayed = (sys.executable, "-c", "import time, runpy; time.sleep(1.5); "
+               "runpy.run_module('synth_containers.engine_guard', run_name='__main__')")
+    with owned_gold_engine(plan(), owner="eval-owner", receipt=receipt, docker_cli=str(cli),
+                           heartbeat_seconds=.1, silence_seconds=.8, guard_command=delayed) as url:
+        assert url == f"http://127.0.0.1:{health_port}"
+    assert json.loads(receipt.read_text())["cleanup"] == "removed"

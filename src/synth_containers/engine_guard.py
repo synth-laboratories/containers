@@ -146,11 +146,18 @@ def remove(reporter: GuardReporter, docker: str, name: str) -> tuple[str, int | 
         time.sleep(reporter.heartbeat)
 
 
+def handshake(name: str) -> None:
+    """First report, before any Docker work: the parent starts silence accounting here."""
+    sys.stdout.write(json.dumps({"event": "hello", "name": name, "pid": os.getpid(), "at": time.time()}) + "\n")
+    sys.stdout.flush()
+
+
 def main():
+    name = "synth-eval-" + uuid4().hex[:16]
+    handshake(name)
     request = json.loads(sys.stdin.readline())
     docker = request.get("docker_cli", "docker")
     heartbeat = float(request.get("heartbeat_seconds", DEFAULT_HEARTBEAT_SECONDS))
-    name = "synth-eval-" + uuid4().hex[:16]
     record = Path(request["receipt"])
     record.parent.mkdir(parents=True, exist_ok=True)
     reporter = GuardReporter(name=name, heartbeat=heartbeat)
