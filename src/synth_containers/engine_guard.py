@@ -27,6 +27,23 @@ OWNER_LABEL = "ai.synth.eval.owner"
 ALLOCATION_LABEL = "ai.synth.eval.allocation"
 DEFAULT_HEARTBEAT_SECONDS = 1.0
 TERMINAL_CLEANUP_STATES = ("removed", "unconfirmed")
+# The engine publishes a loopback port the parent connects to. Docker cannot
+# publish a port from ``--network none`` or an ``--internal`` network, so the
+# engine runs on the default bridge with unrestricted egress. This is a stated
+# capability, recorded on every receipt, not an enforced restriction.
+EGRESS_CAPABILITY = "unrestricted_bridge"
+EGRESS_NETWORK_MODE = "bridge"
+HOST_CONFIG_FORMAT = "{{json .HostConfig}}"
+
+
+class LimitsMismatch(RuntimeError):
+    """Docker did not apply the declared limits; never downgraded to a warning."""
+
+    code = "native_engine_limits_mismatch"
+
+    def __init__(self, declared: dict, observed: dict | None, cause: str):
+        self.declared, self.observed, self.cause = declared, observed, cause
+        super().__init__(f"{self.code}: stage=limits cause={cause}")
 
 
 def engine_port(request: dict) -> int:
@@ -36,16 +53,68 @@ def engine_port(request: dict) -> int:
     return port
 
 
+def declared_limits(request: dict) -> dict:
+    """Declared limits in Docker's own HostConfig units; refuses an undeclared field."""
+    missing = [key for key in ("cpu", "memory_mb") if request.get(key) is None]
+    if missing:
+        raise ValueError("limits_undeclared: missing " + ",".join(missing))
+    cpu, memory_mb = request["cpu"], request["memory_mb"]
+    if type(cpu) not in (int, float) or not 0 < cpu <= 16:
+        raise ValueError("limits_invalid: cpu outside (0, 16]")
+    if type(memory_mb) is not int or not 128 <= memory_mb <= 8192:
+        raise ValueError("limits_invalid: memory_mb outside 128..8192")
+    memory = memory_mb * 1024 * 1024
+    return {"cpu": cpu, "memory_mb": memory_mb, "nano_cpus": round(cpu * 1_000_000_000),
+        "memory_bytes": memory, "memory_swap_bytes": memory, "network_mode": EGRESS_NETWORK_MODE,
+        "egress": EGRESS_CAPABILITY}
+
+
+def observed_limits(host_config: dict) -> dict:
+    """The subset of ``docker inspect`` HostConfig that carries resource and network limits."""
+    nano, memory = host_config.get("NanoCpus"), host_config.get("Memory")
+    return {"cpu": nano / 1_000_000_000 if isinstance(nano, int) else None,
+        "memory_mb": memory // (1024 * 1024) if isinstance(memory, int) else None,
+        "nano_cpus": nano, "memory_bytes": memory, "memory_swap_bytes": host_config.get("MemorySwap"),
+        "network_mode": host_config.get("NetworkMode"), "pids_limit": host_config.get("PidsLimit"),
+        "readonly_rootfs": host_config.get("ReadonlyRootfs"),
+        "egress": EGRESS_CAPABILITY if host_config.get("NetworkMode") in ("bridge", "default") else None}
+
+
+def verify_limits(declared: dict, observed: dict) -> None:
+    for key in ("nano_cpus", "memory_bytes", "memory_swap_bytes"):
+        if observed.get(key) != declared[key]:
+            raise LimitsMismatch(declared, observed, f"{key} declared={declared[key]} observed={observed.get(key)}")
+    if observed.get("network_mode") not in ("bridge", "default"):
+        raise LimitsMismatch(declared, observed, f"network_mode declared=bridge observed={observed.get('network_mode')}")
+
+
+def inspect_limits(reporter: "GuardReporter", docker: str, name: str, declared: dict) -> dict:
+    inspected = reporter.await_process([docker, "inspect", "-f", HOST_CONFIG_FORMAT, name], "limits")
+    if inspected.returncode != 0:
+        raise LimitsMismatch(declared, None, "inspect_failed " + inspected.stderr.strip()[-256:])
+    try:
+        host_config = json.loads(inspected.stdout)
+    except ValueError:
+        raise LimitsMismatch(declared, None, "inspect_unparseable") from None
+    if not isinstance(host_config, dict):
+        raise LimitsMismatch(declared, None, "inspect_unparseable")
+    observed = observed_limits(host_config)
+    verify_limits(declared, observed)
+    return observed
+
+
 def docker_create_argv(request: dict, name: str, docker: str = "docker") -> list[str]:
     """Owned allocation shape; isolation limits are fixed, only command/port vary."""
     port = engine_port(request)
+    limits = declared_limits(request)
     command = request.get("command")
     if command is not None and (not command or any(type(a) is not str or not a for a in command)):
         raise ValueError("engine command must be non-empty strings")
     return [docker, "create", "--pull", "never", "--name", name,
         "--label", f"{OWNER_LABEL}=" + request["owner"], "--label", f"{ALLOCATION_LABEL}={name}",
-        "--read-only", "--tmpfs", "/tmp:rw,size=67108864", "--memory", str(request["memory_mb"]) + "m",
-        "--cpus", str(request["cpu"]), "--pids-limit", "128",
+        "--read-only", "--tmpfs", "/tmp:rw,size=67108864", "--memory", f"{limits['memory_mb']}m",
+        "--memory-swap", f"{limits['memory_mb']}m", "--cpus", str(request["cpu"]), "--pids-limit", "128",
+        "--network", limits["network_mode"],
         "-p", f"127.0.0.1::{port}", "-e", f"PORT={port}", request["image"], *(command or ())]
 
 
@@ -191,8 +260,12 @@ def main():
     started = time.monotonic()
     create_seconds = None
     error = None
+    code = None
+    limits = {"declared": None, "observed": None, "egress": EGRESS_CAPABILITY,
+        "egress_reason": "published loopback port requires a bridge network; Docker cannot publish from none/internal"}
     reporter.state("allocating", owner=request["owner"], label=f"{OWNER_LABEL}={request['owner']}")
     try:
+        limits["declared"] = declared_limits(request)
         argv = docker_create_argv(request, name, docker)
         reporter.state("creating")
         created = reporter.await_process(argv, "creating")
@@ -202,6 +275,8 @@ def main():
         identifier = created.stdout.strip()
         reporter.state("created", observed=observe(reporter, docker, name), container=identifier,
             create_seconds=create_seconds)
+        limits["observed"] = inspect_limits(reporter, docker, name, limits["declared"])
+        reporter.state("limits_verified", limits=limits)
         if reporter.cancelled or reporter.parent_gone:
             raise RuntimeError("native_engine_startup_cancelled")
         reporter.state("starting")
@@ -221,13 +296,17 @@ def main():
             reporter.wait_stdin(3600)
     except Exception as failure:  # reported to the parent; cleanup below still runs
         error = str(failure)
-        reporter.state("failed", error=error)
+        if isinstance(failure, LimitsMismatch):
+            code, limits["observed"] = failure.code, failure.observed
+        elif isinstance(failure, ValueError) and error.startswith(("limits_undeclared", "limits_invalid")):
+            code = error.split(":", 1)[0]
+        reporter.state("failed", error=error, code=code, limits=limits)
     finally:
         cleanup, returncode = remove(reporter, docker, name)
         persist_receipt(reporter, record, {"container": identifier, "name": name, "owner": request["owner"],
             "label": f"{OWNER_LABEL}={request['owner']}", "cleanup": cleanup, "returncode": returncode,
             "last_observed_state": reporter.last_observed, "transitions": reporter.transitions,
-            "create_seconds": create_seconds, "error": error, "recorded_by": "guard"})
+            "create_seconds": create_seconds, "error": error, "code": code, "limits": limits, "recorded_by": "guard"})
         reporter.emit({"event": "receipt", "name": name, "cleanup": cleanup})
 
 
