@@ -1,0 +1,86 @@
+{
+  "at": "2026-10-28T16:08:21.976883+00:00",
+  "elapsed_s": 0.805,
+  "is_error": false,
+  "request": {
+    "project_id": "wave4-restart"
+  },
+  "structured": {
+    "panel": {
+      "config": {
+        "environment": "local",
+        "origin": "local workspace",
+        "path": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/evidence/forge-local-1605cbc4-593a-4dd6-8d4c-babac0ca4744/forge/c46a9d7c622d2fc0/view.json",
+        "product": "forge",
+        "refreshSeconds": 2,
+        "resource": "[\"local\",\"wave4-restart\"]",
+        "target": "forge-local-1605cbc4-593a-4dd6-8d4c-babac0ca4744",
+        "title": "Forge \u00b7 forge-local-1605cbc4-593a-4dd6-8d4c-babac0ca4744"
+      },
+      "evidencePath": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/evidence/forge-local-1605cbc4-593a-4dd6-8d4c-babac0ca4744/forge/c46a9d7c622d2fc0/operations/acb27bbe-301a-4362-a819-8c84904b302c.json",
+      "kind": "synth",
+      "operationId": "acb27bbe-301a-4362-a819-8c84904b302c"
+    },
+    "result": {
+      "next_cursor": null,
+      "operations": [
+        {
+          "contradiction_count": 1,
+          "declared_at": "2026-10-28T16:06:55.363828+00:00",
+          "lanes": [
+            {
+              "attempt_id": "f02c93d1-8ce1-4064-a8c8-814e0bd0e0e6",
+              "benchmark_score": -0.9,
+              "benchmark_status": "graded",
+              "calls": 244,
+              "capture": "complete",
+              "cleanup": "native-rollout-deleted",
+              "execution_status": "completed",
+              "exit_code": 0,
+              "lane": "catalog.scripted-noop.r1-s0-r0",
+              "provider_calls": 0,
+              "provider_cost_usd": "0",
+              "readable": true,
+              "replicate": 0,
+              "seed": 0,
+              "status": "evaluated",
+              "steps": 244,
+              "stop_reason": "environment_terminal",
+              "trace_bundle": "traces/f02c93d1-8ce1-4064-a8c8-814e0bd0e0e6"
+            }
+          ],
+          "operation_id": "restart-1",
+          "phase": "completed",
+          "result_state": "complete",
+          "run_id": "eval-e2cd3106cd3a40e9a6002a459951c3d2",
+          "usage_state": "known"
+        }
+      ],
+      "source": "service"
+    },
+    "root": {
+      "path": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/root",
+      "root_id": "1605cbc4-593a-4dd6-8d4c-babac0ca4744",
+      "schema": "synth.local-forge-root.v1",
+      "storage": "local"
+    },
+    "workspace": {
+      "evidence": {
+        "path": "/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/root/projects/wave4-restart/evidence",
+        "store_id": "d39c12e7-6432-4b93-8f0c-6cdcd384163a"
+      },
+      "provenance": "local-declared",
+      "scope": {
+        "organization_id": "local",
+        "project_id": "wave4-restart"
+      },
+      "storage": "local",
+      "sync": "not configured",
+      "workspace_id": "2489ba9d-fb65-4ecd-b672-504ef9edbd4e"
+    }
+  },
+  "text": [
+    "{\"result\": {\"operations\": [{\"operation_id\": \"restart-1\", \"phase\": \"completed\", \"run_id\": \"eval-e2cd3106cd3a40e9a6002a459951c3d2\", \"declared_at\": \"2026-10-28T16:06:55.363828+00:00\", \"lanes\": [{\"lane\": \"catalog.scripted-noop.r1-s0-r0\", \"readable\": true, \"attempt_id\": \"f02c93d1-8ce1-4064-a8c8-814e0bd0e0e6\", \"seed\": 0, \"replicate\": 0, \"execution_status\": \"completed\", \"status\": \"evaluated\", \"benchmark_status\": \"graded\", \"benchmark_score\": -0.9, \"stop_reason\": \"environment_terminal\", \"steps\": 244, \"calls\": 244, \"provider_calls\": 0, \"provider_cost_usd\": \"0\", \"capture\": \"complete\", \"cleanup\": \"native-rollout-deleted\", \"exit_code\": 0, \"trace_bundle\": \"traces/f02c93d1-8ce1-4064-a8c8-814e0bd0e0e6\"}], \"result_state\": \"complete\", \"contradiction_count\": 1, \"usage_state\": \"known\"}], \"next_cursor\": null, \"source\": \"service\"}, \"root\": {\"storage\": \"local\", \"root_id\": \"1605cbc4-593a-4dd6-8d4c-babac0ca4744\", \"path\": \"/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/root\", \"schema\": \"synth.local-forge-root.v1\"}, \"workspace\": {\"storage\": \"local\", \"workspace_id\": \"2489ba9d-fb65-4ecd-b672-504ef9edbd4e\", \"scope\": {\"organization_id\": \"local\", \"project_id\": \"wave4-restart\"}, \"provenance\": \"local-declared\", \"sync\": \"not configured\", \"evidence\": {\"store_id\": \"d39c12e7-6432-4b93-8f0c-6cdcd384163a\", \"path\": \"/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/root/projects/wave4-restart/evidence\"}}, \"panel\": {\"kind\": \"synth\", \"config\": {\"title\": \"Forge \\u00b7 forge-local-1605cbc4-593a-4dd6-8d4c-babac0ca4744\", \"path\": \"/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/evidence/forge-local-1605cbc4-593a-4dd6-8d4c-babac0ca4744/forge/c46a9d7c622d2fc0/view.json\", \"target\": \"forge-local-1605cbc4-593a-4dd6-8d4c-babac0ca4744\", \"environment\": \"local\", \"origin\": \"local workspace\", \"product\": \"forge\", \"resource\": \"[\\\"local\\\",\\\"wave4-restart\\\"]\", \"refreshSeconds\": 2}, \"operationId\": \"acb27bbe-301a-4362-a819-8c84904b302c\", \"evidencePath\": \"/Users/joshuapurtell/GitHub/workspaces/v025w4-evalqual-20261028/temper_runtime/artifacts/service-qualification-20261028/real-wave4/restart/20261028T160652Z/evidence/forge-local-1605cbc4-593a-4dd6-8d4c-babac0ca4744/forge/c46a9d7c622d2fc0/operations/acb27bbe-301a-4362-a819-8c84904b302c.json\"}}"
+  ],
+  "tool": "local_eval_list"
+}

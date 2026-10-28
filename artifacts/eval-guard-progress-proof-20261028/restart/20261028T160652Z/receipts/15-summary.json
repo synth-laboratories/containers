@@ -1,0 +1,23 @@
+{
+  "docker_ps_owner_label_final": [],
+  "finished_at": "2026-10-28T16:08:23.681064+00:00",
+  "load_end": "12:08  up 5 days, 53 mins, 58 users, load averages: 54.61 56.44 60.31",
+  "load_start": "12:06  up 5 days, 52 mins, 58 users, load averages: 49.84 56.53 60.75",
+  "mode": "restart",
+  "result": {
+    "attempt_state": "completed",
+    "attempts_for_op": [],
+    "containers_after": [],
+    "dispatch_records": [
+      "dispatch.json",
+      "run/catalog.scripted-noop.r1-s0-r0/dispatches"
+    ],
+    "final_phase": "completed",
+    "killed_pid": 78639,
+    "operation": "restart-1",
+    "pid_after": 88325,
+    "proved": true,
+    "source": "service"
+  },
+  "started_at": "2026-10-28T16:06:54.201025+00:00"
+}
