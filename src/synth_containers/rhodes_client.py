@@ -218,6 +218,60 @@ class RhodesClient(PoolClient):
         """Register a content-addressed version from retained Artifact Platform input."""
         return await self._request("POST", "/environment_releases", payload=manifest)
 
+    async def _build_request(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        from .rhodes_build_operations import typed_refusal
+
+        try:
+            return await self._request(*args, **kwargs)
+        except RhodesRequestError as error:
+            typed = typed_refusal(error)
+            if typed is error:
+                raise
+            raise typed from error
+
+    async def create_build_operation(self, request: Any) -> Any:
+        """Accept a durable build/import; idempotent on ``request.operation_id``.
+
+        Raises a typed ``BuildOperationRefused`` subclass for ``rhodes.build.*``.
+        """
+        from .rhodes_build_operations import BuildOperation
+
+        body = await self._build_request(
+            "POST", "/environment_build_operations", payload=request.to_json(), replay_safe=True
+        )
+        return BuildOperation.from_json(body["operation"], reused=bool(body.get("reused")))
+
+    async def get_build_operation(self, build_operation_id: str) -> Any:
+        from .rhodes_build_operations import BuildOperation
+
+        body = await self._build_request(
+            "GET", "/environment_build_operations/" + quote(build_operation_id, safe="")
+        )
+        return BuildOperation.from_json(body)
+
+    async def list_build_operations(self, environment: str, *, limit: int = 50) -> list[Any]:
+        from .rhodes_build_operations import BuildOperation
+
+        if type(limit) is not int or not 1 <= limit <= 200:
+            raise ValueError("limit must be between 1 and 200")
+        body = await self._build_request(
+            "GET",
+            "/environment_definitions/" + quote(environment, safe="") + "/build_operations",
+            params={"limit": limit},
+        )
+        return [BuildOperation.from_json(item) for item in body.get("items", [])]
+
+    async def retry_build_operation(self, build_operation_id: str) -> Any:
+        """Return a failed/recovery_required operation to pending (same identity)."""
+        from .rhodes_build_operations import BuildOperation
+
+        body = await self._build_request(
+            "POST",
+            "/environment_build_operations/" + quote(build_operation_id, safe="") + "/retry",
+            replay_safe=False,
+        )
+        return BuildOperation.from_json(body["operation"])
+
     async def prepare_environment_source(self, declaration: Mapping[str, Any]) -> dict[str, Any]:
         return await self._request("POST", "/environment_sources/prepare", payload=declaration)
 
