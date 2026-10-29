@@ -47,7 +47,7 @@ from .tracing.capture.binding import (
     BindingCaptureV1,
     BindingContainerV1,
     BindingContextV1,
-    BindingWorkloadV1,
+    BindingTraceSourceV1,
     CaptureMode,
     CapturePolicyV1,
     Interception,
@@ -1071,7 +1071,7 @@ class CispoEvidenceBuilder:
                 token_level=TokenCaptureLevel.FULL_TRAINING,
                 retention_class="local_only",
             ),
-            workload=BindingWorkloadV1(
+            trace_source=BindingTraceSourceV1(
                 kind=WorkloadKind.OTHER,
                 root_actor_id=actor_ids[root_key],
                 actor_session_id=session_ids[root_key],

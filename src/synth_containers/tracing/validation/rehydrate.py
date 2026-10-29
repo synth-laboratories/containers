@@ -29,6 +29,12 @@ def build(record_type: type, payload: Any) -> Any:
         return payload
     if not isinstance(payload, dict):
         raise RehydrationError(f"expected an object for {record_type.__name__}")
+    normalize = getattr(record_type, "__normalize_payload__", None)
+    if callable(normalize):
+        try:
+            payload = normalize(payload)
+        except ValueError as error:
+            raise RehydrationError(f"{record_type.__name__}: {error}") from error
     hints = get_type_hints(record_type)
     kwargs: dict[str, Any] = {}
     for field_info in fields(record_type):

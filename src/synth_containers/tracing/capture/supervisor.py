@@ -56,7 +56,7 @@ from .binding import (
     BindingCaptureV1,
     BindingContainerV1,
     BindingContextV1,
-    BindingWorkloadV1,
+    BindingTraceSourceV1,
     CaptureMode,
     CapturePolicyV1,
     Interception,
@@ -205,7 +205,7 @@ class CaptureSupervisor:
                 policy=config.policy,
                 container=config.container,
                 context=config.context,
-                workload=BindingWorkloadV1(
+                trace_source=BindingTraceSourceV1(
                     kind=config.workload_kind,
                     root_actor_id=actor_id,
                     actor_session_id=session_id,
@@ -484,8 +484,8 @@ class CaptureSupervisor:
         registered_sessions: set[str] = set()
         terminal_sessions: set[str] = set()
         capture_finished = False
-        root_actor_id = self.binding.workload.root_actor_id
-        root_session_id = self.binding.workload.actor_session_id
+        root_actor_id = self.binding.trace_source.root_actor_id
+        root_session_id = self.binding.trace_source.actor_session_id
         terminal_statuses = {
             str(SessionStatus.COMPLETED),
             str(SessionStatus.FAILED),
@@ -961,9 +961,9 @@ class CaptureSupervisor:
                         "authorization": f"Bearer {self._collector_token}",
                         "x-synth-trace-id": self.binding.trace_id,
                         "x-synth-capture-id": self.binding.capture_id,
-                        "x-synth-actor-id": self.binding.workload.root_actor_id,
+                        "x-synth-actor-id": self.binding.trace_source.root_actor_id,
                         "x-synth-session-id": (
-                            self.binding.workload.actor_session_id
+                            self.binding.trace_source.actor_session_id
                         ),
                     },
                 )
@@ -1202,7 +1202,7 @@ class CaptureSupervisor:
         with self._lifecycle_lock:
             self._assert_capture_mutable()
             actor = actor.sealed()
-            if actor.actor_id == self.binding.workload.root_actor_id:
+            if actor.actor_id == self.binding.trace_source.root_actor_id:
                 raise ValueError("child actor id collides with the root actor")
             if actor.parent_actor_id == actor.actor_id:
                 raise ValueError("child actor cannot be its own parent")
@@ -1241,13 +1241,13 @@ class CaptureSupervisor:
         actor: ActorV5,
         session: SessionV5,
     ) -> tuple[ActorV5, SessionV5]:
-        if actor.actor_id == self.binding.workload.root_actor_id:
+        if actor.actor_id == self.binding.trace_source.root_actor_id:
             raise ValueError("child actor id collides with the root actor")
         if actor.parent_actor_id == actor.actor_id:
             raise ValueError("child actor cannot be its own parent")
         if session.actor_id != actor.actor_id:
             raise ValueError("declared session must belong to declared actor")
-        if session.session_id == self.binding.workload.actor_session_id:
+        if session.session_id == self.binding.trace_source.actor_session_id:
             raise ValueError("child session id collides with the root session")
         if session.parent_session_id == session.session_id:
             raise ValueError("child session cannot be its own parent")
@@ -1266,9 +1266,9 @@ class CaptureSupervisor:
                 None,
             )
             parent_actor_id = (
-                self.binding.workload.root_actor_id
+                self.binding.trace_source.root_actor_id
                 if session.parent_session_id
-                == self.binding.workload.actor_session_id
+                == self.binding.trace_source.actor_session_id
                 else (
                     parent_session.actor_id
                     if parent_session is not None
@@ -1375,9 +1375,9 @@ class CaptureSupervisor:
             raise ValueError("child context must join the supervisor trace")
         if context.capture_id == self.binding.capture_id:
             raise ValueError("child capture id collides with the root capture")
-        if actor.actor_id == self.binding.workload.root_actor_id:
+        if actor.actor_id == self.binding.trace_source.root_actor_id:
             raise ValueError("child actor id collides with the root actor")
-        if session.session_id == self.binding.workload.actor_session_id:
+        if session.session_id == self.binding.trace_source.actor_session_id:
             raise ValueError("child session id collides with the root session")
         if context.actor_id == context.parent_actor_id:
             raise ValueError("child actor cannot be its own parent")
@@ -1445,7 +1445,7 @@ class CaptureSupervisor:
             self._assert_capture_mutable()
             if capture_or_session_id in {
                 self.binding.capture_id,
-                self.binding.workload.actor_session_id,
+                self.binding.trace_source.actor_session_id,
             }:
                 raise ValueError(
                     "root session lifecycle is owned by CaptureSupervisor.finalize"

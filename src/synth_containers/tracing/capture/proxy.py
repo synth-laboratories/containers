@@ -881,8 +881,8 @@ class CaptureProxy:
 
         if self.context_resolver is None:
             return (
-                self.binding.workload.root_actor_id,
-                self.binding.workload.actor_session_id,
+                self.binding.trace_source.root_actor_id,
+                self.binding.trace_source.actor_session_id,
                 None,
             )
         context = self.context_resolver(headers)

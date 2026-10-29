@@ -11,7 +11,7 @@ from typing import Any, Mapping
 from ..canonical import bytes_digest, canonical_bytes
 from ..capture.binding import (
     BindingCaptureV1,
-    BindingWorkloadV1,
+    BindingTraceSourceV1,
     CaptureMode,
     CapturePolicyV1,
     TokenCaptureLevel,
@@ -154,7 +154,7 @@ def write_imported_document(
             raw_capture="source_artifact",
             token_level=TokenCaptureLevel.USAGE_ONLY,
         ),
-        workload=BindingWorkloadV1(
+        trace_source=BindingTraceSourceV1(
             kind=WorkloadKind.OTHER,
             root_actor_id=document.actors[0].actor_id,
             actor_session_id=document.sessions[0].session_id,
@@ -320,7 +320,7 @@ def _assemble_events(
         capture_id=capture_id,
         trace_kind=trace_kind,
         policy=policy,
-        workload=BindingWorkloadV1(
+        trace_source=BindingTraceSourceV1(
             kind=workload_kind,
             root_actor_id=actor_id,
             actor_session_id=session_id,

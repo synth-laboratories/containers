@@ -260,11 +260,11 @@ class TraceFinalizer:
                     call_id=call_id,
                     call_index=int(payload.get("call_index") or 0),
                     actor_id=str(
-                        record.get("actor_id") or self.binding.workload.root_actor_id
+                        record.get("actor_id") or self.binding.trace_source.root_actor_id
                     ),
                     session_id=str(
                         record.get("session_id")
-                        or self.binding.workload.actor_session_id
+                        or self.binding.trace_source.actor_session_id
                     ),
                     started_at=str(payload.get("started_at") or record["occurred_at"]),
                     model=payload.get("model"),
@@ -486,22 +486,22 @@ class TraceFinalizer:
         extra_actors = _resolve_actor_declarations(
             tuple(actor_declaration_records),
             extra_actors=extra_actors,
-            root_actor_id=self.binding.workload.root_actor_id,
-            root_session_id=self.binding.workload.actor_session_id,
+            root_actor_id=self.binding.trace_source.root_actor_id,
+            root_session_id=self.binding.trace_source.actor_session_id,
         )
         aliases = _resolve_alias_declarations(
             tuple(alias_declaration_records),
             aliases=aliases,
-            root_actor_id=self.binding.workload.root_actor_id,
-            root_session_id=self.binding.workload.actor_session_id,
+            root_actor_id=self.binding.trace_source.root_actor_id,
+            root_session_id=self.binding.trace_source.actor_session_id,
         )
         extra_actors, extra_sessions = _resolve_child_registrations(
             tuple(child_registration_records),
             extra_actors=extra_actors,
             extra_sessions=extra_sessions,
             trace_id=self.binding.trace_id,
-            root_actor_id=self.binding.workload.root_actor_id,
-            root_session_id=self.binding.workload.actor_session_id,
+            root_actor_id=self.binding.trace_source.root_actor_id,
+            root_session_id=self.binding.trace_source.actor_session_id,
             root_capture_id=self.binding.capture_id,
         )
         if terminal_finalization is not None:
@@ -539,7 +539,7 @@ class TraceFinalizer:
             finish_records=tuple(session_finish_records),
             records=tuple(records),
             parent_ended_at=ended_at,
-            root_session_id=self.binding.workload.actor_session_id,
+            root_session_id=self.binding.trace_source.actor_session_id,
         )
         diagnostics.extend(lifecycle_diagnostics)
         diagnostics.extend(
@@ -588,16 +588,16 @@ class TraceFinalizer:
             )
 
         root_actor = ActorV5(
-            actor_id=self.binding.workload.root_actor_id,
+            actor_id=self.binding.trace_source.root_actor_id,
             kind=self.root_actor_kind,
             display_name=self.root_actor_name,
-            role=str(self.binding.workload.kind),
+            role=str(self.binding.trace_source.kind),
             harness=self.provenance.harness,
             runtime=self.provenance.runtime_version,
             model=self.provenance.model,
             provider=self.provenance.provider,
             task_id=self.binding.context.task_id,
-            workflow_id=self.binding.workload.workflow_id,
+            workflow_id=self.binding.trace_source.workflow_id,
         ).sealed()
 
         model_calls_state, usage_state, raw_state = _call_coverage(
@@ -614,7 +614,7 @@ class TraceFinalizer:
             tuple(
                 calls[item]
                 for item in order
-                if calls[item].session_id == self.binding.workload.actor_session_id
+                if calls[item].session_id == self.binding.trace_source.actor_session_id
             )
         )
         root_event_names = {
@@ -622,12 +622,12 @@ class TraceFinalizer:
             for item in application_records
             if str(
                 item.get("session_id")
-                or self.binding.workload.actor_session_id
+                or self.binding.trace_source.actor_session_id
             )
-            == self.binding.workload.actor_session_id
+            == self.binding.trace_source.actor_session_id
         }
         root_session = SessionV5(
-            session_id=self.binding.workload.actor_session_id,
+            session_id=self.binding.trace_source.actor_session_id,
             actor_id=root_actor.actor_id,
             started_at=started_at,
             ended_at=ended_at,
@@ -866,7 +866,7 @@ class TraceFinalizer:
         without guessing. Explicit non-root capture context always wins.
         """
 
-        root_session_id = self.binding.workload.actor_session_id
+        root_session_id = self.binding.trace_source.actor_session_id
         sessions = {
             session.session_id: session
             for session in extra_sessions
@@ -1231,8 +1231,8 @@ class TraceFinalizer:
         return EventV5(
             event_id=application_event_id(trace_id=trace_id, envelope_id=envelope_id),
             event_type=str(payload.get("event_type") or EventType.APPLICATION),
-            actor_id=str(record.get("actor_id") or self.binding.workload.root_actor_id),
-            session_id=str(record.get("session_id") or self.binding.workload.actor_session_id),
+            actor_id=str(record.get("actor_id") or self.binding.trace_source.root_actor_id),
+            session_id=str(record.get("session_id") or self.binding.trace_source.actor_session_id),
             occurred_at=str(record["occurred_at"]),
             span_id=span_id,
             order=EventOrderV1(
