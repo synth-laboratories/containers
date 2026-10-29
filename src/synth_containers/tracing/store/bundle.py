@@ -47,7 +47,7 @@ from ..canonical import (
     utc_now,
 )
 from ..atomic import durable_write, durable_mkdir
-from ..capture.binding import TraceCaptureBindingV1
+from ..capture.binding import BINDING_SCHEMA_VERSION, TraceCaptureBindingV1
 from ..capture.spool import TraceSegmentManifestV1
 from ..models.document import TraceDocumentV5
 from ..models.evidence import TraceEvidenceBundleV5
@@ -281,7 +281,7 @@ class LocalTraceBundle:
             component_schemas={
                 "trace": "synth.trace.v5",
                 "evidence": "synth.trace-evidence-bundle.v5",
-                "binding": "synth.trace-capture-binding.v1",
+                "binding": BINDING_SCHEMA_VERSION,
                 "raw_envelope": "synth.capture.raw.v1",
                 "segment_manifest": "synth.trace-segment-manifest.v1",
                 "coverage_receipt": "synth.capture-coverage-receipt.v1",

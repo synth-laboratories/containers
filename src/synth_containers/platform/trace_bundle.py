@@ -24,7 +24,7 @@ from ..tracing.capture.binding import (
     BindingCaptureV1,
     BindingContainerV1,
     BindingContextV1,
-    BindingWorkloadV1,
+    BindingTraceSourceV1,
     CaptureMode,
     CapturePolicyV1,
     Interception,
@@ -525,7 +525,7 @@ def _document_from_source(
             token_level=TokenCaptureLevel.NONE,
             retention_class="local_only",
         ),
-        workload=BindingWorkloadV1(
+        trace_source=BindingTraceSourceV1(
             kind=WorkloadKind.OTHER,
             root_actor_id=actor_ids[category_order[0]],
             actor_session_id=session_ids[category_order[0]],
