@@ -33,6 +33,7 @@ from .http_requests import (
 )
 from .state import CompatPlatform, _seed_from_task_instance_id
 from .reward import REWARD_STREAM_KINDS, reward_api_catalog
+from .reward_nodes import product_combiner
 from .targets import TARGETS, TargetSpec, advertised_reward_authority, advertised_reward_calculator
 
 
@@ -503,7 +504,7 @@ def create_compat_app(
         except (RequestParseError, ValueError) as exc:
             # Translate once at the HTTP edge: parse failures are 422, not 500.
             raise _http_from_parse(exc) from exc
-        return platform.product_combiner(req.bases, req.required)
+        return product_combiner(req.bases, req.required)
 
     @app.get("/evaluations/{evaluation_id}")
     async def get_evaluation(evaluation_id: str) -> dict[str, Any]:

@@ -32,6 +32,7 @@ from .journal_retention import journal_retention, retention_ttl_seconds
 from .journal_pages import journal_events_payload
 from .http_requests import CreateRolloutRequest, ISOLATED_POLICY_HARNESS, NANOHORIZON_HARNESS
 from .policy_process import DEFAULT_HEURISTIC, IsolatedPolicyProcess
+from .reward_nodes import reward_nodes
 from .reward_plan import PlanOutcome, classify_plan_outcome
 from .runtime import runtime_for
 from .seal import seal_rollout_log, validate_rollout_seal
@@ -1346,6 +1347,7 @@ class CompatPlatform:
                     # either of them, including after a partial host write.
                     pass
             runtime_provenance = runtime_provenance_from_environment()
+            terminal = reward_nodes(pin, script_node=str(self.spec.script_node))
             self.trace_bundles[pin.rollout_id] = materialize_harbor_trace_bundle(
                 output_path=archive_path,
                 spec=self.spec,
@@ -1359,8 +1361,8 @@ class CompatPlatform:
                     "task_instance_id": pin.task_instance_id,
                     "environment_version": pin.environment_version,
                     "terminal_reward": {
-                        "value": self._reward_nodes(pin)[0],
-                        "status": self._reward_nodes(pin)[2],
+                        "value": terminal.reward,
+                        "status": terminal.status,
                     } if self.spec.reward_definition is not None else None,
                 },
                 status=pin.status,
@@ -1857,7 +1859,7 @@ class CompatPlatform:
                 and existing.get("evaluation_plan_ref") == plan
             ):
                 return existing
-        reward, nodes, status, reason = self._reward_nodes(pin)
+        reward, nodes, status, reason = reward_nodes(pin, script_node=str(self.spec.script_node))
         record = {
             "execution_id": f"eval_{pin.rollout_id}_{_digest((plan, evidence_digest, rescore, uuid.uuid4().hex if rescore else 'once'))}",
             "rollout_id": pin.rollout_id,
@@ -1907,83 +1909,11 @@ class CompatPlatform:
             values.append(item.payload.get("value"))
         return values
 
-    def _reward_nodes(self, pin: RolloutPin) -> tuple[float | None, list[dict[str, Any]], str, str | None]:
-        if pin.hillclimb_nodes:
-            nodes = [node.to_dict() for node in pin.hillclimb_nodes]
-            gates = [node for node in pin.hillclimb_nodes if node.kind == "gate"]
-            if any(node.status == "gated" or node.value is None for node in gates):
-                return None, nodes, "gated", "heldout_gate"
-            gate_value = gates[0].value if gates else None
-            return float(gate_value) if gate_value is not None else None, nodes, "scored", None
-        kind = pin.reward_kind
-        if kind in {"env_sum", "verifier"}:
-            authority = "verifier" if kind == "verifier" else "environment"
-            node_kind = "verifier_reward" if kind == "verifier" else "env_reward"
-            node_id = "verifier" if kind == "verifier" else "env_sum"
-            if any(item is None for item in pin.reward_signals):
-                return None, [
-                    {
-                        "node_id": node_id,
-                        "kind": node_kind,
-                        "authority": authority,
-                        "status": "skipped",
-                        "value": None,
-                    }
-                ], "absent", "missing_reward_signal"
-            total = float(
-                sum(float(item) for item in pin.reward_signals if item is not None)
-            )
-            return total, [
-                {
-                    "node_id": node_id,
-                    "kind": node_kind,
-                    "authority": authority,
-                    "status": "scored",
-                    "value": total,
-                }
-            ], "scored", None
-        if kind == "script":
-            node_id = str(self.spec.script_node)
-            value = pin.native_script_reward
-            return value, [
-                {
-                    "node_id": node_id,
-                    "kind": "script" if node_id == "reward.txt" else "gate",
-                    "authority": "trusted_scorer",
-                    "status": "scored" if value is not None else "skipped",
-                    "value": value,
-                }
-            ], "scored" if value is not None else "absent", None
-        if kind == "env_status":
-            value = pin.native_script_reward
-            return value, [
-                {
-                    "node_id": "env_status",
-                    "kind": "env_reward",
-                    "authority": "environment",
-                    "status": "scored" if value is not None else "skipped",
-                    "value": value,
-                }
-            ], "scored" if value is not None else "absent", None
-        return None, [], "absent", "unknown_plan"
-
     def get_reward(self, rollout_id: str) -> dict[str, Any]:
         existing = self.reward_executions.get(rollout_id)
         if existing is None:
             return {"status": "absent", "reward": None, "rollout_id": rollout_id}
         return existing
-
-    def product_combiner(self, bases: dict[str, float | None], required: list[str]) -> dict[str, Any]:
-        values = []
-        for name in required:
-            item = bases.get(name)
-            if item is None:
-                return {"status": "absent", "reward": None, "reasons": [f"missing_basis:{name}"]}
-            values.append(float(item))
-        product = 1.0
-        for item in values:
-            product *= item
-        return {"status": "scored", "reward": product}
 
     # How many closed rollout logs stay resident. Their envelopes are already
     # fsynced to the journal and `RolloutEventLog.recover` replays them failing
