@@ -8,7 +8,7 @@ version so a sealed v1 binding verifies identically.
 from __future__ import annotations
 
 import json
-from dataclasses import replace
+from dataclasses import fields, replace
 from pathlib import Path
 
 import pytest
@@ -19,6 +19,7 @@ from synth_containers.tracing.capture.binding import (
     BINDING_SCHEMA_VERSION_V1,
     BINDING_SCHEMA_VERSION_V2,
     BindingCaptureV1,
+    BindingContextV1,
     BindingTraceSourceV1,
     BindingVersionError,
     BindingWorkloadV1,
@@ -150,3 +151,29 @@ def test_written_binding_file_is_v2(tmp_path: Path) -> None:
     on_disk = json.loads(path.read_text(encoding="utf-8"))
     assert on_disk["schema_version"] == BINDING_SCHEMA_VERSION_V2
     assert "trace_source" in on_disk and "workload" not in on_disk
+
+
+AGENTS_V2_FIXTURE = FIXTURE.parent / "v2_mloky_agents_service.json"
+
+
+def test_rust_agents_service_v2_binding_verifies_identically() -> None:
+    """Cross-language: a binding written by mloky agents-service (Rust) verifies here.
+
+    The fixture is the byte-exact golden of mloky
+    ``agents-service/tests/trace_v5.rs`` (the Rust test asserts it produces exactly
+    these bytes). The Python reader rebuilds the binding from its dataclasses, so
+    any wire key outside the model is dropped and the digest would stop verifying;
+    the binding must re-serialize byte for byte.
+    """
+
+    raw = AGENTS_V2_FIXTURE.read_text(encoding="utf-8").strip()
+    payload = json.loads(raw)
+    binding = build(TraceCaptureBindingV1, payload)
+    assert isinstance(binding, TraceCaptureBindingV1)
+    assert binding.schema_version == BINDING_SCHEMA_VERSION_V2
+    assert binding.trace_source.root_actor_id == payload["trace_source"]["root_actor_id"]
+    assert binding.content_digest == payload["content_digest"]
+    assert content_digest(binding) == payload["content_digest"]
+    assert binding.verify_digest()
+    assert canonical_text(binding) == raw
+    assert set(payload["context"]) <= {item.name for item in fields(BindingContextV1)}
