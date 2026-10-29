@@ -39,6 +39,10 @@ from .rhodes_client import RhodesClient, RhodesRequestError
 # Backend snapshot-ledger names, plus the pre-ledger names older backends create.
 HARBOR_SNAPSHOT_PREFIXES = ("synth-harbor-", "synth-pool-harbor-")
 TERMINAL = {"completed", "failed", "cancelled"}
+# SYN-4843: the agent edits /app and the patch is read from the working tree, so a
+# restarted warm task would hand the next attempt the previous patch. Rhodes
+# (backend lifecycle_profiles.py) replaces a used `deepswe` task instead of reusing it.
+LIFECYCLE_PROFILE = "deepswe"
 
 
 def _now() -> str:
@@ -170,6 +174,7 @@ def task_payload(task: DeepSweTask, *, task_id: str, agent: dict[str, Any]) -> d
     }
     return {
         "task_id": task_id,
+        "lifecycle_profile": LIFECYCLE_PROFILE,
         "context_tar_base64": _tar_b64({"Dockerfile": task_dockerfile(task, agent).encode()}),
         "entrypoint": "native_harbor_phases",
         "entrypoint_mode": "native_harbor",
@@ -187,6 +192,7 @@ def task_payload(task: DeepSweTask, *, task_id: str, agent: dict[str, Any]) -> d
             "harbor_native_phases": native,
             "allow_internet": False,
             "deepswe_task": f"deepswe/{task.slug}",
+            "lifecycle_profile": LIFECYCLE_PROFILE,
         },
     }
 

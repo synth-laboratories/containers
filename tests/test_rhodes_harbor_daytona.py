@@ -49,6 +49,16 @@ def test_task_verifies_isolated_from_the_patch_alone(tmp_path):
     assert payload["limits"]["timeout_s"] == 5400 + 1800 + 300
 
 
+def test_task_declares_the_deepswe_lifecycle_profile(tmp_path):
+    corpus, pins = _corpus(tmp_path)
+    task = load_task(corpus, pins, "demo")
+    for agent in ({"name": "fixed_solution", "script_b64": "eA=="}, {"name": "codex", "model_name": "m"}):
+        payload = task_payload(task, task_id="demo", agent=agent)
+        # Rhodes reads it from task_config (the payload) and task_metadata; both must agree.
+        assert payload["lifecycle_profile"] == "deepswe"
+        assert payload["metadata"]["lifecycle_profile"] == "deepswe"
+
+
 def test_oracle_exports_the_patch_against_the_base_commit(tmp_path):
     corpus, pins = _corpus(tmp_path)
     script = oracle_script(load_task(corpus, pins, "demo"))
