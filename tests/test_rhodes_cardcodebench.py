@@ -54,6 +54,7 @@ def test_private_verifier_only_enters_isolated_post_agent_phase(tmp_path):
     assert phases["allow_internet"] is False
     assert b"private-proof" in files(phases["tests_archive_b64"])["test.sh"]
     assert payload["lifecycle_profile"] == "cardcodebench"
+    assert payload["limits"]["pids_limit"] == 128
     assert payload["metadata"]["verifier_bundle_sha256"] == digest
 
 
