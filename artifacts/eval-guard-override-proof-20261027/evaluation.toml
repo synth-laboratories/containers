@@ -12,7 +12,10 @@
 "parallelism" = 1
 "checkpoint_every_steps" = 3
 "cpu" = 1.0
-"memory_mb" = 512
+# The craftax gold engine grows ~3 MiB per step (756 MiB observed by step ~200, COH4 10-30). Before SYN-5209
+# set --memory-swap equal to --memory, Docker's default swap doubled 512 to an effective 1024 MiB; with swap
+# disabled the declared limit is the whole envelope, so it is declared with headroom here.
+"memory_mb" = 2048
 "capture" = "native-state-actions-rewards-v1"
 "annotations" = "disabled"
 "trusted_scorer_source_digests" = []

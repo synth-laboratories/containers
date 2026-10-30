@@ -38,6 +38,7 @@ TERMINAL_CLEANUP_STATES = ("removed", "unconfirmed")
 EGRESS_CAPABILITY = "unrestricted_bridge"
 EGRESS_NETWORK_MODE = BRIDGE_NETWORK
 HOST_CONFIG_FORMAT = "{{json .HostConfig}}"
+STATE_FORMAT = "{{json .State}}"
 
 
 class LimitsMismatch(RuntimeError):
@@ -231,6 +232,21 @@ def await_ready(reporter: GuardReporter, docker: str, name: str, url: str) -> No
                     "observed": status})
             reporter.wait_stdin(.1)
     raise RuntimeError("native_engine_startup_cancelled")
+
+
+def engine_exit(reporter: GuardReporter, docker: str, name: str) -> dict | None:
+    """How the engine itself ended, read from Docker before removal; None when unobservable.
+
+    ``oom_killed`` is the kernel's verdict under the declared ``--memory``/``--memory-swap``
+    limit. Without it an OOM-killed engine looks to the parent like a network fault
+    ("gold unreachable") instead of a memory limit the plan declared too small.
+    """
+    state = inspect_json(reporter, docker, [name], STATE_FORMAT, "exit")
+    if not isinstance(state, dict):
+        return None
+    status, exit_code = state.get("Status"), state.get("ExitCode")
+    return {"status": status if isinstance(status, str) else None, "oom_killed": state.get("OOMKilled") is True,
+        "exit_code": exit_code if type(exit_code) is int else None}
 
 
 def remove_container(reporter: GuardReporter, docker: str, name: str) -> tuple[str, int | None]:
@@ -455,6 +471,9 @@ def main():
         limits["egress_detail"] = egress
         reporter.state("failed", error=error, code=code, stage=stage, limits=limits)
     finally:
+        exited = engine_exit(reporter, docker, name) if identifier is not None else None
+        if exited is not None and exited["oom_killed"]:
+            reporter.state("oom_killed", observed=exited["status"], exit_code=exited["exit_code"])
         cleanup, returncode, remaining = remove(reporter, docker, name, names)
         limits["egress_detail"] = egress
         persist_receipt(reporter, record, {"container": identifier, "name": name, "owner": request["owner"],
@@ -463,7 +482,7 @@ def main():
             "network": egress.get("network"), "egress": egress,
             "last_observed_state": reporter.last_observed, "transitions": reporter.transitions,
             "create_seconds": create_seconds, "error": error, "code": code, "stage": stage, "limits": limits,
-            "recorded_by": "guard"})
+            "engine_exit": exited, "recorded_by": "guard"})
         reporter.emit({"event": "receipt", "name": name, "cleanup": cleanup})
 
 
