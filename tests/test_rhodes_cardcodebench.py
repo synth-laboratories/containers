@@ -69,3 +69,19 @@ def test_unpinned_private_bundle_and_private_public_paths_refuse(tmp_path):
     (public / "environment/workspace/cases.json").write_text("hidden")
     with pytest.raises(ValueError, match="private_paths"):
         load_task(public, private, **kwargs)
+
+
+def test_isolated_verifier_resource_requirement_is_reserved(tmp_path):
+    public, private, digest = fixture(tmp_path)
+    with (public / "task.toml").open("a") as stream:
+        stream.write("\n[verifier.environment]\ncpus=4\nmemory_mb=3072\n")
+    task = load_task(
+        public,
+        private,
+        image="registry/worker@sha256:" + "a" * 64,
+        verifier_sha256=digest,
+        agent_user="agent",
+    )
+    payload = task_payload(task, task_id="task", agent={"name": "fixed_solution"})
+    assert payload["limits"]["cpu_cores"] == 4
+    assert payload["limits"]["memory_mb"] == 3072

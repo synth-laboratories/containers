@@ -77,3 +77,7 @@ Private grading files are transferred only to the verifier phase. Task limits
 request `pids_limit=128`; the backend must preserve that finite process bound
 through resource normalization and Docker cgroup creation. Bases need `id`,
 `useradd`, and `chown`; failure to provision the named account fails the build.
+
+The single deployment CPU/memory envelope reserves the larger of the public
+agent environment and isolated verifier environment requirements. A 2048 MiB
+agent with a 3072 MiB verifier therefore requests 3072 MiB for the deployment.

@@ -64,6 +64,7 @@ def load_task(
     if digest != verifier_sha256:
         raise ValueError("cardcode_verifier_digest_mismatch")
     environment = config.get("environment", {})
+    verifier_environment = config.get("verifier", {}).get("environment", {})
     return CardCodeTask(
         task_id=str(config["task"]["name"]),
         image=image,
@@ -73,8 +74,13 @@ def load_task(
         agent_user=agent_user,
         agent_timeout_s=int(config["agent"]["timeout_sec"]),
         verifier_timeout_s=int(config["verifier"]["timeout_sec"]),
-        cpu_cores=int(environment["cpus"]),
-        memory_mb=int(environment["memory_mb"]),
+        # Agent and verifier share one declared deployment envelope. Reserve
+        # the larger requirement so isolated grading never receives less than
+        # the task's verifier environment requests.
+        cpu_cores=max(int(environment["cpus"]), int(verifier_environment.get("cpus", 0))),
+        memory_mb=max(
+            int(environment["memory_mb"]), int(verifier_environment.get("memory_mb", 0))
+        ),
     )
 
 
