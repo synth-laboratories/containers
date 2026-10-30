@@ -65,3 +65,15 @@ no model or paid provider calls.
   without retaining them yet.
 - **Not covered.** Hosted providers, warm reset, money settlement, Swarms or
   optimizer adoption and the G0–G5 matrices.
+
+
+### CardCodeBench process and workspace custody
+
+The producer builds only public workspace files into the task image. It
+provisions the declared named non-root agent account, grants that account the
+public workspace, and leaves the trusted native phase supervisor as root so it
+can drop the candidate's privilege and run the separate isolated verifier.
+Private grading files are transferred only to the verifier phase. Task limits
+request `pids_limit=128`; the backend must preserve that finite process bound
+through resource normalization and Docker cgroup creation. Bases need `id`,
+`useradd`, and `chown`; failure to provision the named account fails the build.

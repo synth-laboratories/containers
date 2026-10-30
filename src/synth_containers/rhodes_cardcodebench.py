@@ -93,7 +93,19 @@ def task_payload(task: CardCodeTask, *, task_id: str, agent: dict[str, Any]) -> 
         raise ValueError("cardcode_agent_unsupported")
     if min(task.agent_timeout_s, task.verifier_timeout_s, task.cpu_cores, task.memory_mb) <= 0:
         raise ValueError("cardcode_limits_invalid")
-    dockerfile = f"FROM {task.image}\nCOPY workspace /work\nWORKDIR /work\n"
+    # Native Harbor's trusted supervisor needs root to drop the candidate to
+    # the named unprivileged account and run the separate verifier. Bases may
+    # default to an unnamed numeric UID; create the explicit account and make
+    # only the public workspace writable before any candidate code executes.
+    dockerfile = (
+        f"FROM {task.image}\nUSER root\n"
+        f"RUN (id -u {task.agent_user} >/dev/null 2>&1 || "
+        f"useradd --create-home --shell /bin/bash {task.agent_user}) "
+        f"&& test \"$(id -u {task.agent_user})\" -ne 0\n"
+        "COPY workspace /work\n"
+        f"RUN chown -R {task.agent_user} /work\n"
+        "WORKDIR /work\n"
+    )
     public = {
         "Dockerfile": dockerfile.encode(),
         **{"workspace/" + name: body for name, body in task.public_files.items()},
@@ -123,6 +135,7 @@ def task_payload(task: CardCodeTask, *, task_id: str, agent: dict[str, Any]) -> 
             "cpu_cores": task.cpu_cores,
             "memory_mb": task.memory_mb,
             "gpu_count": 0,
+            "pids_limit": 128,
             "timeout_s": task.agent_timeout_s + task.verifier_timeout_s + 300,
         },
         "metadata": {
