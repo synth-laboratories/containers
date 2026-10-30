@@ -101,6 +101,9 @@ elif command == "inspect":
         print(json.dumps(entry["networks"]))
     elif "HostConfig" in template:
         print(json.dumps(entry["host"]))
+    elif template == "{{json .State}}":
+        oom = bool(config.get("oom_killed"))
+        print(json.dumps({"Status": "exited" if oom else entry["status"], "OOMKilled": oom, "ExitCode": 137 if oom else 0}))
     else:
         print(entry["status"])
 elif command == "ps":
@@ -400,3 +403,28 @@ def test_limits_mismatch_is_typed_startup_failure_and_container_removed(tmp_path
     record = json.loads(receipt.read_text())
     assert record["code"] == "native_engine_limits_mismatch" and record["cleanup"] == "removed"
     assert "ready" not in states(receipt) and containers(cli) == {}
+
+
+@pytest.mark.parametrize("oom_killed", [True, False], ids=["oom-killed", "not-oom"])
+def test_engine_killed_at_memory_limit_is_typed_not_unreachable(tmp_path, health_port, oom_killed):
+    """COH4 / SYN-5224: with --memory-swap equal to --memory (SYN-5209) an engine that outgrows
+    memory_mb is OOM-killed mid-rollout. The parent's transport error ("gold unreachable") must
+    surface as the typed native_engine_oom_killed, read from Docker's State before removal."""
+    cli = fake_docker(tmp_path, health_port, oom_killed=oom_killed)
+    receipt = tmp_path / "receipt.json"
+    with pytest.raises((NativeEngineError, RuntimeError)) as caught:
+        with owned_gold_engine(plan(), owner="eval-owner", receipt=receipt, docker_cli=str(cli),
+                               heartbeat_seconds=.1, silence_seconds=4.0) as url:
+            raise RuntimeError(f"craftax gold unreachable at {url}/rollouts/r")
+    record = json.loads(receipt.read_text())
+    assert record["cleanup"] == "removed" and containers(cli) == {}
+    assert record["engine_exit"]["oom_killed"] is oom_killed
+    if oom_killed:
+        error = caught.value
+        assert isinstance(error, NativeEngineError) and error.code == "native_engine_oom_killed"
+        assert error.stage == "running" and error.cause == "memory_mb=512 memory_swap_mb=512"
+        assert "gold unreachable" in str(error.__context__)
+        assert record["engine_exit"]["exit_code"] == 137 and "oom_killed" in states(receipt)
+    else:
+        assert not isinstance(caught.value, NativeEngineError) and "gold unreachable" in str(caught.value)
+        assert "oom_killed" not in states(receipt)

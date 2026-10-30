@@ -184,3 +184,10 @@ def owned_gold_engine(plan, *, owner: str, receipt: Path, docker_cli: str = "doc
         if recorded["cleanup"] not in ("removed", "not_allocated"):
             raise NativeEngineError("native_engine_cleanup_unconfirmed", stage="cleanup", name=channel.name,
                 last_state=recorded.get("last_observed_state", channel.last_state), cause=recorded.get("reason"))
+        exited = recorded.get("engine_exit")
+        if isinstance(exited, dict) and exited.get("oom_killed") is True:
+            # Replaces the in-flight transport error (kept as __context__): the engine
+            # did not become unreachable, the kernel killed it at the declared limit.
+            raise NativeEngineError("native_engine_oom_killed", stage="running", name=channel.name,
+                last_state="oom_killed", cause=f"memory_mb={plan.memory_mb} memory_swap_mb={plan.memory_mb}",
+                limits=recorded.get("limits"))
