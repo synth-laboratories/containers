@@ -35,6 +35,19 @@ identity are attempted once. HTTP refusals retain status, typed code and
 `Retry-After` in `RhodesRequestError`; a caller can reconcile the original IDs
 before any deliberate retry.
 
+## Optional trace observation
+
+`await client.trace_capture_capabilities()` reads the server's declared trace
+policy. Older servers return `None`; the declaration is not an authorization or
+proof that a specific producer advertises a trace. For the admitted observed
+local Docker `synth_http` lease profile, pass
+`trace_capture=RhodesTraceCapturePolicy()` to `submit`. The original payload
+and idempotency key are preserved. The backend records requested, admitted and
+effective states and only observes a native trace when the terminal producer
+advertises one. Its private Artifact custody is a separate state. This policy
+does not promise complete capture, required capture or Mnemosyne project
+retention. Unsupported profiles and modes are refused by the server.
+
 This interface is in implementation qualification. Native benchmark/provider,
 ready-capacity, org funding and Swarms/optimizer adoption evidence remain
 separate acceptance requirements in the v0.24 Rhodes tickets.

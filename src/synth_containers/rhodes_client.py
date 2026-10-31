@@ -11,6 +11,7 @@ import hashlib
 import json
 import math
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from collections.abc import AsyncIterator, Mapping, Sequence
@@ -48,6 +49,34 @@ class RhodesRequestError(PoolClientError):
         # class); refusal bodies are never echoed.
         self.identifiers = dict(identifiers or {})
         super().__init__(f"Rhodes request refused: HTTP {status_code} ({code})")
+
+
+@dataclass(frozen=True, slots=True)
+class RhodesTraceCapturePolicy:
+    """Observe a native trace only when the producer advertises one.
+
+    This does not promise full capture or project retention. The backend must
+    admit the request for the selected lease and profile.
+    See docs/specs/rhodes-client-v1.md.
+    """
+
+    def to_payload(self) -> dict[str, str]:
+        return {
+            "schema_version": "synth.rhodes-trace-capture.v1",
+            "mode": "when_advertised",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class RhodesTraceCaptureCapabilities:
+    """Backend-advertised profile facts; these do not grant resource access."""
+
+    schema_version: str
+    modes: tuple[str, ...]
+    profiles: tuple[str, ...]
+    producer_capability: str
+    required_capture_supported: bool
+    project_retention_supported: bool
 
 
 def _http_refusal(error: httpx.HTTPStatusError) -> RhodesRequestError:
@@ -104,6 +133,35 @@ def _retry_after_seconds(value: str, *, now: datetime) -> float | None:
 
 
 class RhodesClient(PoolClient):
+    async def trace_capture_capabilities(self) -> RhodesTraceCaptureCapabilities | None:
+        """Read trace policy support; older deployments may not advertise it."""
+        response = await self._request("GET", "/capabilities")
+        if "trace_capture" not in response:
+            return None
+        value = response["trace_capture"]
+        if not isinstance(value, dict):
+            raise PoolClientError("Rhodes returned malformed trace capture capabilities")
+        modes, profiles = value.get("modes"), value.get("profiles")
+        if (
+            not isinstance(value.get("schema_version"), str)
+            or not isinstance(value.get("producer_capability"), str)
+            or not isinstance(modes, list)
+            or not all(isinstance(item, str) for item in modes)
+            or not isinstance(profiles, list)
+            or not all(isinstance(item, str) for item in profiles)
+            or type(value.get("required_capture_supported")) is not bool
+            or type(value.get("project_retention_supported")) is not bool
+        ):
+            raise PoolClientError("Rhodes returned malformed trace capture capabilities")
+        return RhodesTraceCaptureCapabilities(
+            schema_version=value["schema_version"],
+            modes=tuple(modes),
+            profiles=tuple(profiles),
+            producer_capability=value["producer_capability"],
+            required_capture_supported=value["required_capture_supported"],
+            project_retention_supported=value["project_retention_supported"],
+        )
+
     async def wait_for(
         self,
         rollout_id: str,
@@ -179,10 +237,24 @@ class RhodesClient(PoolClient):
                 cause = cause.__cause__ if cause is not None else None
             raise
 
-    async def submit(self, pool_id: str, payload: Mapping[str, Any]) -> str:
+    async def submit(
+        self,
+        pool_id: str,
+        payload: Mapping[str, Any],
+        *,
+        trace_capture: RhodesTraceCapturePolicy | None = None,
+    ) -> str:
         if not isinstance(payload.get("idempotency_key"), str) or not payload["idempotency_key"]:
             raise ValueError("Rhodes submission requires a stable idempotency_key")
-        return await super().submit(pool_id, payload)
+        if trace_capture is None:
+            return await super().submit(pool_id, payload)
+        if not isinstance(trace_capture, RhodesTraceCapturePolicy):
+            raise TypeError("trace_capture must be a RhodesTraceCapturePolicy")
+        if "trace_capture" in payload:
+            raise ValueError("trace_capture may be supplied only once")
+        return await super().submit(
+            pool_id, {**payload, "trace_capture": trace_capture.to_payload()}
+        )
 
     async def submit_batch(self, pool_id: str, payloads: Sequence[Mapping[str, Any]]) -> list[str]:
         if len(payloads) > 1000:
