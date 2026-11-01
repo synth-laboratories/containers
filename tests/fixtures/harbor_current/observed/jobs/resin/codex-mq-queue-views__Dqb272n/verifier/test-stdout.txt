@@ -1,0 +1,51 @@
+test_parent_drilldown (__main__.QueueViewTests.test_parent_drilldown) ... ERROR
+test_read_preview_omits_unread (__main__.QueueViewTests.test_read_preview_omits_unread) ... ok
+test_sender_filter_and_toggle (__main__.QueueViewTests.test_sender_filter_and_toggle) ... ERROR
+test_sender_label_fallback_and_cap (__main__.QueueViewTests.test_sender_label_fallback_and_cap) ... FAIL
+test_unread_preview_and_transport_identity (__main__.QueueViewTests.test_unread_preview_and_transport_identity) ... FAIL
+
+======================================================================
+ERROR: test_parent_drilldown (__main__.QueueViewTests.test_parent_drilldown)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tests/test_outputs.py", line 63, in test_parent_drilldown
+    parent = next(fragment for fragment in ui.message_fragments() if fragment[1] == ' Parent ')
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+StopIteration
+
+======================================================================
+ERROR: test_sender_filter_and_toggle (__main__.QueueViewTests.test_sender_filter_and_toggle)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tests/test_outputs.py", line 57, in test_sender_filter_and_toggle
+    entry = next(fragment for fragment in parts if 'Alice' in fragment[1] and len(fragment) == 3 and '→' not in fragment[1])
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+StopIteration
+
+======================================================================
+FAIL: test_sender_label_fallback_and_cap (__main__.QueueViewTests.test_sender_label_fallback_and_cap)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tests/test_outputs.py", line 71, in test_sender_label_fallback_and_cap
+    self.assertEqual(labels, ['Child0', 'Child1', 'Child2'])
+AssertionError: Lists differ: [] != ['Child0', 'Child1', 'Child2']
+
+Second list contains 3 additional elements.
+First extra element 0:
+'Child0'
+
+- []
++ ['Child0', 'Child1', 'Child2']
+
+======================================================================
+FAIL: test_unread_preview_and_transport_identity (__main__.QueueViewTests.test_unread_preview_and_transport_identity)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tests/test_outputs.py", line 76, in test_unread_preview_and_transport_identity
+    self.assertIn('unread', text)
+AssertionError: 'unread' not found in ' Queue  All 1  Human 0  Subagents 1  Peers 0  · MQ connected\n Subagent · Alice → agent · hello · Follow-up · pending\n'
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.002s
+
+FAILED (failures=2, errors=2)

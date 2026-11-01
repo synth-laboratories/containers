@@ -1,0 +1,37 @@
+{
+    "schema_version": 2,
+    "task": {
+        "name": "codex-mq-queue-views",
+        "type": "local",
+        "digest": "sha256:8462cf3e17fe1f1a89dd737d9b4bd9d5b38763bd58a0302e8a80a8374b0c953d",
+        "source": "harbor",
+        "path": "/fixture/resinbench/workloads/coding-agent/harbor/codex-mq-queue-views"
+    },
+    "install_only": false,
+    "timeout_multiplier": 1.0,
+    "agent": {
+        "name": "harbor_trace_agent:TraceAgent",
+        "model_name": "Qwen/Qwen3-0.6B",
+        "skills": [],
+        "resume_trajectory": false,
+        "extra_allowed_hosts": [],
+        "kwargs": {},
+        "mcp_servers": []
+    },
+    "bridge_inputs": {},
+    "skills": [],
+    "environment": {
+        "type": "modal",
+        "force_build": false,
+        "delete": true,
+        "cpu_enforcement_policy": "auto",
+        "memory_enforcement_policy": "auto",
+        "extra_docker_compose": [],
+        "kwargs": {},
+        "extra_allowed_hosts": []
+    },
+    "verifier": {
+        "disable": false,
+        "environment_mode": "separate"
+    }
+}

@@ -1,0 +1,28 @@
+test_bad_line_preserves_location (__main__.ReplayTests.test_bad_line_preserves_location) ... ok
+test_empty_panel_rejected (__main__.ReplayTests.test_empty_panel_rejected) ... ok
+test_existing_tool_history (__main__.ReplayTests.test_existing_tool_history) ... ok
+test_metadata_and_defaults (__main__.ReplayTests.test_metadata_and_defaults) ... ERROR
+test_sessions_and_order_with_blank_and_empty_files (__main__.ReplayTests.test_sessions_and_order_with_blank_and_empty_files) ... ERROR
+
+======================================================================
+ERROR: test_metadata_and_defaults (__main__.ReplayTests.test_metadata_and_defaults)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tests/test_outputs.py", line 24, in test_metadata_and_defaults
+    self.assertEqual((converted['started_s'], converted['input_tokens_hint']), (12.75, 1234))
+                      ~~~~~~~~~^^^^^^^^^^^^^
+KeyError: 'started_s'
+
+======================================================================
+ERROR: test_sessions_and_order_with_blank_and_empty_files (__main__.ReplayTests.test_sessions_and_order_with_blank_and_empty_files)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tests/test_outputs.py", line 35, in test_sessions_and_order_with_blank_and_empty_files
+    self.assertEqual([r['session'] for r in rows], [0, 0, 2])
+                      ~^^^^^^^^^^^
+KeyError: 'session'
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.012s
+
+FAILED (errors=2)

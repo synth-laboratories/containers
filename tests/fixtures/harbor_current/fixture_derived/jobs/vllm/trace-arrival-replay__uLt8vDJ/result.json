@@ -1,0 +1,58 @@
+{
+  "id": "8f19b8a0-trial-1",
+  "task_name": "trace-arrival-replay",
+  "trial_name": "trace-arrival-replay__uLt8vDJ",
+  "trial_uri": "file:///fixture/resinbench/artifacts/harbor-reference/20261101T160739Z-632079bb/jobs/vllm/trace-arrival-replay__uLt8vDJ",
+  "task_id": {
+    "path": "/fixture/resinbench/workloads/coding-agent/harbor/trace-arrival-replay"
+  },
+  "source": "harbor",
+  "task_checksum": "7777777777777777777777777777777777777777777777777777777777777777",
+  "config": {
+    "task": {
+      "path": "/fixture/resinbench/workloads/coding-agent/harbor/trace-arrival-replay",
+      "source": "harbor"
+    },
+    "trial_name": "trace-arrival-replay__uLt8vDJ",
+    "agent": {
+      "name": "harbor_trace_agent:TraceAgent",
+      "model_name": "Qwen/Qwen3-0.6B"
+    },
+    "environment": {
+      "type": "modal",
+      "delete": true
+    },
+    "job_id": "8f19b8a0-2679-4f2d-9bfe-0df1b8d56ead"
+  },
+  "agent_info": {
+    "name": "resinbench-shell-agent",
+    "version": "0.1.0",
+    "model_info": {
+      "name": "Qwen3-0.6B",
+      "provider": "Qwen"
+    }
+  },
+  "agent_result": null,
+  "verifier_result": null,
+  "verifier_environment_mode": "separate",
+  "exception_info": {
+    "exception_type": "AgentTimeoutError",
+    "exception_message": "agent exceeded 900 s"
+  },
+  "started_at": "2026-11-01T16:10:45.330879Z",
+  "finished_at": "2026-11-01T16:11:03.519369Z",
+  "environment_setup": {
+    "started_at": "2026-11-01T16:10:45.412107Z",
+    "finished_at": "2026-11-01T16:10:48.110519Z"
+  },
+  "agent_setup": {
+    "started_at": "2026-11-01T16:10:48.110579Z",
+    "finished_at": "2026-11-01T16:10:48.110644Z"
+  },
+  "agent_execution": {
+    "started_at": "2026-11-01T16:10:48.110711Z",
+    "finished_at": "2026-11-01T16:10:53.101934Z"
+  },
+  "verifier": null,
+  "step_results": null
+}
