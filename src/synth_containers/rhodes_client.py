@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from collections.abc import AsyncIterator, Mapping, Sequence
-from typing import Any
+from typing import Any, Literal
 from pathlib import Path
 from urllib.parse import quote
 
@@ -65,6 +65,130 @@ class RhodesTraceCapturePolicy:
             "schema_version": "synth.rhodes-trace-capture.v1",
             "mode": "when_advertised",
         }
+
+
+@dataclass(frozen=True, slots=True)
+class RhodesTraceSaveRequest:
+    """Request project retention of an advertised trace, subject to server admission."""
+
+    valid_for_seconds: int
+    destination: Literal["project"] = "project"
+
+    def __post_init__(self):
+        if self.destination != "project":
+            raise ValueError("trace save destination must be project")
+        if type(self.valid_for_seconds) is not int or not 60 <= self.valid_for_seconds <= 86400:
+            raise ValueError("trace save valid_for_seconds must be an integer between 60 and 86400")
+
+    def to_payload(self) -> dict[str, str | int]:
+        return {"destination": self.destination, "valid_for_seconds": self.valid_for_seconds}
+
+
+@dataclass(frozen=True, slots=True)
+class RhodesTraceSaveCapture:
+    association_id: str
+    hold_id: str
+    execution_epoch: str
+    publication_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class RhodesTraceSaveAttempt:
+    execution_epoch: str
+    state: str
+    created_at: str
+    released_at: str | None
+    release_reason: str | None
+    release_decision_ref: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class RhodesTraceSaveStatus:
+    """Observed server status; retained captures and delegation are distinct."""
+
+    delegation_id: str
+    project_id: str
+    rollout_id: str
+    status: str
+    delegation_status: str | None
+    expires_at: str
+    revoked_at: str | None
+    captures: tuple[RhodesTraceSaveCapture, ...]
+    captures_truncated: bool
+    attempts: tuple[RhodesTraceSaveAttempt, ...]
+    attempts_truncated: bool
+    capture_coverage: Literal["observed_only"]
+
+
+def _trace_save_status(value: dict[str, Any], rollout_id: str) -> RhodesTraceSaveStatus:
+    try:
+
+        def required_str(item, key):
+            result = item[key]
+            if not isinstance(result, str) or not result:
+                raise ValueError(key)
+            return result
+
+        def optional_str(item, key):
+            result = item.get(key)
+            if result is not None and not isinstance(result, str):
+                raise ValueError(key)
+            return result
+
+        if (
+            value.get("rollout_id") != rollout_id
+            or value.get("status") not in {"pending", "expired", "revoked", "retained"}
+            or value.get("capture_coverage") != "observed_only"
+            or type(value.get("captures_truncated")) is not bool
+            or type(value.get("attempts_truncated")) is not bool
+            or not isinstance(value.get("captures"), list)
+            or len(value["captures"]) > 100
+            or not isinstance(value.get("attempts"), list)
+            or len(value["attempts"]) > 100
+        ):
+            raise ValueError("status")
+        captures = tuple(
+            RhodesTraceSaveCapture(
+                **{
+                    key: required_str(item, key)
+                    for key in ("association_id", "hold_id", "execution_epoch", "publication_id")
+                }
+            )
+            for item in value["captures"]
+        )
+        attempts = tuple(
+            RhodesTraceSaveAttempt(
+                execution_epoch=required_str(item, "execution_epoch"),
+                state=required_str(item, "state"),
+                created_at=required_str(item, "created_at"),
+                released_at=optional_str(item, "released_at"),
+                release_reason=optional_str(item, "release_reason"),
+                release_decision_ref=optional_str(item, "release_decision_ref"),
+            )
+            for item in value["attempts"]
+        )
+        delegation_status = optional_str(value, "delegation_status")
+        if (value["status"] == "retained") != bool(captures) or (
+            delegation_status is not None
+            and delegation_status not in {"pending", "expired", "revoked"}
+        ):
+            raise ValueError("retention status")
+        return RhodesTraceSaveStatus(
+            delegation_id=required_str(value, "delegation_id"),
+            project_id=required_str(value, "project_id"),
+            rollout_id=rollout_id,
+            status=value["status"],
+            delegation_status=delegation_status,
+            expires_at=required_str(value, "expires_at"),
+            revoked_at=optional_str(value, "revoked_at"),
+            captures=captures,
+            captures_truncated=value["captures_truncated"],
+            attempts=attempts,
+            attempts_truncated=value["attempts_truncated"],
+            capture_coverage="observed_only",
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise PoolClientError("Rhodes returned malformed configured trace save status") from error
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,9 +318,7 @@ class RhodesClient(PoolClient):
                 "(not cancelled)"
             ) from error
 
-    def _retry_delay_seconds(
-        self, response: httpx.Response | None, attempt: int
-    ) -> float | None:
+    def _retry_delay_seconds(self, response: httpx.Response | None, attempt: int) -> float | None:
         fallback = super()._retry_delay_seconds(response, attempt)
         if response is None or response.status_code not in {429, 503}:
             return fallback
@@ -243,18 +365,40 @@ class RhodesClient(PoolClient):
         payload: Mapping[str, Any],
         *,
         trace_capture: RhodesTraceCapturePolicy | None = None,
+        trace_save: RhodesTraceSaveRequest | None = None,
     ) -> str:
         if not isinstance(payload.get("idempotency_key"), str) or not payload["idempotency_key"]:
             raise ValueError("Rhodes submission requires a stable idempotency_key")
-        if trace_capture is None:
-            return await super().submit(pool_id, payload)
-        if not isinstance(trace_capture, RhodesTraceCapturePolicy):
-            raise TypeError("trace_capture must be a RhodesTraceCapturePolicy")
-        if "trace_capture" in payload:
-            raise ValueError("trace_capture may be supplied only once")
-        return await super().submit(
-            pool_id, {**payload, "trace_capture": trace_capture.to_payload()}
+        request = dict(payload)
+        if trace_capture is not None:
+            if not isinstance(trace_capture, RhodesTraceCapturePolicy):
+                raise TypeError("trace_capture must be a RhodesTraceCapturePolicy")
+            if "trace_capture" in request:
+                raise ValueError("trace_capture may be supplied only once")
+            request["trace_capture"] = trace_capture.to_payload()
+        if trace_save is not None:
+            if not isinstance(trace_save, RhodesTraceSaveRequest):
+                raise TypeError("trace_save must be a RhodesTraceSaveRequest")
+            if "trace_save" in request:
+                raise ValueError("trace_save may be supplied only once")
+            if (
+                not isinstance(request.get("trace_capture"), dict)
+                or request["trace_capture"] != RhodesTraceCapturePolicy().to_payload()
+            ):
+                raise ValueError("trace_save requires the supported trace_capture policy")
+            request["trace_save"] = trace_save.to_payload()
+        return await super().submit(pool_id, request)
+
+    async def configured_trace_save_status(self, rollout_id: str) -> RhodesTraceSaveStatus:
+        """Observe the existing server delegation and its retained captures."""
+        if not isinstance(rollout_id, str) or not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", rollout_id
+        ):
+            raise ValueError("rollout_id must be a bounded Rhodes identifier")
+        body = await self._request(
+            "GET", f"/rollouts/{quote(rollout_id, safe='')}/configured_trace_save"
         )
+        return _trace_save_status(body, rollout_id)
 
     async def submit_batch(self, pool_id: str, payloads: Sequence[Mapping[str, Any]]) -> list[str]:
         if len(payloads) > 1000:
@@ -653,7 +797,9 @@ class RhodesClient(PoolClient):
             },
         )
 
-    async def get_deployment(self, pool_id: str, task_id: str, *, project_id: str) -> dict[str, Any]:
+    async def get_deployment(
+        self, pool_id: str, task_id: str, *, project_id: str
+    ) -> dict[str, Any]:
         return await self._request(
             "GET",
             "/pools/" + quote(pool_id, safe="") + "/deployments/" + quote(task_id, safe=""),
@@ -791,7 +937,9 @@ class RhodesClient(PoolClient):
         )
         async with self._client.stream("GET", path) as response:
             if response.status_code >= 400:
-                raise RhodesRequestError(response.status_code, "publication_asset_unavailable", None)
+                raise RhodesRequestError(
+                    response.status_code, "publication_asset_unavailable", None
+                )
             body = bytearray()
             async for chunk in response.aiter_bytes():
                 body.extend(chunk)

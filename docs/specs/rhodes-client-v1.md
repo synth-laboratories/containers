@@ -48,6 +48,17 @@ advertises one. Its private Artifact custody is a separate state. This policy
 does not promise complete capture, required capture or Mnemosyne project
 retention. Unsupported profiles and modes are refused by the server.
 
+For a server that admits configured project retention, callers can pass
+`trace_capture=RhodesTraceCapturePolicy()` and
+`trace_save=RhodesTraceSaveRequest(valid_for_seconds=3600)` together to `submit`.
+The duration is an integer from 60 through 86400 seconds; the destination is
+`project`. The request is an opt-in delegation, not evidence that a trace was
+captured or saved. `await client.configured_trace_save_status(rollout_id)` reads
+the existing server status, including separately reported delegation state and
+observed retained captures. Capture coverage can be incomplete. The backend
+currently gates this feature; the client does not advertise readiness or bypass
+that gate. Keep the original idempotency key when reconciling an uncertain submit.
+
 This interface is in implementation qualification. Native benchmark/provider,
 ready-capacity, org funding and Swarms/optimizer adoption evidence remain
 separate acceptance requirements in the v0.24 Rhodes tickets.
