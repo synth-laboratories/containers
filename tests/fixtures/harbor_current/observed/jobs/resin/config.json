@@ -1,0 +1,19 @@
+{
+    "job_name": "resin",
+    "jobs_dir": "/fixture/resinbench/artifacts/harbor-reference/20261101T160739Z-632079bb/jobs",
+    "n_concurrent_trials": 1,
+    "environment": {
+        "type": "modal"
+    },
+    "agents": [
+        {
+            "name": "harbor_trace_agent:TraceAgent",
+            "model_name": "Qwen/Qwen3-0.6B"
+        }
+    ],
+    "datasets": [
+        {
+            "path": "/fixture/resinbench/workloads/coding-agent/harbor"
+        }
+    ]
+}

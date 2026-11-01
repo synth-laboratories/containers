@@ -1,0 +1,51 @@
+{
+  "steps": [
+    {
+      "step": 0,
+      "finish_reason": "tool_calls",
+      "tool_calls": 1,
+      "usage": {
+        "prompt_tokens": 402,
+        "completion_tokens": 519,
+        "total_tokens": 921,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": null
+        }
+      },
+      "tools": [
+        {
+          "name": "shell",
+          "executed": true,
+          "return_code": 1
+        }
+      ]
+    },
+    {
+      "step": 1,
+      "finish_reason": "tool_calls",
+      "tool_calls": 1,
+      "usage": {
+        "prompt_tokens": 991,
+        "completion_tokens": 261,
+        "total_tokens": 1252,
+        "prompt_tokens_details": {
+          "cached_tokens": 768
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": null
+        }
+      },
+      "tools": [
+        {
+          "name": "final_answer",
+          "executed": true
+        }
+      ]
+    }
+  ],
+  "termination": "final_answer_tool",
+  "tool_turn_limit": 12
+}

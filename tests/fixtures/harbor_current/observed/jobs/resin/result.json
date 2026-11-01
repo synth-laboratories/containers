@@ -1,0 +1,40 @@
+{
+    "id": "67585b1a-5408-43bd-9aee-81fb6280410b",
+    "started_at": "2026-11-01T11:09:16.222964",
+    "updated_at": "2026-11-01T11:09:44.545860",
+    "finished_at": "2026-11-01T11:09:44.545860",
+    "n_total_trials": 2,
+    "stats": {
+        "n_completed_trials": 2,
+        "n_errored_trials": 0,
+        "n_running_trials": 0,
+        "n_pending_trials": 0,
+        "n_cancelled_trials": 0,
+        "n_retries": 0,
+        "evals": {
+            "resinbench-shell-agent__Qwen3-0.6B__harbor": {
+                "n_trials": 2,
+                "n_errors": 0,
+                "metrics": [
+                    {
+                        "mean": 0.0
+                    }
+                ],
+                "pass_at_k": {},
+                "reward_stats": {
+                    "reward": {
+                        "0.0": [
+                            "codex-mq-queue-views__Dqb272n",
+                            "trace-arrival-replay__gYpv26r"
+                        ]
+                    }
+                },
+                "exception_stats": {}
+            }
+        },
+        "n_input_tokens": 3955,
+        "n_cache_tokens": null,
+        "n_output_tokens": 1551,
+        "cost_usd": null
+    }
+}

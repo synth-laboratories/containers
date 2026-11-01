@@ -1,0 +1,282 @@
+{
+  "files": [
+    {
+      "origin": "producer_observed",
+      "path": "observed/jobs/resin/codex-mq-queue-views__Dqb272n/agent/resinbench-agent.json",
+      "sanitized": false,
+      "source_relpath": "jobs/resin/codex-mq-queue-views__Dqb272n/agent/resinbench-agent.json",
+      "source_sha256": "92bcd851d5a642387a3860159fd3b39e6523d48e578b215fff7dc2d908737688",
+      "source_size_bytes": 1557,
+      "stored_sha256": "92bcd851d5a642387a3860159fd3b39e6523d48e578b215fff7dc2d908737688",
+      "stored_size_bytes": 1557
+    },
+    {
+      "origin": "producer_observed",
+      "path": "observed/jobs/resin/codex-mq-queue-views__Dqb272n/artifacts/app/queue.py",
+      "sanitized": false,
+      "source_relpath": "jobs/resin/codex-mq-queue-views__Dqb272n/artifacts/app/queue.py",
+      "source_sha256": "d764310ae2d4e5cb5331791a7a43daf367707bd5f49775dbdd30338290f8c528",
+      "source_size_bytes": 24222,
+      "stored_sha256": "d764310ae2d4e5cb5331791a7a43daf367707bd5f49775dbdd30338290f8c528",
+      "stored_size_bytes": 24222
+    },
+    {
+      "origin": "producer_observed",
+      "path": "observed/jobs/resin/codex-mq-queue-views__Dqb272n/artifacts/manifest.json",
+      "sanitized": false,
+      "source_relpath": "jobs/resin/codex-mq-queue-views__Dqb272n/artifacts/manifest.json",
+      "source_sha256": "2e92e280505401c114b7163a0336a4bb07114234eb48b9e675261c8bfe67fee8",
+      "source_size_bytes": 301,
+      "stored_sha256": "2e92e280505401c114b7163a0336a4bb07114234eb48b9e675261c8bfe67fee8",
+      "stored_size_bytes": 301
+    },
+    {
+      "origin": "producer_observed",
+      "path": "observed/jobs/resin/codex-mq-queue-views__Dqb272n/config.json",
+      "sanitized": true,
+      "source_relpath": "jobs/resin/codex-mq-queue-views__Dqb272n/config.json",
+      "source_sha256": "d3057e70419abd80f94ff3eb07bfe2d18656e429d141112228db235f99f27c58",
+      "source_size_bytes": 551,
+      "stored_sha256": "0e5d518c63f87581f899d3e084fdbd0c13415820d47e8a183753000233d45604",
+      "stored_size_bytes": 513
+    },
+    {
+      "origin": "producer_observed",
+      "path": "observed/jobs/resin/codex-mq-queue-views__Dqb272n/lock.json",
+      "sanitized": true,
+      "source_relpath": "jobs/resin/codex-mq-queue-views__Dqb272n/lock.json",
+      "source_sha256": "d73e0ff3ef6184f29ed7292ee4d81f9fb49268d3fd72d0e612e2987b1e7c05e1",
+      "source_size_bytes": 1072,
+      "stored_sha256": "523936ed5d00ca7620c7a28f52923ba2510499c44ad5e21e2b9cd955af54b90f",
+      "stored_size_bytes": 1053
+    },
+    {
+      "origin": "producer_observed",
+      "path": "observed/jobs/resin/codex-mq-queue-views__Dqb272n/result.json",
+      "sanitized": true,
+      "source_relpath": "jobs/resin/codex-mq-queue-views__Dqb272n/result.json",
+      "source_sha256": "649a9a0c1955a11ee170006214327d8ea8a265256cd5a84f8bc878dc1982bf31",
+      "source_size_bytes": 6734,
+      "stored_sha256": "9d72910a869c228e9dcf7ff4cfa15e8548b0938e075df2adc0560791031369d7",
+      "stored_size_bytes": 6658
+    },
+    {
+      "origin": "producer_observed",
+      "path": "observed/jobs/resin/codex-mq-queue-views__Dqb272n/trial.log",
+      "sanitized": false,
+      "source_relpath": "jobs/resin/codex-mq-queue-views__Dqb272n/trial.log",
+      "source_sha256": "f8e1975ee06d439cb4f8e8c6d8812dd83e92aaf38043d8e7bc95c90a47605f29",
+      "source_size_bytes": 98,
+      "stored_sha256": "f8e1975ee06d439cb4f8e8c6d8812dd83e92aaf38043d8e7bc95c90a47605f29",
+      "stored_size_bytes": 98
+    },
+    {
+      "origin": "producer_observed",
+      "path": "observed/jobs/resin/codex-mq-queue-views__Dqb272n/verifier/reward.txt",
+      "sanitized": false,
+      "source_relpath": "jobs/resin/codex-mq-queue-views__Dqb272n/verifier/reward.txt",
+      "source_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "source_size_bytes": 2,
+      "stored_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "stored_size_bytes": 2
+    },
+    {
+      "origin": "producer_observed",
+      "path": "observed/jobs/resin/codex-mq-queue-views__Dqb272n/verifier/test-stdout.txt",
+      "sanitized": false,
+      "source_relpath": "jobs/resin/codex-mq-queue-views__Dqb272n/verifier/test-stdout.txt",
+      "source_sha256": "922b871935f80d8a5bdcad74ff9e582b999efe69584f29809aa4d8b5fb4946bb",
+      "source_size_bytes": 2951,
+      "stored_sha256": "922b871935f80d8a5bdcad74ff9e582b999efe69584f29809aa4d8b5fb4946bb",
+      "stored_size_bytes": 2951
+    },
+    {
+      "origin": "producer_observed",
+      "path": "observed/jobs/resin/config.json",
+      "sanitized": true,
+      "source_relpath": "jobs/resin/config.json",
+      "source_sha256": "2144057123a07c293ea78a3fcd9429058deccab8e759f3db45ebf43f9bbf3499",
+      "source_size_bytes": 501,
+      "stored_sha256": "a77f5afe98adb05da898dcaac9bdab3eb5f64db1c5f37b585e08f17328e9ca02",
+      "stored_size_bytes": 463
+    },
+    {
+      "origin": "producer_observed",
+      "path": "observed/jobs/resin/job.log",
+      "sanitized": false,
+      "source_relpath": "jobs/resin/job.log",
+      "source_sha256": "c596eebfec08c4463dd93a3446ab09d6bb3b8cf6f5c5e0f368fc6c91e69a324b",
+      "source_size_bytes": 196,
+      "stored_sha256": "c596eebfec08c4463dd93a3446ab09d6bb3b8cf6f5c5e0f368fc6c91e69a324b",
+      "stored_size_bytes": 196
+    },
+    {
+      "origin": "producer_observed",
+      "path": "observed/jobs/resin/lock.json",
+      "sanitized": true,
+      "source_relpath": "jobs/resin/lock.json",
+      "source_sha256": "39b0e549448e1d14fd1373dbaa3f738b60983d58c07d98354bea472fd960aa7c",
+      "source_size_bytes": 3460,
+      "stored_sha256": "105e01d9f509da4bc0983ba8e3e5b324a0a7bdbe0ad5d481e25f866bdd55d8ee",
+      "stored_size_bytes": 3422
+    },
+    {
+      "origin": "producer_observed",
+      "path": "observed/jobs/resin/result.json",
+      "sanitized": false,
+      "source_relpath": "jobs/resin/result.json",
+      "source_sha256": "e20deb1836a5d111bd8ff6f8005829802ea951c1d88307a3f36910cc618bed08",
+      "source_size_bytes": 1201,
+      "stored_sha256": "e20deb1836a5d111bd8ff6f8005829802ea951c1d88307a3f36910cc618bed08",
+      "stored_size_bytes": 1201
+    },
+    {
+      "origin": "producer_observed",
+      "path": "observed/jobs/resin/trace-arrival-replay__gYpv26r/agent/resinbench-agent.json",
+      "sanitized": false,
+      "source_relpath": "jobs/resin/trace-arrival-replay__gYpv26r/agent/resinbench-agent.json",
+      "source_sha256": "02258d9244f4c3f432a9f1b8b3b78c2d719679c46307443e7d83ad5f16b2da68",
+      "source_size_bytes": 1055,
+      "stored_sha256": "02258d9244f4c3f432a9f1b8b3b78c2d719679c46307443e7d83ad5f16b2da68",
+      "stored_size_bytes": 1055
+    },
+    {
+      "origin": "producer_observed",
+      "path": "observed/jobs/resin/trace-arrival-replay__gYpv26r/artifacts/app/qwen35_panel.py",
+      "sanitized": false,
+      "source_relpath": "jobs/resin/trace-arrival-replay__gYpv26r/artifacts/app/qwen35_panel.py",
+      "source_sha256": "672d4a7e54e4c8ccd03076abbab1f0845afe695829dbddba3d254c506e413dcf",
+      "source_size_bytes": 3392,
+      "stored_sha256": "672d4a7e54e4c8ccd03076abbab1f0845afe695829dbddba3d254c506e413dcf",
+      "stored_size_bytes": 3392
+    },
+    {
+      "origin": "producer_observed",
+      "path": "observed/jobs/resin/trace-arrival-replay__gYpv26r/artifacts/manifest.json",
+      "sanitized": false,
+      "source_relpath": "jobs/resin/trace-arrival-replay__gYpv26r/artifacts/manifest.json",
+      "source_sha256": "a2433ba04e41e7d1ea0307754e02e80466dc6bdda1fb86801134fa471017aca7",
+      "source_size_bytes": 315,
+      "stored_sha256": "a2433ba04e41e7d1ea0307754e02e80466dc6bdda1fb86801134fa471017aca7",
+      "stored_size_bytes": 315
+    },
+    {
+      "origin": "producer_observed",
+      "path": "observed/jobs/resin/trace-arrival-replay__gYpv26r/config.json",
+      "sanitized": true,
+      "source_relpath": "jobs/resin/trace-arrival-replay__gYpv26r/config.json",
+      "source_sha256": "22d54fd5ad7d9d82c3fccdb9643363fd666530d26beca1da0e2789615344868f",
+      "source_size_bytes": 551,
+      "stored_sha256": "feaa88cfabf46ea95651b83bc90e23088102e500aac1e9bf3ae752cf8f667c87",
+      "stored_size_bytes": 513
+    },
+    {
+      "origin": "producer_observed",
+      "path": "observed/jobs/resin/trace-arrival-replay__gYpv26r/lock.json",
+      "sanitized": true,
+      "source_relpath": "jobs/resin/trace-arrival-replay__gYpv26r/lock.json",
+      "source_sha256": "7d8e8893c4e479896ba75bb122eacef181801b49920acb24554acef915828a5c",
+      "source_size_bytes": 1072,
+      "stored_sha256": "7c4d0dac61f8a150d6c8263ffe94b257b0293d73419e23c3d419cfb4d2df09ef",
+      "stored_size_bytes": 1053
+    },
+    {
+      "origin": "producer_observed",
+      "path": "observed/jobs/resin/trace-arrival-replay__gYpv26r/result.json",
+      "sanitized": true,
+      "source_relpath": "jobs/resin/trace-arrival-replay__gYpv26r/result.json",
+      "source_sha256": "294b5d0a36879825d3807d64aab9c56bdda915267229bfa20264f058cb7a5107",
+      "source_size_bytes": 5876,
+      "stored_sha256": "9f3945f66ed2a37b88da06dbe53496e552a655dd15dc034a0b5a748b32205feb",
+      "stored_size_bytes": 5800
+    },
+    {
+      "origin": "producer_observed",
+      "path": "observed/jobs/resin/trace-arrival-replay__gYpv26r/trial.log",
+      "sanitized": false,
+      "source_relpath": "jobs/resin/trace-arrival-replay__gYpv26r/trial.log",
+      "source_sha256": "f8e1975ee06d439cb4f8e8c6d8812dd83e92aaf38043d8e7bc95c90a47605f29",
+      "source_size_bytes": 98,
+      "stored_sha256": "f8e1975ee06d439cb4f8e8c6d8812dd83e92aaf38043d8e7bc95c90a47605f29",
+      "stored_size_bytes": 98
+    },
+    {
+      "origin": "producer_observed",
+      "path": "observed/jobs/resin/trace-arrival-replay__gYpv26r/verifier/reward.txt",
+      "sanitized": false,
+      "source_relpath": "jobs/resin/trace-arrival-replay__gYpv26r/verifier/reward.txt",
+      "source_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "source_size_bytes": 2,
+      "stored_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "stored_size_bytes": 2
+    },
+    {
+      "origin": "producer_observed",
+      "path": "observed/jobs/resin/trace-arrival-replay__gYpv26r/verifier/test-stdout.txt",
+      "sanitized": false,
+      "source_relpath": "jobs/resin/trace-arrival-replay__gYpv26r/verifier/test-stdout.txt",
+      "source_sha256": "acc98f7b86361ce2791f43e507a3f74acdb70f6630ecd68d7203f5d77d34ff15",
+      "source_size_bytes": 1615,
+      "stored_sha256": "acc98f7b86361ce2791f43e507a3f74acdb70f6630ecd68d7203f5d77d34ff15",
+      "stored_size_bytes": 1615
+    },
+    {
+      "origin": "fixture_derived",
+      "path": "fixture_derived/jobs/vllm/trace-arrival-replay__uLt8vDJ/config.json",
+      "sanitized": false,
+      "source_relpath": "jobs/vllm/trace-arrival-replay__uLt8vDJ/config.json",
+      "source_sha256": "7ce7632d67382109cf746748d3d59afb8e57445a8f6e07fd9b00a73a7f77d4db",
+      "source_size_bytes": 393,
+      "stored_sha256": "7ce7632d67382109cf746748d3d59afb8e57445a8f6e07fd9b00a73a7f77d4db",
+      "stored_size_bytes": 393
+    },
+    {
+      "origin": "fixture_derived",
+      "path": "fixture_derived/jobs/vllm/trace-arrival-replay__uLt8vDJ/lock.json",
+      "sanitized": false,
+      "source_relpath": "jobs/vllm/trace-arrival-replay__uLt8vDJ/lock.json",
+      "source_sha256": "d22256451d8773cbec1f81e61ca89f308c54eabd5b8447d20c003b454ce43652",
+      "source_size_bytes": 212,
+      "stored_sha256": "d22256451d8773cbec1f81e61ca89f308c54eabd5b8447d20c003b454ce43652",
+      "stored_size_bytes": 212
+    },
+    {
+      "origin": "fixture_derived",
+      "path": "fixture_derived/jobs/vllm/trace-arrival-replay__uLt8vDJ/result.json",
+      "sanitized": false,
+      "source_relpath": "jobs/vllm/trace-arrival-replay__uLt8vDJ/result.json",
+      "source_sha256": "c53ac026bcc126072e7af31de89f688da6a9649407e28c0bb1b2742eda42ff1a",
+      "source_size_bytes": 1798,
+      "stored_sha256": "c53ac026bcc126072e7af31de89f688da6a9649407e28c0bb1b2742eda42ff1a",
+      "stored_size_bytes": 1798
+    },
+    {
+      "origin": "fixture_derived",
+      "path": "fixture_derived/jobs/vllm/trace-arrival-replay__uLt8vDJ/trial.log",
+      "sanitized": false,
+      "source_relpath": "jobs/vllm/trace-arrival-replay__uLt8vDJ/trial.log",
+      "source_sha256": "396a8ac2155c24b0c7602122b6b9453315e827c133354cba33f275fa5f9054b3",
+      "source_size_bytes": 66,
+      "stored_sha256": "396a8ac2155c24b0c7602122b6b9453315e827c133354cba33f275fa5f9054b3",
+      "stored_size_bytes": 66
+    }
+  ],
+  "fixture_derived": {
+    "generator": "resinbench tools/harbor_fixture.py build(parent)",
+    "generator_repo_commit": "472225d",
+    "generator_sha256": "9e032ecc9f0289e53097cf9975589aab9b992fa538f5bcc1b4959790f4113aef",
+    "note": "deterministic synthetic failed trial (AgentTimeoutError, no agent/verifier output); not producer-observed"
+  },
+  "producer_observed": {
+    "engine": "resin",
+    "harbor_version_advertised": "0.22.0",
+    "run_id": "20261101T160739Z-632079bb",
+    "source_root": "resinbench/artifacts/harbor-reference/20261101T160739Z-632079bb (read-only user run)"
+  },
+  "sanitization": {
+    "from": "$HOME/GitHub/resinbench",
+    "rule": "byte replace",
+    "to": "/fixture/resinbench"
+  },
+  "schema_version": "synth.harbor-golden-source.v1"
+}

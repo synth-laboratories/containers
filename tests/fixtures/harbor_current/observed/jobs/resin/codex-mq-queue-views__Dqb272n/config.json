@@ -1,0 +1,16 @@
+{
+    "task": {
+        "path": "/fixture/resinbench/workloads/coding-agent/harbor/codex-mq-queue-views",
+        "source": "harbor"
+    },
+    "trial_name": "codex-mq-queue-views__Dqb272n",
+    "trials_dir": "/fixture/resinbench/artifacts/harbor-reference/20261101T160739Z-632079bb/jobs/resin",
+    "agent": {
+        "name": "harbor_trace_agent:TraceAgent",
+        "model_name": "Qwen/Qwen3-0.6B"
+    },
+    "environment": {
+        "type": "modal"
+    },
+    "job_id": "67585b1a-5408-43bd-9aee-81fb6280410b"
+}
