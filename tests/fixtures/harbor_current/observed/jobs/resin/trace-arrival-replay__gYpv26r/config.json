@@ -1,0 +1,16 @@
+{
+    "task": {
+        "path": "/fixture/resinbench/workloads/coding-agent/harbor/trace-arrival-replay",
+        "source": "harbor"
+    },
+    "trial_name": "trace-arrival-replay__gYpv26r",
+    "trials_dir": "/fixture/resinbench/artifacts/harbor-reference/20261101T160739Z-632079bb/jobs/resin",
+    "agent": {
+        "name": "harbor_trace_agent:TraceAgent",
+        "model_name": "Qwen/Qwen3-0.6B"
+    },
+    "environment": {
+        "type": "modal"
+    },
+    "job_id": "67585b1a-5408-43bd-9aee-81fb6280410b"
+}

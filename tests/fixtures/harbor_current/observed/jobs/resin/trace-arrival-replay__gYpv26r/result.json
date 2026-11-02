@@ -1,0 +1,167 @@
+{
+    "id": "228af94c-b167-446b-b5ba-b72c3458035d",
+    "task_name": "trace-arrival-replay",
+    "trial_name": "trace-arrival-replay__gYpv26r",
+    "trial_uri": "file:///fixture/resinbench/artifacts/harbor-reference/20261101T160739Z-632079bb/jobs/resin/trace-arrival-replay__gYpv26r",
+    "task_id": {
+        "path": "/fixture/resinbench/workloads/coding-agent/harbor/trace-arrival-replay"
+    },
+    "source": "harbor",
+    "task_checksum": "3d4a3c2661d1121410ab6c291d2498217d0d928c43c7787550dd33af7af32103",
+    "config": {
+        "task": {
+            "path": "/fixture/resinbench/workloads/coding-agent/harbor/trace-arrival-replay",
+            "git_url": null,
+            "git_commit_id": null,
+            "name": null,
+            "ref": null,
+            "overwrite": false,
+            "download_dir": null,
+            "source": "harbor"
+        },
+        "trial_name": "trace-arrival-replay__gYpv26r",
+        "trials_dir": "/fixture/resinbench/artifacts/harbor-reference/20261101T160739Z-632079bb/jobs/resin",
+        "install_only": false,
+        "timeout_multiplier": 1.0,
+        "agent_timeout_multiplier": null,
+        "verifier_timeout_multiplier": null,
+        "agent_setup_timeout_multiplier": null,
+        "environment_build_timeout_multiplier": null,
+        "agent": {
+            "name": "harbor_trace_agent:TraceAgent",
+            "import_path": null,
+            "model_name": "Qwen/Qwen3-0.6B",
+            "n_concurrent": null,
+            "concurrency_group": null,
+            "skills": [],
+            "override_timeout_sec": null,
+            "override_setup_timeout_sec": null,
+            "max_timeout_sec": null,
+            "resume_trajectory": false,
+            "load_trajectory": null,
+            "extra_allowed_hosts": [],
+            "kwargs": {},
+            "mcp_servers": []
+        },
+        "user_agent": null,
+        "environment": {
+            "type": "modal",
+            "import_path": null,
+            "force_build": false,
+            "delete": true,
+            "cpu_enforcement_policy": "auto",
+            "memory_enforcement_policy": "auto",
+            "override_cpus": null,
+            "override_memory_mb": null,
+            "override_storage_mb": null,
+            "override_gpus": null,
+            "override_tpu": null,
+            "mounts": null,
+            "extra_docker_compose": [],
+            "kwargs": {},
+            "extra_allowed_hosts": []
+        },
+        "verifier": {
+            "override_timeout_sec": null,
+            "max_timeout_sec": null,
+            "disable": false
+        },
+        "artifacts": [],
+        "extra_instruction_paths": [],
+        "extra_instructions": [],
+        "job_id": "67585b1a-5408-43bd-9aee-81fb6280410b",
+        "source_trial": null
+    },
+    "agent_info": {
+        "name": "resinbench-shell-agent",
+        "version": "0.1.0",
+        "model_info": {
+            "name": "Qwen3-0.6B",
+            "provider": "Qwen"
+        }
+    },
+    "agent_result": {
+        "n_input_tokens": 1393,
+        "n_cache_tokens": null,
+        "n_output_tokens": 780,
+        "cost_usd": null,
+        "rollout_details": null,
+        "metadata": {
+            "steps": [
+                {
+                    "step": 0,
+                    "finish_reason": "tool_calls",
+                    "tool_calls": 1,
+                    "usage": {
+                        "prompt_tokens": 402,
+                        "completion_tokens": 519,
+                        "total_tokens": 921,
+                        "prompt_tokens_details": {
+                            "cached_tokens": 0
+                        },
+                        "completion_tokens_details": {
+                            "reasoning_tokens": null
+                        }
+                    },
+                    "tools": [
+                        {
+                            "name": "shell",
+                            "executed": true,
+                            "return_code": 1
+                        }
+                    ]
+                },
+                {
+                    "step": 1,
+                    "finish_reason": "tool_calls",
+                    "tool_calls": 1,
+                    "usage": {
+                        "prompt_tokens": 991,
+                        "completion_tokens": 261,
+                        "total_tokens": 1252,
+                        "prompt_tokens_details": {
+                            "cached_tokens": 768
+                        },
+                        "completion_tokens_details": {
+                            "reasoning_tokens": null
+                        }
+                    },
+                    "tools": [
+                        {
+                            "name": "final_answer",
+                            "executed": true
+                        }
+                    ]
+                }
+            ],
+            "termination": "final_answer_tool",
+            "tool_turn_limit": 12
+        }
+    },
+    "verifier_result": {
+        "rewards": {
+            "reward": 0.0
+        }
+    },
+    "verifier_environment_mode": "separate",
+    "exception_info": null,
+    "started_at": "2026-11-01T16:09:34.523498Z",
+    "finished_at": "2026-11-01T16:09:44.543875Z",
+    "environment_setup": {
+        "started_at": "2026-11-01T16:09:34.524263Z",
+        "finished_at": "2026-11-01T16:09:35.110412Z"
+    },
+    "agent_setup": {
+        "started_at": "2026-11-01T16:09:35.110429Z",
+        "finished_at": "2026-11-01T16:09:35.110445Z"
+    },
+    "agent_execution": {
+        "started_at": "2026-11-01T16:09:35.110471Z",
+        "finished_at": "2026-11-01T16:09:37.997623Z"
+    },
+    "verifier": {
+        "started_at": "2026-11-01T16:09:39.147489Z",
+        "finished_at": "2026-11-01T16:09:44.543867Z"
+    },
+    "step_results": null
+}

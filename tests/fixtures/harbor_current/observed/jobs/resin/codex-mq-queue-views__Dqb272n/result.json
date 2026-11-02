@@ -1,0 +1,190 @@
+{
+    "id": "13a1aaa6-0447-4d1c-b1a3-dc05a6389a15",
+    "task_name": "codex-mq-queue-views",
+    "trial_name": "codex-mq-queue-views__Dqb272n",
+    "trial_uri": "file:///fixture/resinbench/artifacts/harbor-reference/20261101T160739Z-632079bb/jobs/resin/codex-mq-queue-views__Dqb272n",
+    "task_id": {
+        "path": "/fixture/resinbench/workloads/coding-agent/harbor/codex-mq-queue-views"
+    },
+    "source": "harbor",
+    "task_checksum": "6ff50c41320e6380708b9c8d3acdd2fa40aba43672fc273fb53f424ea0ac28e3",
+    "config": {
+        "task": {
+            "path": "/fixture/resinbench/workloads/coding-agent/harbor/codex-mq-queue-views",
+            "git_url": null,
+            "git_commit_id": null,
+            "name": null,
+            "ref": null,
+            "overwrite": false,
+            "download_dir": null,
+            "source": "harbor"
+        },
+        "trial_name": "codex-mq-queue-views__Dqb272n",
+        "trials_dir": "/fixture/resinbench/artifacts/harbor-reference/20261101T160739Z-632079bb/jobs/resin",
+        "install_only": false,
+        "timeout_multiplier": 1.0,
+        "agent_timeout_multiplier": null,
+        "verifier_timeout_multiplier": null,
+        "agent_setup_timeout_multiplier": null,
+        "environment_build_timeout_multiplier": null,
+        "agent": {
+            "name": "harbor_trace_agent:TraceAgent",
+            "import_path": null,
+            "model_name": "Qwen/Qwen3-0.6B",
+            "n_concurrent": null,
+            "concurrency_group": null,
+            "skills": [],
+            "override_timeout_sec": null,
+            "override_setup_timeout_sec": null,
+            "max_timeout_sec": null,
+            "resume_trajectory": false,
+            "load_trajectory": null,
+            "extra_allowed_hosts": [],
+            "kwargs": {},
+            "mcp_servers": []
+        },
+        "user_agent": null,
+        "environment": {
+            "type": "modal",
+            "import_path": null,
+            "force_build": false,
+            "delete": true,
+            "cpu_enforcement_policy": "auto",
+            "memory_enforcement_policy": "auto",
+            "override_cpus": null,
+            "override_memory_mb": null,
+            "override_storage_mb": null,
+            "override_gpus": null,
+            "override_tpu": null,
+            "mounts": null,
+            "extra_docker_compose": [],
+            "kwargs": {},
+            "extra_allowed_hosts": []
+        },
+        "verifier": {
+            "override_timeout_sec": null,
+            "max_timeout_sec": null,
+            "disable": false
+        },
+        "artifacts": [],
+        "extra_instruction_paths": [],
+        "extra_instructions": [],
+        "job_id": "67585b1a-5408-43bd-9aee-81fb6280410b",
+        "source_trial": null
+    },
+    "agent_info": {
+        "name": "resinbench-shell-agent",
+        "version": "0.1.0",
+        "model_info": {
+            "name": "Qwen3-0.6B",
+            "provider": "Qwen"
+        }
+    },
+    "agent_result": {
+        "n_input_tokens": 2562,
+        "n_cache_tokens": null,
+        "n_output_tokens": 771,
+        "cost_usd": null,
+        "rollout_details": null,
+        "metadata": {
+            "steps": [
+                {
+                    "step": 0,
+                    "finish_reason": "tool_calls",
+                    "tool_calls": 1,
+                    "usage": {
+                        "prompt_tokens": 481,
+                        "completion_tokens": 402,
+                        "total_tokens": 883,
+                        "prompt_tokens_details": {
+                            "cached_tokens": 0
+                        },
+                        "completion_tokens_details": {
+                            "reasoning_tokens": null
+                        }
+                    },
+                    "tools": [
+                        {
+                            "name": "shell",
+                            "executed": true,
+                            "return_code": 127
+                        }
+                    ]
+                },
+                {
+                    "step": 1,
+                    "finish_reason": "tool_calls",
+                    "tool_calls": 1,
+                    "usage": {
+                        "prompt_tokens": 912,
+                        "completion_tokens": 197,
+                        "total_tokens": 1109,
+                        "prompt_tokens_details": {
+                            "cached_tokens": 768
+                        },
+                        "completion_tokens_details": {
+                            "reasoning_tokens": null
+                        }
+                    },
+                    "tools": [
+                        {
+                            "name": "shell",
+                            "executed": true,
+                            "return_code": 1
+                        }
+                    ]
+                },
+                {
+                    "step": 2,
+                    "finish_reason": "tool_calls",
+                    "tool_calls": 1,
+                    "usage": {
+                        "prompt_tokens": 1169,
+                        "completion_tokens": 172,
+                        "total_tokens": 1341,
+                        "prompt_tokens_details": {
+                            "cached_tokens": 1024
+                        },
+                        "completion_tokens_details": {
+                            "reasoning_tokens": null
+                        }
+                    },
+                    "tools": [
+                        {
+                            "name": "final_answer",
+                            "executed": true
+                        }
+                    ]
+                }
+            ],
+            "termination": "final_answer_tool",
+            "tool_turn_limit": 12
+        }
+    },
+    "verifier_result": {
+        "rewards": {
+            "reward": 0.0
+        }
+    },
+    "verifier_environment_mode": "separate",
+    "exception_info": null,
+    "started_at": "2026-11-01T16:09:16.330879Z",
+    "finished_at": "2026-11-01T16:09:34.519369Z",
+    "environment_setup": {
+        "started_at": "2026-11-01T16:09:16.412107Z",
+        "finished_at": "2026-11-01T16:09:19.110519Z"
+    },
+    "agent_setup": {
+        "started_at": "2026-11-01T16:09:19.110579Z",
+        "finished_at": "2026-11-01T16:09:19.110644Z"
+    },
+    "agent_execution": {
+        "started_at": "2026-11-01T16:09:19.110711Z",
+        "finished_at": "2026-11-01T16:09:24.101934Z"
+    },
+    "verifier": {
+        "started_at": "2026-11-01T16:09:32.562704Z",
+        "finished_at": "2026-11-01T16:09:34.519358Z"
+    },
+    "step_results": null
+}
