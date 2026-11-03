@@ -1,0 +1,8 @@
+{
+  "kind": "papercut",
+  "description": "First actual isolated_stdio_v1 Docker qualification exposed two concrete compatibility failures: installed Docker CLI emits exact lowercase error: no such object, which strict absence parsing rejected; create --interactive without explicit attach stdin leaves StdinOnce false, so the exact /bin/cat input never received EOF and execution timed out. Source adds only the exact lowercase absence form plus explicit attached stdin/stdout/stderr and actual StdinOnce validation. Original owned container cleanup then blocked in Docker inspect/rm despite healthy daemon info; exact original ownership is retained and no engine restart/foreign state mutation was attempted. Estimated time lost 180 seconds so far; runtime requalification pending.",
+  "severity": "medium",
+  "time_lost_seconds": 180,
+  "status": "open",
+  "resolution": null
+}

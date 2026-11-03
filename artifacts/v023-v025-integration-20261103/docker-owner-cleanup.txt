@@ -1,0 +1,12 @@
+['docker', 'info', '--format', '{{.ID}}']
+0
+675739ac-5f66-433f-bd30-f22809aa43f2
+['docker', 'inspect', 'c6c8e7820e86', '--format', '{{.Id}} {{index .Config.Labels "ai.synth.rhodes.finite"}} {{.State.Running}}']
+timeout8s
+['docker', 'container', 'ls', '-a', '--filter', 'label=ai.synth.rhodes.finite', '--format', '{{.ID}} {{.Names}} {{.Status}}']
+0
+c6c8e7820e86 rhodes-finite-9a6182f0f98b8b389af74f6ec392276363df4be3 Up 2 minutes
+['docker', 'rm', '--force', 'c6c8e7820e86']
+timeout10s
+['docker', 'kill', '--signal', 'KILL', 'c6c8e7820e86']
+timeout10s

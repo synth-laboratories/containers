@@ -1,0 +1,17 @@
+{
+  "command": [
+    "/Users/joshuapurtell/GitHub/workspaces/v023-v025-integration-20261103/containers/.venv/bin/python",
+    "-m",
+    "pytest",
+    "-q",
+    "tests/test_rhodes_catalog.py",
+    "tests/test_rhodes_build_operations.py",
+    "tests/test_rhodes_client.py",
+    "tests/test_rhodes_cli.py",
+    "tests/test_task_catalog.py",
+    "--basetemp",
+    "/Users/joshuapurtell/GitHub/workspaces/v023-v025-integration-20261103/containers/artifacts/v023-v025-integration-20261103/pytest-sdk-tmp"
+  ],
+  "exit_code": 0,
+  "elapsed_seconds": 4.186441584024578
+}

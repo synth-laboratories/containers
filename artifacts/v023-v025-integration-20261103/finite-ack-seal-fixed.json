@@ -1,0 +1,16 @@
+{
+  "command": [
+    "/Users/joshuapurtell/GitHub/workspaces/v023-v025-integration-20261103/containers/.venv/bin/python",
+    "-m",
+    "pytest",
+    "-q",
+    "tests/test_finite_stdio_capture.py",
+    "-k",
+    "not original_terminal",
+    "--basetemp",
+    "/Users/joshuapurtell/GitHub/workspaces/v023-v025-integration-20261103/containers/artifacts/v023-v025-integration-20261103/finite-ack-seal-fixed-tmp"
+  ],
+  "exit_code": 0,
+  "elapsed_seconds": 78.108,
+  "image": "sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4"
+}

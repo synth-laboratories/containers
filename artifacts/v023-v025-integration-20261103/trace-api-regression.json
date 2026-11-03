@@ -1,0 +1,21 @@
+{
+  "label": "trace-api-regression",
+  "cwd": "/Users/joshuapurtell/GitHub/workspaces/v023-v025-integration-20261103/containers",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    "-q",
+    "tests/test_pools.py",
+    "tests/test_metadata_contract.py",
+    "tests/test_trace_v5_inspection.py",
+    "tests/test_trace_v5_capture_security_regressions.py",
+    "tests/test_harbor_current_evidence.py"
+  ],
+  "started_at_utc": "2026-11-03T19:56:29.336141+00:00",
+  "elapsed_seconds": 12.897,
+  "exit_code": 0,
+  "timed_out": false,
+  "source_head": "730ebce699ab22d31060f0e1b304f916a883248a",
+  "log": "/Users/joshuapurtell/GitHub/workspaces/v023-v025-integration-20261103/containers/artifacts/v023-v025-integration-20261103/trace-api-regression.log"
+}

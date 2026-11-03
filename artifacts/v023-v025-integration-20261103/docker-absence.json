@@ -1,0 +1,10 @@
+{
+  "command": [
+    "docker",
+    "inspect",
+    "rhodes-finite-3c1a551ac9845e0ae8cfc08e63ecd184934d5a56"
+  ],
+  "exit_code": 1,
+  "stdout": "[]\n",
+  "stderr": "error: no such object: rhodes-finite-3c1a551ac9845e0ae8cfc08e63ecd184934d5a56\n"
+}

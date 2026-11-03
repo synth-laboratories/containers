@@ -1,0 +1,163 @@
+.......FFF                                                               [100%]
+=================================== FAILURES ===================================
+_________ test_real_finite_original_terminal_and_same_archive_recovery _________
+
+docker_execution = ({'rollout_id': 'finite-test-6b9cf262954c410c92d5ce2ce84d138f', 'epoch': 'efeb09dc815f4e75a0f8ae56e08a5054', 'image_di...389ca60a1a59d3463db586e5fa4', 'command': ('/bin/cat',), ...}, 'rhodes-finite-3c1a551ac9845e0ae8cfc08e63ecd184934d5a56')
+
+    def test_real_finite_original_terminal_and_same_archive_recovery(docker_execution):
+        values, name = docker_execution
+        owner = {}
+        phases = []
+>       result = recorder.run_isolated_stdio(**values, on_owner=lambda value: owner.update(value), on_state=phases.append)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_finite_stdio_capture.py:129: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/synth_containers/finite_stdio_capture.py:195: in run_isolated_stdio
+    if inspect_original(docker, name, env, expected_daemon_id=owner_daemon_id) is not None:
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+docker = '/opt/homebrew/bin/docker'
+name = 'rhodes-finite-3c1a551ac9845e0ae8cfc08e63ecd184934d5a56'
+env = {'PATH': '/Users/joshuapurtell/.local/bin:/Users/joshuapurtell/Library/Application Support/mbx/bin:/Users/joshuapurtel...ts/Resources/codex-cli/CodexCLI.app/Contents/MacOS:/Users/joshuapurtell/.orbstack/bin', 'HOME': '/Users/joshuapurtell'}
+expected_daemon_id = '675739ac-5f66-433f-bd30-f22809aa43f2', container_id = None
+
+    def inspect_original(docker, name, env, *, expected_daemon_id=None, container_id=None):
+        """Absence needs an exact daemon response, never a transport exit code."""
+        def read():
+            return subprocess.run([docker, "inspect", container_id or name], capture_output=True, env=env, timeout=10)
+        def absent(value):
+            error = value.stderr.decode(errors="replace").strip()
+            return value.returncode != 0 and error in {
+                "Error: No such object: " + (container_id or name),
+                "Error response from daemon: No such container: " + (container_id or name),
+            }
+        identity = daemon_identity(docker, env)
+        if expected_daemon_id is not None and identity != expected_daemon_id:
+            raise FiniteRecorderRefusal("finite_original_daemon_differs")
+        value = read()
+        if value.returncode == 0:
+            rows = json.loads(value.stdout)
+            if (len(rows) != 1 or container_id is not None and rows[0].get("Id") != container_id
+                or container_id is None and rows[0].get("Name") != "/" + name):
+                raise FiniteRecorderRefusal("finite_original_identity_differs")
+            if daemon_identity(docker, env) != identity:
+                raise FiniteRecorderRefusal("finite_original_daemon_changed")
+            return rows[0]
+        if not absent(value):
+>           raise FiniteRecorderRefusal("finite_original_presence_unknown")
+E           synth_containers.finite_stdio_capture.FiniteRecorderRefusal: finite_original_presence_unknown
+
+src/synth_containers/finite_stdio_capture.py:59: FiniteRecorderRefusal
+____________ test_real_lost_created_ack_preserves_cleanup_original _____________
+
+docker_execution = ({'rollout_id': 'finite-test-94c33ed269d446b8889d6bddb362c89f', 'epoch': '288072f8a22043f3aa558532a1a7283e', 'image_di...389ca60a1a59d3463db586e5fa4', 'command': ('/bin/cat',), ...}, 'rhodes-finite-c67923c205a9b103e7af7e53b6bec124ad57df44')
+
+    def test_real_lost_created_ack_preserves_cleanup_original(docker_execution):
+        values, name = docker_execution
+        owner = {}
+        def acknowledge(value):
+            owner.update(value)
+            if "container_id" in value:
+                raise TimeoutError("fixture lost create acknowledgment")
+        with pytest.raises(TimeoutError, match="fixture lost create"):
+>           recorder.run_isolated_stdio(**values, on_owner=acknowledge)
+
+tests/test_finite_stdio_capture.py:152: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/synth_containers/finite_stdio_capture.py:195: in run_isolated_stdio
+    if inspect_original(docker, name, env, expected_daemon_id=owner_daemon_id) is not None:
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+docker = '/opt/homebrew/bin/docker'
+name = 'rhodes-finite-c67923c205a9b103e7af7e53b6bec124ad57df44'
+env = {'PATH': '/Users/joshuapurtell/.local/bin:/Users/joshuapurtell/Library/Application Support/mbx/bin:/Users/joshuapurtel...ts/Resources/codex-cli/CodexCLI.app/Contents/MacOS:/Users/joshuapurtell/.orbstack/bin', 'HOME': '/Users/joshuapurtell'}
+expected_daemon_id = '675739ac-5f66-433f-bd30-f22809aa43f2', container_id = None
+
+    def inspect_original(docker, name, env, *, expected_daemon_id=None, container_id=None):
+        """Absence needs an exact daemon response, never a transport exit code."""
+        def read():
+            return subprocess.run([docker, "inspect", container_id or name], capture_output=True, env=env, timeout=10)
+        def absent(value):
+            error = value.stderr.decode(errors="replace").strip()
+            return value.returncode != 0 and error in {
+                "Error: No such object: " + (container_id or name),
+                "Error response from daemon: No such container: " + (container_id or name),
+            }
+        identity = daemon_identity(docker, env)
+        if expected_daemon_id is not None and identity != expected_daemon_id:
+            raise FiniteRecorderRefusal("finite_original_daemon_differs")
+        value = read()
+        if value.returncode == 0:
+            rows = json.loads(value.stdout)
+            if (len(rows) != 1 or container_id is not None and rows[0].get("Id") != container_id
+                or container_id is None and rows[0].get("Name") != "/" + name):
+                raise FiniteRecorderRefusal("finite_original_identity_differs")
+            if daemon_identity(docker, env) != identity:
+                raise FiniteRecorderRefusal("finite_original_daemon_changed")
+            return rows[0]
+        if not absent(value):
+>           raise FiniteRecorderRefusal("finite_original_presence_unknown")
+E           synth_containers.finite_stdio_capture.FiniteRecorderRefusal: finite_original_presence_unknown
+
+src/synth_containers/finite_stdio_capture.py:59: FiniteRecorderRefusal
+_____________ test_real_lost_terminal_ack_recovers_exact_original ______________
+
+docker_execution = ({'rollout_id': 'finite-test-d07bd6a3dbd24ba7abffef5ef159aa89', 'epoch': '16f0a7a0e1064ce2bafb2a26be7c2f06', 'image_di...389ca60a1a59d3463db586e5fa4', 'command': ('/bin/cat',), ...}, 'rhodes-finite-75fdb35909f0cf1b3dd0e6c33da5b863a7f9e2fe')
+
+    def test_real_lost_terminal_ack_recovers_exact_original(docker_execution):
+        values, name = docker_execution
+        owner = {}
+        retained = []
+        def acknowledge(value):
+            retained.append(value)
+            raise TimeoutError("fixture lost terminal acknowledgment")
+        with pytest.raises(TimeoutError, match="fixture lost terminal"):
+>           recorder.run_isolated_stdio(**values, on_owner=lambda value: owner.update(value), on_terminal=acknowledge)
+
+tests/test_finite_stdio_capture.py:165: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/synth_containers/finite_stdio_capture.py:195: in run_isolated_stdio
+    if inspect_original(docker, name, env, expected_daemon_id=owner_daemon_id) is not None:
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+docker = '/opt/homebrew/bin/docker'
+name = 'rhodes-finite-75fdb35909f0cf1b3dd0e6c33da5b863a7f9e2fe'
+env = {'PATH': '/Users/joshuapurtell/.local/bin:/Users/joshuapurtell/Library/Application Support/mbx/bin:/Users/joshuapurtel...ts/Resources/codex-cli/CodexCLI.app/Contents/MacOS:/Users/joshuapurtell/.orbstack/bin', 'HOME': '/Users/joshuapurtell'}
+expected_daemon_id = '675739ac-5f66-433f-bd30-f22809aa43f2', container_id = None
+
+    def inspect_original(docker, name, env, *, expected_daemon_id=None, container_id=None):
+        """Absence needs an exact daemon response, never a transport exit code."""
+        def read():
+            return subprocess.run([docker, "inspect", container_id or name], capture_output=True, env=env, timeout=10)
+        def absent(value):
+            error = value.stderr.decode(errors="replace").strip()
+            return value.returncode != 0 and error in {
+                "Error: No such object: " + (container_id or name),
+                "Error response from daemon: No such container: " + (container_id or name),
+            }
+        identity = daemon_identity(docker, env)
+        if expected_daemon_id is not None and identity != expected_daemon_id:
+            raise FiniteRecorderRefusal("finite_original_daemon_differs")
+        value = read()
+        if value.returncode == 0:
+            rows = json.loads(value.stdout)
+            if (len(rows) != 1 or container_id is not None and rows[0].get("Id") != container_id
+                or container_id is None and rows[0].get("Name") != "/" + name):
+                raise FiniteRecorderRefusal("finite_original_identity_differs")
+            if daemon_identity(docker, env) != identity:
+                raise FiniteRecorderRefusal("finite_original_daemon_changed")
+            return rows[0]
+        if not absent(value):
+>           raise FiniteRecorderRefusal("finite_original_presence_unknown")
+E           synth_containers.finite_stdio_capture.FiniteRecorderRefusal: finite_original_presence_unknown
+
+src/synth_containers/finite_stdio_capture.py:59: FiniteRecorderRefusal
+=========================== short test summary info ============================
+FAILED tests/test_finite_stdio_capture.py::test_real_finite_original_terminal_and_same_archive_recovery
+FAILED tests/test_finite_stdio_capture.py::test_real_lost_created_ack_preserves_cleanup_original
+FAILED tests/test_finite_stdio_capture.py::test_real_lost_terminal_ack_recovers_exact_original
+3 failed, 7 passed in 2.89s

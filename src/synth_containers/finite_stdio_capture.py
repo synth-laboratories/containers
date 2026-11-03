@@ -41,6 +41,7 @@ def inspect_original(docker, name, env, *, expected_daemon_id=None, container_id
         error = value.stderr.decode(errors="replace").strip()
         return value.returncode != 0 and error in {
             "Error: No such object: " + (container_id or name),
+            "error: no such object: " + (container_id or name),
             "Error response from daemon: No such container: " + (container_id or name),
         }
     identity = daemon_identity(docker, env)
@@ -250,7 +251,11 @@ def run_isolated_stdio(*, rollout_id, epoch, image_digest, command, input_bytes,
                 raise FiniteRecorderRefusal("finite_cancelled_before_create")
             if on_state:
                 on_state("create_pending")  # Durable original intent before the control effect.
-            allocated = call(["create", "--interactive", "--pull", "never", "--name", name, "--label", label,
+            # Explicit stdin attachment makes Docker set StdinOnce: closing
+            # the owned input pipe must deliver EOF, rather than retaining an
+            # open stdin forever for a future unrelated attach client.
+            allocated = call(["create", "--interactive", "--attach", "stdin", "--attach", "stdout", "--attach", "stderr",
+                "--pull", "never", "--name", name, "--label", label,
                 "--no-healthcheck", "--log-driver", "none",
                 "--read-only", "--network", "none", "--ipc", "none", "--cap-drop", "ALL",
                 "--security-opt", "no-new-privileges", "--user", "65534:65534",
@@ -291,6 +296,9 @@ def run_isolated_stdio(*, rollout_id, epoch, image_digest, command, input_bytes,
                 or host.get("Memory") != memory_bytes or host.get("MemorySwap") != memory_bytes
                 or host.get("NanoCpus") != round(cpus * 1_000_000_000)
                 or config.get("User") != "65534:65534"
+                or config.get("OpenStdin") is not True or config.get("StdinOnce") is not True
+                or config.get("AttachStdin") is not True or config.get("AttachStdout") is not True
+                or config.get("AttachStderr") is not True or config.get("Tty") is not False
                 or len(mounts) != 2 or {item.get("Destination") for item in mounts} != {"/dev/shm", "/dev/mqueue"}
                 or any(item.get("RW") is not False or item.get("Source") != str(empty) for item in mounts)
                 or (config.get("Healthcheck") or {}).get("Test") != ["NONE"]

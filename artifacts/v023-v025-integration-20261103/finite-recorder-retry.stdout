@@ -1,0 +1,437 @@
+........FEFF                                                             [100%]
+==================================== ERRORS ====================================
+_ ERROR at teardown of test_real_finite_original_terminal_and_same_archive_recovery _
+
+signer = RecorderSigner(key_id='test-only', cohort_id='test-only', module_sha256='c04621d2c899e625ac9e9eb74390eeac33d8d13e2c922...t 0x10d7d32b0>, public_key=<cryptography.hazmat.bindings._rust.openssl.ed25519.Ed25519PublicKey object at 0x10d7d3dd0>)
+
+    @pytest.fixture
+    def docker_execution(signer):
+        image = os.environ.get("RHODES_FINITE_TEST_IMAGE")
+        if not image:
+            pytest.skip("requires explicit owned-test cached image digest")
+        details = json.loads(subprocess.check_output(["docker", "image", "inspect", image], timeout=10))[0]
+        platform = {"os": details["Os"], "architecture": details["Architecture"]}
+        rollout_id, epoch = "finite-test-" + uuid4().hex, uuid4().hex
+        name = "rhodes-finite-" + hashlib.sha256((rollout_id + ":" + epoch).encode()).hexdigest()[:40]
+        values = dict(rollout_id=rollout_id, epoch=epoch, image_digest=details["Id"], command=("/bin/cat",),
+            input_bytes=b'{"success":true,"reward":1}', cpus=1, memory_bytes=256 * 1024**2,
+            timeout_seconds=60, maximum_output_bytes=4096,
+            closure={"image_platform": "sha256:" + hashlib.sha256(recorder.canonical(platform)).hexdigest()}, signer=signer)
+        try:
+            yield values, name
+        finally:
+            # Only this random test's exact labelled allocation may be removed.
+>           observed = subprocess.run(["docker", "inspect", name], capture_output=True, timeout=10)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_finite_stdio_capture.py:119: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+../../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/subprocess.py:556: in run
+    stdout, stderr = process.communicate(input, timeout=timeout)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/subprocess.py:1222: in communicate
+    stdout, stderr = self._communicate(input, endtime, timeout)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/subprocess.py:2155: in _communicate
+    self._check_timeout(endtime, orig_timeout, stdout, stderr)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <Popen: returncode: -9 args: ['docker', 'inspect', 'rhodes-finite-9a6182f0f9...>
+endtime = 421913.650931625, orig_timeout = 10, stdout_seq = [], stderr_seq = []
+skip_check_and_raise = False
+
+    def _check_timeout(self, endtime, orig_timeout, stdout_seq, stderr_seq,
+                       skip_check_and_raise=False):
+        """Convenience for checking if a timeout has expired."""
+        if endtime is None:
+            return
+        if skip_check_and_raise or _time() > endtime:
+>           raise TimeoutExpired(
+                    self.args, orig_timeout,
+                    output=b''.join(stdout_seq) if stdout_seq else None,
+                    stderr=b''.join(stderr_seq) if stderr_seq else None)
+E           subprocess.TimeoutExpired: Command '['docker', 'inspect', 'rhodes-finite-9a6182f0f98b8b389af74f6ec392276363df4be3']' timed out after 10 seconds
+
+../../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/subprocess.py:1269: TimeoutExpired
+=================================== FAILURES ===================================
+_________ test_real_finite_original_terminal_and_same_archive_recovery _________
+
+rollout_id = 'finite-test-0211f239be464e628058129ed2f882b6'
+epoch = 'a8f71b97dd034ef7bf71784023e48df0'
+image_digest = 'sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4'
+command = ('/bin/cat',), input_bytes = b'{"success":true,"reward":1}', cpus = 1
+memory_bytes = 268435456, timeout_seconds = 60, maximum_output_bytes = 4096
+closure = {'image_platform': 'sha256:d6f56bc20064075ce319ac2e6fcef5de9ea21773b0a8a4398c4405222971f9c0'}
+signer = RecorderSigner(key_id='test-only', cohort_id='test-only', module_sha256='c04621d2c899e625ac9e9eb74390eeac33d8d13e2c922...t 0x10d7d32b0>, public_key=<cryptography.hazmat.bindings._rust.openssl.ed25519.Ed25519PublicKey object at 0x10d7d3dd0>)
+cancelled = None
+on_state = <built-in method append of list object at 0x10d8afa40>
+on_terminal = None
+on_owner = <function test_real_finite_original_terminal_and_same_archive_recovery.<locals>.<lambda> at 0x10d945e40>
+deadline_timestamp = None
+
+    def run_isolated_stdio(*, rollout_id, epoch, image_digest, command, input_bytes,
+                           cpus, memory_bytes, timeout_seconds, maximum_output_bytes,
+                           closure, signer, cancelled=None, on_state=None, on_terminal=None, on_owner=None,
+                           deadline_timestamp=None):
+        """One foreground-owned container; every observable output byte is retained."""
+        docker = shutil.which("docker")
+        if docker is None or not 0 < cpus <= 16 or not 0 < timeout_seconds <= 3600:
+            raise FiniteRecorderRefusal("finite_runtime_or_limits_unavailable")
+        remaining = timeout_seconds
+        if deadline_timestamp is not None:
+            if not math.isfinite(deadline_timestamp):
+                raise FiniteRecorderRefusal("finite_deadline_invalid")
+            remaining = min(remaining, deadline_timestamp - time.time())
+        if remaining <= 0:
+            raise FiniteRecorderRefusal("finite_deadline_exhausted")
+        deadline = time.monotonic() + remaining
+        if type(memory_bytes) is not int or not 128 * 1024 * 1024 <= memory_bytes <= 8 * 1024**3:
+            raise FiniteRecorderRefusal("finite_memory_invalid")
+        name = "rhodes-finite-" + hashlib.sha256((rollout_id + ":" + epoch).encode()).hexdigest()[:40]
+        label = "ai.synth.rhodes.finite=" + rollout_id + ":" + epoch
+        env = {name: os.environ[name] for name in ("PATH", "DOCKER_HOST", "DOCKER_CONFIG", "HOME") if name in os.environ}
+        owner_daemon_id = daemon_identity(docker, env)
+    
+        def call(args):
+            # A timed-out original create is left alive and in doubt. Its durable
+            # name/spool intent prevents replacement; the reaper never redispatches.
+            process = subprocess.Popen([docker, *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+            try:
+                output, _error = process.communicate(timeout=15)
+            except subprocess.TimeoutExpired as error:
+                raise FiniteRecorderRefusal("finite_original_control_in_doubt") from error
+            if process.returncode:
+                raise FiniteRecorderRefusal("finite_owner_command_refused")
+            return output
+    
+        # Refuse a previous original allocation; this runner never redispatches it.
+        if inspect_original(docker, name, env, expected_daemon_id=owner_daemon_id) is not None:
+            raise FiniteRecorderRefusal("finite_original_allocation_exists")
+        journal = []
+        journal_bytes = 2  # Canonical list brackets; bound adversarial tiny writes.
+        streams = {"stdout": bytearray(), "stderr": bytearray()}
+        created = False
+        container_id = None
+        child = None
+        selector = None
+        spool_value = os.environ.get("RHODES_FINITE_RECORDER_SPOOL_DIR")
+        if not spool_value or not Path(spool_value).is_absolute():
+            raise FiniteRecorderRefusal("finite_durable_spool_unavailable")
+        spool = Path(spool_value)
+        spool_info = spool.lstat()
+        if (not stat.S_ISDIR(spool_info.st_mode) or spool_info.st_uid != os.getuid()
+            or stat.S_IMODE(spool_info.st_mode) != 0o700):
+            raise FiniteRecorderRefusal("finite_spool_custody_invalid")
+        attempt = spool / name
+        attempt.mkdir(mode=0o700, exist_ok=False)  # Existing original never redispatches.
+        descriptor = os.open(spool, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    
+        def durable(path, body, *, append=False):
+            flags = os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | (os.O_APPEND if append else os.O_EXCL)
+            descriptor = os.open(attempt / path, flags, 0o600)
+            try:
+                view = memoryview(body)
+                while view:
+                    view = view[os.write(descriptor, view):]
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+            parent = os.open(attempt, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(parent)
+            finally:
+                os.close(parent)
+    
+        durable("input.bin", input_bytes)
+        def retain_lifecycle(value, *, container_id=None):
+            body = {"schema_version": "synth.rhodes-finite-lifecycle.v1", "rollout_id": rollout_id,
+                "execution_epoch": epoch, "container_name": name, "docker_daemon_id": owner_daemon_id,
+                "state": value, "container_id": container_id, "recorder_module_sha256": signer.module_sha256}
+            durable("lifecycle-" + value + ".json", canonical(signer.sign(body)))
+        retain_lifecycle("owner_bound")
+        if on_owner:
+            on_owner({"docker_daemon_id": owner_daemon_id})
+        with nullcontext(str(attempt)) as directory:
+            empty = Path(directory) / "readonly-shm"
+            empty.mkdir(mode=0o700)
+            try:
+                if time.monotonic() >= deadline or cancelled is not None and cancelled.is_set():
+                    raise FiniteRecorderRefusal("finite_cancelled_before_create")
+                if on_state:
+                    on_state("create_pending")  # Durable original intent before the control effect.
+                allocated = call(["create", "--interactive", "--pull", "never", "--name", name, "--label", label,
+                    "--no-healthcheck", "--log-driver", "none",
+                    "--read-only", "--network", "none", "--ipc", "none", "--cap-drop", "ALL",
+                    "--security-opt", "no-new-privileges", "--user", "65534:65534",
+                    "--pids-limit", "64", "--cpus", str(cpus), "--memory", str(memory_bytes),
+                    "--memory-swap", str(memory_bytes), "--mount",
+                    f"type=bind,source={empty},target=/dev/shm,readonly", "--mount",
+                    f"type=bind,source={empty},target=/dev/mqueue,readonly", "--entrypoint", command[0],
+                    image_digest, *command[1:]])
+                created = True
+                allocated_id = allocated.decode("ascii").strip()
+                if len(allocated_id) != 64 or any(char not in "0123456789abcdef" for char in allocated_id):
+                    raise FiniteRecorderRefusal("finite_original_allocation_identity_invalid")
+                container_id = allocated_id
+                retain_lifecycle("created", container_id=container_id)
+                if on_owner:
+                    on_owner({"docker_daemon_id": owner_daemon_id, "container_id": container_id})
+                if on_state:
+                    on_state("created")
+                if time.monotonic() >= deadline or cancelled is not None and cancelled.is_set():
+                    raise FiniteRecorderRefusal("finite_cancelled_before_start")
+                observed = json.loads(call(["inspect", name]))[0]
+                image = json.loads(call(["image", "inspect", image_digest]))[0]
+                daemon = json.loads(call(["info", "--format", "{{json .}}"])
+                    or b"null")
+                architecture = {"x86_64": "amd64", "aarch64": "arm64"}.get(
+                    daemon.get("Architecture"), daemon.get("Architecture"))
+                platform = {"os": image.get("Os"), "architecture": image.get("Architecture")}
+                if (daemon.get("ID") != owner_daemon_id or observed.get("Id") != container_id
+                    or image.get("Id") != image_digest or platform["os"] != "linux" or daemon.get("OSType") != "linux"
+                    or platform["architecture"] != architecture
+                    or "sha256:" + hashlib.sha256(canonical(platform)).hexdigest() != closure.get("image_platform")):
+                    raise FiniteRecorderRefusal("finite_native_platform_or_image_differs")
+                host, config = observed["HostConfig"], observed["Config"]
+                mounts = observed.get("Mounts") or []
+                if (observed.get("Image") != image_digest or host.get("ReadonlyRootfs") is not True
+                    or host.get("NetworkMode") != "none" or host.get("Privileged") is not False
+                    or set(host.get("CapDrop") or ()) != {"ALL"} or host.get("PidsLimit") != 64
+                    or host.get("Memory") != memory_bytes or host.get("MemorySwap") != memory_bytes
+                    or host.get("NanoCpus") != round(cpus * 1_000_000_000)
+                    or config.get("User") != "65534:65534"
+                    or len(mounts) != 2 or {item.get("Destination") for item in mounts} != {"/dev/shm", "/dev/mqueue"}
+                    or any(item.get("RW") is not False or item.get("Source") != str(empty) for item in mounts)
+                    or (config.get("Healthcheck") or {}).get("Test") != ["NONE"]
+                    or (host.get("LogConfig") or {}).get("Type") != "none"
+                    or config.get("Entrypoint") != [command[0]] or (config.get("Cmd") or []) != list(command[1:])
+                    or not set(host.get("SecurityOpt") or ()) <= {"no-new-privileges", "no-new-privileges:true"}
+                    or not host.get("SecurityOpt")
+                    or config.get("Volumes") or host.get("Devices") or host.get("Binds")
+                    or host.get("PidMode") not in ("", "private") or host.get("IpcMode") != "none"):
+                    raise FiniteRecorderRefusal("finite_enforced_isolation_differs")
+                for item in config.get("Env") or ():
+                    if item.partition("=")[0] not in {"PATH", "LANG", "LC_ALL", "TZ"}:
+                        raise FiniteRecorderRefusal("finite_image_environment_refused")
+                if time.monotonic() >= deadline or cancelled is not None and cancelled.is_set():
+                    raise FiniteRecorderRefusal("finite_cancelled_before_start")
+                child = subprocess.Popen([docker, "start", "--attach", "--interactive", container_id],
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+                retain_lifecycle("running", container_id=container_id)
+                if on_state:
+                    on_state("running")
+                selector = selectors.DefaultSelector()
+                for handle, channel in ((child.stdout, "stdout"), (child.stderr, "stderr"), (child.stdin, "stdin")):
+                    os.set_blocking(handle.fileno(), False)
+                    selector.register(handle, selectors.EVENT_WRITE if channel == "stdin" else selectors.EVENT_READ, channel)
+                cursor = 0
+                while selector.get_map():
+                    if time.monotonic() >= deadline or cancelled is not None and cancelled.is_set():
+>                       raise FiniteRecorderRefusal("finite_execution_timeout")
+E                       synth_containers.finite_stdio_capture.FiniteRecorderRefusal: finite_execution_timeout
+
+src/synth_containers/finite_stdio_capture.py:322: FiniteRecorderRefusal
+
+During handling of the above exception, another exception occurred:
+
+docker_execution = ({'rollout_id': 'finite-test-0211f239be464e628058129ed2f882b6', 'epoch': 'a8f71b97dd034ef7bf71784023e48df0', 'image_di...389ca60a1a59d3463db586e5fa4', 'command': ('/bin/cat',), ...}, 'rhodes-finite-9a6182f0f98b8b389af74f6ec392276363df4be3')
+
+    def test_real_finite_original_terminal_and_same_archive_recovery(docker_execution):
+        values, name = docker_execution
+        owner = {}
+        phases = []
+>       result = recorder.run_isolated_stdio(**values, on_owner=lambda value: owner.update(value), on_state=phases.append)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_finite_stdio_capture.py:130: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/synth_containers/finite_stdio_capture.py:391: in run_isolated_stdio
+    observed = inspect_original(docker, name, env, expected_daemon_id=owner_daemon_id, container_id=container_id)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/synth_containers/finite_stdio_capture.py:50: in inspect_original
+    value = read()
+            ^^^^^^
+src/synth_containers/finite_stdio_capture.py:39: in read
+    return subprocess.run([docker, "inspect", container_id or name], capture_output=True, env=env, timeout=10)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/subprocess.py:556: in run
+    stdout, stderr = process.communicate(input, timeout=timeout)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/subprocess.py:1222: in communicate
+    stdout, stderr = self._communicate(input, endtime, timeout)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/subprocess.py:2155: in _communicate
+    self._check_timeout(endtime, orig_timeout, stdout, stderr)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <Popen: returncode: -9 args: ['/opt/homebrew/bin/docker', 'inspect', 'c6c8e7...>
+endtime = 421901.274512416, orig_timeout = 10, stdout_seq = [], stderr_seq = []
+skip_check_and_raise = False
+
+    def _check_timeout(self, endtime, orig_timeout, stdout_seq, stderr_seq,
+                       skip_check_and_raise=False):
+        """Convenience for checking if a timeout has expired."""
+        if endtime is None:
+            return
+        if skip_check_and_raise or _time() > endtime:
+>           raise TimeoutExpired(
+                    self.args, orig_timeout,
+                    output=b''.join(stdout_seq) if stdout_seq else None,
+                    stderr=b''.join(stderr_seq) if stderr_seq else None)
+E           subprocess.TimeoutExpired: Command '['/opt/homebrew/bin/docker', 'inspect', 'c6c8e7820e86a805509f69400f8000d8eb3a77d4781de1fb0da401687f3a3400']' timed out after 10 seconds
+
+../../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/subprocess.py:1269: TimeoutExpired
+____________ test_real_lost_created_ack_preserves_cleanup_original _____________
+
+args = ['create', '--interactive', '--pull', 'never', '--name', 'rhodes-finite-1d14348f8f5f350c2c9bffefe53f6cd12c7feb85', ...]
+
+    def call(args):
+        # A timed-out original create is left alive and in doubt. Its durable
+        # name/spool intent prevents replacement; the reaper never redispatches.
+        process = subprocess.Popen([docker, *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+        try:
+>           output, _error = process.communicate(timeout=15)
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+src/synth_containers/finite_stdio_capture.py:188: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+../../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/subprocess.py:1222: in communicate
+    stdout, stderr = self._communicate(input, endtime, timeout)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/subprocess.py:2155: in _communicate
+    self._check_timeout(endtime, orig_timeout, stdout, stderr)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <Popen: returncode: None args: ['/opt/homebrew/bin/docker', 'create', '--int...>
+endtime = 421929.822209291, orig_timeout = 15, stdout_seq = [], stderr_seq = []
+skip_check_and_raise = False
+
+    def _check_timeout(self, endtime, orig_timeout, stdout_seq, stderr_seq,
+                       skip_check_and_raise=False):
+        """Convenience for checking if a timeout has expired."""
+        if endtime is None:
+            return
+        if skip_check_and_raise or _time() > endtime:
+>           raise TimeoutExpired(
+                    self.args, orig_timeout,
+                    output=b''.join(stdout_seq) if stdout_seq else None,
+                    stderr=b''.join(stderr_seq) if stderr_seq else None)
+E           subprocess.TimeoutExpired: Command '['/opt/homebrew/bin/docker', 'create', '--interactive', '--pull', 'never', '--name', 'rhodes-finite-1d14348f8f5f350c2c9bffefe53f6cd12c7feb85', '--label', 'ai.synth.rhodes.finite=finite-test-f17550b3e969400c9aec18cc901584da:acc44f20686d4bf5855a597552743616', '--no-healthcheck', '--log-driver', 'none', '--read-only', '--network', 'none', '--ipc', 'none', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--user', '65534:65534', '--pids-limit', '64', '--cpus', '1', '--memory', '268435456', '--memory-swap', '268435456', '--mount', 'type=bind,source=/Users/joshuapurtell/GitHub/workspaces/v023-v025-integration-20261103/containers/artifacts/v023-v025-integration-20261103/pytest-finite-retry-tmp/test_real_lost_created_ack_pre0/spool/rhodes-finite-1d14348f8f5f350c2c9bffefe53f6cd12c7feb85/readonly-shm,target=/dev/shm,readonly', '--mount', 'type=bind,source=/Users/joshuapurtell/GitHub/workspaces/v023-v025-integration-20261103/containers/artifacts/v023-v025-integration-20261103/pytest-finite-retry-tmp/test_real_lost_created_ack_pre0/spool/rhodes-finite-1d14348f8f5f350c2c9bffefe53f6cd12c7feb85/readonly-shm,target=/dev/mqueue,readonly', '--entrypoint', '/bin/cat', 'sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4']' timed out after 15 seconds
+
+../../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/subprocess.py:1269: TimeoutExpired
+
+The above exception was the direct cause of the following exception:
+
+docker_execution = ({'rollout_id': 'finite-test-f17550b3e969400c9aec18cc901584da', 'epoch': 'acc44f20686d4bf5855a597552743616', 'image_di...389ca60a1a59d3463db586e5fa4', 'command': ('/bin/cat',), ...}, 'rhodes-finite-1d14348f8f5f350c2c9bffefe53f6cd12c7feb85')
+
+    def test_real_lost_created_ack_preserves_cleanup_original(docker_execution):
+        values, name = docker_execution
+        owner = {}
+        def acknowledge(value):
+            owner.update(value)
+            if "container_id" in value:
+                raise TimeoutError("fixture lost create acknowledgment")
+        with pytest.raises(TimeoutError, match="fixture lost create"):
+>           recorder.run_isolated_stdio(**values, on_owner=acknowledge)
+
+tests/test_finite_stdio_capture.py:153: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/synth_containers/finite_stdio_capture.py:254: in run_isolated_stdio
+    allocated = call(["create", "--interactive", "--pull", "never", "--name", name, "--label", label,
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ['create', '--interactive', '--pull', 'never', '--name', 'rhodes-finite-1d14348f8f5f350c2c9bffefe53f6cd12c7feb85', ...]
+
+    def call(args):
+        # A timed-out original create is left alive and in doubt. Its durable
+        # name/spool intent prevents replacement; the reaper never redispatches.
+        process = subprocess.Popen([docker, *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+        try:
+            output, _error = process.communicate(timeout=15)
+        except subprocess.TimeoutExpired as error:
+>           raise FiniteRecorderRefusal("finite_original_control_in_doubt") from error
+E           synth_containers.finite_stdio_capture.FiniteRecorderRefusal: finite_original_control_in_doubt
+
+src/synth_containers/finite_stdio_capture.py:190: FiniteRecorderRefusal
+_____________ test_real_lost_terminal_ack_recovers_exact_original ______________
+
+args = ['create', '--interactive', '--pull', 'never', '--name', 'rhodes-finite-429599a544915aa2c6b29bc6717266e1d9dae6dc', ...]
+
+    def call(args):
+        # A timed-out original create is left alive and in doubt. Its durable
+        # name/spool intent prevents replacement; the reaper never redispatches.
+        process = subprocess.Popen([docker, *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+        try:
+>           output, _error = process.communicate(timeout=15)
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+src/synth_containers/finite_stdio_capture.py:188: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+../../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/subprocess.py:1222: in communicate
+    stdout, stderr = self._communicate(input, endtime, timeout)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/subprocess.py:2155: in _communicate
+    self._check_timeout(endtime, orig_timeout, stdout, stderr)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <Popen: returncode: None args: ['/opt/homebrew/bin/docker', 'create', '--int...>
+endtime = 421945.471598458, orig_timeout = 15, stdout_seq = [], stderr_seq = []
+skip_check_and_raise = False
+
+    def _check_timeout(self, endtime, orig_timeout, stdout_seq, stderr_seq,
+                       skip_check_and_raise=False):
+        """Convenience for checking if a timeout has expired."""
+        if endtime is None:
+            return
+        if skip_check_and_raise or _time() > endtime:
+>           raise TimeoutExpired(
+                    self.args, orig_timeout,
+                    output=b''.join(stdout_seq) if stdout_seq else None,
+                    stderr=b''.join(stderr_seq) if stderr_seq else None)
+E           subprocess.TimeoutExpired: Command '['/opt/homebrew/bin/docker', 'create', '--interactive', '--pull', 'never', '--name', 'rhodes-finite-429599a544915aa2c6b29bc6717266e1d9dae6dc', '--label', 'ai.synth.rhodes.finite=finite-test-2c9f1fe536bc43b1828a1ce50ab9f8b7:63f7de32209c4e48afeb26fb230e7f16', '--no-healthcheck', '--log-driver', 'none', '--read-only', '--network', 'none', '--ipc', 'none', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--user', '65534:65534', '--pids-limit', '64', '--cpus', '1', '--memory', '268435456', '--memory-swap', '268435456', '--mount', 'type=bind,source=/Users/joshuapurtell/GitHub/workspaces/v023-v025-integration-20261103/containers/artifacts/v023-v025-integration-20261103/pytest-finite-retry-tmp/test_real_lost_terminal_ack_re0/spool/rhodes-finite-429599a544915aa2c6b29bc6717266e1d9dae6dc/readonly-shm,target=/dev/shm,readonly', '--mount', 'type=bind,source=/Users/joshuapurtell/GitHub/workspaces/v023-v025-integration-20261103/containers/artifacts/v023-v025-integration-20261103/pytest-finite-retry-tmp/test_real_lost_terminal_ack_re0/spool/rhodes-finite-429599a544915aa2c6b29bc6717266e1d9dae6dc/readonly-shm,target=/dev/mqueue,readonly', '--entrypoint', '/bin/cat', 'sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4']' timed out after 15 seconds
+
+../../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/subprocess.py:1269: TimeoutExpired
+
+The above exception was the direct cause of the following exception:
+
+docker_execution = ({'rollout_id': 'finite-test-2c9f1fe536bc43b1828a1ce50ab9f8b7', 'epoch': '63f7de32209c4e48afeb26fb230e7f16', 'image_di...389ca60a1a59d3463db586e5fa4', 'command': ('/bin/cat',), ...}, 'rhodes-finite-429599a544915aa2c6b29bc6717266e1d9dae6dc')
+
+    def test_real_lost_terminal_ack_recovers_exact_original(docker_execution):
+        values, name = docker_execution
+        owner = {}
+        retained = []
+        def acknowledge(value):
+            retained.append(value)
+            raise TimeoutError("fixture lost terminal acknowledgment")
+        with pytest.raises(TimeoutError, match="fixture lost terminal"):
+>           recorder.run_isolated_stdio(**values, on_owner=lambda value: owner.update(value), on_terminal=acknowledge)
+
+tests/test_finite_stdio_capture.py:166: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/synth_containers/finite_stdio_capture.py:254: in run_isolated_stdio
+    allocated = call(["create", "--interactive", "--pull", "never", "--name", name, "--label", label,
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ['create', '--interactive', '--pull', 'never', '--name', 'rhodes-finite-429599a544915aa2c6b29bc6717266e1d9dae6dc', ...]
+
+    def call(args):
+        # A timed-out original create is left alive and in doubt. Its durable
+        # name/spool intent prevents replacement; the reaper never redispatches.
+        process = subprocess.Popen([docker, *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+        try:
+            output, _error = process.communicate(timeout=15)
+        except subprocess.TimeoutExpired as error:
+>           raise FiniteRecorderRefusal("finite_original_control_in_doubt") from error
+E           synth_containers.finite_stdio_capture.FiniteRecorderRefusal: finite_original_control_in_doubt
+
+src/synth_containers/finite_stdio_capture.py:190: FiniteRecorderRefusal
+=========================== short test summary info ============================
+FAILED tests/test_finite_stdio_capture.py::test_real_finite_original_terminal_and_same_archive_recovery
+FAILED tests/test_finite_stdio_capture.py::test_real_lost_created_ack_preserves_cleanup_original
+FAILED tests/test_finite_stdio_capture.py::test_real_lost_terminal_ack_recovers_exact_original
+ERROR tests/test_finite_stdio_capture.py::test_real_finite_original_terminal_and_same_archive_recovery
+3 failed, 8 passed, 1 error in 116.23s (0:01:56)

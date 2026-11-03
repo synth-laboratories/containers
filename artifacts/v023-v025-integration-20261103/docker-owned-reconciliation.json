@@ -1,0 +1,32 @@
+[
+  {
+    "name": "rhodes-finite-1d14348f8f5f350c2c9bffefe53f6cd12c7feb85",
+    "expected_label": "finite-test-f17550b3e969400c9aec18cc901584da:acc44f20686d4bf5855a597552743616",
+    "container_id": "8455942dad7de086291d474a7b940f08120c2bbe8a6eb040360c1b0f684cf1e1",
+    "remove_exit": 0,
+    "remove_stdout": "8455942dad7de086291d474a7b940f08120c2bbe8a6eb040360c1b0f684cf1e1\n",
+    "remove_stderr": ""
+  },
+  {
+    "name": "rhodes-finite-429599a544915aa2c6b29bc6717266e1d9dae6dc",
+    "expected_label": "finite-test-2c9f1fe536bc43b1828a1ce50ab9f8b7:63f7de32209c4e48afeb26fb230e7f16",
+    "container_id": "db85b106a6b39db895e15a92e2691b23648d686ef626127ebddde867cb2d87f3",
+    "remove_exit": 0,
+    "remove_stdout": "db85b106a6b39db895e15a92e2691b23648d686ef626127ebddde867cb2d87f3\n",
+    "remove_stderr": ""
+  },
+  {
+    "name": "rhodes-finite-9a6182f0f98b8b389af74f6ec392276363df4be3",
+    "expected_label": "finite-test-0211f239be464e628058129ed2f882b6:a8f71b97dd034ef7bf71784023e48df0",
+    "inspect_exit": 1,
+    "inspect_stderr": "error: no such object: rhodes-finite-9a6182f0f98b8b389af74f6ec392276363df4be3\n"
+  },
+  {
+    "name": "rhodes-stdin-config-c659a5cf47574409b1a8eba4d67023c2",
+    "expected_label": "v023-rhodes-integration",
+    "container_id": "31e6c2e1aa9e53f1609b1c0ce9f3813b78757da84989c694b4423d1569f7faf5",
+    "remove_exit": 0,
+    "remove_stdout": "31e6c2e1aa9e53f1609b1c0ce9f3813b78757da84989c694b4423d1569f7faf5\n",
+    "remove_stderr": ""
+  }
+]
