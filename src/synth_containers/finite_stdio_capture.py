@@ -1,0 +1,382 @@
+"""Protected host recorder for a finite read-only, networkless stdio workload.
+
+No candidate callback runs in this process. The child receives only exact stdin
+bytes; the signing key stays in this owner process. Ordinary HTTP/agent images
+must not advertise this execution profile unless they satisfy its fixed shape.
+"""
+
+import base64
+import hashlib
+import json
+import os
+from pathlib import Path
+import selectors
+import shutil
+import stat
+import subprocess
+import tempfile
+import time
+from dataclasses import dataclass
+from contextlib import nullcontext
+
+
+def canonical(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+
+
+def inspect_original(docker, name, env):
+    """Absence needs an exact daemon response, never a transport exit code."""
+    def read():
+        return subprocess.run([docker, "inspect", name], capture_output=True, env=env, timeout=10)
+    def absent(value):
+        error = value.stderr.decode(errors="replace").strip()
+        return value.returncode != 0 and error in {
+            "Error: No such object: " + name,
+            "Error response from daemon: No such container: " + name,
+        }
+    value = read()
+    if value.returncode == 0:
+        rows = json.loads(value.stdout)
+        if len(rows) != 1 or rows[0].get("Name") != "/" + name:
+            raise FiniteRecorderRefusal("finite_original_identity_differs")
+        return rows[0]
+    if not absent(value):
+        raise FiniteRecorderRefusal("finite_original_presence_unknown")
+    healthy = subprocess.run([docker, "info", "--format", "{{.ID}}"], capture_output=True, env=env, timeout=10)
+    if healthy.returncode or not healthy.stdout.strip() or not absent(read()):
+        raise FiniteRecorderRefusal("finite_original_absence_unconfirmed")
+    return None
+
+
+class FiniteRecorderRefusal(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class RecorderSigner:
+    key_id: str
+    cohort_id: str
+    module_sha256: str
+    private_key: object
+    public_key: object
+
+    def sign(self, body):
+        return {"schema_version": "synth.rhodes-finite-recorder-proof.v1", "key_id": self.key_id,
+            "cohort_id": self.cohort_id, "body": body,
+            "signature_b64": base64.b64encode(self.private_key.sign(canonical(body))).decode()}
+
+
+def operator_signer(cohort_id):
+    """Explicit installed operator custody; no key generation or auto enrollment."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+
+    value = os.environ.get("RHODES_FINITE_RECORDER_COHORT_JSON")
+    path = os.environ.get("RHODES_FINITE_RECORDER_PRIVATE_KEY_FILE")
+    if not value or not path or not Path(path).is_absolute() or len(value) > 16384:
+        raise FiniteRecorderRefusal("recorder_operator_binding_unavailable")
+    cohort = json.loads(value)
+    module_digest = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    if (cohort.get("schema_version") != "synth.rhodes-recorder-cohort.v1"
+        or cohort.get("cohort_id") != cohort_id or cohort.get("module_sha256") != module_digest):
+        raise FiniteRecorderRefusal("recorder_cohort_pin_differs")
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(descriptor)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+            or stat.S_IMODE(info.st_mode) != 0o600 or info.st_size > 16384):
+            raise FiniteRecorderRefusal("recorder_key_custody_invalid")
+        private_bytes = os.read(descriptor, 16385)
+    finally:
+        os.close(descriptor)
+    private = serialization.load_pem_private_key(private_bytes, password=None)
+    public = serialization.load_pem_public_key(cohort["public_key_pem"].encode())
+    if not isinstance(private, Ed25519PrivateKey) or not isinstance(public, Ed25519PublicKey):
+        raise FiniteRecorderRefusal("recorder_ed25519_required")
+    encoding = serialization.Encoding.Raw
+    fmt = serialization.PublicFormat.Raw
+    if private.public_key().public_bytes(encoding, fmt) != public.public_bytes(encoding, fmt):
+        raise FiniteRecorderRefusal("recorder_key_pin_differs")
+    return RecorderSigner(cohort["key_id"], cohort_id, module_digest, private, public)
+
+
+@dataclass(frozen=True)
+class FiniteStdioResult:
+    result: dict
+    archive: bytes
+    proof: dict
+    stdout: bytes
+    stderr: bytes
+    journal: bytes
+    image_digest: str
+
+
+def run_isolated_stdio(*, rollout_id, epoch, image_digest, command, input_bytes,
+                       cpus, memory_bytes, timeout_seconds, maximum_output_bytes,
+                       closure, signer, cancelled=None, on_state=None, on_terminal=None):
+    """One foreground-owned container; every observable output byte is retained."""
+    docker = shutil.which("docker")
+    if docker is None or not 0 < cpus <= 16 or not 0 < timeout_seconds <= 3600:
+        raise FiniteRecorderRefusal("finite_runtime_or_limits_unavailable")
+    if type(memory_bytes) is not int or not 128 * 1024 * 1024 <= memory_bytes <= 8 * 1024**3:
+        raise FiniteRecorderRefusal("finite_memory_invalid")
+    name = "rhodes-finite-" + hashlib.sha256((rollout_id + ":" + epoch).encode()).hexdigest()[:40]
+    label = "ai.synth.rhodes.finite=" + rollout_id + ":" + epoch
+    env = {name: os.environ[name] for name in ("PATH", "DOCKER_HOST", "DOCKER_CONFIG", "HOME") if name in os.environ}
+
+    def call(args):
+        # A timed-out original create is left alive and in doubt. Its durable
+        # name/spool intent prevents replacement; the reaper never redispatches.
+        process = subprocess.Popen([docker, *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+        try:
+            output, _error = process.communicate(timeout=15)
+        except subprocess.TimeoutExpired as error:
+            raise FiniteRecorderRefusal("finite_original_control_in_doubt") from error
+        if process.returncode:
+            raise FiniteRecorderRefusal("finite_owner_command_refused")
+        return output
+
+    # Refuse a previous original allocation; this runner never redispatches it.
+    if inspect_original(docker, name, env) is not None:
+        raise FiniteRecorderRefusal("finite_original_allocation_exists")
+    journal = []
+    streams = {"stdout": bytearray(), "stderr": bytearray()}
+    created = False
+    started = False
+    spool_value = os.environ.get("RHODES_FINITE_RECORDER_SPOOL_DIR")
+    if not spool_value or not Path(spool_value).is_absolute():
+        raise FiniteRecorderRefusal("finite_durable_spool_unavailable")
+    spool = Path(spool_value)
+    spool_info = spool.lstat()
+    if (not stat.S_ISDIR(spool_info.st_mode) or spool_info.st_uid != os.getuid()
+        or stat.S_IMODE(spool_info.st_mode) != 0o700):
+        raise FiniteRecorderRefusal("finite_spool_custody_invalid")
+    attempt = spool / name
+    attempt.mkdir(mode=0o700, exist_ok=False)  # Existing original never redispatches.
+
+    def durable(path, body, *, append=False):
+        flags = os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | (os.O_APPEND if append else os.O_EXCL)
+        descriptor = os.open(attempt / path, flags, 0o600)
+        try:
+            view = memoryview(body)
+            while view:
+                view = view[os.write(descriptor, view):]
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        parent = os.open(attempt, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(parent)
+        finally:
+            os.close(parent)
+
+    durable("input.bin", input_bytes)
+    with nullcontext(str(attempt)) as directory:
+        empty = Path(directory) / "readonly-shm"
+        empty.mkdir(mode=0o700)
+        try:
+            call(["create", "--interactive", "--pull", "never", "--name", name, "--label", label,
+                "--read-only", "--network", "none", "--ipc", "none", "--cap-drop", "ALL",
+                "--security-opt", "no-new-privileges", "--user", "65534:65534",
+                "--pids-limit", "64", "--cpus", str(cpus), "--memory", str(memory_bytes),
+                "--memory-swap", str(memory_bytes), "--mount",
+                f"type=bind,source={empty},target=/dev/shm,readonly", "--entrypoint", command[0],
+                image_digest, *command[1:]])
+            created = True
+            if on_state:
+                on_state("created")
+            if cancelled is not None and cancelled.is_set():
+                raise FiniteRecorderRefusal("finite_cancelled_before_start")
+            observed = json.loads(call(["inspect", name]))[0]
+            host, config = observed["HostConfig"], observed["Config"]
+            mounts = observed.get("Mounts") or []
+            if (observed.get("Image") != image_digest or host.get("ReadonlyRootfs") is not True
+                or host.get("NetworkMode") != "none" or host.get("Privileged") is not False
+                or set(host.get("CapDrop") or ()) != {"ALL"} or host.get("PidsLimit") != 64
+                or host.get("Memory") != memory_bytes or host.get("MemorySwap") != memory_bytes
+                or host.get("NanoCpus") != round(cpus * 1_000_000_000)
+                or config.get("User") != "65534:65534"
+                or len(mounts) != 1 or mounts[0].get("Destination") != "/dev/shm" or mounts[0].get("RW") is not False
+                or config.get("Volumes") or host.get("Devices") or host.get("Binds")
+                or host.get("PidMode") not in ("", "private") or host.get("IpcMode") != "none"):
+                raise FiniteRecorderRefusal("finite_enforced_isolation_differs")
+            for item in config.get("Env") or ():
+                if item.partition("=")[0] not in {"PATH", "LANG", "LC_ALL", "TZ"}:
+                    raise FiniteRecorderRefusal("finite_image_environment_refused")
+            child = subprocess.Popen([docker, "start", "--attach", "--interactive", name],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+            started = True
+            if on_state:
+                on_state("running")
+            selector = selectors.DefaultSelector()
+            for handle, channel in ((child.stdout, "stdout"), (child.stderr, "stderr"), (child.stdin, "stdin")):
+                os.set_blocking(handle.fileno(), False)
+                selector.register(handle, selectors.EVENT_WRITE if channel == "stdin" else selectors.EVENT_READ, channel)
+            cursor = 0
+            deadline = time.monotonic() + timeout_seconds
+            while selector.get_map():
+                if time.monotonic() >= deadline or cancelled is not None and cancelled.is_set():
+                    raise FiniteRecorderRefusal("finite_execution_timeout")
+                for key, _events in selector.select(0.1):
+                    handle, channel = key.fileobj, key.data
+                    if channel == "stdin":
+                        if cursor < len(input_bytes):
+                            try:
+                                cursor += os.write(handle.fileno(), input_bytes[cursor:cursor + 65536])
+                            except BrokenPipeError as error:
+                                raise FiniteRecorderRefusal("finite_input_not_consumed") from error
+                        else:
+                            selector.unregister(handle)
+                            handle.close()
+                    else:
+                        data = os.read(handle.fileno(), 65536)
+                        if not data:
+                            selector.unregister(handle)
+                            handle.close()
+                            continue
+                        streams[channel].extend(data)
+                        if sum(len(value) for value in streams.values()) > maximum_output_bytes:
+                            raise FiniteRecorderRefusal("finite_output_capture_bound_exceeded")
+                        journal.append({"sequence": len(journal) + 1, "channel": channel,
+                            "data_b64": base64.b64encode(data).decode(),
+                            "sha256": hashlib.sha256(data).hexdigest(), "size_bytes": len(data)})
+                        durable(channel + ".bin", data, append=True)
+                        durable("stream-journal.jsonl", canonical(journal[-1]) + b"\n", append=True)
+            child.wait(timeout=max(0.1, deadline - time.monotonic()))
+            terminal = json.loads(call(["inspect", name]))[0]
+            if terminal["State"].get("Running") or terminal["State"].get("ExitCode") != child.returncode:
+                raise FiniteRecorderRefusal("finite_terminal_outcome_unverified")
+            stdout, stderr = bytes(streams["stdout"]), bytes(streams["stderr"])
+            body = {"schema_version": "synth.rhodes-finite-terminal.v1", "rollout_id": rollout_id,
+                "execution_epoch": epoch, "profile": "isolated_stdio_v1", "image_digest": image_digest,
+                "command": list(command), "input_sha256": hashlib.sha256(input_bytes).hexdigest(),
+                "stdout_sha256": hashlib.sha256(stdout).hexdigest(), "stderr_sha256": hashlib.sha256(stderr).hexdigest(),
+                "journal_sha256": hashlib.sha256(canonical(journal)).hexdigest(), "exit_code": child.returncode,
+                "terminal_observed": True, "streams_drained": True, "filesystem_writes": "forbidden",
+                "network": "none", "credential_injection": "none", "closure": closure,
+                "resource_limits": {"cpu_cores": cpus, "memory_bytes": memory_bytes, "pids_limit": 64},
+                "recorder_module_sha256": signer.module_sha256}
+            proof = signer.sign(body)
+            durable("stdio-journal.json", canonical(journal))
+            durable("recorder-proof.json", canonical(proof))
+            from .tracing.capture.supervisor import CaptureSupervisor, SupervisorConfig
+            from .tracing.models.identity import TraceIdentityV5, TraceProvenanceV5
+            from .tracing.store.bundle import LocalTraceBundle
+
+            root = Path(directory) / "trace"
+            with CaptureSupervisor(SupervisorConfig(bundle_root=root, trace_key={"rollout": rollout_id, "epoch": epoch},
+                trace_id=rollout_id, upstream_base_url="http://127.0.0.1:9", interception="application",
+                identity=TraceIdentityV5(rollout_id=rollout_id), workload_kind="other",
+                provenance=TraceProvenanceV5("rhodes-isolated-stdio", "1", container_image_digest=image_digest))) as capture:
+                for path, content in (("input.bin", input_bytes), ("stdout.bin", stdout), ("stderr.bin", stderr),
+                    ("stdio-journal.json", canonical(journal)), ("recorder-proof.json", canonical(proof))):
+                    capture.collector.artifact(role="research_log", media_type="application/octet-stream",
+                        content=content, logical_name=path, visibility="private")
+                capture.collector.event(event_type="environment.finite_stdio.terminal", payload=body)
+                capture.finalize(status="completed")
+            archive = LocalTraceBundle(root).archive_bytes()
+            durable("native-trace.zip", archive)
+            try:
+                result = json.loads(stdout)
+            except ValueError:
+                result = {"success": False, "error": "finite_result_not_json"}
+            if not isinstance(result, dict):
+                result = {"success": False, "error": "finite_result_not_object"}
+            result.update(rollout_id=rollout_id, finite_exit_code=child.returncode)
+            if child.returncode:
+                result["success"] = False
+            retained = FiniteStdioResult(result, archive, proof, stdout, stderr, canonical(journal), image_digest)
+            if on_terminal:
+                on_terminal(retained)
+            return retained
+        finally:
+            if created:
+                observed = inspect_original(docker, name, env)
+                if observed is not None and (observed.get("Config", {}).get("Labels") or {}).get("ai.synth.rhodes.finite") != rollout_id + ":" + epoch:
+                    raise FiniteRecorderRefusal("finite_cleanup_ownership_differs")
+                if observed is not None:
+                    subprocess.run([docker, "rm", "--force", name], capture_output=True, env=env, timeout=15)
+                if inspect_original(docker, name, env) is not None:
+                    raise FiniteRecorderRefusal("finite_owner_cleanup_unconfirmed")
+                if on_state:
+                    on_state("cleanup_confirmed")
+
+
+def recover_original_stdio(*, rollout_id, epoch, state, cohort_id):
+    """Read a completed original spool and stop its exact allocation; never run."""
+    docker = shutil.which("docker")
+    if docker is None:
+        raise FiniteRecorderRefusal("finite_runtime_unavailable")
+    name = "rhodes-finite-" + hashlib.sha256((rollout_id + ":" + epoch).encode()).hexdigest()[:40]
+    env = {key: os.environ[key] for key in ("PATH", "DOCKER_HOST", "DOCKER_CONFIG", "HOME") if key in os.environ}
+    observed = inspect_original(docker, name, env)
+    if observed is None and state == "admitted":
+        # An original create without its ACK can still materialize later.
+        raise FiniteRecorderRefusal("finite_original_create_in_doubt")
+    if observed is not None:
+        if (observed.get("Config", {}).get("Labels") or {}).get("ai.synth.rhodes.finite") != rollout_id + ":" + epoch:
+            raise FiniteRecorderRefusal("finite_cleanup_ownership_differs")
+        subprocess.run([docker, "rm", "--force", name], capture_output=True, env=env, timeout=15)
+        if inspect_original(docker, name, env) is not None:
+            raise FiniteRecorderRefusal("finite_owner_cleanup_unconfirmed")
+    spool = Path(os.environ.get("RHODES_FINITE_RECORDER_SPOOL_DIR", "/nonexistent"))
+    if not spool.is_absolute():
+        raise FiniteRecorderRefusal("finite_absolute_spool_required")
+    info = spool.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
+        raise FiniteRecorderRefusal("finite_spool_custody_invalid")
+    attempt = spool / name
+    info = attempt.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
+        raise FiniteRecorderRefusal("finite_attempt_spool_custody_invalid")
+    def retained(path, maximum):
+        fd = os.open(attempt / path, os.O_RDONLY | os.O_NOFOLLOW)
+        try:
+            item = os.fstat(fd)
+            if not stat.S_ISREG(item.st_mode) or item.st_uid != os.getuid() or stat.S_IMODE(item.st_mode) != 0o600 or item.st_size > maximum:
+                raise FiniteRecorderRefusal("finite_retained_spool_invalid")
+            body = bytearray()
+            while chunk := os.read(fd, min(65536, maximum + 1 - len(body))):
+                body.extend(chunk)
+            if len(body) != item.st_size:
+                raise FiniteRecorderRefusal("finite_retained_spool_changed")
+            return bytes(body)
+        finally:
+            os.close(fd)
+    try:
+        proof = json.loads(retained("recorder-proof.json", 1024 * 1024))
+        body = verify_recorder_proof(proof, cohort_id=cohort_id)
+        archive = retained("native-trace.zip", 8 * 1024 * 1024)
+        journal = retained("stdio-journal.json", 2 * 1024 * 1024)
+        stdout = retained("stdout.bin", 256 * 1024) if (attempt / "stdout.bin").exists() else b""
+        stderr = retained("stderr.bin", 256 * 1024) if (attempt / "stderr.bin").exists() else b""
+        if (body.get("rollout_id") != rollout_id or body.get("execution_epoch") != epoch
+            or body.get("terminal_observed") is not True or body.get("streams_drained") is not True
+            or any(body.get(key) != hashlib.sha256(value).hexdigest() for key, value in (
+                ("stdout_sha256", stdout), ("stderr_sha256", stderr), ("journal_sha256", journal)))):
+            raise FiniteRecorderRefusal("finite_retained_terminal_differs")
+        return FiniteStdioResult({}, archive, proof, stdout, stderr, journal, body["image_digest"])
+    except FileNotFoundError:
+        # Cleanup is proven, but a partial journal never becomes terminal evidence.
+        return None
+
+
+def verify_recorder_proof(proof, *, cohort_id):
+    """Only the operator public pin verifies a retained recorder observation."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+    value = os.environ.get("RHODES_FINITE_RECORDER_COHORT_JSON")
+    if not value:
+        raise FiniteRecorderRefusal("recorder_public_cohort_unavailable")
+    cohort = json.loads(value)
+    if (cohort.get("schema_version") != "synth.rhodes-recorder-cohort.v1"
+        or cohort.get("cohort_id") != cohort_id or proof.get("cohort_id") != cohort_id
+        or proof.get("key_id") != cohort.get("key_id")
+        or proof.get("body", {}).get("recorder_module_sha256") != cohort.get("module_sha256")):
+        raise FiniteRecorderRefusal("recorder_public_pin_differs")
+    public = serialization.load_pem_public_key(cohort["public_key_pem"].encode())
+    if not isinstance(public, Ed25519PublicKey):
+        raise FiniteRecorderRefusal("recorder_public_key_invalid")
+    public.verify(base64.b64decode(proof["signature_b64"], validate=True), canonical(proof["body"]))
+    return proof["body"]

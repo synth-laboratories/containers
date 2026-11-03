@@ -1,6 +1,6 @@
 """Opt-in per-epoch capture/export contracts; no caller claim grants custody.
 
-Wire mirror: backend packages/rhodes/attempt_capture.py; source-only handoff. A full closure requires
+Spec: notes/specifications/rhodes-v024-service.md. A full closure requires
 independent current owner proofs, not object labels or an observed image digest.
 """
 
@@ -11,8 +11,9 @@ from pydantic import Field, model_validator
 
 from .rhodes_catalog import Contract, EvidenceReference
 from .package_models import portable_path
+from .rhodes_finite_capture import FiniteCaptureContract
 
-CaptureRole = Literal["input", "configuration", "source", "grader", "policy", "image", "dependency"]
+CaptureRole = Literal["input", "configuration", "source", "grader", "policy", "image", "dependency", "output", "log"]
 
 
 class CaptureAdmissionReference(Contract):
@@ -43,7 +44,7 @@ class AttemptCaptureRequest(Contract):
     declared_secret_paths: tuple[str, ...] = Field(default=(), max_length=128)
     required_roles: tuple[CaptureRole, ...] = Field(default=(
         "input", "configuration", "source", "grader", "policy", "image",
-    ), max_length=7)
+    ), max_length=9)
     maximum_bytes: Annotated[int, Field(strict=True, ge=1024, le=16 * 1024 * 1024)] = 8 * 1024 * 1024
 
     @model_validator(mode="after")
@@ -74,6 +75,7 @@ class AttemptCaptureExportPolicy(Contract):
     input_data_classification: Literal["owner_declared_nonsecret_except_opaque_paths"]
     command_contains_no_credentials: Literal[True]
     retained_objects: tuple[DeclaredCaptureReference, ...] = Field(default=(), max_length=128)
+    finite_contract: FiniteCaptureContract | None = None
 
     @model_validator(mode="after")
     def canonical_project(self):
@@ -102,7 +104,7 @@ class AttemptCaptureReceipt(Contract):
     schema_version: Literal["synth.rhodes-attempt-capture.v1"]
     execution_epoch: str
     status: Literal["pending", "committed", "refused"]
-    scope: Literal["pre_execution_inputs_and_declarations"]
+    scope: Literal["pre_execution_inputs_and_declarations", "terminal_observed_output"]
     inventory: tuple[CaptureObject, ...] = Field(max_length=256)
     inventory_sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
     archive_sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
@@ -117,6 +119,9 @@ class AttemptCaptureReceipt(Contract):
     gaps: tuple[str, ...] = Field(max_length=256)
     full_attempt_capture_verified: bool = False
     owner_custody: dict[str, str] | None = None
+    role_closures: dict[str, str] = Field(default_factory=dict)
+    terminal_publication: dict | None = None
+    terminal_native: dict | None = None
 
     @model_validator(mode="after")
     def closure_is_owned(self):

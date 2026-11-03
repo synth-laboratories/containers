@@ -171,6 +171,7 @@ from .rhodes_catalog import (
     TaskDefinition as RegisteredTaskDefinition,
 )
 from .rhodes_catalog_tools import RhodesCatalogTools
+from .rhodes_finite_capture import FiniteCaptureContract
 from .rhodes_attempt_capture import (
     AttemptCaptureRequest,
     AttemptCaptureExportPolicy,
