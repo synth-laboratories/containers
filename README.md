@@ -129,3 +129,10 @@ for complete containers: Banking77, HotpotQA, MiniGrid, TBLite, and Crafter.
 ## License
 
 MIT
+
+
+The opt-in protected Rhodes finite recorder requires installing
+`synth-containers[finite-recorder]`. Operator public cohort, absolute private-key
+file and fsynced spool bindings are documented in
+`artifacts/v023-v025-impl-20261103/FINITE-CAPTURE-HANDOFF.md`. This source handoff
+does not regenerate dependency locks or packages or install/enroll a signer.

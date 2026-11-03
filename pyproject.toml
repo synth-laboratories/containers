@@ -21,6 +21,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+finite-recorder = ["cryptography>=44,<51"]
 native-harbor = ["harbor==0.22.0; python_version >= '3.12'"]
 native-harbor-docker = [
     "harbor==0.22.0; python_version >= '3.12'",

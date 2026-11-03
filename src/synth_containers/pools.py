@@ -406,6 +406,13 @@ class RolloutOutcome:
         value = self.payload.get("result")
         return value if isinstance(value, Mapping) else {}
 
+    @property
+    def attempt_capture(self) -> Mapping[str, Any]:
+        """Executor-owned capture receipt; a committed archive may have gaps."""
+        execution = self.payload.get("execution")
+        value = execution.get("attempt_capture") if isinstance(execution, Mapping) else None
+        return value if isinstance(value, Mapping) else {}
+
 
 class PoolClient:
     """Submit and collect container-pool rollouts through the backend."""
