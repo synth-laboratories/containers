@@ -1,0 +1,10 @@
+{
+  "review_commit": "969ece3fe7feea49eb8a8b23001211fc74ff8779",
+  "integrated_commit": "435c48f2644ce62922aa0cef3d1a4eb1a1f46fb3",
+  "identical_changed_files": {
+    "artifacts/v023-v025-impl-20261103/FINITE-CAPTURE-HANDOFF.md": "c3e830dff71ae59d2991686109b26a6cb3a14b451925d1124c196562db50dc5f",
+    "src/synth_containers/finite_stdio_capture.py": "3d725b3427039c186c86d0e5a425521eb62573e315ef7a548e9541c809b5250f",
+    "tests/test_finite_stdio_capture.py": "32b75bd55383246e76bd3ed5b6d03d65f746560103b3dda0bad209a5d01e4352"
+  },
+  "rust_qualification": "see isolated Python test receipts; DB/Docker pending"
+}

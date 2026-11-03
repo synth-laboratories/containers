@@ -1,0 +1,19 @@
+{
+  "command": [
+    "/Users/joshuapurtell/GitHub/workspaces/v023-v025-integration-20261103/containers/.venv/bin/python",
+    "-m",
+    "pytest",
+    "-q",
+    "--tb=short",
+    "tests/test_finite_stdio_capture.py",
+    "-k",
+    "not real"
+  ],
+  "repo": "/Users/joshuapurtell/GitHub/workspaces/v023-v025-finish-20261103/containers",
+  "exit_code": 0,
+  "elapsed_seconds": 1.7499435000354424,
+  "head": "336cbf41b206c28d97111668df28576c628a9940",
+  "dirty_source": " M src/synth_containers/finite_stdio_capture.py\n M tests/test_finite_stdio_capture.py\n",
+  "external_services": "disabled; fakes only",
+  "log": "/Users/joshuapurtell/GitHub/workspaces/v023-v025-finish-20261103/artifacts/containers/finite-source-review.log"
+}
