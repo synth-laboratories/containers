@@ -104,6 +104,17 @@ def _retry_after_seconds(value: str, *, now: datetime) -> float | None:
 
 
 class RhodesClient(PoolClient):
+    @staticmethod
+    def attempt_capture_declaration(value):
+        """Validate an opt-in declaration for submit's `attempt_capture` field.
+
+        The signed owner intent and task-owned export policy are independently
+        authorized by the backend; constructing this DTO grants no access.
+        """
+        from .rhodes_attempt_capture import AttemptCaptureRequest
+
+        return AttemptCaptureRequest.model_validate(value).model_dump(mode="json")
+
     @property
     def catalog(self):
         """Draft versioned task/resource registry over this authenticated client."""

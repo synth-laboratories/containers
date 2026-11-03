@@ -171,6 +171,11 @@ from .rhodes_catalog import (
     TaskDefinition as RegisteredTaskDefinition,
 )
 from .rhodes_catalog_tools import RhodesCatalogTools
+from .rhodes_attempt_capture import (
+    AttemptCaptureRequest,
+    AttemptCaptureExportPolicy,
+    AttemptCaptureReceipt,
+)
 from .profiles import all_profile_specs, infer_profiles, missing_protocols, spec_for_profile
 from .prompt_programs import (
     GEPA_OPTIMIZER_CONTRACT_VERSION,
@@ -356,6 +361,9 @@ __all__ = [
     "PolicyDisableReasoning",
     "PoolClient",
     "RhodesClient",
+    "AttemptCaptureRequest",
+    "AttemptCaptureExportPolicy",
+    "AttemptCaptureReceipt",
     "BuildLogPublication",
     "BuildLogPublicationPage",
     "RhodesCatalogClient",

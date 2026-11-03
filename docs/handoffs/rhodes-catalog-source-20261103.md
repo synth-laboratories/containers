@@ -42,3 +42,16 @@ source authorization/digest failures, CAS/replay/archive/pagination and immutabl
 history. Internal bundle registration requires its owning admitted-grant wiring.
 These drafts do not claim accepted schema naming, runtime qualification, trusted
 scores, verified budget enforcement, deployment or ticket completion.
+
+Per-attempt source continuation: `rhodes_attempt_capture.py` mirrors the backend
+closed request, export-policy, preadmission-reference, inventory and receipt DTOs.
+`RhodesClient.attempt_capture_declaration(value)` validates a declaration for the
+ordinary submit request's `attempt_capture` field; `RolloutOutcome.attempt_capture`
+reads the executor-owned receipt. `get_rollout` and wait preserve the complete
+additive response. The declaration carries only the nonsecret intent reference
+returned by public Forge preadmission, never an acting token or raw bearer.
+Current original-user rights, explicit native-use/task revision consent and
+actual byte custody remain backend owner checks. Archive commit alone cannot
+assert full capture; the receipt carries actual per-object hashes/sizes and gaps.
+No schema generation, import, tests, compilation or live calls were run for this
+continuation either.
