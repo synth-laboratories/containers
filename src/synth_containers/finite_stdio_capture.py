@@ -8,6 +8,7 @@ must not advertise this execution profile unless they satisfy its fixed shape.
 import base64
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import selectors
@@ -24,26 +25,39 @@ def canonical(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
 
 
-def inspect_original(docker, name, env):
+def daemon_identity(docker, env):
+    value = subprocess.run([docker, "info", "--format", "{{.ID}}"], capture_output=True, env=env, timeout=10)
+    identity = value.stdout.decode(errors="strict").strip()
+    if value.returncode or not 1 <= len(identity) <= 256 or any(char.isspace() for char in identity):
+        raise FiniteRecorderRefusal("finite_owner_daemon_unavailable")
+    return identity
+
+
+def inspect_original(docker, name, env, *, expected_daemon_id=None, container_id=None):
     """Absence needs an exact daemon response, never a transport exit code."""
     def read():
-        return subprocess.run([docker, "inspect", name], capture_output=True, env=env, timeout=10)
+        return subprocess.run([docker, "inspect", container_id or name], capture_output=True, env=env, timeout=10)
     def absent(value):
         error = value.stderr.decode(errors="replace").strip()
         return value.returncode != 0 and error in {
-            "Error: No such object: " + name,
-            "Error response from daemon: No such container: " + name,
+            "Error: No such object: " + (container_id or name),
+            "Error response from daemon: No such container: " + (container_id or name),
         }
+    identity = daemon_identity(docker, env)
+    if expected_daemon_id is not None and identity != expected_daemon_id:
+        raise FiniteRecorderRefusal("finite_original_daemon_differs")
     value = read()
     if value.returncode == 0:
         rows = json.loads(value.stdout)
-        if len(rows) != 1 or rows[0].get("Name") != "/" + name:
+        if (len(rows) != 1 or container_id is not None and rows[0].get("Id") != container_id
+            or container_id is None and rows[0].get("Name") != "/" + name):
             raise FiniteRecorderRefusal("finite_original_identity_differs")
+        if daemon_identity(docker, env) != identity:
+            raise FiniteRecorderRefusal("finite_original_daemon_changed")
         return rows[0]
     if not absent(value):
         raise FiniteRecorderRefusal("finite_original_presence_unknown")
-    healthy = subprocess.run([docker, "info", "--format", "{{.ID}}"], capture_output=True, env=env, timeout=10)
-    if healthy.returncode or not healthy.stdout.strip() or not absent(read()):
+    if daemon_identity(docker, env) != identity or not absent(read()):
         raise FiniteRecorderRefusal("finite_original_absence_unconfirmed")
     return None
 
@@ -144,16 +158,26 @@ def seal_original_stdio(*, root, rollout_id, epoch, input_bytes, stdout, stderr,
 
 def run_isolated_stdio(*, rollout_id, epoch, image_digest, command, input_bytes,
                        cpus, memory_bytes, timeout_seconds, maximum_output_bytes,
-                       closure, signer, cancelled=None, on_state=None, on_terminal=None):
+                       closure, signer, cancelled=None, on_state=None, on_terminal=None, on_owner=None,
+                       deadline_timestamp=None):
     """One foreground-owned container; every observable output byte is retained."""
     docker = shutil.which("docker")
     if docker is None or not 0 < cpus <= 16 or not 0 < timeout_seconds <= 3600:
         raise FiniteRecorderRefusal("finite_runtime_or_limits_unavailable")
+    remaining = timeout_seconds
+    if deadline_timestamp is not None:
+        if not math.isfinite(deadline_timestamp):
+            raise FiniteRecorderRefusal("finite_deadline_invalid")
+        remaining = min(remaining, deadline_timestamp - time.time())
+    if remaining <= 0:
+        raise FiniteRecorderRefusal("finite_deadline_exhausted")
+    deadline = time.monotonic() + remaining
     if type(memory_bytes) is not int or not 128 * 1024 * 1024 <= memory_bytes <= 8 * 1024**3:
         raise FiniteRecorderRefusal("finite_memory_invalid")
     name = "rhodes-finite-" + hashlib.sha256((rollout_id + ":" + epoch).encode()).hexdigest()[:40]
     label = "ai.synth.rhodes.finite=" + rollout_id + ":" + epoch
     env = {name: os.environ[name] for name in ("PATH", "DOCKER_HOST", "DOCKER_CONFIG", "HOME") if name in os.environ}
+    owner_daemon_id = daemon_identity(docker, env)
 
     def call(args):
         # A timed-out original create is left alive and in doubt. Its durable
@@ -168,13 +192,15 @@ def run_isolated_stdio(*, rollout_id, epoch, image_digest, command, input_bytes,
         return output
 
     # Refuse a previous original allocation; this runner never redispatches it.
-    if inspect_original(docker, name, env) is not None:
+    if inspect_original(docker, name, env, expected_daemon_id=owner_daemon_id) is not None:
         raise FiniteRecorderRefusal("finite_original_allocation_exists")
     journal = []
     journal_bytes = 2  # Canonical list brackets; bound adversarial tiny writes.
     streams = {"stdout": bytearray(), "stderr": bytearray()}
     created = False
-    started = False
+    container_id = None
+    child = None
+    selector = None
     spool_value = os.environ.get("RHODES_FINITE_RECORDER_SPOOL_DIR")
     if not spool_value or not Path(spool_value).is_absolute():
         raise FiniteRecorderRefusal("finite_durable_spool_unavailable")
@@ -208,15 +234,23 @@ def run_isolated_stdio(*, rollout_id, epoch, image_digest, command, input_bytes,
             os.close(parent)
 
     durable("input.bin", input_bytes)
+    def retain_lifecycle(value, *, container_id=None):
+        body = {"schema_version": "synth.rhodes-finite-lifecycle.v1", "rollout_id": rollout_id,
+            "execution_epoch": epoch, "container_name": name, "docker_daemon_id": owner_daemon_id,
+            "state": value, "container_id": container_id, "recorder_module_sha256": signer.module_sha256}
+        durable("lifecycle-" + value + ".json", canonical(signer.sign(body)))
+    retain_lifecycle("owner_bound")
+    if on_owner:
+        on_owner({"docker_daemon_id": owner_daemon_id})
     with nullcontext(str(attempt)) as directory:
         empty = Path(directory) / "readonly-shm"
         empty.mkdir(mode=0o700)
         try:
-            if cancelled is not None and cancelled.is_set():
+            if time.monotonic() >= deadline or cancelled is not None and cancelled.is_set():
                 raise FiniteRecorderRefusal("finite_cancelled_before_create")
             if on_state:
                 on_state("create_pending")  # Durable original intent before the control effect.
-            call(["create", "--interactive", "--pull", "never", "--name", name, "--label", label,
+            allocated = call(["create", "--interactive", "--pull", "never", "--name", name, "--label", label,
                 "--no-healthcheck", "--log-driver", "none",
                 "--read-only", "--network", "none", "--ipc", "none", "--cap-drop", "ALL",
                 "--security-opt", "no-new-privileges", "--user", "65534:65534",
@@ -226,9 +260,16 @@ def run_isolated_stdio(*, rollout_id, epoch, image_digest, command, input_bytes,
                 f"type=bind,source={empty},target=/dev/mqueue,readonly", "--entrypoint", command[0],
                 image_digest, *command[1:]])
             created = True
+            allocated_id = allocated.decode("ascii").strip()
+            if len(allocated_id) != 64 or any(char not in "0123456789abcdef" for char in allocated_id):
+                raise FiniteRecorderRefusal("finite_original_allocation_identity_invalid")
+            container_id = allocated_id
+            retain_lifecycle("created", container_id=container_id)
+            if on_owner:
+                on_owner({"docker_daemon_id": owner_daemon_id, "container_id": container_id})
             if on_state:
                 on_state("created")
-            if cancelled is not None and cancelled.is_set():
+            if time.monotonic() >= deadline or cancelled is not None and cancelled.is_set():
                 raise FiniteRecorderRefusal("finite_cancelled_before_start")
             observed = json.loads(call(["inspect", name]))[0]
             image = json.loads(call(["image", "inspect", image_digest]))[0]
@@ -237,7 +278,8 @@ def run_isolated_stdio(*, rollout_id, epoch, image_digest, command, input_bytes,
             architecture = {"x86_64": "amd64", "aarch64": "arm64"}.get(
                 daemon.get("Architecture"), daemon.get("Architecture"))
             platform = {"os": image.get("Os"), "architecture": image.get("Architecture")}
-            if (image.get("Id") != image_digest or platform["os"] != "linux" or daemon.get("OSType") != "linux"
+            if (daemon.get("ID") != owner_daemon_id or observed.get("Id") != container_id
+                or image.get("Id") != image_digest or platform["os"] != "linux" or daemon.get("OSType") != "linux"
                 or platform["architecture"] != architecture
                 or "sha256:" + hashlib.sha256(canonical(platform)).hexdigest() != closure.get("image_platform")):
                 raise FiniteRecorderRefusal("finite_native_platform_or_image_differs")
@@ -262,9 +304,11 @@ def run_isolated_stdio(*, rollout_id, epoch, image_digest, command, input_bytes,
             for item in config.get("Env") or ():
                 if item.partition("=")[0] not in {"PATH", "LANG", "LC_ALL", "TZ"}:
                     raise FiniteRecorderRefusal("finite_image_environment_refused")
-            child = subprocess.Popen([docker, "start", "--attach", "--interactive", name],
+            if time.monotonic() >= deadline or cancelled is not None and cancelled.is_set():
+                raise FiniteRecorderRefusal("finite_cancelled_before_start")
+            child = subprocess.Popen([docker, "start", "--attach", "--interactive", container_id],
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
-            started = True
+            retain_lifecycle("running", container_id=container_id)
             if on_state:
                 on_state("running")
             selector = selectors.DefaultSelector()
@@ -272,7 +316,6 @@ def run_isolated_stdio(*, rollout_id, epoch, image_digest, command, input_bytes,
                 os.set_blocking(handle.fileno(), False)
                 selector.register(handle, selectors.EVENT_WRITE if channel == "stdin" else selectors.EVENT_READ, channel)
             cursor = 0
-            deadline = time.monotonic() + timeout_seconds
             while selector.get_map():
                 if time.monotonic() >= deadline or cancelled is not None and cancelled.is_set():
                     raise FiniteRecorderRefusal("finite_execution_timeout")
@@ -306,8 +349,9 @@ def run_isolated_stdio(*, rollout_id, epoch, image_digest, command, input_bytes,
                         durable(channel + ".bin", data, append=True)
                         durable("stream-journal.jsonl", canonical(journal[-1]) + b"\n", append=True)
             child.wait(timeout=max(0.1, deadline - time.monotonic()))
-            terminal = json.loads(call(["inspect", name]))[0]
-            if terminal["State"].get("Running") or terminal["State"].get("ExitCode") != child.returncode:
+            terminal = json.loads(call(["inspect", container_id]))[0]
+            if (terminal.get("Id") != container_id or terminal["State"].get("Running")
+                or terminal["State"].get("ExitCode") != child.returncode):
                 raise FiniteRecorderRefusal("finite_terminal_outcome_unverified")
             stdout, stderr = bytes(streams["stdout"]), bytes(streams["stderr"])
             body = {"schema_version": "synth.rhodes-finite-terminal.v1", "rollout_id": rollout_id,
@@ -317,6 +361,7 @@ def run_isolated_stdio(*, rollout_id, epoch, image_digest, command, input_bytes,
                 "journal_sha256": hashlib.sha256(canonical(journal)).hexdigest(), "exit_code": child.returncode,
                 "terminal_observed": True, "streams_drained": True, "filesystem_writes": "forbidden",
                 "network": "none", "credential_injection": "none", "closure": closure,
+                "docker_daemon_id": owner_daemon_id, "container_id": container_id,
                 "resource_limits": {"cpu_cores": cpus, "memory_bytes": memory_bytes, "pids_limit": 64},
                 "recorder_module_sha256": signer.module_sha256}
             proof = signer.sign(body)
@@ -340,37 +385,53 @@ def run_isolated_stdio(*, rollout_id, epoch, image_digest, command, input_bytes,
                 on_terminal(retained)
             return retained
         finally:
-            if created:
-                observed = inspect_original(docker, name, env)
-                if observed is not None and (observed.get("Config", {}).get("Labels") or {}).get("ai.synth.rhodes.finite") != rollout_id + ":" + epoch:
-                    raise FiniteRecorderRefusal("finite_cleanup_ownership_differs")
-                if observed is not None:
-                    subprocess.run([docker, "rm", "--force", name], capture_output=True, env=env, timeout=15)
-                if inspect_original(docker, name, env) is not None:
-                    raise FiniteRecorderRefusal("finite_owner_cleanup_unconfirmed")
-                if on_state:
-                    on_state("cleanup_confirmed")
+            try:
+                if created:
+                    observed = inspect_original(docker, name, env, expected_daemon_id=owner_daemon_id, container_id=container_id)
+                    if observed is not None:
+                        if (observed.get("Config", {}).get("Labels") or {}).get("ai.synth.rhodes.finite") != rollout_id + ":" + epoch:
+                            raise FiniteRecorderRefusal("finite_cleanup_ownership_differs")
+                        # After finding the named original, remove only its
+                        # immutable ID even if another actor renames it.
+                        container_id = observed["Id"]
+                        subprocess.run([docker, "rm", "--force", container_id], capture_output=True, env=env, timeout=15)
+                    if inspect_original(docker, name, env, expected_daemon_id=owner_daemon_id, container_id=container_id) is not None:
+                        raise FiniteRecorderRefusal("finite_owner_cleanup_unconfirmed")
+                    retain_lifecycle("cleanup_confirmed", container_id=container_id)
+                    if on_state:
+                        on_state("cleanup_confirmed")
+            finally:
+                # Reap only the local attach client. Its exit is never evidence
+                # that the original provider allocation was removed.
+                if selector is not None:
+                    selector.close()
+                if child is not None:
+                    for handle in (child.stdin, child.stdout, child.stderr):
+                        if handle is not None and not handle.closed:
+                            handle.close()
+                    try:
+                        child.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        child.terminate()
+                        try:
+                            child.wait(timeout=2)
+                        except subprocess.TimeoutExpired:
+                            child.kill()
+                            child.wait(timeout=2)
 
 
-def recover_original_stdio(*, rollout_id, epoch, state, cohort_id, allow_first_seal=False):
+def recover_original_stdio(*, rollout_id, epoch, state, cohort_id, allow_first_seal=False,
+                           expected_daemon_id=None):
     """Read a completed original spool and stop its exact allocation; never run."""
+    if state == "preflight":
+        return None  # Durable create_pending never authorized an effect.
+    if not isinstance(expected_daemon_id, str) or not expected_daemon_id:
+        raise FiniteRecorderRefusal("finite_original_daemon_binding_missing")
     docker = shutil.which("docker")
     if docker is None:
         raise FiniteRecorderRefusal("finite_runtime_unavailable")
     name = "rhodes-finite-" + hashlib.sha256((rollout_id + ":" + epoch).encode()).hexdigest()[:40]
     env = {key: os.environ[key] for key in ("PATH", "DOCKER_HOST", "DOCKER_CONFIG", "HOME") if key in os.environ}
-    observed = inspect_original(docker, name, env)
-    if observed is None and state in {"admitted", "create_pending"}:
-        # An original create without its ACK can still materialize later.
-        raise FiniteRecorderRefusal("finite_original_create_in_doubt")
-    if observed is None and state == "preflight":
-        return None  # The durable create_pending transition never authorized an effect.
-    if observed is not None:
-        if (observed.get("Config", {}).get("Labels") or {}).get("ai.synth.rhodes.finite") != rollout_id + ":" + epoch:
-            raise FiniteRecorderRefusal("finite_cleanup_ownership_differs")
-        subprocess.run([docker, "rm", "--force", name], capture_output=True, env=env, timeout=15)
-        if inspect_original(docker, name, env) is not None:
-            raise FiniteRecorderRefusal("finite_owner_cleanup_unconfirmed")
     spool = Path(os.environ.get("RHODES_FINITE_RECORDER_SPOOL_DIR", "/nonexistent"))
     if not spool.is_absolute():
         raise FiniteRecorderRefusal("finite_absolute_spool_required")
@@ -395,6 +456,41 @@ def recover_original_stdio(*, rollout_id, epoch, state, cohort_id, allow_first_s
             return bytes(body)
         finally:
             os.close(fd)
+    def lifecycle(value, *, optional=False):
+        try:
+            proof = json.loads(retained("lifecycle-" + value + ".json", 65536))
+        except FileNotFoundError:
+            if optional:
+                return None
+            raise FiniteRecorderRefusal("finite_original_lifecycle_missing") from None
+        body = verify_recorder_proof(proof, cohort_id=cohort_id)
+        if (body.get("schema_version") != "synth.rhodes-finite-lifecycle.v1"
+            or body.get("rollout_id") != rollout_id or body.get("execution_epoch") != epoch
+            or body.get("container_name") != name or body.get("state") != value
+            or body.get("docker_daemon_id") != expected_daemon_id):
+            raise FiniteRecorderRefusal("finite_original_lifecycle_differs")
+        identity = body.get("container_id")
+        if identity is not None and (not isinstance(identity, str) or len(identity) != 64
+            or any(char not in "0123456789abcdef" for char in identity)):
+            raise FiniteRecorderRefusal("finite_original_allocation_identity_invalid")
+        return body
+    lifecycle("owner_bound")
+    cleaned = lifecycle("cleanup_confirmed", optional=True)
+    created = None if cleaned else lifecycle("created", optional=True)
+    expected_id = (cleaned or created or {}).get("container_id")
+    observed = inspect_original(docker, name, env, expected_daemon_id=expected_daemon_id, container_id=expected_id)
+    if observed is None and state in {"admitted", "create_pending"} and not (created or cleaned):
+        raise FiniteRecorderRefusal("finite_original_create_in_doubt")
+    if observed is not None:
+        if ((observed.get("Config", {}).get("Labels") or {}).get("ai.synth.rhodes.finite") != rollout_id + ":" + epoch
+            or expected_id is not None and observed.get("Id") != expected_id):
+            raise FiniteRecorderRefusal("finite_cleanup_ownership_differs")
+        if cleaned:
+            raise FiniteRecorderRefusal("finite_allocation_reappeared_after_cleanup")
+        expected_id = observed["Id"]
+        subprocess.run([docker, "rm", "--force", expected_id], capture_output=True, env=env, timeout=15)
+        if inspect_original(docker, name, env, expected_daemon_id=expected_daemon_id, container_id=expected_id) is not None:
+            raise FiniteRecorderRefusal("finite_owner_cleanup_unconfirmed")
     try:
         proof = json.loads(retained("recorder-proof.json", 1024 * 1024))
         body = verify_recorder_proof(proof, cohort_id=cohort_id)
@@ -403,6 +499,7 @@ def recover_original_stdio(*, rollout_id, epoch, state, cohort_id, allow_first_s
         stdout = retained("stdout.bin", 256 * 1024) if (attempt / "stdout.bin").exists() else b""
         stderr = retained("stderr.bin", 256 * 1024) if (attempt / "stderr.bin").exists() else b""
         if (body.get("rollout_id") != rollout_id or body.get("execution_epoch") != epoch
+            or body.get("docker_daemon_id") != expected_daemon_id
             or body.get("terminal_observed") is not True or body.get("streams_drained") is not True
             or body.get("profile") != "isolated_stdio_v1" or body.get("filesystem_writes") != "forbidden"
             or body.get("network") != "none" or body.get("credential_injection") != "none"

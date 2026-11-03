@@ -44,9 +44,11 @@ absent. Missing terminal files preserve partial evidence without full promotion.
 Spool retirement is deliberately left to an operator after durable custody.
 Unsupported remote/Harbor/post-handoff/grader/image encodings still refuse full
 required capture before dispatch. This source has not been imported, compiled,
-tested, built or executed. Lock resolution, package/wheel generation, operator
-installation and all positive/negative crash/runtime/custody checks are deferred
-to integration/testing under the user's explicit hold.
+tested or executed. Root completed dependency metadata lock resolution with
+builds, installs and Python downloads disabled; the finite-recorder extra is
+now in uv.lock. Root owns immutable wheel packaging. Operator installation and
+all positive/negative crash/runtime/custody checks remain deferred to
+integration/testing under the user's explicit hold.
 
 Finite admission requires enough original reservation for source/image bytes,
 twice the declared preexecution archive bound, up to 32 MiB terminal publication
@@ -96,8 +98,8 @@ actual entrypoint/argv/no-new-privileges and read-only shm+mqueue mounts are
 verified. Stdio output and journal have independent strict byte bounds.
 
 All tests, lint, type checking, compilation, builds, imports, provider/Docker
-execution, source/registry fetch, signer access/enrollment and package generation
-remain unrun under the user's explicit testing hold. Integrate the matching
+execution, source/registry fetch and signer access/enrollment remain unrun under
+the user's explicit testing hold. Integrate the matching
 owner helper/receipt fixes and current-key-lock migration before qualification.
 
 The finite image closure additionally records `image_platform` as the canonical
@@ -105,3 +107,20 @@ SHA256 of OCI os/architecture. Runtime independently inspects the actual local
 image and Docker daemon and requires native Linux amd64/arm64 agreement; implicit
 QEMU/emulation is unsupported because that dependency is outside retained image
 layers. No image inspection or Docker command was run during implementation.
+
+### Source completion pass (2026-11-03)
+
+The recorder now pins the actual Docker daemon ID before original create and
+the immutable container ID after its ACK. Signed, fsynced lifecycle originals
+record owner binding, create, start and confirmed cleanup independently of DB
+ACKs. Recovery requires the same daemon and original signed lifecycle; an
+unacknowledged create with no concrete terminal/cleanup proof stays in doubt.
+An unavailable or changed daemon cannot prove absence. Cleanup targets the
+observed immutable ID and original label, including after container rename.
+
+The original deadline now includes preflight and owner acknowledgments. Start
+checks deadline/cancellation again after provider validation. Local attach
+clients/pipes are reaped separately; their exit never proves provider cleanup.
+No project import, test, compiler, lint, Docker or provider command was run.
+The matching backend requires this source revision's on_owner and
+deadline_timestamp inputs, and passes the retained daemon ID during recovery.
