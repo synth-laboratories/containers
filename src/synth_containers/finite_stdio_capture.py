@@ -67,6 +67,41 @@ class FiniteRecorderRefusal(RuntimeError):
     pass
 
 
+def write_original_input(selector, handle, body, cursor):
+    """Send a bounded chunk and deliver EOF in the final write-ready event."""
+    if cursor < len(body):
+        try:
+            cursor += os.write(handle.fileno(), body[cursor:cursor + 65536])
+        except BlockingIOError:
+            return cursor  # Readiness can change before the nonblocking write.
+        except BrokenPipeError as error:
+            raise FiniteRecorderRefusal("finite_input_not_consumed") from error
+    if cursor == len(body):
+        # A pipe need not emit another write-ready edge after a short write.
+        selector.unregister(handle)
+        handle.close()
+    return cursor
+
+
+def owner_command(docker, arguments, env):
+    """Bound the local control client; an uncertain provider effect stays uncertain."""
+    process = subprocess.Popen([docker, *arguments], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+    try:
+        output, _error = process.communicate(timeout=15)
+    except subprocess.TimeoutExpired as error:
+        # Reaping this local CLI never proves the original create was absent
+        # or cancelled. Its durable create_pending intent still owns recovery.
+        process.kill()
+        try:
+            process.communicate(timeout=2)
+        except subprocess.TimeoutExpired as reaping_error:
+            raise FiniteRecorderRefusal("finite_control_client_reaping_in_doubt") from reaping_error
+        raise FiniteRecorderRefusal("finite_original_control_in_doubt") from error
+    if process.returncode:
+        raise FiniteRecorderRefusal("finite_owner_command_refused")
+    return output
+
+
 @dataclass(frozen=True)
 class RecorderSigner:
     key_id: str
@@ -181,16 +216,7 @@ def run_isolated_stdio(*, rollout_id, epoch, image_digest, command, input_bytes,
     owner_daemon_id = daemon_identity(docker, env)
 
     def call(args):
-        # A timed-out original create is left alive and in doubt. Its durable
-        # name/spool intent prevents replacement; the reaper never redispatches.
-        process = subprocess.Popen([docker, *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
-        try:
-            output, _error = process.communicate(timeout=15)
-        except subprocess.TimeoutExpired as error:
-            raise FiniteRecorderRefusal("finite_original_control_in_doubt") from error
-        if process.returncode:
-            raise FiniteRecorderRefusal("finite_owner_command_refused")
-        return output
+        return owner_command(docker, args, env)
 
     # Refuse a previous original allocation; this runner never redispatches it.
     if inspect_original(docker, name, env, expected_daemon_id=owner_daemon_id) is not None:
@@ -330,14 +356,7 @@ def run_isolated_stdio(*, rollout_id, epoch, image_digest, command, input_bytes,
                 for key, _events in selector.select(0.1):
                     handle, channel = key.fileobj, key.data
                     if channel == "stdin":
-                        if cursor < len(input_bytes):
-                            try:
-                                cursor += os.write(handle.fileno(), input_bytes[cursor:cursor + 65536])
-                            except BrokenPipeError as error:
-                                raise FiniteRecorderRefusal("finite_input_not_consumed") from error
-                        else:
-                            selector.unregister(handle)
-                            handle.close()
+                        cursor = write_original_input(selector, handle, input_bytes, cursor)
                     else:
                         data = os.read(handle.fileno(), 65536)
                         if not data:

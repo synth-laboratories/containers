@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import selectors
 import time
 from types import SimpleNamespace
 from uuid import uuid4
@@ -14,6 +15,47 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from synth_containers import finite_stdio_capture as recorder
+
+
+def test_final_input_write_delivers_eof_without_second_ready_event():
+    reader, writer = os.pipe()
+    handle = os.fdopen(writer, "wb", buffering=0)
+    selector = selectors.DefaultSelector()
+    selector.register(handle, selectors.EVENT_WRITE)
+    os.set_blocking(reader, False)
+    try:
+        body = b'{"original":true}'
+        assert recorder.write_original_input(selector, handle, body, 0) == len(body)
+        assert handle.closed and not selector.get_map()
+        assert os.read(reader, 1024) == body
+        assert os.read(reader, 1024) == b""  # Actual pipe EOF, no second selector event.
+    finally:
+        selector.close()
+        handle.close()
+        os.close(reader)
+
+
+def test_timed_out_control_client_is_reaped_but_original_stays_in_doubt(monkeypatch):
+    class Client:
+        returncode = None
+        killed = False
+        calls = 0
+
+        def communicate(self, *, timeout):
+            self.calls += 1
+            if self.calls == 1:
+                raise subprocess.TimeoutExpired(["docker", "create"], timeout)
+            assert self.killed and timeout == 2
+            return b"", b""
+
+        def kill(self):
+            self.killed = True
+
+    client = Client()
+    monkeypatch.setattr(recorder.subprocess, "Popen", lambda *args, **kwargs: client)
+    with pytest.raises(recorder.FiniteRecorderRefusal, match="finite_original_control_in_doubt"):
+        recorder.owner_command("docker", ["create"], {})
+    assert client.killed and client.calls == 2
 
 
 @pytest.fixture

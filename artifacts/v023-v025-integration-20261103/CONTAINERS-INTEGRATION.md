@@ -56,3 +56,25 @@ installed Artifact/Mnemosyne custody, protected operator key installation,
 hosted services, owner revocation under live load, or the later study gates.
 The paired backend wheel must use the final candidate source after these
 changes; root owns packaging and backend dependency pins.
+
+## Installed-wheel follow-up and EOF correction
+
+The installed `0.4.7.dev2026110302` wheel repeated the real execution timeout
+under backend Python 3.11 after its nine selected unit cases passed. This is
+retained in backend `rhodes-installed-finite-wheel-retry.log`; it supersedes
+any interpretation that the earlier timeout was purely transient or that
+explicit attach flags alone qualified the path.
+
+The final input write previously closed stdin only on a second write-ready
+event. The source now delivers EOF immediately after the final successful
+write. A real OS-pipe regression proves exact bytes and EOF after a single
+event, without relying on a second readiness notification. Timed-out local
+control clients are also killed/reaped within a bounded wait; this never proves
+their original provider effects absent or cancelled. Original create_pending
+recovery remains in doubt until its real owner proves the outcome.
+
+`finite-eof-control-regressions.json` reports 11 unit tests passed. An immediate
+real rerun encountered a Docker create timeout before execution; that original
+intent remains explicitly uncertain, with exact names retained for owner
+reconciliation. Further real/wheel qualification follows in the retained
+receipts, rather than being inferred from the source correction.

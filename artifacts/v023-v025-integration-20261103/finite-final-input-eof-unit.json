@@ -1,0 +1,19 @@
+{
+  "label": "finite-final-input-eof-unit",
+  "cwd": "/Users/joshuapurtell/GitHub/workspaces/v023-v025-integration-20261103/containers",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    "-q",
+    "tests/test_finite_stdio_capture.py",
+    "-k",
+    "not real"
+  ],
+  "started_at_utc": "2026-11-03T20:13:02.075055+00:00",
+  "elapsed_seconds": 1.316,
+  "exit_code": 0,
+  "timed_out": false,
+  "source_head": "75ff31f10746ae1b17948cd3c75e4c74e5304115",
+  "log": "/Users/joshuapurtell/GitHub/workspaces/v023-v025-integration-20261103/containers/artifacts/v023-v025-integration-20261103/finite-final-input-eof-unit.log"
+}

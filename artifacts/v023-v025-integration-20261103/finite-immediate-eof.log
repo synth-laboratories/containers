@@ -1,0 +1,74 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_________ test_real_finite_original_terminal_and_same_archive_recovery _________
+
+args = ['create', '--interactive', '--attach', 'stdin', '--attach', 'stdout', ...]
+
+    def call(args):
+        # A timed-out original create is left alive and in doubt. Its durable
+        # name/spool intent prevents replacement; the reaper never redispatches.
+        process = subprocess.Popen([docker, *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+        try:
+>           output, _error = process.communicate(timeout=15)
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+src/synth_containers/finite_stdio_capture.py:188: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+../../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/subprocess.py:1222: in communicate
+    stdout, stderr = self._communicate(input, endtime, timeout)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/subprocess.py:2155: in _communicate
+    self._check_timeout(endtime, orig_timeout, stdout, stderr)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <Popen: returncode: None args: ['/opt/homebrew/bin/docker', 'create', '--int...>
+endtime = 422912.608184291, orig_timeout = 15, stdout_seq = [], stderr_seq = []
+skip_check_and_raise = False
+
+    def _check_timeout(self, endtime, orig_timeout, stdout_seq, stderr_seq,
+                       skip_check_and_raise=False):
+        """Convenience for checking if a timeout has expired."""
+        if endtime is None:
+            return
+        if skip_check_and_raise or _time() > endtime:
+>           raise TimeoutExpired(
+                    self.args, orig_timeout,
+                    output=b''.join(stdout_seq) if stdout_seq else None,
+                    stderr=b''.join(stderr_seq) if stderr_seq else None)
+E           subprocess.TimeoutExpired: Command '['/opt/homebrew/bin/docker', 'create', '--interactive', '--attach', 'stdin', '--attach', 'stdout', '--attach', 'stderr', '--pull', 'never', '--name', 'rhodes-finite-0b7387a45b109145fea1e780f49a91fc05ee8782', '--label', 'ai.synth.rhodes.finite=finite-test-319898e0fba24894babb15dca8d86ef6:fdcd3152393f4ba0a00bff4fd11e9745', '--no-healthcheck', '--log-driver', 'none', '--read-only', '--network', 'none', '--ipc', 'none', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--user', '65534:65534', '--pids-limit', '64', '--cpus', '1', '--memory', '268435456', '--memory-swap', '268435456', '--mount', 'type=bind,source=/Users/joshuapurtell/GitHub/workspaces/v023-v025-integration-20261103/containers/artifacts/v023-v025-integration-20261103/finite-immediate-eof-tmp/test_real_finite_original_term0/spool/rhodes-finite-0b7387a45b109145fea1e780f49a91fc05ee8782/readonly-shm,target=/dev/shm,readonly', '--mount', 'type=bind,source=/Users/joshuapurtell/GitHub/workspaces/v023-v025-integration-20261103/containers/artifacts/v023-v025-integration-20261103/finite-immediate-eof-tmp/test_real_finite_original_term0/spool/rhodes-finite-0b7387a45b109145fea1e780f49a91fc05ee8782/readonly-shm,target=/dev/mqueue,readonly', '--entrypoint', '/bin/cat', 'sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4']' timed out after 15 seconds
+
+../../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/subprocess.py:1269: TimeoutExpired
+
+The above exception was the direct cause of the following exception:
+
+docker_execution = ({'rollout_id': 'finite-test-319898e0fba24894babb15dca8d86ef6', 'epoch': 'fdcd3152393f4ba0a00bff4fd11e9745', 'image_di...389ca60a1a59d3463db586e5fa4', 'command': ('/bin/cat',), ...}, 'rhodes-finite-0b7387a45b109145fea1e780f49a91fc05ee8782')
+
+    def test_real_finite_original_terminal_and_same_archive_recovery(docker_execution):
+        values, name = docker_execution
+        owner = {}
+        phases = []
+>       result = recorder.run_isolated_stdio(**values, on_owner=lambda value: owner.update(value), on_state=phases.append)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_finite_stdio_capture.py:142: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/synth_containers/finite_stdio_capture.py:257: in run_isolated_stdio
+    allocated = call(["create", "--interactive", "--attach", "stdin", "--attach", "stdout", "--attach", "stderr",
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = ['create', '--interactive', '--attach', 'stdin', '--attach', 'stdout', ...]
+
+    def call(args):
+        # A timed-out original create is left alive and in doubt. Its durable
+        # name/spool intent prevents replacement; the reaper never redispatches.
+        process = subprocess.Popen([docker, *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+        try:
+            output, _error = process.communicate(timeout=15)
+        except subprocess.TimeoutExpired as error:
+>           raise FiniteRecorderRefusal("finite_original_control_in_doubt") from error
+E           synth_containers.finite_stdio_capture.FiniteRecorderRefusal: finite_original_control_in_doubt
+
+src/synth_containers/finite_stdio_capture.py:190: FiniteRecorderRefusal
+=========================== short test summary info ============================
+FAILED tests/test_finite_stdio_capture.py::test_real_finite_original_terminal_and_same_archive_recovery
+1 failed in 16.44s
