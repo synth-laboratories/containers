@@ -124,3 +124,14 @@ clients/pipes are reaped separately; their exit never proves provider cleanup.
 No project import, test, compiler, lint, Docker or provider command was run.
 The matching backend requires this source revision's on_owner and
 deadline_timestamp inputs, and passes the retained daemon ID during recovery.
+
+### Review follow-up
+
+The recorder rechecks cancellation and the original deadline after the durable
+`create_pending` acknowledgment. Expiry, cancellation or acknowledgment failure
+before provider submission retains a signed, fsynced `create_not_dispatched`
+original. Recovery distinguishes this fact from an ambiguous Docker create and
+refuses any conflicting allocation/lifecycle. The source regression suite passed
+17 checks with real Docker cases deselected; this does not qualify an installed
+container runtime. This source changes the recorder module digest and therefore
+requires a freshly paired wheel and explicit cohort pin before installation.

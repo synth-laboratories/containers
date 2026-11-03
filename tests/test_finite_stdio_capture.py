@@ -207,6 +207,35 @@ def test_owner_ack_latency_consumes_original_deadline_without_create(signer, mon
             on_owner=lambda value: time.sleep(0.02))
 
 
+@pytest.mark.parametrize("cause", ["deadline", "cancelled", "lost_ack"])
+def test_create_intent_ack_cannot_dispatch_after_authority_is_lost(signer, monkeypatch, cause):
+    import threading
+
+    monkeypatch.setattr(recorder, "daemon_identity", lambda *args: "original-daemon")
+    monkeypatch.setattr(recorder, "inspect_original", lambda *args, **kwargs: None)
+    monkeypatch.setattr(recorder, "owner_command", lambda *args: pytest.fail("create dispatched after lost authority"))
+    clock = [100.0]
+    monkeypatch.setattr(recorder.time, "monotonic", lambda: clock[0])
+    cancelled = threading.Event()
+    def acknowledge(value):
+        assert value == "create_pending"
+        if cause == "deadline":
+            clock[0] += 31
+        elif cause == "cancelled":
+            cancelled.set()
+        else:
+            raise TimeoutError("lost original intent ACK")
+    expected = TimeoutError if cause == "lost_ack" else recorder.FiniteRecorderRefusal
+    rollout = "intent-" + cause
+    with pytest.raises(expected):
+        recorder.run_isolated_stdio(rollout_id=rollout, epoch="epoch", image_digest="sha256:" + "a" * 64,
+            command=("/bin/cat",), input_bytes=b"{}", cpus=1, memory_bytes=256 * 1024**2,
+            timeout_seconds=30, maximum_output_bytes=1024, closure={}, signer=signer,
+            on_state=acknowledge, cancelled=cancelled)
+    assert recorder.recover_original_stdio(rollout_id=rollout, epoch="epoch", state="create_pending",
+        cohort_id="test-only", expected_daemon_id="original-daemon") is None
+
+
 @pytest.fixture
 def docker_execution(signer):
     image = os.environ.get("RHODES_FINITE_TEST_IMAGE")

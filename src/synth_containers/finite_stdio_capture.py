@@ -276,8 +276,18 @@ def run_isolated_stdio(*, rollout_id, epoch, image_digest, command, input_bytes,
         try:
             if time.monotonic() >= deadline or cancelled is not None and cancelled.is_set():
                 raise FiniteRecorderRefusal("finite_cancelled_before_create")
-            if on_state:
-                on_state("create_pending")  # Durable original intent before the control effect.
+            try:
+                if on_state:
+                    on_state("create_pending")  # Durable original intent before the control effect.
+                # Acknowledgement latency consumes the original authority.
+                # No provider allocation may begin after cancellation/expiry.
+                if time.monotonic() >= deadline or cancelled is not None and cancelled.is_set():
+                    raise FiniteRecorderRefusal("finite_cancelled_before_create")
+            except BaseException:
+                # Unlike a timed-out Docker create, this owner knows it never
+                # submitted a create. Retain that fact even if the DB ACK is lost.
+                retain_lifecycle("create_not_dispatched")
+                raise
             # Explicit stdin attachment makes Docker set StdinOnce: closing
             # the owned input pipe must deliver EOF, rather than retaining an
             # open stdin forever for a future unrelated attach client.
@@ -503,10 +513,15 @@ def recover_original_stdio(*, rollout_id, epoch, state, cohort_id, allow_first_s
             raise FiniteRecorderRefusal("finite_original_allocation_identity_invalid")
         return body
     lifecycle("owner_bound")
+    not_dispatched = lifecycle("create_not_dispatched", optional=True)
     cleaned = lifecycle("cleanup_confirmed", optional=True)
     created = None if cleaned else lifecycle("created", optional=True)
     expected_id = (cleaned or created or {}).get("container_id")
     observed = inspect_original(docker, name, env, expected_daemon_id=expected_daemon_id, container_id=expected_id)
+    if not_dispatched:
+        if created or cleaned or observed is not None or not_dispatched.get("container_id") is not None:
+            raise FiniteRecorderRefusal("finite_original_no_dispatch_conflict")
+        return None
     if observed is None and state in {"admitted", "create_pending"} and not (created or cleaned):
         raise FiniteRecorderRefusal("finite_original_create_in_doubt")
     if observed is not None:
