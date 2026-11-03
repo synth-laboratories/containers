@@ -119,3 +119,11 @@ which does not disprove a delayed server commit. Exact names, scopes, retained
 spool locations and reconciliation receipts are in the backend handoff. Root
 coordinates their final owned-only cleanup; these pending intents never
 authorize a second original execution.
+
+At 20:29 UTC both retained late creates appeared in `created` state. Final
+backend reconciliation matched their original scopes and daemon, removed only
+their immutable IDs, and confirmed exact ID/name absence. No workload was
+started. Both observed original effects are reconciled; the failed real gate
+remains unqualified. Root then communicated a shared-host recovery hold: all
+this lane's jobs have drained, and no new DB/Docker/build/test work is submitted
+until that hold is explicitly cleared.
