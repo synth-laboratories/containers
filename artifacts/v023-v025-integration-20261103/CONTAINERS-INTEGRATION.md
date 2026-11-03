@@ -90,3 +90,32 @@ immediate EOF and no sentinel bytes. `finite-control-stdin-isolation.json`
 reports twelve unit tests passed. Installed real qualification of this final
 control boundary follows in subsequent receipts; its runtime causal effect is
 not inferred from the unit result.
+
+## Final installed and original-identity checks
+
+The installed dev04 wheel from `1c29152` passed all twelve unit cases. Its
+real lifecycle case, run alone, still timed out during Docker create at the
+15-second control guard, before the workload started. A separate fresh owned
+create-only probe also timed out after 30 seconds with no stdout or stderr.
+Inherited caller, stripped runner and SDK control environments resolve the
+same Docker executable, context, socket and daemon ID; all three DOCKER_HOST,
+DOCKER_CONTEXT and DOCKER_CONFIG variables were absent. The input isolation
+fix is therefore a tested boundary correction, not an established explanation
+for this unresolved Docker behavior. No timeout guard or original execution
+budget was increased. Final installed real qualification remains blocked.
+
+Static recovery review then found that a signed terminal record was checked
+against the original epoch and daemon but not the signed allocation's immutable
+container ID. Recovery now requires the terminal schema and exact container ID
+from the signed creation/cleanup lifecycle. Two signed-spool negative cases
+exercise conflicting IDs and a lifecycle-shaped terminal body. The final
+`finite-terminal-identity-regressions` batch passed all fourteen unit cases;
+root owns the matching final wheel and installed-source verification.
+
+The dev03 late allocation was removed only after its actual ownership label
+matched its retained original scope. The two dev04/probe create intents remain
+explicitly uncertain: bounded inspect currently reports exact no-such-object,
+which does not disprove a delayed server commit. Exact names, scopes, retained
+spool locations and reconciliation receipts are in the backend handoff. Root
+coordinates their final owned-only cleanup; these pending intents never
+authorize a second original execution.

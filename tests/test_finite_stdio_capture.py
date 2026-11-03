@@ -151,6 +151,43 @@ def test_no_effect_preflight_recovery_never_contacts_provider(monkeypatch):
         cohort_id="test-only") is None
 
 
+@pytest.mark.parametrize("conflict", ["container_id", "schema_version"])
+def test_recovery_rejects_signed_terminal_with_conflicting_original_identity(signer, monkeypatch, conflict):
+    rollout_id, epoch = "retained-original", "epoch"
+    name = "rhodes-finite-" + hashlib.sha256((rollout_id + ":" + epoch).encode()).hexdigest()[:40]
+    attempt = Path(os.environ["RHODES_FINITE_RECORDER_SPOOL_DIR"]) / name
+    attempt.mkdir(mode=0o700)
+
+    def retained(path, body):
+        value = attempt / path
+        value.write_bytes(body)
+        value.chmod(0o600)
+
+    for state, identity in (("owner_bound", None), ("cleanup_confirmed", "a" * 64)):
+        body = {"schema_version": "synth.rhodes-finite-lifecycle.v1", "rollout_id": rollout_id,
+            "execution_epoch": epoch, "container_name": name, "docker_daemon_id": "original-daemon",
+            "state": state, "container_id": identity, "recorder_module_sha256": signer.module_sha256}
+        retained("lifecycle-" + state + ".json", recorder.canonical(signer.sign(body)))
+    contents = {"input.bin": b"{}", "stdout.bin": b"", "stderr.bin": b"", "stdio-journal.json": b"[]"}
+    for path, body in contents.items():
+        retained(path, body)
+    body = {"schema_version": "synth.rhodes-finite-terminal.v1", "rollout_id": rollout_id,
+        "execution_epoch": epoch, "docker_daemon_id": "original-daemon", "container_id": "a" * 64,
+        "profile": "isolated_stdio_v1", "terminal_observed": True, "streams_drained": True,
+        "filesystem_writes": "forbidden", "network": "none", "credential_injection": "none",
+        "recorder_module_sha256": signer.module_sha256,
+        **{field: hashlib.sha256(contents[path]).hexdigest() for field, path in (
+            ("input_sha256", "input.bin"), ("stdout_sha256", "stdout.bin"),
+            ("stderr_sha256", "stderr.bin"), ("journal_sha256", "stdio-journal.json"))}}
+    body[conflict] = "b" * 64 if conflict == "container_id" else "synth.rhodes-finite-lifecycle.v1"
+    retained("recorder-proof.json", recorder.canonical(signer.sign(body)))
+    monkeypatch.setattr(recorder.shutil, "which", lambda *args: "docker")
+    monkeypatch.setattr(recorder, "inspect_original", lambda *args, **kwargs: None)
+    with pytest.raises(recorder.FiniteRecorderRefusal, match="finite_retained_terminal_differs"):
+        recorder.recover_original_stdio(rollout_id=rollout_id, epoch=epoch, state="cleanup_confirmed",
+            cohort_id="test-only", expected_daemon_id="original-daemon")
+
+
 def test_expired_original_deadline_refuses_before_daemon_read(signer, monkeypatch):
     monkeypatch.setattr(recorder, "daemon_identity", lambda *args: pytest.fail("expired deadline"))
     with pytest.raises(recorder.FiniteRecorderRefusal, match="finite_deadline_exhausted"):

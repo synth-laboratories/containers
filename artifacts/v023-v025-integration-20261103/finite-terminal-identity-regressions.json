@@ -1,0 +1,21 @@
+{
+  "label": "finite-terminal-identity-regressions",
+  "cwd": "/Users/joshuapurtell/GitHub/workspaces/v023-v025-integration-20261103/containers",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    "-q",
+    "tests/test_finite_stdio_capture.py",
+    "-k",
+    "not real",
+    "--basetemp",
+    "artifacts/v023-v025-integration-20261103/finite-identity-tmp"
+  ],
+  "started_at_utc": "2026-11-03T20:28:16.013709+00:00",
+  "elapsed_seconds": 1.41,
+  "exit_code": 0,
+  "timed_out": false,
+  "source_head": "1c29152fc3c7688703d43e44d4183ddd383031ee",
+  "log": "/Users/joshuapurtell/GitHub/workspaces/v023-v025-integration-20261103/containers/artifacts/v023-v025-integration-20261103/finite-terminal-identity-regressions.log"
+}

@@ -526,8 +526,10 @@ def recover_original_stdio(*, rollout_id, epoch, state, cohort_id, allow_first_s
         journal = retained("stdio-journal.json", 2 * 1024 * 1024)
         stdout = retained("stdout.bin", 256 * 1024) if (attempt / "stdout.bin").exists() else b""
         stderr = retained("stderr.bin", 256 * 1024) if (attempt / "stderr.bin").exists() else b""
-        if (body.get("rollout_id") != rollout_id or body.get("execution_epoch") != epoch
+        if (body.get("schema_version") != "synth.rhodes-finite-terminal.v1"
+            or body.get("rollout_id") != rollout_id or body.get("execution_epoch") != epoch
             or body.get("docker_daemon_id") != expected_daemon_id
+            or expected_id is None or body.get("container_id") != expected_id
             or body.get("terminal_observed") is not True or body.get("streams_drained") is not True
             or body.get("profile") != "isolated_stdio_v1" or body.get("filesystem_writes") != "forbidden"
             or body.get("network") != "none" or body.get("credential_injection") != "none"
