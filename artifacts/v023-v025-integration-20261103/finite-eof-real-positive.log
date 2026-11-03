@@ -1,0 +1,86 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_________ test_real_finite_original_terminal_and_same_archive_recovery _________
+
+docker = '/opt/homebrew/bin/docker'
+arguments = ['create', '--interactive', '--attach', 'stdin', '--attach', 'stdout', ...]
+env = {'PATH': '/Users/joshuapurtell/.local/bin:/Users/joshuapurtell/Library/Application Support/mbx/bin:/Users/joshuapurtel...ts/Resources/codex-cli/CodexCLI.app/Contents/MacOS:/Users/joshuapurtell/.orbstack/bin', 'HOME': '/Users/joshuapurtell'}
+
+    def owner_command(docker, arguments, env):
+        """Bound the local control client; an uncertain provider effect stays uncertain."""
+        process = subprocess.Popen([docker, *arguments], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+        try:
+>           output, _error = process.communicate(timeout=15)
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+src/synth_containers/finite_stdio_capture.py:90: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+../../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/subprocess.py:1222: in communicate
+    stdout, stderr = self._communicate(input, endtime, timeout)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/subprocess.py:2155: in _communicate
+    self._check_timeout(endtime, orig_timeout, stdout, stderr)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <Popen: returncode: -9 args: ['/opt/homebrew/bin/docker', 'create', '--inter...>
+endtime = 423011.56512075, orig_timeout = 15, stdout_seq = [b'']
+stderr_seq = [b''], skip_check_and_raise = False
+
+    def _check_timeout(self, endtime, orig_timeout, stdout_seq, stderr_seq,
+                       skip_check_and_raise=False):
+        """Convenience for checking if a timeout has expired."""
+        if endtime is None:
+            return
+        if skip_check_and_raise or _time() > endtime:
+>           raise TimeoutExpired(
+                    self.args, orig_timeout,
+                    output=b''.join(stdout_seq) if stdout_seq else None,
+                    stderr=b''.join(stderr_seq) if stderr_seq else None)
+E           subprocess.TimeoutExpired: Command '['/opt/homebrew/bin/docker', 'create', '--interactive', '--attach', 'stdin', '--attach', 'stdout', '--attach', 'stderr', '--pull', 'never', '--name', 'rhodes-finite-9769f0f23652a2c7d87901ed4edd014cac6d0d9c', '--label', 'ai.synth.rhodes.finite=finite-test-7748c0c96b614b29a82c89111f931f48:9f65a0054f7c49a0bf91fe76882ed27c', '--no-healthcheck', '--log-driver', 'none', '--read-only', '--network', 'none', '--ipc', 'none', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--user', '65534:65534', '--pids-limit', '64', '--cpus', '1', '--memory', '268435456', '--memory-swap', '268435456', '--mount', 'type=bind,source=/Users/joshuapurtell/GitHub/workspaces/v023-v025-integration-20261103/containers/artifacts/v023-v025-integration-20261103/finite-eof-real-positive-tmp/test_real_finite_original_term0/spool/rhodes-finite-9769f0f23652a2c7d87901ed4edd014cac6d0d9c/readonly-shm,target=/dev/shm,readonly', '--mount', 'type=bind,source=/Users/joshuapurtell/GitHub/workspaces/v023-v025-integration-20261103/containers/artifacts/v023-v025-integration-20261103/finite-eof-real-positive-tmp/test_real_finite_original_term0/spool/rhodes-finite-9769f0f23652a2c7d87901ed4edd014cac6d0d9c/readonly-shm,target=/dev/mqueue,readonly', '--entrypoint', '/bin/cat', 'sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4']' timed out after 15 seconds
+
+../../../../.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/subprocess.py:1269: TimeoutExpired
+
+The above exception was the direct cause of the following exception:
+
+docker_execution = ({'rollout_id': 'finite-test-7748c0c96b614b29a82c89111f931f48', 'epoch': '9f65a0054f7c49a0bf91fe76882ed27c', 'image_di...389ca60a1a59d3463db586e5fa4', 'command': ('/bin/cat',), ...}, 'rhodes-finite-9769f0f23652a2c7d87901ed4edd014cac6d0d9c')
+
+    def test_real_finite_original_terminal_and_same_archive_recovery(docker_execution):
+        values, name = docker_execution
+        owner = {}
+        phases = []
+>       result = recorder.run_isolated_stdio(**values, on_owner=lambda value: owner.update(value), on_state=phases.append)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_finite_stdio_capture.py:184: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/synth_containers/finite_stdio_capture.py:283: in run_isolated_stdio
+    allocated = call(["create", "--interactive", "--attach", "stdin", "--attach", "stdout", "--attach", "stderr",
+src/synth_containers/finite_stdio_capture.py:219: in call
+    return owner_command(docker, args, env)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+docker = '/opt/homebrew/bin/docker'
+arguments = ['create', '--interactive', '--attach', 'stdin', '--attach', 'stdout', ...]
+env = {'PATH': '/Users/joshuapurtell/.local/bin:/Users/joshuapurtell/Library/Application Support/mbx/bin:/Users/joshuapurtel...ts/Resources/codex-cli/CodexCLI.app/Contents/MacOS:/Users/joshuapurtell/.orbstack/bin', 'HOME': '/Users/joshuapurtell'}
+
+    def owner_command(docker, arguments, env):
+        """Bound the local control client; an uncertain provider effect stays uncertain."""
+        process = subprocess.Popen([docker, *arguments], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+        try:
+            output, _error = process.communicate(timeout=15)
+        except subprocess.TimeoutExpired as error:
+            # Reaping this local CLI never proves the original create was absent
+            # or cancelled. Its durable create_pending intent still owns recovery.
+            process.kill()
+            try:
+                process.communicate(timeout=2)
+            except subprocess.TimeoutExpired as reaping_error:
+                raise FiniteRecorderRefusal("finite_control_client_reaping_in_doubt") from reaping_error
+>           raise FiniteRecorderRefusal("finite_original_control_in_doubt") from error
+E           synth_containers.finite_stdio_capture.FiniteRecorderRefusal: finite_original_control_in_doubt
+
+src/synth_containers/finite_stdio_capture.py:99: FiniteRecorderRefusal
+=========================== short test summary info ============================
+FAILED tests/test_finite_stdio_capture.py::test_real_finite_original_terminal_and_same_archive_recovery
+1 failed in 16.76s

@@ -1,0 +1,19 @@
+{
+  "label": "finite-control-stdin-isolation",
+  "cwd": "/Users/joshuapurtell/GitHub/workspaces/v023-v025-integration-20261103/containers",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    "-q",
+    "tests/test_finite_stdio_capture.py",
+    "-k",
+    "not real"
+  ],
+  "started_at_utc": "2026-11-03T20:21:11.936123+00:00",
+  "elapsed_seconds": 1.376,
+  "exit_code": 0,
+  "timed_out": false,
+  "source_head": "744590ec983b9a6db4cdb6d9076276de9bc73fad",
+  "log": "/Users/joshuapurtell/GitHub/workspaces/v023-v025-integration-20261103/containers/artifacts/v023-v025-integration-20261103/finite-control-stdin-isolation.log"
+}

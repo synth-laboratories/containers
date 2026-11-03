@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import selectors
+import sys
 import time
 from types import SimpleNamespace
 from uuid import uuid4
@@ -56,6 +57,22 @@ def test_timed_out_control_client_is_reaped_but_original_stays_in_doubt(monkeypa
     with pytest.raises(recorder.FiniteRecorderRefusal, match="finite_original_control_in_doubt"):
         recorder.owner_command("docker", ["create"], {})
     assert client.killed and client.calls == 2
+
+
+def test_control_client_never_inherits_open_ambient_worker_input():
+    reader, writer = os.pipe()
+    original = os.dup(0)
+    os.write(writer, b"ambient-worker-input-must-not-be-forwarded")
+    try:
+        os.dup2(reader, 0)
+        output = recorder.owner_command(sys.executable,
+            ["-c", "import sys; print(repr(sys.stdin.buffer.read()))"], dict(os.environ))
+        assert output == b"b''\n"
+    finally:
+        os.dup2(original, 0)
+        os.close(original)
+        os.close(reader)
+        os.close(writer)
 
 
 @pytest.fixture

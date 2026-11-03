@@ -78,3 +78,15 @@ real rerun encountered a Docker create timeout before execution; that original
 intent remains explicitly uncertain, with exact names retained for owner
 reconciliation. Further real/wheel qualification follows in the retained
 receipts, rather than being inferred from the source correction.
+
+The installed dev03 wheel passed eleven unit cases but its real test timed out
+at Docker create before starting the child. The same source passed a quiet
+editable real run without increasing its original 60-second budget. Inspection
+found that noninteractive control clients inherited ambient worker stdin; the
+source now binds those control clients to DEVNULL. The attached workload still
+receives only its separate exact declared input pipe. An actual OS-pipe test
+keeps ambient stdin open with a sentinel and proves the control subprocess sees
+immediate EOF and no sentinel bytes. `finite-control-stdin-isolation.json`
+reports twelve unit tests passed. Installed real qualification of this final
+control boundary follows in subsequent receipts; its runtime causal effect is
+not inferred from the unit result.

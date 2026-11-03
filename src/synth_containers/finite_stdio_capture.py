@@ -85,7 +85,8 @@ def write_original_input(selector, handle, body, cursor):
 
 def owner_command(docker, arguments, env):
     """Bound the local control client; an uncertain provider effect stays uncertain."""
-    process = subprocess.Popen([docker, *arguments], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+    process = subprocess.Popen([docker, *arguments], stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
     try:
         output, _error = process.communicate(timeout=15)
     except subprocess.TimeoutExpired as error:

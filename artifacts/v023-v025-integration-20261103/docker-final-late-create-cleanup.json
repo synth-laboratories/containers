@@ -1,0 +1,16 @@
+[
+  {
+    "name": "rhodes-finite-9769f0f23652a2c7d87901ed4edd014cac6d0d9c",
+    "container_id": "eb2be8525bbff5be8c48012b125158c9b4bd47858f996402f79987019ad111ee",
+    "matched_original_label": "finite-test-7748c0c96b614b29a82c89111f931f48:9f65a0054f7c49a0bf91fe76882ed27c",
+    "remove_exit": 0,
+    "stderr": ""
+  },
+  {
+    "name": "rhodes-finite-0b7387a45b109145fea1e780f49a91fc05ee8782",
+    "container_id": "a5026f35eeab0374220bb5125fe29fc3dc8a18d3f893d1cc103726350970335d",
+    "matched_original_label": "finite-test-319898e0fba24894babb15dca8d86ef6:fdcd3152393f4ba0a00bff4fd11e9745",
+    "remove_exit": 0,
+    "stderr": ""
+  }
+]
