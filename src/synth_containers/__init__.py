@@ -164,6 +164,13 @@ from .pools import (
     validate_pool_transition,
 )
 from .rhodes_client import RhodesClient
+from .rhodes_build_operations import BuildLogPublication, BuildLogPublicationPage
+from .rhodes_catalog import (
+    RhodesCatalogClient, CatalogPut, CatalogArchive, CatalogQuery, CatalogPin,
+    CatalogRefused, ResourcePlanTemplate, TaskMetadata, metadata_from_source,
+    TaskDefinition as RegisteredTaskDefinition,
+)
+from .rhodes_catalog_tools import RhodesCatalogTools
 from .profiles import all_profile_specs, infer_profiles, missing_protocols, spec_for_profile
 from .prompt_programs import (
     GEPA_OPTIMIZER_CONTRACT_VERSION,
@@ -349,6 +356,19 @@ __all__ = [
     "PolicyDisableReasoning",
     "PoolClient",
     "RhodesClient",
+    "BuildLogPublication",
+    "BuildLogPublicationPage",
+    "RhodesCatalogClient",
+    "RhodesCatalogTools",
+    "CatalogPut",
+    "CatalogArchive",
+    "CatalogQuery",
+    "CatalogPin",
+    "CatalogRefused",
+    "ResourcePlanTemplate",
+    "RegisteredTaskDefinition",
+    "TaskMetadata",
+    "metadata_from_source",
     "PoolClientError",
     "PoolRolloutTimeout",
     "PoolState",

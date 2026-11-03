@@ -160,6 +160,41 @@ class FailureRecord:
 
 
 @dataclass(frozen=True)
+class BuildLogPublication:
+    """Independent custody state; a terminal build may still have pending logs."""
+
+    state: Literal["pending", "published", "refused"]
+    attempt: int
+    manifest_digest: str
+    log_ref: str | None = None
+    error_code: str | None = None
+
+    @classmethod
+    def from_json(cls, body: Mapping[str, Any], *, operation_id: str, attempt: int):
+        state = body["state"]
+        digest = body["manifest_digest"]
+        if state not in {"pending", "published", "refused"} or type(body["attempt"]) is not int or body["attempt"] != attempt or attempt < 1:
+            raise ValueError("invalid build-log publication state or attempt")
+        if not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest):
+            raise ValueError("invalid build-log publication digest")
+        ref, code = body.get("log_ref"), body.get("error_code")
+        expected = f"rhodes-build-log/{operation_id}/{attempt}@sha256:{digest}"
+        if (state == "published" and (ref != expected or code is not None)) or (state != "published" and ref is not None):
+            raise ValueError("invalid build-log publication identity")
+        if state == "refused" and code is None:
+            raise ValueError("refused build-log publication requires a code")
+        if code is not None and (not isinstance(code, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", code)):
+            raise ValueError("invalid build-log publication code")
+        return cls(state=state, attempt=attempt, manifest_digest=digest, log_ref=ref, error_code=code)
+
+
+@dataclass(frozen=True)
+class BuildLogPublicationPage:
+    items: tuple[BuildLogPublication, ...]
+    next_attempt: int | None = None
+
+
+@dataclass(frozen=True)
 class BuildOperation:
     build_operation_id: str
     operation_id: str
@@ -181,6 +216,7 @@ class BuildOperation:
     started_at: str | None = None
     completed_at: str | None = None
     reused: bool | None = None
+    log_publication: BuildLogPublication | None = None
 
     @property
     def terminal(self) -> bool:
@@ -193,6 +229,11 @@ class BuildOperation:
     @classmethod
     def from_json(cls, body: Mapping[str, Any], *, reused: bool | None = None) -> BuildOperation:
         try:
+            publication = (BuildLogPublication.from_json(body["log_publication"],
+                operation_id=str(body["build_operation_id"]), attempt=int(body["attempt"]))
+                if body.get("log_publication") is not None else None)
+            if publication is not None and body.get("log_ref") != publication.log_ref:
+                raise ValueError("build-log status and top-level reference differ")
             return cls(
                 build_operation_id=str(body["build_operation_id"]),
                 operation_id=str(body["operation_id"]),
@@ -216,6 +257,7 @@ class BuildOperation:
                 started_at=body.get("started_at"),
                 completed_at=body.get("completed_at"),
                 reused=reused,
+                log_publication=publication,
             )
         except (KeyError, TypeError, ValueError, AttributeError) as error:
             from .pools import PoolClientError

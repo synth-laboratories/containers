@@ -188,3 +188,25 @@ def test_request_validation_refuses_before_network():
         BuildOperationRequest("op", "Bad Env", SourceArtifact("a", D), D).to_json()
     with pytest.raises(ValueError):
         BuildOperationRequest("op", "env", SourceArtifact("a", "sha256:zz"), D).to_json()
+
+
+def test_terminal_build_can_have_pending_log_custody():
+    from synth_containers.rhodes_build_operations import BuildOperation
+    body = operation(state="succeeded", log_ref=None, log_publication={"state": "pending", "attempt": 1,
+        "manifest_digest": "b" * 64, "log_ref": None, "error_code": "rhodes.build.log_custody_error"})
+    decoded = BuildOperation.from_json(body)
+    assert decoded.terminal and decoded.log_publication.state == "pending"
+    assert decoded.log_ref is None
+    assert BuildOperation.from_json(operation()).log_publication is None
+
+
+@pytest.mark.parametrize("facet", [
+    {"state": "published", "attempt": 2, "manifest_digest": "b" * 64, "log_ref": "foreign"},
+    {"state": "published", "attempt": 1, "manifest_digest": "b" * 64, "log_ref": "foreign"},
+    {"state": "refused", "attempt": 1, "manifest_digest": "b" * 64, "log_ref": None},
+])
+def test_log_publication_decoder_refuses_foreign_identity_or_untyped_refusal(facet):
+    from synth_containers.rhodes_build_operations import BuildOperation
+    from synth_containers.pools import PoolClientError
+    with pytest.raises(PoolClientError):
+        BuildOperation.from_json(operation(log_ref=facet.get("log_ref"), log_publication=facet))

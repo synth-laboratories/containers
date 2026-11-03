@@ -137,6 +137,26 @@ def _parser() -> argparse.ArgumentParser:
         if verb == "history":
             command.add_argument("--after-revision", type=int, default=0)
             command.add_argument("--limit", type=int, default=100)
+    catalog = commands.add_parser("catalog")
+    catalog.add_argument("kind", choices=("task", "resource_plan"))
+    catalog_verbs = catalog.add_subparsers(dest="verb", required=True)
+    listing = catalog_verbs.add_parser("list")
+    listing.add_argument("--query", dest="config", type=Path)
+    putting = catalog_verbs.add_parser("put")
+    putting.add_argument("name")
+    putting.add_argument("config", type=Path)
+    operation = catalog_verbs.add_parser("operation")
+    operation.add_argument("operation_id")
+    for verb in ("get", "history", "archive"):
+        command = catalog_verbs.add_parser(verb)
+        command.add_argument("name")
+        if verb == "get": command.add_argument("--revision", type=int)
+        if verb == "history":
+            command.add_argument("--after-revision", type=int, default=0)
+            command.add_argument("--limit", type=int, default=100)
+        if verb == "archive":
+            command.add_argument("--operation-id", required=True)
+            command.add_argument("--expected-revision", type=int, required=True)
     pools = commands.add_parser("pools").add_subparsers(dest="verb", required=True)
     pools.add_parser("create").add_argument("config", type=Path)
     for verb in ("get", "delete"):
@@ -220,6 +240,22 @@ async def _execute(client: RhodesClient, args: argparse.Namespace, body: dict | 
             output = await client.get_validation(args.release_id, args.validation_id)
         else:
             output = await client.environment_compatibility(args.release_id, provider=args.provider)
+    elif args.command == "catalog":
+        from .rhodes_catalog import CatalogArchive, CatalogPut, CatalogQuery
+        if args.verb == "put":
+            request = CatalogPut.model_validate(body)
+            if request.definition.kind != args.kind:
+                raise ValueError("rhodes.catalog.definition_kind_mismatch")
+            result = await client.catalog.put(args.name, request)
+        elif args.verb == "archive":
+            result = await client.catalog.archive(args.kind, args.name, CatalogArchive(
+                schema_version="synth.rhodes-catalog-archive.draft.v1", operation_id=args.operation_id,
+                expected_revision=args.expected_revision))
+        elif args.verb == "list": result = await client.catalog.list(args.kind, CatalogQuery.model_validate(body or {}))
+        elif args.verb == "get": result = await client.catalog.inspect(args.kind, args.name, revision=args.revision)
+        elif args.verb == "history": result = await client.catalog.history(args.kind, args.name, after_revision=args.after_revision, limit=args.limit)
+        else: result = await client.catalog.operation(args.operation_id)
+        output = result.model_dump(mode="json")
     elif args.command == "definitions":
         if args.verb == "list":
             output = await client.list_definitions(

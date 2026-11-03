@@ -104,6 +104,12 @@ def _retry_after_seconds(value: str, *, now: datetime) -> float | None:
 
 
 class RhodesClient(PoolClient):
+    @property
+    def catalog(self):
+        """Draft versioned task/resource registry over this authenticated client."""
+        from .rhodes_catalog import catalog_for
+        return catalog_for(self)
+
     async def wait_for(
         self,
         rollout_id: str,
@@ -260,6 +266,28 @@ class RhodesClient(PoolClient):
             params={"limit": limit},
         )
         return [BuildOperation.from_json(item) for item in body.get("items", [])]
+
+    async def list_build_log_publications(self, build_operation_id: str, *, after_attempt: int = 0, limit: int = 100):
+        """Retained custody for original attempts, including after later retries."""
+        from .rhodes_build_operations import BuildLogPublication, BuildLogPublicationPage
+        if type(after_attempt) is not int or after_attempt < 0 or type(limit) is not int or not 1 <= limit <= 200:
+            raise ValueError("Invalid build-log publication page")
+        body = await self._build_request("GET", "/environment_build_operations/" + quote(build_operation_id, safe="") + "/log_publications",
+                                         params={"after_attempt": after_attempt, "limit": limit})
+        try:
+            items = body["items"]
+            if not isinstance(items, list) or len(items) > limit:
+                raise ValueError("Invalid build-log publication page")
+            publications = tuple(BuildLogPublication.from_json(item, operation_id=build_operation_id, attempt=item["attempt"]) for item in items)
+            attempts = [item.attempt for item in publications]
+            if attempts != sorted(set(attempts)) or any(attempt <= after_attempt for attempt in attempts):
+                raise ValueError("Invalid build-log publication order")
+            cursor = body.get("next_attempt")
+            if cursor is not None and (not attempts or type(cursor) is not int or cursor != attempts[-1]):
+                raise ValueError("Invalid build-log publication cursor")
+            return BuildLogPublicationPage(items=publications, next_attempt=cursor)
+        except (KeyError, TypeError, ValueError) as error:
+            raise PoolClientError("Rhodes returned a malformed build-log publication page") from error
 
     async def retry_build_operation(self, build_operation_id: str) -> Any:
         """Return a failed/recovery_required operation to pending (same identity)."""
