@@ -55,3 +55,53 @@ with only required trace kind `trace` and at least 8 MiB is protected before
 dispatch. Actual consumption can still refuse; it never overrides quota.
 Original signer unavailability is a typed predispatch refusal. The finite
 container never borrows the shared task deployment handle during cleanup.
+
+
+### Source cross-lane audit follow-up (2026-11-03)
+
+The producer now calls the concrete owner `lock_current_closure` in its final
+transaction before promoting full capture. The owner locks live original
+reservations, original credential version and current exact object/native
+holds/grants through commit. The producer checks the public receipts did not
+change and validates full receipt coherence: complete role digests, no opaque
+credential references, same-epoch committed terminal objects, and actual
+Mnemosyne native reference matching the terminal native archive digest. This
+is an observation under the then-current retained owners, not a promise that
+an explicit later owner release cannot withdraw custody.
+
+The source audit identified and sent actual owner fixes for inventory.json
+authorization, private native trace read-before-grant, and exact final owner
+fencing. Root corrected source proxy selection for native task source pins
+without requiring duplicate original.inputs and tightened Forge full guards.
+The maximum source-ref tuple is 130 (128 policy refs plus finite source/image,
+with identical registered source deduplicated). No runtime claim follows from
+these source inspections.
+
+Recovery first checks the exact signed original input and stream digests and
+rebuilds stdout/stderr from the fsynced chunk journal. If no archive exists AND
+no terminal/native publication identity was pinned, it may seal the first
+Trace V5 from these actual original observations. Provenance explicitly records
+`signed-original-stdio-recovery`, the original proof digest and materializer
+module digest. O_EXCL/fsync prevents replacement of an existing archive; a
+partial or conflicting original archive remains a refusal. No process or
+workload is run by recovery. Missing unsigned/unfinished terminal observations
+stay partial.
+
+Before actual create, the recorder durably transitions `preflight` to
+`create_pending` under a live original ownership check. Recovery can close a
+proven no-effect preflight; create_pending or legacy admitted without an ACK
+remains uncertain. The original execution fact cannot be overwritten for a
+second dispatch. Healthchecks and daemon logging are disabled and checked;
+actual entrypoint/argv/no-new-privileges and read-only shm+mqueue mounts are
+verified. Stdio output and journal have independent strict byte bounds.
+
+All tests, lint, type checking, compilation, builds, imports, provider/Docker
+execution, source/registry fetch, signer access/enrollment and package generation
+remain unrun under the user's explicit testing hold. Integrate the matching
+owner helper/receipt fixes and current-key-lock migration before qualification.
+
+The finite image closure additionally records `image_platform` as the canonical
+SHA256 of OCI os/architecture. Runtime independently inspects the actual local
+image and Docker daemon and requires native Linux amd64/arm64 agreement; implicit
+QEMU/emulation is unsupported because that dependency is outside retained image
+layers. No image inspection or Docker command was run during implementation.

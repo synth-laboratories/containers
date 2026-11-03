@@ -6,6 +6,7 @@ independent current owner proofs, not object labels or an observed image digest.
 
 from typing import Annotated, Literal
 from uuid import UUID
+import re
 
 from pydantic import Field, model_validator
 
@@ -114,7 +115,7 @@ class AttemptCaptureReceipt(Contract):
     collection_id: str
     manifest_digest: str | None = None
     logical_path: Literal["attempt.zip"] = "attempt.zip"
-    source_references: tuple[DeclaredCaptureReference, ...] = Field(default=(), max_length=129)
+    source_references: tuple[DeclaredCaptureReference, ...] = Field(default=(), max_length=130)
     opaque_credential_references: tuple[dict[str, str], ...] = Field(default=(), max_length=256)
     gaps: tuple[str, ...] = Field(max_length=256)
     full_attempt_capture_verified: bool = False
@@ -129,6 +130,30 @@ class AttemptCaptureReceipt(Contract):
             raise ValueError("Capture publication byte accounting is invalid")
         if self.full_attempt_capture_verified and (
             self.status != "committed" or self.gaps or not self.owner_custody
+            or self.opaque_credential_references
         ):
             raise ValueError("Complete capture requires committed gap-free owner custody")
+        if self.full_attempt_capture_verified:
+            required = {"input", "configuration", "source", "image", "dependency", "grader", "policy", "image_config_digest", "image_platform"}
+            if (self.scope != "pre_execution_inputs_and_declarations"
+                or not required <= self.role_closures.keys()
+                or any(re.fullmatch(r"sha256:[0-9a-f]{64}", self.role_closures[key]) is None for key in required)
+                or self.terminal_publication is None or self.terminal_native is None):
+                raise ValueError("Complete capture requires exact finite role and terminal closures")
+            terminal = type(self).model_validate(self.terminal_publication)
+            if (terminal.scope != "terminal_observed_output" or terminal.status != "committed"
+                or terminal.execution_epoch != self.execution_epoch or terminal.gaps
+                or not terminal.owner_custody or terminal.opaque_credential_references):
+                raise ValueError("Complete capture requires committed same-epoch terminal custody")
+            objects = {item.logical_path: item for item in terminal.inventory}
+            if not {"output/stdout.bin", "output/stderr.bin", "output/stdio-journal.json",
+                    "output/recorder-proof.json", "output/native-trace.zip"} <= objects.keys():
+                raise ValueError("Complete capture requires every actual terminal object")
+            native = self.terminal_native
+            if ((native.get("authority"), native.get("kind"), native.get("revision")) !=
+                    ("mnemosyne", "capture_native_trace", "1")
+                or not isinstance(native.get("record_id"), str)
+                or re.fullmatch(r"mct_[0-9a-f]{64}", native["record_id"]) is None
+                or native.get("digest_sha256") != objects["output/native-trace.zip"].digest_sha256):
+                raise ValueError("Complete capture requires exact retained terminal native archive")
         return self

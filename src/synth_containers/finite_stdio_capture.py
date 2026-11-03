@@ -111,6 +111,37 @@ class FiniteStdioResult:
     image_digest: str
 
 
+def seal_original_stdio(*, root, rollout_id, epoch, input_bytes, stdout, stderr,
+                        journal, proof, recovery=False):
+    """A trace transformation of actual retained observations, never execution."""
+    from .tracing.capture.supervisor import CaptureSupervisor, SupervisorConfig
+    from .tracing.models.identity import TraceIdentityV5, TraceProvenanceV5
+    from .tracing.store.bundle import LocalTraceBundle
+
+    body = proof["body"]
+    transformation = {
+        "schema_version": "synth.rhodes-finite-spool-transform.v1",
+        "original_recorder_proof_sha256": hashlib.sha256(canonical(proof)).hexdigest(),
+        "materializer_module_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        "source": "fsynced_signed_original_stdio" if recovery else "live_owned_original_stdio",
+    }
+    with CaptureSupervisor(SupervisorConfig(bundle_root=Path(root),
+        trace_key={"rollout": rollout_id, "epoch": epoch}, trace_id=rollout_id,
+        upstream_base_url="http://127.0.0.1:9", interception="application",
+        identity=TraceIdentityV5(rollout_id=rollout_id), workload_kind="other",
+        provenance=TraceProvenanceV5("rhodes-isolated-stdio", "1",
+            container_image_digest=body["image_digest"],
+            transformation_chain=("signed-original-stdio-recovery",) if recovery else (),
+            extra={"finite_materialization": transformation}))) as capture:
+        for path, content in (("input.bin", input_bytes), ("stdout.bin", stdout), ("stderr.bin", stderr),
+            ("stdio-journal.json", journal), ("recorder-proof.json", canonical(proof))):
+            capture.collector.artifact(role="research_log", media_type="application/octet-stream",
+                content=content, logical_name=path, visibility="private")
+        capture.collector.event(event_type="environment.finite_stdio.terminal", payload=body)
+        capture.finalize(status="completed")
+    return LocalTraceBundle(Path(root)).archive_bytes()
+
+
 def run_isolated_stdio(*, rollout_id, epoch, image_digest, command, input_bytes,
                        cpus, memory_bytes, timeout_seconds, maximum_output_bytes,
                        closure, signer, cancelled=None, on_state=None, on_terminal=None):
@@ -140,6 +171,7 @@ def run_isolated_stdio(*, rollout_id, epoch, image_digest, command, input_bytes,
     if inspect_original(docker, name, env) is not None:
         raise FiniteRecorderRefusal("finite_original_allocation_exists")
     journal = []
+    journal_bytes = 2  # Canonical list brackets; bound adversarial tiny writes.
     streams = {"stdout": bytearray(), "stderr": bytearray()}
     created = False
     started = False
@@ -153,6 +185,11 @@ def run_isolated_stdio(*, rollout_id, epoch, image_digest, command, input_bytes,
         raise FiniteRecorderRefusal("finite_spool_custody_invalid")
     attempt = spool / name
     attempt.mkdir(mode=0o700, exist_ok=False)  # Existing original never redispatches.
+    descriptor = os.open(spool, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
     def durable(path, body, *, append=False):
         flags = os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | (os.O_APPEND if append else os.O_EXCL)
@@ -175,12 +212,18 @@ def run_isolated_stdio(*, rollout_id, epoch, image_digest, command, input_bytes,
         empty = Path(directory) / "readonly-shm"
         empty.mkdir(mode=0o700)
         try:
+            if cancelled is not None and cancelled.is_set():
+                raise FiniteRecorderRefusal("finite_cancelled_before_create")
+            if on_state:
+                on_state("create_pending")  # Durable original intent before the control effect.
             call(["create", "--interactive", "--pull", "never", "--name", name, "--label", label,
+                "--no-healthcheck", "--log-driver", "none",
                 "--read-only", "--network", "none", "--ipc", "none", "--cap-drop", "ALL",
                 "--security-opt", "no-new-privileges", "--user", "65534:65534",
                 "--pids-limit", "64", "--cpus", str(cpus), "--memory", str(memory_bytes),
                 "--memory-swap", str(memory_bytes), "--mount",
-                f"type=bind,source={empty},target=/dev/shm,readonly", "--entrypoint", command[0],
+                f"type=bind,source={empty},target=/dev/shm,readonly", "--mount",
+                f"type=bind,source={empty},target=/dev/mqueue,readonly", "--entrypoint", command[0],
                 image_digest, *command[1:]])
             created = True
             if on_state:
@@ -188,6 +231,16 @@ def run_isolated_stdio(*, rollout_id, epoch, image_digest, command, input_bytes,
             if cancelled is not None and cancelled.is_set():
                 raise FiniteRecorderRefusal("finite_cancelled_before_start")
             observed = json.loads(call(["inspect", name]))[0]
+            image = json.loads(call(["image", "inspect", image_digest]))[0]
+            daemon = json.loads(call(["info", "--format", "{{json .}}"])
+                or b"null")
+            architecture = {"x86_64": "amd64", "aarch64": "arm64"}.get(
+                daemon.get("Architecture"), daemon.get("Architecture"))
+            platform = {"os": image.get("Os"), "architecture": image.get("Architecture")}
+            if (image.get("Id") != image_digest or platform["os"] != "linux" or daemon.get("OSType") != "linux"
+                or platform["architecture"] != architecture
+                or "sha256:" + hashlib.sha256(canonical(platform)).hexdigest() != closure.get("image_platform")):
+                raise FiniteRecorderRefusal("finite_native_platform_or_image_differs")
             host, config = observed["HostConfig"], observed["Config"]
             mounts = observed.get("Mounts") or []
             if (observed.get("Image") != image_digest or host.get("ReadonlyRootfs") is not True
@@ -196,7 +249,13 @@ def run_isolated_stdio(*, rollout_id, epoch, image_digest, command, input_bytes,
                 or host.get("Memory") != memory_bytes or host.get("MemorySwap") != memory_bytes
                 or host.get("NanoCpus") != round(cpus * 1_000_000_000)
                 or config.get("User") != "65534:65534"
-                or len(mounts) != 1 or mounts[0].get("Destination") != "/dev/shm" or mounts[0].get("RW") is not False
+                or len(mounts) != 2 or {item.get("Destination") for item in mounts} != {"/dev/shm", "/dev/mqueue"}
+                or any(item.get("RW") is not False or item.get("Source") != str(empty) for item in mounts)
+                or (config.get("Healthcheck") or {}).get("Test") != ["NONE"]
+                or (host.get("LogConfig") or {}).get("Type") != "none"
+                or config.get("Entrypoint") != [command[0]] or (config.get("Cmd") or []) != list(command[1:])
+                or not set(host.get("SecurityOpt") or ()) <= {"no-new-privileges", "no-new-privileges:true"}
+                or not host.get("SecurityOpt")
                 or config.get("Volumes") or host.get("Devices") or host.get("Binds")
                 or host.get("PidMode") not in ("", "private") or host.get("IpcMode") != "none"):
                 raise FiniteRecorderRefusal("finite_enforced_isolation_differs")
@@ -237,9 +296,13 @@ def run_isolated_stdio(*, rollout_id, epoch, image_digest, command, input_bytes,
                         streams[channel].extend(data)
                         if sum(len(value) for value in streams.values()) > maximum_output_bytes:
                             raise FiniteRecorderRefusal("finite_output_capture_bound_exceeded")
-                        journal.append({"sequence": len(journal) + 1, "channel": channel,
+                        entry = {"sequence": len(journal) + 1, "channel": channel,
                             "data_b64": base64.b64encode(data).decode(),
-                            "sha256": hashlib.sha256(data).hexdigest(), "size_bytes": len(data)})
+                            "sha256": hashlib.sha256(data).hexdigest(), "size_bytes": len(data)}
+                        journal_bytes += len(canonical(entry)) + bool(journal)
+                        if journal_bytes > 2 * 1024 * 1024 or len(journal) >= 65536:
+                            raise FiniteRecorderRefusal("finite_journal_capture_bound_exceeded")
+                        journal.append(entry)
                         durable(channel + ".bin", data, append=True)
                         durable("stream-journal.jsonl", canonical(journal[-1]) + b"\n", append=True)
             child.wait(timeout=max(0.1, deadline - time.monotonic()))
@@ -259,22 +322,9 @@ def run_isolated_stdio(*, rollout_id, epoch, image_digest, command, input_bytes,
             proof = signer.sign(body)
             durable("stdio-journal.json", canonical(journal))
             durable("recorder-proof.json", canonical(proof))
-            from .tracing.capture.supervisor import CaptureSupervisor, SupervisorConfig
-            from .tracing.models.identity import TraceIdentityV5, TraceProvenanceV5
-            from .tracing.store.bundle import LocalTraceBundle
-
-            root = Path(directory) / "trace"
-            with CaptureSupervisor(SupervisorConfig(bundle_root=root, trace_key={"rollout": rollout_id, "epoch": epoch},
-                trace_id=rollout_id, upstream_base_url="http://127.0.0.1:9", interception="application",
-                identity=TraceIdentityV5(rollout_id=rollout_id), workload_kind="other",
-                provenance=TraceProvenanceV5("rhodes-isolated-stdio", "1", container_image_digest=image_digest))) as capture:
-                for path, content in (("input.bin", input_bytes), ("stdout.bin", stdout), ("stderr.bin", stderr),
-                    ("stdio-journal.json", canonical(journal)), ("recorder-proof.json", canonical(proof))):
-                    capture.collector.artifact(role="research_log", media_type="application/octet-stream",
-                        content=content, logical_name=path, visibility="private")
-                capture.collector.event(event_type="environment.finite_stdio.terminal", payload=body)
-                capture.finalize(status="completed")
-            archive = LocalTraceBundle(root).archive_bytes()
+            archive = seal_original_stdio(root=Path(directory) / "trace", rollout_id=rollout_id,
+                epoch=epoch, input_bytes=input_bytes, stdout=stdout, stderr=stderr,
+                journal=canonical(journal), proof=proof)
             durable("native-trace.zip", archive)
             try:
                 result = json.loads(stdout)
@@ -302,7 +352,7 @@ def run_isolated_stdio(*, rollout_id, epoch, image_digest, command, input_bytes,
                     on_state("cleanup_confirmed")
 
 
-def recover_original_stdio(*, rollout_id, epoch, state, cohort_id):
+def recover_original_stdio(*, rollout_id, epoch, state, cohort_id, allow_first_seal=False):
     """Read a completed original spool and stop its exact allocation; never run."""
     docker = shutil.which("docker")
     if docker is None:
@@ -310,9 +360,11 @@ def recover_original_stdio(*, rollout_id, epoch, state, cohort_id):
     name = "rhodes-finite-" + hashlib.sha256((rollout_id + ":" + epoch).encode()).hexdigest()[:40]
     env = {key: os.environ[key] for key in ("PATH", "DOCKER_HOST", "DOCKER_CONFIG", "HOME") if key in os.environ}
     observed = inspect_original(docker, name, env)
-    if observed is None and state == "admitted":
+    if observed is None and state in {"admitted", "create_pending"}:
         # An original create without its ACK can still materialize later.
         raise FiniteRecorderRefusal("finite_original_create_in_doubt")
+    if observed is None and state == "preflight":
+        return None  # The durable create_pending transition never authorized an effect.
     if observed is not None:
         if (observed.get("Config", {}).get("Labels") or {}).get("ai.synth.rhodes.finite") != rollout_id + ":" + epoch:
             raise FiniteRecorderRefusal("finite_cleanup_ownership_differs")
@@ -346,15 +398,58 @@ def recover_original_stdio(*, rollout_id, epoch, state, cohort_id):
     try:
         proof = json.loads(retained("recorder-proof.json", 1024 * 1024))
         body = verify_recorder_proof(proof, cohort_id=cohort_id)
-        archive = retained("native-trace.zip", 8 * 1024 * 1024)
+        input_bytes = retained("input.bin", 256 * 1024)
         journal = retained("stdio-journal.json", 2 * 1024 * 1024)
         stdout = retained("stdout.bin", 256 * 1024) if (attempt / "stdout.bin").exists() else b""
         stderr = retained("stderr.bin", 256 * 1024) if (attempt / "stderr.bin").exists() else b""
         if (body.get("rollout_id") != rollout_id or body.get("execution_epoch") != epoch
             or body.get("terminal_observed") is not True or body.get("streams_drained") is not True
+            or body.get("profile") != "isolated_stdio_v1" or body.get("filesystem_writes") != "forbidden"
+            or body.get("network") != "none" or body.get("credential_injection") != "none"
             or any(body.get(key) != hashlib.sha256(value).hexdigest() for key, value in (
-                ("stdout_sha256", stdout), ("stderr_sha256", stderr), ("journal_sha256", journal)))):
+                ("input_sha256", input_bytes), ("stdout_sha256", stdout),
+                ("stderr_sha256", stderr), ("journal_sha256", journal)))):
             raise FiniteRecorderRefusal("finite_retained_terminal_differs")
+        entries = json.loads(journal)
+        rebuilt = {"stdout": bytearray(), "stderr": bytearray()}
+        if not isinstance(entries, list) or len(entries) > 65536:
+            raise FiniteRecorderRefusal("finite_retained_journal_invalid")
+        for sequence, item in enumerate(entries, 1):
+            data = base64.b64decode(item["data_b64"], validate=True)
+            if (item.get("sequence") != sequence or item.get("channel") not in rebuilt
+                or item.get("size_bytes") != len(data) or item.get("sha256") != hashlib.sha256(data).hexdigest()):
+                raise FiniteRecorderRefusal("finite_retained_stream_journal_differs")
+            rebuilt[item["channel"]].extend(data)
+            if sum(map(len, rebuilt.values())) > 256 * 1024:
+                raise FiniteRecorderRefusal("finite_retained_stream_bound_exceeded")
+        if rebuilt != {"stdout": stdout, "stderr": stderr}:
+            raise FiniteRecorderRefusal("finite_retained_stream_bytes_differ")
+        try:
+            archive = retained("native-trace.zip", 8 * 1024 * 1024)
+        except FileNotFoundError:
+            if not allow_first_seal:
+                raise FiniteRecorderRefusal("finite_pinned_archive_missing")
+            with tempfile.TemporaryDirectory(prefix="first-seal-", dir=attempt) as temporary:
+                archive = seal_original_stdio(root=Path(temporary) / "trace", rollout_id=rollout_id,
+                    epoch=epoch, input_bytes=input_bytes, stdout=stdout, stderr=stderr,
+                    journal=journal, proof=proof, recovery=True)
+            if len(archive) > 8 * 1024 * 1024:
+                raise FiniteRecorderRefusal("finite_native_archive_bound_exceeded")
+            # O_EXCL is the first immutable archive identity. A competing first
+            # seal or a partial existing file is never silently overwritten.
+            fd = os.open(attempt / "native-trace.zip", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            try:
+                view = memoryview(archive)
+                while view:
+                    view = view[os.write(fd, view):]
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            fd = os.open(attempt, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
         return FiniteStdioResult({}, archive, proof, stdout, stderr, journal, body["image_digest"])
     except FileNotFoundError:
         # Cleanup is proven, but a partial journal never becomes terminal evidence.
