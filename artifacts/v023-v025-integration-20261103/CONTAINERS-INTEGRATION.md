@@ -127,3 +127,18 @@ started. Both observed original effects are reconciled; the failed real gate
 remains unqualified. Root then communicated a shared-host recovery hold: all
 this lane's jobs have drained, and no new DB/Docker/build/test work is submitted
 until that hold is explicitly cleared.
+
+## Final paired installed qualification
+
+After the recovery owner explicitly released the host hold, root built immutable
+recorder06 from source `3951e33` and installed it alongside SDK05. All 21 recorder
+cases passed, including the four real cached-image Docker cases, lost create and
+terminal ACK recovery, first archive seal and the signed no-dispatch fence.
+The exact installed module SHA256 was
+`3d725b3427039c186c86d0e5a425521eb62573e315ef7a548e9541c809b5250f`.
+Backend receipts `final-installed-finite06-all` and
+`final-installed-finite06-inventory.json` retain the installed path/version and
+zero remaining finite allocations. All 324 Python modules match the committed
+wheel export byte for byte. This supersedes the earlier installed-runtime block
+for the tested local profile; it does not establish a source cause for the
+earlier shared Docker timeout, or installed Artifact/Mnemosyne owner custody.
