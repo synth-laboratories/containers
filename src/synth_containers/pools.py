@@ -49,7 +49,7 @@ import tarfile
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Self, Sequence
 
 import httpx
 
@@ -453,7 +453,7 @@ class PoolClient:
         if self._owns_client:
             await self._client.aclose()
 
-    async def __aenter__(self) -> "PoolClient":
+    async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:

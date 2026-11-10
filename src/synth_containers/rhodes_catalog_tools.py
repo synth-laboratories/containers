@@ -88,10 +88,16 @@ class RhodesCatalogTools:
         if isinstance(parsed, BuildArguments):
             return asdict(await self.client.get_build_operation(parsed.build_operation_id))
         catalog = self.client.catalog
-        if isinstance(parsed, ReadArguments): result = await catalog.inspect(parsed.kind, parsed.name, revision=parsed.revision)
-        elif isinstance(parsed, ListArguments): result = await catalog.list(parsed.kind, parsed.query)
-        elif isinstance(parsed, PutArguments): result = await catalog.put(parsed.name, parsed.request)
-        elif isinstance(parsed, ArchiveArguments): result = await catalog.archive(parsed.kind, parsed.name, parsed.request)
-        elif isinstance(parsed, HistoryArguments): result = await catalog.history(parsed.kind, parsed.name, after_revision=parsed.after_revision, limit=parsed.limit)
-        else: result = await catalog.operation(parsed.operation_id)
+        if isinstance(parsed, ReadArguments):
+            result = await catalog.inspect(parsed.kind, parsed.name, revision=parsed.revision)
+        elif isinstance(parsed, ListArguments):
+            result = await catalog.list(parsed.kind, parsed.query)
+        elif isinstance(parsed, PutArguments):
+            result = await catalog.put(parsed.name, parsed.request)
+        elif isinstance(parsed, ArchiveArguments):
+            result = await catalog.archive(parsed.kind, parsed.name, parsed.request)
+        elif isinstance(parsed, HistoryArguments):
+            result = await catalog.history(parsed.kind, parsed.name, after_revision=parsed.after_revision, limit=parsed.limit)
+        else:
+            result = await catalog.operation(parsed.operation_id)
         return result.model_dump(mode="json")

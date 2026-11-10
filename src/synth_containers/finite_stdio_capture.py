@@ -17,6 +17,7 @@ import stat
 import subprocess
 import tempfile
 import time
+from typing import IO, Any, cast
 from dataclasses import dataclass
 from contextlib import nullcontext
 
@@ -108,7 +109,7 @@ class RecorderSigner:
     key_id: str
     cohort_id: str
     module_sha256: str
-    private_key: object
+    private_key: Any
     public_key: object
 
     def sign(self, body):
@@ -358,6 +359,7 @@ def run_isolated_stdio(*, rollout_id, epoch, image_digest, command, input_bytes,
                 on_state("running")
             selector = selectors.DefaultSelector()
             for handle, channel in ((child.stdout, "stdout"), (child.stderr, "stderr"), (child.stdin, "stdin")):
+                handle = cast(IO[bytes], handle)  # PIPE was requested for all three
                 os.set_blocking(handle.fileno(), False)
                 selector.register(handle, selectors.EVENT_WRITE if channel == "stdin" else selectors.EVENT_READ, channel)
             cursor = 0
@@ -365,7 +367,7 @@ def run_isolated_stdio(*, rollout_id, epoch, image_digest, command, input_bytes,
                 if time.monotonic() >= deadline or cancelled is not None and cancelled.is_set():
                     raise FiniteRecorderRefusal("finite_execution_timeout")
                 for key, _events in selector.select(0.1):
-                    handle, channel = key.fileobj, key.data
+                    handle, channel = cast(IO[bytes], key.fileobj), key.data
                     if channel == "stdin":
                         cursor = write_original_input(selector, handle, input_bytes, cursor)
                     else:
@@ -409,6 +411,7 @@ def run_isolated_stdio(*, rollout_id, epoch, image_digest, command, input_bytes,
                 epoch=epoch, input_bytes=input_bytes, stdout=stdout, stderr=stderr,
                 journal=canonical(journal), proof=proof)
             durable("native-trace.zip", archive)
+            result: dict[str, Any]
             try:
                 result = json.loads(stdout)
             except ValueError:

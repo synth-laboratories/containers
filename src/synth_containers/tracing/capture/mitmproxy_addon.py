@@ -228,7 +228,7 @@ def _mitmproxy_response(
     body: bytes,
     headers: Mapping[str, str],
 ) -> Any:
-    from mitmproxy import http
+    from mitmproxy import http  # ty: ignore[unresolved-import]
 
     return http.Response.make(status, body, dict(headers))
 

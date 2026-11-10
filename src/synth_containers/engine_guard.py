@@ -17,6 +17,8 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
+from typing import Any
 from uuid import uuid4
 
 import httpx
@@ -279,7 +281,8 @@ def remove(reporter: GuardReporter, docker: str, name: str, names: EgressNames |
            ) -> tuple[str, int | None, list[str]]:
     """Remove sidecar, engine, then network; ``removed`` only when every owned resource is observed absent."""
     reporter.state("stopping")
-    steps = [] if names is None else [(names.sidecar, remove_container)]
+    steps: list[tuple[str, Callable[[GuardReporter, str, str], tuple[str, int | None]]]] = (
+        [] if names is None else [(names.sidecar, remove_container)])
     steps.append((name, remove_container))
     if names is not None:
         steps.append((names.network, remove_network))
@@ -399,7 +402,7 @@ def main():
     stage = None
     owner_label = f"{OWNER_LABEL}={request['owner']}"
     names = None
-    egress = {"declared": request.get("egress") or EGRESS_CAPABILITY, "observed": None}
+    egress: dict[str, Any] = {"declared": request.get("egress") or EGRESS_CAPABILITY, "observed": None}
     limits = {"declared": None, "observed": None, "egress": EGRESS_CAPABILITY,
         "egress_reason": "published loopback port requires a bridge network; Docker cannot publish from none/internal"}
     reporter.state("allocating", owner=request["owner"], label=owner_label)

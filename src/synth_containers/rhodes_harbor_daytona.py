@@ -201,7 +201,7 @@ class DaytonaObserver:
     """Read-only view of Harbor-owned Daytona resources, to prove teardown left none."""
 
     def __init__(self) -> None:
-        from daytona_sdk import Daytona, DaytonaConfig
+        from daytona_sdk import Daytona, DaytonaConfig  # ty: ignore[unresolved-import]
 
         self._sdk = Daytona(
             DaytonaConfig(
