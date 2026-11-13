@@ -10,13 +10,14 @@ import pytest
 
 from synth_containers.rhodes_api_contract import APIContractError
 from synth_containers.rhodes_core_harbor_e2e import CoreHarborRun, launch_request, upload_task
-from tests.test_rhodes_deepswe_e2e import body, events, inputs
+from tests.test_rhodes_deepswe_e2e import SNAPSHOT, body, events, inputs
 
 
 @pytest.mark.parametrize("lost_ack", [False, True])
 @pytest.mark.parametrize("valid_result", [True, False])
+@pytest.mark.parametrize("provider_matches", [True, False])
 def test_owned_lifecycle_reconciles_original_launch_and_cleans_up_even_for_bad_results(
-    tmp_path, lost_ack, valid_result
+    tmp_path, lost_ack, valid_result, provider_matches
 ):
     args = inputs(tmp_path)
     args.budget, args.wall_seconds = "10", 60
@@ -114,8 +115,11 @@ def test_owned_lifecycle_reconciles_original_launch_and_cleans_up_even_for_bad_r
             return {"status": "archived", "archive": {"state": "archived"}}
 
     class Observer:
+        samples = 0
+
         async def snapshots(self):
-            return set()
+            self.samples += 1
+            return {SNAPSHOT} if provider_matches and self.samples == 2 else set()
 
         async def remaining_owners(self, owners):
             assert len(owners) == 2
@@ -137,9 +141,9 @@ def test_owned_lifecycle_reconciles_original_launch_and_cleans_up_even_for_bad_r
             return await CoreHarborRun(core, Rhodes(), storage, Observer(), args, output).execute()
 
     report = asyncio.run(exercise())
-    assert report["passed"] is valid_result
+    assert report["passed"] is (valid_result and provider_matches)
     assert state["closed"] is True
-    assert report["checks"]["provider_sandboxes_absent"] is True
+    assert report["checks"]["provider_sandboxes_absent"] is provider_matches
     assert len(uploads) == 1
     assert hashlib.sha256(uploads[0]).hexdigest() == state["declaration"]["digest_sha256"]
     declaration = json.loads(uploads[0])

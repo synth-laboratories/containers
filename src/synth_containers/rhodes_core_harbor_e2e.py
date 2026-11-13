@@ -102,8 +102,9 @@ do not create another deployment, pool or rollout.
 seed={seed}, timeout_seconds=3600 and inputs={{}}. Its native agent runs the task.
 5. Poll pool_rollout_get for the SAME rollout_id until terminal. Report the
 actual rollout_id, pool_id, native reward, phase exit codes and any refusal.
-6. Archive this run's pool after execution and record the summary. Do not retry
-the experiment or create replacement resources. Then finish this workflow.
+6. Record the summary and finish this workflow. Leave the pool to the parent
+run's Core-owned termination/archival path, so the external observer can read
+its exact snapshot before cleanup. Do not retry or create replacement resources.
 The native verifier's score is the result; do not infer success from a tool's HTTP status.
 """
     return {
@@ -242,6 +243,16 @@ class CoreHarborRun:
                         self.report["rollout_id"] = rid
                         self.body = await self.rhodes.get_rollout(rid)
                         self.report["pool_id"] = self.body["pool_id"]
+                        _, _, execution = _result(self.body)
+                        snapshot_id = execution.get("snapshot_id")
+                        if isinstance(snapshot_id, str) and not snapshot_id.startswith(
+                            "image_ref:"
+                        ):
+                            if (
+                                snapshot_id in self.before_snapshots
+                                or snapshot_id in await self.observer.snapshots()
+                            ):
+                                self.report["checks"]["provider_snapshot_observed"] = True
                         self.save()
                         if self.body.get("status") in TERMINAL:
                             break
@@ -253,6 +264,7 @@ class CoreHarborRun:
             t = time.perf_counter()
             events = await self.events(self.report["rollout_id"])
             self.report["checks"].update(result_checks(self.body, events, agent))
+            self.report["checks"].setdefault("provider_snapshot_observed", False)
             _, metrics, execution = _result(self.body)
             self.report.update(reward=metrics.get("outcome_reward"), execution=execution)
             self.report["task_solved"] = self.report["reward"] == 1
@@ -334,7 +346,9 @@ class CoreHarborRun:
                 raise ValueError("Both native sandbox identities must be retained")
             while await self.observer.remaining_owners(owners):
                 await asyncio.sleep(self.args.poll_seconds)
-            self.report["checks"]["provider_sandboxes_absent"] = True
+            self.report["checks"]["provider_sandboxes_absent"] = (
+                self.report["checks"].get("provider_snapshot_observed") is True
+            )
             snapshot_id = execution.get("snapshot_id")
             if not isinstance(snapshot_id, str) or not snapshot_id:
                 raise ValueError("Native snapshot identity is missing")
@@ -344,6 +358,8 @@ class CoreHarborRun:
             ):
                 while snapshot_id in await self.observer.snapshots():
                     await asyncio.sleep(self.args.poll_seconds)
-            self.report["checks"]["owned_snapshot_absent_or_retained_shared"] = True
+            self.report["checks"]["owned_snapshot_absent_or_retained_shared"] = (
+                self.report["checks"].get("provider_snapshot_observed") is True
+            )
         else:
             self.report["checks"]["native_rollout_observed"] = False
