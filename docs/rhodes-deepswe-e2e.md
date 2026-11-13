@@ -7,8 +7,8 @@ pool archived; independent provider readback confirmed its exact build snapshot
 absent. The current extracted Rhodes API passed identity/readiness checks but
 refused `POST /v1/pools` with `rhodes_customer_route_refused` at
 `public_origin_guard`, before allocating compute. Hosted compute intentionally
-requires the Core-owned execution path. This standalone launcher needs a
-Core-owned Harbor adapter before it can claim hosted end-to-end acceptance; no
+requires the Core-owned execution path. The Core-owned Harbor adapter is implemented in source and needs installed
+qualification before it can claim hosted end-to-end acceptance; no
 model-solving result has been obtained. The [API versioning contract](rhodes-api-versioning-proposal.md)
 describes the implemented source handshake (not yet deployed). Do not reopen the guarded hosted
 writes or fall back to the legacy host to make the test pass.
@@ -137,3 +137,30 @@ failure receipt containing the exact pool/rollout IDs and unresolved resources.
 Rhodes retains provider cleanup and snapshot-ledger authority; the script never
 deletes provider resources directly or sweeps another run's resources. There is
 no detached client-side watchdog after the script exits.
+
+## Core-owned hosted execution
+
+Add `--core-url "$SYNTH_CORE_URL"` to the invocation. The Rhodes URL remains
+`--backend-url "$SYNTH_BACKEND_URL"`. The same authorized customer key is used
+at both APIs. `--budget 30` bounds the parent run (maximum 39 USD per invocation);
+`--wall-seconds 1800` bounds its wall time. Daytona credentials are read-only
+observation credentials, as in the direct local path.
+
+The runner requires `core-owned.harbor.execute` during version discovery before
+upload. It uploads the exact task JSON through Core's immutable file protocol,
+attaches its revision/digest to a single Swarms run, and grants exactly one pool
+rollout. A worker creates the run-owned pool and native Harbor deployment from
+that attachment. The configured Codex agent remains gpt-6-luna with low effort;
+the actor does not replace it with a generic command job or an oracle.
+
+The runner observes the native rollout through authenticated read routes, drains
+its committed phase/accounting events, checks the agent/verifier result, closes
+the parent through Core, and waits for financial and physical closure. It checks
+pool archival and independently observes the exact sandbox and snapshot absence.
+Immutable input/evidence files remain under their normal retained artifact
+lifecycle. Stage timings and Core settlement are printed and saved; task-solving
+success is an independent explicit check with `--require-solved`.
+
+A lost launch acknowledgement is reconciled once with the same durable Core key
+and body. No replacement run, legacy endpoint fallback, or direct hosted pool
+mutation is attempted. An unresolved launch/cleanup remains a failed receipt.

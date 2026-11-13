@@ -528,6 +528,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--backend-url", default=os.environ.get("SYNTH_BACKEND_URL"))
     parser.add_argument("--project-id", default=os.environ.get("SYNTH_PROJECT_ID"))
+    parser.add_argument("--core-url", default=os.environ.get("SYNTH_CORE_URL"), help="use Core-owned hosted Harbor execution")
+    parser.add_argument("--budget", default="30", help="Core parent run maximum charge in USD")
+    parser.add_argument("--wall-seconds", type=int, default=1800)
     parser.add_argument("--deepswe-root", type=Path, required=True)
     parser.add_argument("--pins", type=Path, required=True)
     parser.add_argument("--task", default="anko-default-function-arguments")
@@ -543,6 +546,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--out", type=Path, default=Path(".local/rhodes-deepswe-e2e"))
     args = parser.parse_args(argv)
+    from decimal import Decimal, InvalidOperation
+    try:
+        budget = Decimal(args.budget)
+        if not budget.is_finite() or not 0 < budget <= 39 or not 60 <= args.wall_seconds <= 3600:
+            raise ValueError("Core limits out of range")
+    except (InvalidOperation, ValueError):
+        parser.error("--budget must be positive and at most 39 USD; --wall-seconds must be 60..3600")
     if not re.fullmatch(r"[A-Za-z0-9_-]+", args.task):
         parser.error("--task must be a corpus task slug")
     try:
@@ -601,6 +611,18 @@ def main(argv: list[str] | None = None) -> int:
                 if current is not None:
                     loop.add_signal_handler(signal.SIGTERM, current.cancel)
                 try:
+                    if args.core_url:
+                        import httpx
+                        from .rhodes_core_harbor_e2e import CoreHarborRun
+                        async with (
+                            httpx.AsyncClient(base_url=args.core_url, timeout=60, headers={"Authorization": "Bearer " + os.environ["SYNTH_API_KEY"]}) as core,
+                            httpx.AsyncClient(timeout=60) as storage,
+                        ):
+                            report = await CoreHarborRun(core, client, storage, ScopedDaytonaObserver(provider), args, output).execute()
+                        print("E2E " + ("PASS" if report["passed"] else "FAIL"))
+                        print(json.dumps({k: report.get(k) for k in ("run_id", "rollout_id", "reward", "timings_seconds", "checks", "errors")}, indent=2))
+                        print("receipt=" + str(output / "report.json"))
+                        return report
                     return await E2ERun(
                         client, ScopedDaytonaObserver(provider), args, output
                     ).execute()
