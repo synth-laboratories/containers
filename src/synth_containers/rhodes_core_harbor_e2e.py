@@ -142,6 +142,7 @@ class CoreHarborRun:
         self.started = time.perf_counter()
         self.key = output.name
         self.before_snapshots: set[str] = set()
+        self.observed_snapshots: set[str] = set()
 
     def save(self):
         _write(self.output / "report.json", self.report)
@@ -178,6 +179,7 @@ class CoreHarborRun:
                 required_capabilities=["core-owned.harbor.execute"]
             )
             self.before_snapshots = await self.observer.snapshots()
+            self.observed_snapshots.update(self.before_snapshots)
             self.report["task"] = task.slug
             self.report["image"] = task.image
             self.report["timings_seconds"][stage] = time.perf_counter() - t
@@ -230,6 +232,9 @@ class CoreHarborRun:
             t = time.perf_counter()
             async with asyncio.timeout(self.args.wall_seconds + 60):
                 while True:
+                    # Retain positive observations while the build/agent runs.
+                    # Core may archive the snapshot before its result is published.
+                    self.observed_snapshots.update(await self.observer.snapshots())
                     run_id = self.report["run_id"]
                     snapshot = await core_request(self.core, "GET", f"/v1/runs/{run_id}")
                     report = await core_request(self.core, "GET", f"/v1/runs/{run_id}/report")
@@ -248,10 +253,7 @@ class CoreHarborRun:
                         if isinstance(snapshot_id, str) and not snapshot_id.startswith(
                             "image_ref:"
                         ):
-                            if (
-                                snapshot_id in self.before_snapshots
-                                or snapshot_id in await self.observer.snapshots()
-                            ):
+                            if snapshot_id in self.observed_snapshots:
                                 self.report["checks"]["provider_snapshot_observed"] = True
                         self.save()
                         if self.body.get("status") in TERMINAL:
