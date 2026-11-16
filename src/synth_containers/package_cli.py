@@ -21,12 +21,14 @@ from .package_files import ContainerPackageError, read_package_file
 from .package_models import (
     ContainerArtifactDescriptor,
     ContainerPackageManifest,
+    ContainerServicePackageManifest,
     PackageBuildOutput,
     PackageBuildPlan,
 )
 
 SCHEMAS = {
     "manifest": ContainerPackageManifest,
+    "service-manifest": ContainerServicePackageManifest,
     "plan": PackageBuildPlan,
     "build-output": PackageBuildOutput,
     "artifact": ContainerArtifactDescriptor,

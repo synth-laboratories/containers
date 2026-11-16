@@ -1,6 +1,6 @@
 [project]
 name = "synth-containers"
-version = "0.4.6"
+version = "0.4.7.dev2026111401"
 description = "Shared Synth container and environment runtime substrate"
 authors = [{name = "Synth Laboratories", email = "josh@usesynth.ai"}]
 readme = "README.md"
@@ -22,6 +22,7 @@ dependencies = [
 
 [project.optional-dependencies]
 finite-recorder = ["cryptography>=44,<51"]
+harbor-serve = ["harbor==0.26.0; python_version >= '3.12'"]
 native-harbor = ["harbor==0.22.0; python_version >= '3.12'"]
 native-harbor-docker = [
     "harbor==0.22.0; python_version >= '3.12'",
@@ -76,6 +77,7 @@ mitm-types = {requires-python = ">=3.12,<3.15"}
 synth-containers = "synth_containers.cli:main"
 synth-trace = "synth_containers.tracing.cli:main"
 synth-deepswe-e2e = "synth_containers.rhodes_deepswe_e2e:main"
+synth-harbor-serve = "synth_containers.harbor_serve_cli:main"
 
 [project.urls]
 Homepage = "https://github.com/synth-laboratories/containers"
@@ -89,12 +91,17 @@ build-backend = "setuptools.build_meta"
 [tool.uv]
 package = true
 conflicts = [
+    [{extra = "harbor-serve"}, {extra = "native-harbor"}],
+    [{extra = "harbor-serve"}, {extra = "native-harbor-docker"}],
+    [{extra = "harbor-serve"}, {extra = "native-harbor-daytona"}],
+    [{extra = "harbor-serve"}, {group = "release-types"}],
     [{group = "mitm-types"}, {group = "dev"}],
     [{group = "mitm-types"}, {extra = "dev"}],
     [{group = "mitm-types"}, {group = "release-types"}],
     [{group = "mitm-types"}, {extra = "native-harbor"}],
     [{group = "mitm-types"}, {extra = "native-harbor-docker"}],
     [{group = "mitm-types"}, {extra = "native-harbor-daytona"}],
+    [{group = "mitm-types"}, {extra = "harbor-serve"}],
 ]
 
 [tool.setuptools.packages.find]
