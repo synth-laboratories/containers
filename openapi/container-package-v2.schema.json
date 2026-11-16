@@ -1,0 +1,577 @@
+{
+  "$defs": {
+    "BuildEntrypoint": {
+      "additionalProperties": false,
+      "properties": {
+        "arguments": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Arguments",
+          "type": "array"
+        },
+        "entrypoint": {
+          "title": "Entrypoint",
+          "type": "string"
+        },
+        "inputs": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "platform": {
+          "pattern": "^[a-z0-9]+/[a-z0-9_]+(?:/[a-zA-Z0-9_.-]+)?$",
+          "title": "Platform",
+          "type": "string"
+        }
+      },
+      "required": [
+        "entrypoint",
+        "platform"
+      ],
+      "title": "BuildEntrypoint",
+      "type": "object"
+    },
+    "ContractDeclaration": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "title": "ContractDeclaration",
+      "type": "object"
+    },
+    "CredentialReference": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "reference": {
+          "pattern": "^secretref://[A-Za-z0-9._/-]+$",
+          "title": "Reference",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "reference"
+      ],
+      "title": "CredentialReference",
+      "type": "object"
+    },
+    "DependencyIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Digest",
+          "type": "string"
+        },
+        "name": {
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "reference": {
+          "minLength": 1,
+          "title": "Reference",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "reference",
+        "digest"
+      ],
+      "title": "DependencyIdentity",
+      "type": "object"
+    },
+    "ReadinessDeclaration": {
+      "additionalProperties": false,
+      "properties": {
+        "adapter": {
+          "anyOf": [
+            {
+              "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Adapter"
+        },
+        "kind": {
+          "enum": [
+            "process",
+            "http",
+            "adapter"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "port": {
+          "anyOf": [
+            {
+              "maximum": 65535,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Port"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "ReadinessDeclaration",
+      "type": "object"
+    },
+    "RuntimeDeclaration": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Command",
+          "type": "array"
+        },
+        "profile": {
+          "enum": [
+            "command",
+            "http",
+            "native"
+          ],
+          "title": "Profile",
+          "type": "string"
+        },
+        "readiness": {
+          "$ref": "#/$defs/ReadinessDeclaration"
+        },
+        "working_directory": {
+          "default": "/",
+          "title": "Working Directory",
+          "type": "string"
+        }
+      },
+      "required": [
+        "profile",
+        "command",
+        "readiness"
+      ],
+      "title": "RuntimeDeclaration",
+      "type": "object"
+    },
+    "ServiceDeclaration": {
+      "additionalProperties": false,
+      "properties": {
+        "execution": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ServiceExecution"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "interfaces": {
+          "items": {
+            "$ref": "#/$defs/ServiceInterface"
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "title": "Interfaces",
+          "type": "array"
+        },
+        "schema_version": {
+          "const": "synth.container-services.v1",
+          "default": "synth.container-services.v1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "state": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ServiceState"
+          },
+          "maxItems": 16,
+          "title": "State",
+          "type": "array"
+        }
+      },
+      "required": [
+        "interfaces"
+      ],
+      "title": "ServiceDeclaration",
+      "type": "object"
+    },
+    "ServiceExecution": {
+      "additionalProperties": false,
+      "properties": {
+        "admission_unit": {
+          "default": "operation",
+          "enum": [
+            "operation",
+            "trial"
+          ],
+          "title": "Admission Unit",
+          "type": "string"
+        },
+        "cancellation": {
+          "const": "request-and-reconcile",
+          "default": "request-and-reconcile",
+          "title": "Cancellation",
+          "type": "string"
+        },
+        "checkpoint": {
+          "const": "unsupported",
+          "default": "unsupported",
+          "title": "Checkpoint",
+          "type": "string"
+        },
+        "concurrency": {
+          "maximum": 4096,
+          "minimum": 1,
+          "title": "Concurrency",
+          "type": "integer"
+        },
+        "inference": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ServiceInferencePolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "interface": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "title": "Interface",
+          "type": "string"
+        },
+        "max_queued": {
+          "default": 4096,
+          "maximum": 4096,
+          "minimum": 1,
+          "title": "Max Queued",
+          "type": "integer"
+        },
+        "max_timeout_seconds": {
+          "default": 3600,
+          "maximum": 3600,
+          "minimum": 1,
+          "title": "Max Timeout Seconds",
+          "type": "integer"
+        },
+        "pause": {
+          "default": "unsupported",
+          "enum": [
+            "unsupported",
+            "queued"
+          ],
+          "title": "Pause",
+          "type": "string"
+        },
+        "protocol": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "title": "Protocol",
+          "type": "string"
+        },
+        "recovery": {
+          "const": "reconcile",
+          "default": "reconcile",
+          "title": "Recovery",
+          "type": "string"
+        },
+        "resource_limits": {
+          "$ref": "#/$defs/ServiceResourceLimits",
+          "default": {
+            "cpu_cores": 4,
+            "memory_mb": 8192,
+            "storage_mb": 32768
+          }
+        },
+        "resume": {
+          "default": "unsupported",
+          "enum": [
+            "unsupported",
+            "queued"
+          ],
+          "title": "Resume",
+          "type": "string"
+        },
+        "version": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol",
+        "version",
+        "interface",
+        "concurrency"
+      ],
+      "title": "ServiceExecution",
+      "type": "object"
+    },
+    "ServiceInferencePolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "ceiling_micros": {
+          "maximum": 50000000,
+          "minimum": 1,
+          "title": "Ceiling Micros",
+          "type": "integer"
+        },
+        "models": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Models",
+          "type": "array"
+        }
+      },
+      "required": [
+        "models",
+        "ceiling_micros"
+      ],
+      "title": "ServiceInferencePolicy",
+      "type": "object"
+    },
+    "ServiceInterface": {
+      "additionalProperties": false,
+      "properties": {
+        "authentication": {
+          "const": "scoped-bearer",
+          "default": "scoped-bearer",
+          "title": "Authentication",
+          "type": "string"
+        },
+        "base_path": {
+          "default": "/",
+          "title": "Base Path",
+          "type": "string"
+        },
+        "name": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "port": {
+          "maximum": 65535,
+          "minimum": 1,
+          "title": "Port",
+          "type": "integer"
+        },
+        "protocol": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "title": "Protocol",
+          "type": "string"
+        },
+        "schema_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Schema Path"
+        },
+        "transport": {
+          "default": "http",
+          "enum": [
+            "http",
+            "mcp.streamable-http"
+          ],
+          "title": "Transport",
+          "type": "string"
+        },
+        "version": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "protocol",
+        "version",
+        "port"
+      ],
+      "title": "ServiceInterface",
+      "type": "object"
+    },
+    "ServiceResourceLimits": {
+      "additionalProperties": false,
+      "properties": {
+        "cpu_cores": {
+          "maximum": 64,
+          "minimum": 1,
+          "title": "Cpu Cores",
+          "type": "integer"
+        },
+        "memory_mb": {
+          "maximum": 262144,
+          "minimum": 128,
+          "title": "Memory Mb",
+          "type": "integer"
+        },
+        "storage_mb": {
+          "maximum": 1048576,
+          "minimum": 128,
+          "title": "Storage Mb",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cpu_cores",
+        "memory_mb",
+        "storage_mb"
+      ],
+      "title": "ServiceResourceLimits",
+      "type": "object"
+    },
+    "ServiceState": {
+      "additionalProperties": false,
+      "properties": {
+        "access": {
+          "const": "single-writer",
+          "default": "single-writer",
+          "title": "Access",
+          "type": "string"
+        },
+        "mount_path": {
+          "title": "Mount Path",
+          "type": "string"
+        },
+        "name": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "persistence": {
+          "const": "deployment",
+          "default": "deployment",
+          "title": "Persistence",
+          "type": "string"
+        },
+        "retention": {
+          "const": "retain",
+          "default": "retain",
+          "title": "Retention",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "mount_path"
+      ],
+      "title": "ServiceState",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Version two binds service and storage requirements into the build identity.",
+  "properties": {
+    "build": {
+      "$ref": "#/$defs/BuildEntrypoint"
+    },
+    "contracts": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ContractDeclaration"
+      },
+      "title": "Contracts",
+      "type": "array"
+    },
+    "credentials": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/CredentialReference"
+      },
+      "title": "Credentials",
+      "type": "array"
+    },
+    "dependencies": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/DependencyIdentity"
+      },
+      "title": "Dependencies",
+      "type": "array"
+    },
+    "package_id": {
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$",
+      "title": "Package Id",
+      "type": "string"
+    },
+    "runtime": {
+      "$ref": "#/$defs/RuntimeDeclaration"
+    },
+    "schema_version": {
+      "const": "synth.container-package.v2",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "services": {
+      "$ref": "#/$defs/ServiceDeclaration"
+    }
+  },
+  "required": [
+    "package_id",
+    "build",
+    "runtime",
+    "schema_version",
+    "services"
+  ],
+  "title": "ContainerServicePackageManifest",
+  "type": "object"
+}

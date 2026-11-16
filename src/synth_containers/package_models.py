@@ -8,7 +8,9 @@ import re
 from pathlib import PurePosixPath
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, TypeAdapter, model_validator
+
+from .service_contracts import ServiceDeclaration
 
 Digest = Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
 Name = Annotated[str, StringConstraints(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")]
@@ -117,8 +119,7 @@ class DependencyIdentity(PackageModel):
     digest: Digest
 
 
-class ContainerPackageManifest(PackageModel):
-    schema_version: Literal["synth.container-package.v1"]
+class _ContainerPackageFields(PackageModel):
     package_id: Name
     build: BuildEntrypoint
     runtime: RuntimeDeclaration
@@ -127,12 +128,36 @@ class ContainerPackageManifest(PackageModel):
     dependencies: tuple[DependencyIdentity, ...] = ()
 
     @model_validator(mode="after")
-    def validate_names(self) -> ContainerPackageManifest:
+    def validate_names(self) -> _ContainerPackageFields:
         for declarations in (self.contracts, self.credentials, self.dependencies):
             names = [entry.name for entry in declarations]
             if len(names) != len(set(names)):
                 raise ValueError("Duplicate declaration identity")
         return self
+
+
+class ContainerPackageManifest(_ContainerPackageFields):
+    schema_version: Literal["synth.container-package.v1"]
+
+
+class ContainerServicePackageManifest(_ContainerPackageFields):
+    """Version two binds service and storage requirements into the build identity."""
+
+    schema_version: Literal["synth.container-package.v2"]
+    services: ServiceDeclaration
+
+    @model_validator(mode="after")
+    def service_runtime(self) -> ContainerServicePackageManifest:
+        if self.runtime.profile != "http":
+            raise ValueError("Service packages require an HTTP runtime")
+        return self
+
+
+PackageManifest = Annotated[
+    ContainerPackageManifest | ContainerServicePackageManifest,
+    Field(discriminator="schema_version"),
+]
+PACKAGE_MANIFEST = TypeAdapter(PackageManifest)
 
 
 class PackageFileIdentity(PackageModel):
@@ -148,14 +173,16 @@ class PackageFileIdentity(PackageModel):
 
 
 class PackageBuildPlan(PackageModel):
-    schema_version: Literal["synth.container-build-plan.v1"]
-    manifest: ContainerPackageManifest
+    schema_version: Literal["synth.container-build-plan.v1", "synth.container-build-plan.v2"]
+    manifest: PackageManifest
     files: tuple[PackageFileIdentity, ...]
     directories: tuple[str, ...] = ()
     input_digest: Digest
 
     @model_validator(mode="after")
     def validate_identity(self) -> PackageBuildPlan:
+        if self.schema_version.rsplit(".", 1)[1] != self.manifest.schema_version.rsplit(".", 1)[1]:
+            raise ValueError("Build plan version differs from manifest")
         paths = [entry.path for entry in self.files]
         if paths != sorted(set(paths)) or not paths:
             raise ValueError("Build plan files must be nonempty, sorted and unique")
@@ -212,7 +239,7 @@ class PackageBuildOutput(PackageModel):
 
 
 class ContainerArtifactDescriptor(PackageModel):
-    schema_version: Literal["synth.container-artifact.v1"]
+    schema_version: Literal["synth.container-artifact.v1", "synth.container-artifact.v2"]
     plan: PackageBuildPlan
     output: PackageBuildOutput
     artifact_verification: Literal["not_checked"] = "not_checked"
@@ -220,6 +247,8 @@ class ContainerArtifactDescriptor(PackageModel):
 
     @model_validator(mode="after")
     def validate_binding(self) -> ContainerArtifactDescriptor:
+        if self.schema_version.rsplit(".", 1)[1] != self.plan.schema_version.rsplit(".", 1)[1]:
+            raise ValueError("Artifact version differs from build plan")
         if self.output.input_digest != self.plan.input_digest:
             raise ValueError("Build output belongs to different inputs")
         if self.output.artifact.platform != self.plan.manifest.build.platform:

@@ -25,8 +25,8 @@ from .package_files import (
     snapshot_inputs,
 )
 from .package_models import (
+    PACKAGE_MANIFEST,
     ContainerArtifactDescriptor,
-    ContainerPackageManifest,
     PackageBuildOutput,
     PackageBuildPlan,
     content_digest,
@@ -73,7 +73,7 @@ def plan_container_package(manifest_path: str | Path) -> PackageBuildPlan:
             payload = json.loads(raw, object_pairs_hook=_unique_object)
         else:
             raise ContainerPackageError("container_package_format_unsupported")
-        manifest = ContainerPackageManifest.model_validate(payload)
+        manifest = PACKAGE_MANIFEST.validate_python(payload)
         files, directories = snapshot_inputs(
             path.parent, (path.name, manifest.build.entrypoint, *manifest.build.inputs)
         )
@@ -87,7 +87,11 @@ def plan_container_package(manifest_path: str | Path) -> PackageBuildPlan:
             "directories": list(directories),
         }
         return PackageBuildPlan(
-            schema_version="synth.container-build-plan.v1",
+            schema_version=(
+                "synth.container-build-plan.v2"
+                if manifest.schema_version == "synth.container-package.v2"
+                else "synth.container-build-plan.v1"
+            ),
             manifest=manifest,
             files=files,
             directories=directories,
@@ -106,7 +110,11 @@ def validate_container_build_output(
     try:
         output = PackageBuildOutput.model_validate(output)
         return ContainerArtifactDescriptor(
-            schema_version="synth.container-artifact.v1",
+            schema_version=(
+                "synth.container-artifact.v2"
+                if plan.schema_version == "synth.container-build-plan.v2"
+                else "synth.container-artifact.v1"
+            ),
             plan=plan,
             output=output,
         )

@@ -1,0 +1,110 @@
+{
+  "$defs": {
+    "ServiceEndpoint": {
+      "additionalProperties": false,
+      "properties": {
+        "declaration_digest": {
+          "anyOf": [
+            {
+              "pattern": "^sha256:[a-f0-9]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Declaration Digest"
+        },
+        "name": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "protocol": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "title": "Protocol",
+          "type": "string"
+        },
+        "transport": {
+          "default": "http",
+          "enum": [
+            "http",
+            "mcp.streamable-http"
+          ],
+          "title": "Transport",
+          "type": "string"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        },
+        "version": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "protocol",
+        "version",
+        "url"
+      ],
+      "title": "ServiceEndpoint",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "declaration_digest": {
+      "pattern": "^sha256:[a-f0-9]{64}$",
+      "title": "Declaration Digest",
+      "type": "string"
+    },
+    "deployment_id": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+      "title": "Deployment Id",
+      "type": "string"
+    },
+    "endpoints": {
+      "items": {
+        "$ref": "#/$defs/ServiceEndpoint"
+      },
+      "minItems": 1,
+      "title": "Endpoints",
+      "type": "array"
+    },
+    "generation": {
+      "format": "uuid",
+      "title": "Generation",
+      "type": "string"
+    },
+    "origin_instance": {
+      "format": "uuid",
+      "title": "Origin Instance",
+      "type": "string"
+    },
+    "revision": {
+      "pattern": "^sha256:[a-f0-9]{64}$",
+      "title": "Revision",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "synth.service-binding.v1",
+      "default": "synth.service-binding.v1",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "deployment_id",
+    "revision",
+    "origin_instance",
+    "generation",
+    "declaration_digest",
+    "endpoints"
+  ],
+  "title": "ServiceBinding",
+  "type": "object"
+}

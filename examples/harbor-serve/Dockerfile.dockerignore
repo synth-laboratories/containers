@@ -1,0 +1,8 @@
+**
+!examples/
+!examples/harbor-serve/
+!examples/harbor-serve/Dockerfile
+!examples/harbor-serve/tasks/
+!examples/harbor-serve/tasks/**
+!dist/
+!dist/*.whl
