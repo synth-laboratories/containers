@@ -5,16 +5,19 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+from dataclasses import asdict
 from pathlib import Path
 
+from pydantic import ValidationError
+
+from .execution_package import ExecutionPackageError, ExecutionPackagePlan, plan_execution_package
 from .package_build import _unique_object, build_container_package, plan_container_package
-from .package_files import ContainerPackageError, read_package_file
 from .package_compatibility import (
     PackageCompatibilityReport,
     PackageRuntimeSupport,
     check_package_compatibility,
 )
-from pydantic import ValidationError
+from .package_files import ContainerPackageError, read_package_file
 from .package_models import (
     ContainerArtifactDescriptor,
     ContainerPackageManifest,
@@ -29,6 +32,7 @@ SCHEMAS = {
     "artifact": ContainerArtifactDescriptor,
     "runtime-support": PackageRuntimeSupport,
     "compatibility": PackageCompatibilityReport,
+    "execution-plan": ExecutionPackagePlan,
 }
 
 
@@ -50,7 +54,11 @@ def main(argv: list[str] | None = None) -> int:
     schema.add_argument("kind", choices=tuple(SCHEMAS), default="manifest", nargs="?")
     plan = sub.add_parser("plan", help="freeze/validate TOML or JSON without executing code")
     plan.add_argument("manifest", type=Path)
-    check = sub.add_parser("check", help="match artifact declarations against a runtime support policy")
+    execution = sub.add_parser("execution-plan", help="freeze package execution requirements")
+    execution.add_argument("manifest", type=Path)
+    check = sub.add_parser(
+        "check", help="match artifact declarations against a runtime support policy"
+    )
     check.add_argument("artifact", type=Path)
     check.add_argument("--runtime-support", type=Path, required=True)
     build = sub.add_parser("build", help="execute the package build/resolve entrypoint")
@@ -65,6 +73,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "plan":
             value = plan_container_package(args.manifest)
+        elif args.command == "execution-plan":
+            value = plan_execution_package(args.manifest)
         elif args.command == "check":
             value = check_package_compatibility(
                 ContainerArtifactDescriptor.model_validate(_read_descriptor(args.artifact)),
@@ -83,6 +93,9 @@ def main(argv: list[str] | None = None) -> int:
             )
         print(value.model_dump_json(indent=2))
         return 0
+    except ExecutionPackageError as error:
+        print(json.dumps(asdict(error.refusal), sort_keys=True))
+        return 2
     except ValidationError:
         print(json.dumps({"error": "container_package_descriptor_invalid"}))
         return 2
