@@ -75,6 +75,7 @@ mitm-types = {requires-python = ">=3.12,<3.15"}
 [project.scripts]
 synth-containers = "synth_containers.cli:main"
 synth-trace = "synth_containers.tracing.cli:main"
+synth-deepswe-e2e = "synth_containers.rhodes_deepswe_e2e:main"
 
 [project.urls]
 Homepage = "https://github.com/synth-laboratories/containers"
