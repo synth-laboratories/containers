@@ -55,11 +55,11 @@ def _http_refusal(error: httpx.HTTPStatusError) -> RhodesRequestError:
     identifiers: dict[str, str] = {}
     try:
         body = error.response.json()
-        detail = body.get("detail", body) if isinstance(body, dict) else {}
+        detail = body.get("error", body.get("detail", body)) if isinstance(body, dict) else {}
         candidate = detail.get("code") if isinstance(detail, dict) else None
         if isinstance(candidate, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", candidate):
             code = candidate
-        for name in ("operation_id", "cause_type"):
+        for name in ("operation_id", "cause_type", "service", "stage"):
             value = detail.get(name) if isinstance(detail, dict) else None
             if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", value):
                 identifiers[name] = value
@@ -104,6 +104,40 @@ def _retry_after_seconds(value: str, *, now: datetime) -> float | None:
 
 
 class RhodesClient(PoolClient):
+    async def negotiate_api(self, *, required_capabilities: Sequence[str] = ()) -> dict[str, Any]:
+        """Discover without credentials; refuse before effects, then pin major 2.
+
+        Existing clients opt in explicitly. Discovery never retries, redirects,
+        changes endpoint or infers authorization/readiness from compatibility.
+        """
+        from .rhodes_api_contract import (
+            APIContractError, DISCOVERY_PATH, MAX_DISCOVERY_BYTES, REQUEST_HEADER,
+            SUPPORTED_MAJOR, VERSION_HEADER, validate_discovery,
+        )
+
+        request = self._client.build_request("GET", DISCOVERY_PATH, headers={REQUEST_HEADER: str(SUPPORTED_MAJOR)})
+        # A caller-supplied client can carry default credentials or cookie state.
+        for name in ("authorization", "x-api-key", "cookie", "proxy-authorization"):
+            request.headers.pop(name, None)
+        async with asyncio.timeout(10):
+            response = await self._client.send(request, stream=True, auth=None, follow_redirects=False)
+            try:
+                if response.status_code != 200:
+                    raise APIContractError("Rhodes API discovery is unavailable or incompatible", code="api_discovery_unavailable")
+                media_type = response.headers.get("content-type", "").split(";", 1)[0].lower()
+                if media_type not in {"application/json", "application/vnd.synth.rhodes.v2+json"}:
+                    raise APIContractError("Rhodes API discovery is not a JSON representation")
+                content = bytearray()
+                async for chunk in response.aiter_bytes():
+                    if len(content) + len(chunk) > MAX_DISCOVERY_BYTES:
+                        raise APIContractError("Rhodes API discovery exceeds the size limit")
+                    content.extend(chunk)
+                profile = validate_discovery(bytes(content), response.headers.get(VERSION_HEADER), required_capabilities)
+            finally:
+                await response.aclose()
+        self._client.headers[REQUEST_HEADER] = str(SUPPORTED_MAJOR)
+        return profile
+
     @staticmethod
     def attempt_capture_declaration(value):
         """Validate an opt-in declaration for submit's `attempt_capture` field.

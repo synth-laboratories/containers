@@ -18,6 +18,29 @@ def run_async(function):
 
 
 @run_async
+async def test_core_error_envelope_retains_contract_refusal_without_echoing_body():
+    response = {
+        "error": {
+            "code": "rhodes_customer_route_refused",
+            "service": "rhodes",
+            "stage": "public_origin_guard",
+            "cause": "route_not_served_on_hosted_origin",
+            "private_body": "do-not-echo-provider-credentials",
+        }
+    }
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(403, json=response)),
+        base_url="https://rhodes.invalid",
+    ) as transport:
+        client = RhodesClient(api_key="fixture", client=transport)
+        with pytest.raises(RhodesRequestError) as caught:
+            await client._request("POST", "/pools", payload={"name": "owned"})
+    assert caught.value.code == "rhodes_customer_route_refused"
+    assert caught.value.identifiers == {"service": "rhodes", "stage": "public_origin_guard"}
+    assert "do-not-echo" not in str(caught.value)
+
+
+@run_async
 @pytest.mark.parametrize("phase", ["request", "retry", "poll"])
 async def test_poll_deadline_bounds_entire_observation_without_cancel(phase):
     requests = []
