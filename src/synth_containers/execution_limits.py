@@ -1,0 +1,19 @@
+"""Contract bounds for declared container execution, independent of suppliers."""
+
+from __future__ import annotations
+
+__all__ = [
+    "MAXIMUM_CPU_MILLIS",
+    "MAXIMUM_DISK_BYTES",
+    "MAXIMUM_GPU_COUNT",
+    "MAXIMUM_MEMORY_BYTES",
+    "MAXIMUM_NETWORK_HOSTS",
+    "MAXIMUM_WALL_SECONDS",
+]
+
+MAXIMUM_CPU_MILLIS = 128_000
+MAXIMUM_MEMORY_BYTES = 1 << 40
+MAXIMUM_DISK_BYTES = 4 << 40
+MAXIMUM_WALL_SECONDS = 86_400
+MAXIMUM_NETWORK_HOSTS = 64
+MAXIMUM_GPU_COUNT = 8
