@@ -61,3 +61,36 @@ def test_missing_socket_is_not_container_absence(tmp_path):
     def missing(command, **kwargs):
         return SimpleNamespace(returncode=1, stdout="", stderr="cannot connect: no such file or directory")
     assert module.cleanup_compiler("owned","op",cid,{},image_id="image",run=missing)["status"] == "unknown"
+
+
+@pytest.mark.parametrize("platform", ["linux/arm64", "linux/amd64"])
+def test_requested_platform_requires_its_qualified_compiler_before_build(tmp_path, monkeypatch, platform):
+    import sys
+
+    # No Docker/build side effects are possible before compiler validation.
+    source = tmp_path / "source"
+    output = tmp_path / "output"
+    compiler = tmp_path / "compiler"
+    compiler.mkdir()
+    (compiler / "mbx").write_bytes(b"wrong compiler")
+    launcher = tmp_path / "core_dev_build.py"
+    guard = tmp_path / "storage_target_guard.py"
+    monkeypatch.setattr(module, "BOUNDARY", tmp_path)
+    monkeypatch.setattr(sys, "argv", [str(path), "--source-root", str(source),
+        "--output-root", str(output), "--launcher", str(launcher),
+        "--storage-guard", str(guard), "--mbx-linux-dir", str(compiler),
+        "--platform", platform])
+    with pytest.raises(ValueError, match="qualified " + platform + " mbx identity mismatch"):
+        module.main()
+    assert not output.exists()
+
+
+def test_unsupported_platform_refuses_before_any_build(monkeypatch):
+    import sys
+
+    monkeypatch.setattr(sys, "argv", [str(path), "--source-root", "unused",
+        "--output-root", "unused", "--launcher", "unused", "--storage-guard", "unused",
+        "--mbx-linux-dir", "unused", "--platform", "linux/riscv64"])
+    with pytest.raises(SystemExit) as error:
+        module.main()
+    assert error.value.code == 2

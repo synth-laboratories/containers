@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import signal
+import runpy
 from pathlib import Path
 import shutil
 import subprocess
@@ -20,7 +21,10 @@ from uuid import uuid4
 BOUNDARY = Path("/Users/joshuapurtell/GitHub")
 SOURCE_MOUNT = "/opt/gamebench/tasks/craftax-singleplayer"
 RUST_IMAGE = "rust:1.97-slim-bookworm@sha256:2775a09d208ff0d7c1f50490c45b62db929e87ba1dcbc3f2132ac71a704bcdd3"
-MBX_SHA256 = "3b7408c71fae119b09c506ab47daff6cba6476c5e7140111959824bd72e63331"
+# Producer and runtime verifier share one qualified compiler/platform table.
+PLATFORM_POLICY = (Path(__file__).resolve().parents[1]
+    / "images/craftax-gamebench-rust/verify_engine_artifact.py")
+PLATFORMS = runpy.run_path(str(PLATFORM_POLICY))["PLATFORMS"]
 TARGET_LIMIT = 8 * 1024**3
 
 
@@ -124,6 +128,7 @@ def main():
     parser.add_argument("--storage-guard", type=Path, required=True)
     parser.add_argument("--mbx-linux-dir", type=Path, required=True)
     parser.add_argument("--operation-id")
+    parser.add_argument("--platform", choices=sorted(PLATFORMS), default="linux/arm64")
     args = parser.parse_args()
     source, output, launcher, guard, mbx = map(
         owned,
@@ -133,8 +138,10 @@ def main():
         "storage_target_guard.py"
     ):
         raise ValueError("maintained launcher/storage guard pair required")
-    if digest(mbx / "mbx") != MBX_SHA256:
-        raise ValueError("qualified Linux ARM64 mbx identity mismatch")
+    platform_spec = PLATFORMS[args.platform]
+    compiler_digest = platform_spec["mbx_sha256"]
+    if digest(mbx / "mbx") != compiler_digest:
+        raise ValueError("qualified " + args.platform + " mbx identity mismatch")
     revision = subprocess.check_output(
         ["git", "-C", str(source), "rev-parse", "HEAD"], text=True
     ).strip()
@@ -163,9 +170,10 @@ def main():
         source_revision=revision,
         source_root=str(source),
         source_input_sha256=inputs,
-        platform="linux/arm64",
+        platform=args.platform,
         rust_image=RUST_IMAGE,
-        mbx_sha256=MBX_SHA256,
+        mbx_sha256=compiler_digest,
+        platform_policy_sha256=digest(PLATFORM_POLICY),
         launcher_sha256=digest(launcher),
         storage_guard_sha256=digest(guard),
         target_limit_bytes=TARGET_LIMIT,
@@ -225,7 +233,7 @@ fi
         "--pull",
         "never",
         "--platform",
-        "linux/arm64",
+        args.platform,
         "--name",
         name,
         "--label",
@@ -324,6 +332,7 @@ fi
             != revision
             or source_inputs(source) != inputs
             or digest(Path(__file__)) != receipt["preparation_script_sha256"]
+            or digest(PLATFORM_POLICY) != receipt["platform_policy_sha256"]
             or subprocess.check_output(
                 ["git", "-C", str(source), "status", "--porcelain"], text=True
             )
@@ -335,9 +344,9 @@ fi
         if (
             len(header) != 20
             or header[:6] != b"\x7fELF\x02\x01"
-            or int.from_bytes(header[18:20], "little") != 183
+            or int.from_bytes(header[18:20], "little") != platform_spec["elf_machine"]
         ):
-            raise ValueError("Linux ARM64 engine required")
+            raise ValueError(args.platform + " engine required")
         runtime = out / "runtime"
         runtime.mkdir()
         shutil.copy2(binary, runtime / "craftax_gold")

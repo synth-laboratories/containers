@@ -129,3 +129,16 @@ Policy session should show `model: openai/gpt-5.6-luna`, `reasoning_effort: low`
 ## Who attaches this URL
 
 Evals workshop cases, Desktop Inventory, SFT/GELO recipes, and `gate --craftax-url` all talk to **this** façade (`:8080`), not rust gold `:8098` and not `run_service.py`. Harbor GameBench DEO stays on Harbor.
+
+## AMD64 preparation
+
+The preparation command accepts `--platform linux/amd64` with the qualified
+Linux AMD64 mbx directory. Its default remains `linux/arm64`. Both the requested
+Docker compiler platform and output ELF architecture must match that selection;
+the preparation and runtime verifier share the same pinned compiler identities.
+A mismatched compiler is refused before creating build output. Package placement
+still requires the sealed execution requirements, inspected artifact and matching
+qualified offer; platform selection alone is not hosted execution qualification.
+
+The AMD64 compiler run and Modal CPU execution must be qualified separately.
+These source changes do not supply an AMD64 artifact or imply a completed build.
