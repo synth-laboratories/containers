@@ -21,6 +21,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .file_limits_generated import FILE_MAX_BYTES, LAUNCH_MAX_BYTES, LAUNCH_MAX_FILES
+
 __all__ = [
     "HARBOR_ENVIRONMENT_RELEASE_SCHEMA",
     "HARBOR_PACKAGE_DRAFT_SCHEMA",
@@ -40,11 +42,13 @@ HARBOR_PACKAGE_DRAFT_SCHEMA = "synth.harbor-package-draft.v1"
 HARBOR_ENVIRONMENT_RELEASE_SCHEMA = "synth.harbor-environment-release.v1"
 _PINNED_IMAGE = re.compile(r"^[^\s]+@sha256:[0-9a-f]{64}$")
 _LOCAL_IMAGE = re.compile(r"sha256:[0-9a-f]{64}")
+
 _IDENTIFIER = re.compile(r"[^a-z0-9._-]+")
 _ISOLATED_NETWORKS = frozenset({"no-network", "none", "isolated"})
-_MAX_FILE_BYTES = 64 * 1024 * 1024
-_MAX_TREE_BYTES = 256 * 1024 * 1024
-_MAX_TREE_ENTRIES = 10000
+
+_MAX_FILE_BYTES = FILE_MAX_BYTES
+_MAX_TREE_BYTES = LAUNCH_MAX_BYTES
+_MAX_TREE_ENTRIES = LAUNCH_MAX_FILES
 _IO_CHUNK_BYTES = 1024 * 1024
 
 

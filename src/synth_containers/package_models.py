@@ -11,6 +11,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, TypeAdapter, model_validator
 
 from .service_contracts import ServiceDeclaration
+from .file_limits_generated import NAME_MAX_BYTES, NAME_SEGMENT_MAX_BYTES, NAME_PATTERN
 
 Digest = Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
 Name = Annotated[str, StringConstraints(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")]
@@ -30,6 +31,9 @@ def portable_path(value: str) -> str:
     path = PurePosixPath(value)
     if (
         not value
+        or len(value.encode()) > NAME_MAX_BYTES
+        or re.fullmatch(NAME_PATTERN, value) is None
+        or any(len(segment.encode()) > NAME_SEGMENT_MAX_BYTES for segment in path.parts)
         or value == "."
         or path.is_absolute()
         or ".." in path.parts

@@ -116,3 +116,12 @@ require_paths = ["src/synth_containers/service_runtime.py", "tests/test_service_
 command = 'TMPDIR="$PWD/.local/tmp" PYTHONPATH=src .venv/bin/python -m pytest -q tests/test_service_runtime.py tests/test_service_package.py'
 command_timeout_seconds = 30
 remedy = "Preserve no-resubmit recovery, single-writer state, confirmed cleanup and versioned package identity. Native Harbor qualification uses its separate pinned extra."
+
+[[checks]]
+id = "containers_canonical_file_limits"
+description = "Package and Harbor input bounds derive from the pinned canonical Core policy"
+severity = "error"
+require_paths = ["contracts/file-limits.json", "contracts/FILE_LIMITS_SOURCE.toml", "scripts/gen_file_limits.py", "src/synth_containers/file_limits_generated.py"]
+command = ".venv/bin/python scripts/gen_file_limits.py --check"
+command_timeout_seconds = 10
+remedy = "Refresh the pinned Core file policy and regenerate the consumer; qualify byte, count and path boundaries."

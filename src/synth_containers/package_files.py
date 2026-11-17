@@ -9,9 +9,11 @@ from pathlib import Path
 
 from .package_models import PackageBuildPlan, PackageFileIdentity, portable_path
 
-MAX_FILE_BYTES = 64 * 1024 * 1024
-MAX_PACKAGE_BYTES = 256 * 1024 * 1024
-MAX_ENTRIES = 10000
+from .file_limits_generated import FILE_MAX_BYTES, LAUNCH_MAX_BYTES, LAUNCH_MAX_FILES
+
+MAX_FILE_BYTES = FILE_MAX_BYTES
+MAX_PACKAGE_BYTES = LAUNCH_MAX_BYTES
+MAX_ENTRIES = LAUNCH_MAX_FILES
 
 
 class ContainerPackageError(ValueError):
