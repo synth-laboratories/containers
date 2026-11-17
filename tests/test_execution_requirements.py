@@ -296,3 +296,21 @@ def test_requirements_are_frozen_and_unknown_fields_refuse() -> None:
         declared.max_wall_seconds = 1
     with pytest.raises(ValidationError):
         requirements(provider_substitution=True)
+
+
+@pytest.mark.parametrize("provider", [ExecutionProvider.MODAL, ExecutionProvider.DOCKER])
+def test_local_daemon_image_is_not_a_modal_registry_artifact(provider):
+    declared = requirements()
+    digest = "sha256:" + "8" * 64
+    local = ExecutionArtifact(
+        identity=ImageArtifactIdentity(kind="oci_image", digest_kind="oci_config",
+                                      reference=digest, digest=digest, platform="linux/amd64"),
+        verification=ArtifactVerification.VERIFIED,
+        inspection_receipt_digest="sha256:" + "9" * 64,
+    )
+    receipt = preflight_execution(declared, expected_digest=declared.digest(), artifact=local,
+                                 offer=offer(provider=provider))
+    assert receipt.code is (
+        PreflightCode.ARTIFACT_REFERENCE_UNSUPPORTED if provider is ExecutionProvider.MODAL
+        else PreflightCode.SUPPORTED
+    )

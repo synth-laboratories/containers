@@ -200,6 +200,7 @@ class PreflightCode(StrEnum):
     REQUIREMENTS_DIGEST_MISMATCH = "execution_requirements_digest_mismatch"
     ARTIFACT_UNVERIFIED = "execution_artifact_unverified"
     ARTIFACT_PLATFORM_MISMATCH = "execution_artifact_platform_mismatch"
+    ARTIFACT_REFERENCE_UNSUPPORTED = "execution_artifact_reference_unsupported"
     OFFER_NOT_WHITELISTED = "execution_offer_not_whitelisted"
     OFFER_UNQUALIFIED = "execution_offer_unqualified"
     PLATFORM_UNSUPPORTED = "execution_platform_unsupported"
@@ -253,6 +254,9 @@ def preflight_execution(
     elif artifact.identity.platform != requirements.platform:
         result, code = PreflightResult.UNSUPPORTED, PreflightCode.ARTIFACT_PLATFORM_MISMATCH
         cause = f"Inspected image platform {artifact.identity.platform} differs from required {requirements.platform}"
+    elif offer.provider is ExecutionProvider.MODAL and artifact.identity.digest_kind == "oci_config":
+        result, code = PreflightResult.UNSUPPORTED, PreflightCode.ARTIFACT_REFERENCE_UNSUPPORTED
+        cause = "Modal requires a registry-pullable image; a local daemon config digest is not one"
     elif not offer.release_admitted:
         result, code = PreflightResult.BLOCKED, PreflightCode.OFFER_NOT_WHITELISTED
         cause = f"Offer {offer.offer_id} is outside the environment release allow-list"
