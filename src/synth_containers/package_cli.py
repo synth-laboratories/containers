@@ -7,23 +7,26 @@ import asyncio
 import json
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from .package_build import _unique_object, build_container_package, plan_container_package
-from .package_files import ContainerPackageError, read_package_file
 from .package_compatibility import (
     PackageCompatibilityReport,
     PackageRuntimeSupport,
     check_package_compatibility,
 )
-from pydantic import ValidationError
+from .package_files import ContainerPackageError, read_package_file
 from .package_models import (
     ContainerArtifactDescriptor,
     ContainerPackageManifest,
+    ContainerServicePackageManifest,
     PackageBuildOutput,
     PackageBuildPlan,
 )
 
 SCHEMAS = {
     "manifest": ContainerPackageManifest,
+    "service-manifest": ContainerServicePackageManifest,
     "plan": PackageBuildPlan,
     "build-output": PackageBuildOutput,
     "artifact": ContainerArtifactDescriptor,

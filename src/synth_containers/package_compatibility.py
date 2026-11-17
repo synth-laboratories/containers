@@ -8,6 +8,7 @@ from pydantic import model_validator
 
 from .package_models import (
     ContainerArtifactDescriptor,
+    ContainerServicePackageManifest,
     ContractDeclaration,
     Digest,
     Name,
@@ -32,6 +33,8 @@ class PackageRuntimeSupport(PackageModel):
     readiness_kinds: tuple[Literal["process", "http", "adapter"], ...]
     readiness_adapters: tuple[Name, ...] = ()
     contracts: tuple[ContractDeclaration, ...] = ()
+    service_protocols: tuple[ContractDeclaration, ...] = ()
+    persistent_single_writer: bool = False
     image_digest_kinds: tuple[Literal["oci_manifest", "oci_index", "oci_config"], ...] = (
         "oci_manifest", "oci_index",
     )
@@ -39,9 +42,13 @@ class PackageRuntimeSupport(PackageModel):
     @model_validator(mode="after")
     def validate_unique_declarations(self) -> PackageRuntimeSupport:
         for entries in (
-            self.platforms, self.runtime_profiles, self.readiness_kinds,
-            self.readiness_adapters, self.image_digest_kinds,
+            self.platforms,
+            self.runtime_profiles,
+            self.readiness_kinds,
+            self.readiness_adapters,
+            self.image_digest_kinds,
             tuple((c.name, c.version) for c in self.contracts),
+            tuple((c.name, c.version) for c in self.service_protocols),
         ):
             if len(entries) != len(set(entries)):
                 raise ValueError("Duplicate runtime support declaration")
@@ -52,8 +59,14 @@ class PackageRuntimeSupport(PackageModel):
 
 class PackageCompatibilityIssue(PackageModel):
     code: Literal[
-        "platform_unsupported", "runtime_profile_unsupported", "readiness_kind_unsupported",
-        "readiness_adapter_unsupported", "contract_unsupported", "image_digest_kind_unsupported",
+        "platform_unsupported",
+        "runtime_profile_unsupported",
+        "readiness_kind_unsupported",
+        "readiness_adapter_unsupported",
+        "contract_unsupported",
+        "image_digest_kind_unsupported",
+        "service_protocol_unsupported",
+        "persistent_state_unsupported",
     ]
     field: str
     requested: str
@@ -118,6 +131,21 @@ def check_package_compatibility(
         require((contract.name, contract.version) in contracts,
                 "contract_unsupported", f"plan.manifest.contracts.{index}",
                 f"{contract.name}@{contract.version}")
+    if isinstance(manifest, ContainerServicePackageManifest):
+        protocols = {(c.name, c.version) for c in support.service_protocols}
+        for interface in manifest.services.interfaces:
+            require(
+                (interface.protocol, interface.version) in protocols,
+                "service_protocol_unsupported",
+                f"services.interfaces.{interface.name}",
+                f"{interface.protocol}@{interface.version}",
+            )
+        require(
+            not manifest.services.state or support.persistent_single_writer,
+            "persistent_state_unsupported",
+            "services.state",
+            "deployment/single-writer",
+        )
     return PackageCompatibilityReport(
         schema_version="synth.package-compatibility.v1",
         artifact_descriptor_digest=content_digest(artifact.model_dump(mode="json")),

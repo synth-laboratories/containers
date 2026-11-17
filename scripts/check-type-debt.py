@@ -4,18 +4,21 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SDK = "synth-ai @ git+ssh://git@github.com/synth-laboratories/synth-ai.git@9ab8088abf81cdb42f0897ecbe22c68e8f47485f"
 ADDON = "src/synth_containers/tracing/capture/mitmproxy_addon.py"
+SERVE = [f"src/synth_containers/{name}.py" for name in (
+    "harbor_serve", "harbor_serve_cli", "harbor_serve_environment", "harbor_serve_authority",
+)]
 
 
 def run(argv: list[str], *, environment: dict[str, str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(argv, cwd=ROOT, env=environment, text=True, capture_output=True)
+    return subprocess.run(argv, check=False, cwd=ROOT, env=environment, text=True, capture_output=True)
 
 
 def check_profile(profile: str, *, prepare: bool) -> bool:
@@ -31,7 +34,8 @@ def check_profile(profile: str, *, prepare: bool) -> bool:
         commands.append([
             "uv", "sync", "--locked", "--no-default-groups", "--no-install-project", "--no-build",
             *(["--no-install-package", "synth-ai"] if profile == "main" else []),
-            *(["--group", "dev", "--group", "release-types"] if profile == "main" else ["--group", "mitm-types"]),
+            *(["--group", "dev", "--group", "release-types"] if profile == "main" else
+              ["--group", "dev", "--extra", "harbor-serve"] if profile == "serve" else ["--group", "mitm-types"]),
         ])
         if profile == "main":
             # This exact SDK revision has a reviewed pure-Python setuptools
@@ -49,7 +53,8 @@ def check_profile(profile: str, *, prepare: bool) -> bool:
     if not python.exists():
         print(f"{profile}: missing prepared environment")
         return False
-    paths = ["src", "--exclude", ADDON] if profile == "main" else [ADDON]
+    paths = (["src", "--exclude", ADDON, *[arg for path in SERVE for arg in ("--exclude", path)]]
+             if profile == "main" else SERVE if profile == "serve" else [ADDON])
     result = run([
         str(target / "bin" / "ty"), "check", *paths,
         "--python", str(python), "--output-format", "concise",
@@ -64,10 +69,10 @@ def check_profile(profile: str, *, prepare: bool) -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--profile", choices=("all", "main", "mitm"), default="all")
+    parser.add_argument("--profile", choices=("all", "main", "mitm", "serve"), default="all")
     parser.add_argument("--check-only", action="store_true")
     args = parser.parse_args()
-    profiles = ("main", "mitm") if args.profile == "all" else (args.profile,)
+    profiles = ("main", "mitm", "serve") if args.profile == "all" else (args.profile,)
     results = [check_profile(profile, prepare=not args.check_only) for profile in profiles]
     if not all(results):
         return 1

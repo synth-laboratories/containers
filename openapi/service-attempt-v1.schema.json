@@ -1,0 +1,137 @@
+{
+  "$defs": {
+    "ServiceInferenceRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "model": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "wire": {
+          "enum": [
+            "responses",
+            "chat_completions"
+          ],
+          "title": "Wire",
+          "type": "string"
+        }
+      },
+      "required": [
+        "model",
+        "wire"
+      ],
+      "title": "ServiceInferenceRequest",
+      "type": "object"
+    },
+    "ServiceResourceLimits": {
+      "additionalProperties": false,
+      "properties": {
+        "cpu_cores": {
+          "maximum": 64,
+          "minimum": 1,
+          "title": "Cpu Cores",
+          "type": "integer"
+        },
+        "memory_mb": {
+          "maximum": 262144,
+          "minimum": 128,
+          "title": "Memory Mb",
+          "type": "integer"
+        },
+        "storage_mb": {
+          "maximum": 1048576,
+          "minimum": 128,
+          "title": "Storage Mb",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cpu_cores",
+        "memory_mb",
+        "storage_mb"
+      ],
+      "title": "ServiceResourceLimits",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The resolved, bounded work a service asks its deployment owner to admit.",
+  "properties": {
+    "images": {
+      "items": {
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*@sha256:[a-f0-9]{64}$",
+        "type": "string"
+      },
+      "maxItems": 2,
+      "minItems": 1,
+      "title": "Images",
+      "type": "array"
+    },
+    "inference": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ServiceInferenceRequest"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "input_digest": {
+      "pattern": "^sha256:[a-f0-9]{64}$",
+      "title": "Input Digest",
+      "type": "string"
+    },
+    "job_id": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+      "title": "Job Id",
+      "type": "string"
+    },
+    "limits": {
+      "$ref": "#/$defs/ServiceResourceLimits"
+    },
+    "native_id": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+      "title": "Native Id",
+      "type": "string"
+    },
+    "retry_of": {
+      "anyOf": [
+        {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Retry Of"
+    },
+    "schema_version": {
+      "const": "synth.service-attempt.v1",
+      "default": "synth.service-attempt.v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "timeout_seconds": {
+      "maximum": 3600,
+      "minimum": 1,
+      "title": "Timeout Seconds",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "native_id",
+    "job_id",
+    "input_digest",
+    "timeout_seconds",
+    "limits",
+    "images"
+  ],
+  "title": "ServiceAttempt",
+  "type": "object"
+}

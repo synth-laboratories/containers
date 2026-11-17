@@ -11,24 +11,25 @@ import hashlib
 import json
 import math
 import re
-from datetime import datetime, timezone
-from email.utils import parsedate_to_datetime
 from collections.abc import AsyncIterator, Mapping, Sequence
-from typing import Any
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote
+
+import httpx
 
 from .pools import (
     DEFAULT_POLL_INTERVAL_SECONDS,
     DEFAULT_POLL_TIMEOUT_SECONDS,
+    TERMINAL_STATUSES,
     PoolClient,
     PoolClientError,
     PoolRolloutTimeout,
     RolloutOutcome,
-    TERMINAL_STATUSES,
     _rollout_id,
 )
-import httpx
 
 
 class RhodesRequestError(PoolClientError):
@@ -111,8 +112,13 @@ class RhodesClient(PoolClient):
         changes endpoint or infers authorization/readiness from compatibility.
         """
         from .rhodes_api_contract import (
-            APIContractError, DISCOVERY_PATH, MAX_DISCOVERY_BYTES, REQUEST_HEADER,
-            SUPPORTED_MAJOR, VERSION_HEADER, validate_discovery,
+            DISCOVERY_PATH,
+            MAX_DISCOVERY_BYTES,
+            REQUEST_HEADER,
+            SUPPORTED_MAJOR,
+            VERSION_HEADER,
+            APIContractError,
+            validate_discovery,
         )
 
         request = self._client.build_request("GET", DISCOVERY_PATH, headers={REQUEST_HEADER: str(SUPPORTED_MAJOR)})
@@ -187,16 +193,14 @@ class RhodesClient(PoolClient):
                 "(not cancelled)"
             ) from error
 
-    def _retry_delay_seconds(
-        self, response: httpx.Response | None, attempt: int
-    ) -> float | None:
+    def _retry_delay_seconds(self, response: httpx.Response | None, attempt: int) -> float | None:
         fallback = super()._retry_delay_seconds(response, attempt)
         if response is None or response.status_code not in {429, 503}:
             return fallback
         value = response.headers.get("Retry-After")
         if value is None:
             return fallback
-        seconds = _retry_after_seconds(value, now=datetime.now(timezone.utc))
+        seconds = _retry_after_seconds(value, now=datetime.now(UTC))
         if seconds is None:
             return fallback
         delay = max(fallback or 0.0, seconds)
@@ -268,6 +272,17 @@ class RhodesClient(PoolClient):
     async def import_environment(self, manifest: Mapping[str, Any]) -> dict[str, Any]:
         """Register a content-addressed version from retained Artifact Platform input."""
         return await self._request("POST", "/environment_releases", payload=manifest)
+
+    async def deployment_services(self, pool_id: str, task_id: str) -> dict[str, Any]:
+        """Discover named, authenticated endpoints without exposing origin secrets."""
+        return await self._request(
+            "GET",
+            "/pools/"
+            + quote(pool_id, safe="")
+            + "/deployments/"
+            + quote(task_id, safe="")
+            + "/services",
+        )
 
     async def _build_request(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         from .rhodes_build_operations import typed_refusal
@@ -929,9 +944,9 @@ async def _operator_frames(
                         parse_float=_finite_number,
                     )
                     if not isinstance(event, dict):
-                        raise ValueError("Expected operator event object")
+                        raise TypeError("Expected operator event object")
                     yield int(identifiers[0]), event
-                except (ValueError, UnicodeError, RecursionError) as error:
+                except (ValueError, TypeError, UnicodeError, RecursionError) as error:
                     raise PoolClientError("Malformed Rhodes operator SSE event") from error
             if len(pending) > maximum_frame_bytes:
                 raise PoolClientError("Rhodes event frame exceeds 1 MiB")
