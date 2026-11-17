@@ -482,3 +482,42 @@ def test_annotation_storage_volume_uses_env(tmp_path: Path, monkeypatch, healthy
     up_image("banking77", catalog=tmp_path, backend=backend, port=8134)
     assert storage.is_dir()
     assert f"{storage}:/var/lib/synth/storage" in backend.ran[-1][1]
+
+
+@pytest.mark.parametrize("platform", ["linux/amd64", "linux/arm64"])
+def test_catalog_build_forwards_explicit_platform_to_daemon(tmp_path, platform):
+    from subprocess import CompletedProcess
+    from synth_containers.launch import SubprocessDocker, build_image
+
+    class RecordingDocker(SubprocessDocker):
+        def _run(self, args, **kwargs):
+            if args[0] == "build":
+                assert args[args.index("--platform") + 1] == platform
+                assert "--build-context" in args
+                return CompletedProcess(args, 0, "", "")
+            assert args[:2] == ["image", "inspect"]
+            value = platform if "{{.Os}}/{{.Architecture}}" in args else DIGEST
+            return CompletedProcess(args, 0, value, "")
+
+    _write_catalog(tmp_path, extra='[build_contexts]\nengine = "."')
+    assert build_image("banking77", catalog=tmp_path, platform=platform, backend=RecordingDocker()) == DIGEST
+
+
+def test_catalog_build_refuses_unknown_platform_before_catalog_access(tmp_path):
+    from synth_containers.launch import build_image
+    with pytest.raises(LaunchError, match="container_image_platform_unsupported"):
+        build_image("missing", catalog=tmp_path, platform="windows/amd64")
+
+
+def test_catalog_build_refuses_wrong_result_platform(tmp_path):
+    from subprocess import CompletedProcess
+    from synth_containers.launch import SubprocessDocker, build_image
+
+    class WrongPlatformDocker(SubprocessDocker):
+        def _run(self, args, **kwargs):
+            value = "linux/arm64" if "{{.Os}}/{{.Architecture}}" in args else DIGEST
+            return CompletedProcess(args, 0, value, "")
+
+    _write_catalog(tmp_path)
+    with pytest.raises(LaunchError, match="container_image_platform_mismatch"):
+        build_image("banking77", catalog=tmp_path, platform="linux/amd64", backend=WrongPlatformDocker())

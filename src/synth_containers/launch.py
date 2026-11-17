@@ -25,7 +25,7 @@ import time
 import tomllib
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -71,6 +71,7 @@ class ImageSpec:
     extra_env: dict[str, str]
     build_contexts: dict[str, Path] = field(default_factory=dict)
     build_args: dict[str, str] = field(default_factory=dict)
+    build_platform: str | None = None
     nested: str | None = None
     mount_docker_socket: bool = False
     workspace_host_root: bool = False
@@ -206,6 +207,10 @@ class SubprocessDocker:
         if spec.image_name.endswith(":latest") or tag.endswith(":latest"):
             raise LaunchError("container_image_latest_forbidden")
         args = ["build", "-f", str(spec.dockerfile), "-t", tag]
+        if spec.build_platform is not None:
+            if spec.build_platform not in {"linux/amd64", "linux/arm64"}:
+                raise LaunchError("container_image_platform_unsupported")
+            args.extend(["--platform", spec.build_platform])
         for name, path in sorted(spec.build_contexts.items()):
             args.extend(["--build-context", f"{name}={path}"])
         for name, value in sorted(spec.build_args.items()):
@@ -222,6 +227,10 @@ class SubprocessDocker:
         digest = self.inspect_id(tag)
         if digest is None:
             raise LaunchError(f"container_image_build_unresolved:{spec.id}")
+        if spec.build_platform is not None:
+            observed = self._run(["image", "inspect", "--format", "{{.Os}}/{{.Architecture}}", digest])
+            if observed.stdout.strip() != spec.build_platform:
+                raise LaunchError("container_image_platform_mismatch")
         return digest
 
     def pull(self, reference: str) -> str:
@@ -420,9 +429,12 @@ def build_image(
     image_id: str,
     *,
     catalog: str | Path | None = None,
+    platform: str | None = None,
     backend: DockerBackend | None = None,
 ) -> str:
-    spec = get_image_spec(image_id, catalog=catalog)
+    if platform is not None and platform not in {"linux/amd64", "linux/arm64"}:
+        raise LaunchError("container_image_platform_unsupported")
+    spec = replace(get_image_spec(image_id, catalog=catalog), build_platform=platform)
     docker = backend or SubprocessDocker()
     return docker.build(spec, tag=f"{spec.image_name}:local")
 

@@ -97,6 +97,7 @@ def main(argv: list[str] | None = None) -> int:
     build = sub.add_parser("build", help="docker build a catalog image on the local daemon")
     build.add_argument("image_id")
     build.add_argument("--catalog", type=Path, default=None)
+    build.add_argument("--platform", choices=("linux/amd64", "linux/arm64"))
 
     catalog = sub.add_parser("catalog", help="list catalog ids")
     catalog.add_argument("--catalog", type=Path, default=None)
@@ -241,7 +242,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(status_payload(), indent=2, sort_keys=True))
             return 0
         if args.command == "build":
-            print(build_image(args.image_id, catalog=args.catalog))
+            print(build_image(args.image_id, catalog=args.catalog, platform=args.platform))
             return 0
         if args.command == "logs":
             print(logs_image(args.image_id, port=args.port, tail=args.tail))

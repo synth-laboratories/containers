@@ -69,12 +69,16 @@ Set `CRAFTAX_ENGINE_ARTIFACTS` to that qualified runtime directory and
 `CONTAINERS_WHEEL_CONTEXT` to a directory containing exactly one qualified
 `synth-containers` wheel. The image verifies binary/data closure and compiler
 identity, installs dependencies from the hash-locked requirements, then installs
-that wheel without resolving another SDK version. Select `linux/arm64` or `linux/amd64` explicitly and provide the matching
-qualified mbx binary. Compiler package caches are separated by platform. Local
-compiler qualification does not establish hosted placement qualification. Runtime assembly refuses
-an AMD64 Python image paired with the ARM64 engine. On another host, select
-`--platform=linux/arm64` explicitly with a qualified emulation/build provider;
-otherwise this profile is unsupported there.
+that wheel without resolving another SDK version. Select `linux/arm64` or
+`linux/amd64` explicitly and provide the matching qualified mbx binary. Compiler
+package caches are separated by platform. Local compiler qualification does not
+establish hosted placement qualification.
+
+Through the maintained host build launcher, assemble the same selected platform:
+`synth-containers build craftax-gamebench-rust --catalog images/craftax-gamebench-rust --platform linux/amd64`.
+The catalog builder verifies the resulting image architecture. Runtime assembly
+also verifies the engine ELF and manifest against that architecture, refusing a
+mismatched engine rather than relabeling it.
 
 Use this directory's dedicated `catalog.toml` for NanoHorizon and live evals.
 The parent `containers/images/catalog.toml` is a development inventory and may
