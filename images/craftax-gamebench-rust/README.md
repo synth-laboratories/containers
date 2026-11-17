@@ -10,7 +10,7 @@ Do not use `nonsensitive/craftax_go_explore` (JAX). Do not serve a fixture world
 
 Direct module startup requires an explicitly qualified executable for that
 runtime in `SYNTH_CRAFTAX_GOLD_BIN`. It never builds a crate on startup. The
-Docker image supplies its qualified Linux ARM64 executable automatically.
+Docker image supplies its qualified executable for its declared Linux platform.
 
 Prefer the module so Ctrl+C stops **both** rust and the façade. Catalog `up`
 runs the same command as a subprocess; a wrapper SIGTERM can leave rust
@@ -54,7 +54,8 @@ python scripts/prepare_craftax_runtime.py \
   --output-root "$PWD/.local/craftax-runtime-builds" \
   --launcher /path/to/synth-dev/local_dev/scripts/core_dev_build.py \
   --storage-guard /path/to/synth-dev/local_dev/scripts/storage_target_guard.py \
-  --mbx-linux-dir /path/to/qualified/linux-arm64-mbx
+  --mbx-linux-dir /path/to/qualified/linux-amd64-mbx \
+  --platform linux/amd64
 ```
 
 The command reports its frozen runtime directory and retains source/compiler
@@ -68,8 +69,9 @@ Set `CRAFTAX_ENGINE_ARTIFACTS` to that qualified runtime directory and
 `CONTAINERS_WHEEL_CONTEXT` to a directory containing exactly one qualified
 `synth-containers` wheel. The image verifies binary/data closure and compiler
 identity, installs dependencies from the hash-locked requirements, then installs
-that wheel without resolving another SDK version. These local ARM64 inputs do
-not establish hosted/AMD64 placement qualification. Runtime assembly refuses
+that wheel without resolving another SDK version. Select `linux/arm64` or `linux/amd64` explicitly and provide the matching
+qualified mbx binary. Compiler package caches are separated by platform. Local
+compiler qualification does not establish hosted placement qualification. Runtime assembly refuses
 an AMD64 Python image paired with the ARM64 engine. On another host, select
 `--platform=linux/arm64` explicitly with a qualified emulation/build provider;
 otherwise this profile is unsupported there.

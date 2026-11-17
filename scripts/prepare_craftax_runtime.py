@@ -160,7 +160,8 @@ def main():
     temporary = out / "tmp"
     target.mkdir()
     temporary.mkdir()
-    cache = BOUNDARY / "artifacts/linux-mbx-cache/local-image"
+    cache_name = "local-image" if args.platform == "linux/arm64" else "local-image-linux-amd64"
+    cache = BOUNDARY / "artifacts/linux-mbx-cache" / cache_name
     for name in ("cargo-home", "mbx-cache", "apt-lists", "apt-archives"):
         (cache / name).mkdir(parents=True, exist_ok=True)
     receipt = dict(
@@ -220,7 +221,7 @@ def main():
     script = f"""set -eu
 if ! command -v python3 >/dev/null || ! command -v pkg-config >/dev/null; then
   rm -f /etc/apt/apt.conf.d/docker-clean
-  if [ -z "$(find /var/lib/apt/lists -maxdepth 1 -name '*_Packages*' 2>/dev/null)" ]; then apt-get update; fi
+  apt-get update
   apt-get install -y --no-install-recommends -o APT::Keep-Downloaded-Packages=true python3 pkg-config ca-certificates
 fi
 /mbx/mbx test --locked --release --manifest-path {manifest} --lib
