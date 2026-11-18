@@ -88,9 +88,23 @@ copied context directory refuse. A cargo token that survives in an emitted
 ## Outputs
 
 `container.toml`, `execution-requirements.toml`, `Dockerfile`, `build.sh`,
-`context/`, `instruction.md` and `translation-receipt.json` (not a build input).
+`docker_build_receipt.py`, `context/`, `instruction.md` and
+`translation-receipt.json`. The translation receipt is outside the build inputs.
 The emitted package is re-planned with `plan_execution_package`; its refusal is
 `harbor_translation_package_refused`. Translation is deterministic.
+
+## Local image identity
+
+The generated entrypoint streams Docker's OCI-layout export through the receipt
+writer. The layout must name one image root. For an image index, the writer
+selects the unique image manifest for the requested platform. It verifies
+manifest and config descriptor kinds, sizes, SHA-256 digests and the config
+platform before emitting an `oci_config` identity. The build log retains the
+Docker lookup ID and selected manifest digest separately. Legacy archives
+without an OCI descriptor layout refuse with `docker_image_receipt_invalid`.
+
+A registry release needs an independently read-back, digest-pinned single-image
+manifest. Changing the receipt writer changes the frozen package input digest.
 
 ## What this does not prove
 
