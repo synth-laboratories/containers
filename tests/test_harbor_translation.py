@@ -221,6 +221,7 @@ def test_reb_bundle_translates_without_hidden_inputs_or_raw_cargo(tmp_path):
     packaged = {entry.path for entry in plan.build_plan.files}
     assert not any(path.startswith(("tests", "solution")) for path in packaged)
     assert "context/Dockerfile.local" not in packaged
+    assert "docker_build_receipt.py" in packaged
     for path in packaged:
         assert HELDOUT_BYTES not in (out / path).read_bytes()
     excluded = {entry.path: entry.reason for entry in receipt.excluded_inputs}
@@ -235,6 +236,7 @@ def test_reb_bundle_translates_without_hidden_inputs_or_raw_cargo(tmp_path):
     build = (out / "build.sh").read_text()
     assert 'mbx fetch --manifest-path "$root/context/harness/Cargo.toml"' in build
     assert "cargo " not in build.replace("synth-cargo-home", "")
+    assert 'python3 -I "$root/docker_build_receipt.py"' in build
     assert (receipt.dockerfile_rewrites[0].action, receipt.dockerfile_rewrites[0].line) == (
         "replaced",
         9,

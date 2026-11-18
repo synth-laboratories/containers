@@ -62,6 +62,7 @@ RECEIPT_SCHEMA = "synth.harbor-translation-receipt.v1"
 RECEIPT_FILENAME = "translation-receipt.json"
 CONTEXT_DIR = "context"
 CARGO_HOME_DIR = ".synth-cargo-home"
+_IMAGE_RECEIPT_FILENAME = "docker_build_receipt.py"
 _MAX_TASK_TOML_BYTES = 256 * 1024
 _MAX_DOCKERFILE_BYTES = 256 * 1024
 _ALLOWED_INSTRUCTIONS = frozenset(
@@ -931,18 +932,14 @@ def _build_script(platform: str, fetches: tuple[_CargoFetch, ...]) -> str:
             'root="$SYNTH_CONTAINER_PACKAGE_ROOT"',
             f"platform={shlex.quote(platform)}",
             *fetch_lines,
-            'docker build --platform "$platform" --file "$root/Dockerfile" '
-            f'--iidfile "$root/.image-id" "$root/{CONTEXT_DIR}"',
-            'python3 -I - "$SYNTH_CONTAINER_BUILD_PLAN" "$root/.image-id" "$platform" '
-            "\"$SYNTH_CONTAINER_BUILD_OUTPUT\" <<'PY'",
-            "import json, sys",
-            "plan = json.load(open(sys.argv[1]))",
-            "image = open(sys.argv[2]).read().strip()",
-            "json.dump({'schema_version': 'synth.container-build-output.v1', 'action': 'build',",
-            "           'input_digest': plan['input_digest'], 'artifact': {'kind': 'oci_image',",
-            "           'digest_kind': 'oci_config', 'reference': image, 'digest': image,",
-            "           'platform': sys.argv[3]}}, open(sys.argv[4], 'w'))",
-            "PY",
+            (
+                'docker build --platform "$platform" --file "$root/Dockerfile" '
+                f'--iidfile "$root/.image-id" "$root/{CONTEXT_DIR}"'
+            ),
+            (
+                f'python3 -I "$root/{_IMAGE_RECEIPT_FILENAME}" "$SYNTH_CONTAINER_BUILD_PLAN" '
+                '"$root/.image-id" "$platform" "$SYNTH_CONTAINER_BUILD_OUTPUT"'
+            ),
             "",
         ]
     )
@@ -1099,12 +1096,14 @@ def translate_harbor_bundle(
         _build_script(policy.platform.value, dockerfile.cargo_fetches), encoding="utf-8"
     )
     build.chmod(0o755)
+    helper = Path(__file__).with_name(_IMAGE_RECEIPT_FILENAME)
+    (out / _IMAGE_RECEIPT_FILENAME).write_bytes(helper.read_bytes())
     (out / EXECUTION_REQUIREMENTS_FILENAME).write_text(
         _requirements_toml(requirements), encoding="utf-8"
     )
     inputs = tuple(
         sorted(
-            {"Dockerfile", CONTEXT_DIR, EXECUTION_REQUIREMENTS_FILENAME}
+            {"Dockerfile", CONTEXT_DIR, EXECUTION_REQUIREMENTS_FILENAME, _IMAGE_RECEIPT_FILENAME}
             | ({"instruction.md"} if instruction_files else set())
         )
     )

@@ -125,3 +125,14 @@ require_paths = ["contracts/file-limits.json", "contracts/FILE_LIMITS_SOURCE.tom
 command = ".venv/bin/python scripts/gen_file_limits.py --check"
 command_timeout_seconds = 10
 remedy = "Refresh the pinned Core file policy and regenerate the consumer; qualify byte, count and path boundaries."
+
+[[checks]]
+id = "harbor_docker_config_receipt"
+description = "Translated builds bind the requested platform config to verified Docker descriptors"
+severity = "error"
+require_paths = ["src/synth_containers/docker_build_receipt.py", "tests/test_docker_build_receipt.py", "tests/fixtures/docker_build_receipt/image-index.json"]
+file_contains = [
+  { path = "src/synth_containers/harbor_translation.py", pattern = "_IMAGE_RECEIPT_FILENAME" },
+  { path = "tests/test_docker_build_receipt.py", pattern = "test_emitted_entrypoint_writes_verified_config_receipt" },
+]
+remedy = "Keep the verified metadata writer in frozen build inputs and run the actual successor index and single-manifest regressions."
