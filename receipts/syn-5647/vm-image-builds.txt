@@ -1,0 +1,19 @@
+SYN-5647 full image builds of the translated packages on the exe.dev VM (synth-slot-c1, x86_64),
+2026-11-18 ~05:30Z. Each build ran the emitted build.sh under nice -n 10, with SYNTH_CONTAINER_PACKAGE_ROOT,
+_BUILD_PLAN (from `synth-containers package plan`) and _BUILD_OUTPUT set. A free-disk guard (stop below 32 GiB) was checked before each build.
+
+reb-013-rust-miprov2: rc=0, 22 s, free disk 41G -> 37G
+  input_digest sha256:5666beb4ab0be57013009a497d6042b4c81d0dfb4255e480cba8614620893b7d (== receipt build_input_digest)
+  image (oci_config) sha256:1fba2bde959caedaa1d1da60d4fd718b95271c81193c2ebf23dd1770688d94d6 linux/amd64, 551,195,316 bytes
+  Inside the image with --network none: `cd /app/harness && cargo fetch --locked --offline` exit 0.
+  /tests is absent. /app = fixtures harness proxy workspace. No prebuilt target/.
+resinbench-coding-agent-qwen3-0.6b-h100: rc=0, 4 s, free disk 37G -> 37G
+  input_digest sha256:79aa274dcfb6b9920e81a0ef17c95989efc09ae09865f650cfcd2ed12622a1f9 (== receipt build_input_digest)
+  image (oci_config) sha256:4e8e532678025377f6050ec952e2236a152af1f2d81360f60b269f7243a411b4 linux/amd64, 43,290,821 bytes
+  /tests is absent. /app = bench-config.json candidate. /usr/local/bin/bench is executable.
+Both build-output JSONs validate as synth.container-build-output.v1 (below). No refusals.
+Cleanup: both images removed (docker rmi), and the build directory removed. Free disk after cleanup: 53G.
+The identities are local daemon config digests. Registry publish is still needed before a Modal/hosted offer will accept them.
+
+{"schema_version": "synth.container-build-output.v1", "action": "build", "input_digest": "sha256:5666beb4ab0be57013009a497d6042b4c81d0dfb4255e480cba8614620893b7d", "artifact": {"kind": "oci_image", "digest_kind": "oci_config", "reference": "sha256:1fba2bde959caedaa1d1da60d4fd718b95271c81193c2ebf23dd1770688d94d6", "digest": "sha256:1fba2bde959caedaa1d1da60d4fd718b95271c81193c2ebf23dd1770688d94d6", "platform": "linux/amd64"}}
+{"schema_version": "synth.container-build-output.v1", "action": "build", "input_digest": "sha256:79aa274dcfb6b9920e81a0ef17c95989efc09ae09865f650cfcd2ed12622a1f9", "artifact": {"kind": "oci_image", "digest_kind": "oci_config", "reference": "sha256:4e8e532678025377f6050ec952e2236a152af1f2d81360f60b269f7243a411b4", "digest": "sha256:4e8e532678025377f6050ec952e2236a152af1f2d81360f60b269f7243a411b4", "platform": "linux/amd64"}}
