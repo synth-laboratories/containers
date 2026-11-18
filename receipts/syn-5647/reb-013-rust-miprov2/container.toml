@@ -1,0 +1,15 @@
+schema_version = "synth.container-package.v1"
+package_id = "013-rust-miprov2"
+
+[build]
+entrypoint = "build.sh"
+inputs = ["Dockerfile", "context", "execution-requirements.toml", "instruction.md"]
+platform = "linux/amd64"
+
+[runtime]
+profile = "command"
+command = ["bash"]
+working_directory = "/app"
+
+[runtime.readiness]
+kind = "process"

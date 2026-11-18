@@ -1,0 +1,6 @@
+SYN-5647 fail-before: tests/test_harbor_translation.py run against origin/dev a5cecc5 src (PYTHONPATH=exported origin/dev src):
+ImportError while importing test module '<origin-dev-export>/test_harbor_translation.py'.
+E   ModuleNotFoundError: No module named 'synth_containers.harbor_translation'
+!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+1 error in 0.77s
+After: 21 passed (tests/test_harbor_translation.py) on this branch.

@@ -11,6 +11,11 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from .execution_package import ExecutionPackageError, ExecutionPackagePlan, plan_execution_package
+from .harbor_translation import (
+    HarborTranslationError,
+    load_translation_policy,
+    translate_harbor_bundle,
+)
 from .package_build import _unique_object, build_container_package, plan_container_package
 from .package_compatibility import (
     PackageCompatibilityReport,
@@ -63,6 +68,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     check.add_argument("artifact", type=Path)
     check.add_argument("--runtime-support", type=Path, required=True)
+    translate = sub.add_parser(
+        "translate-harbor", help="statically translate a Harbor bundle into a container package"
+    )
+    translate.add_argument("bundle", type=Path)
+    translate.add_argument("--policy", type=Path, required=True)
+    translate.add_argument("--output", type=Path, required=True)
     build = sub.add_parser("build", help="execute the package build/resolve entrypoint")
     build.add_argument("manifest", type=Path)
     build.add_argument("--output", type=Path, required=True)
@@ -77,6 +88,12 @@ def main(argv: list[str] | None = None) -> int:
             value = plan_container_package(args.manifest)
         elif args.command == "execution-plan":
             value = plan_execution_package(args.manifest)
+        elif args.command == "translate-harbor":
+            receipt, _ = translate_harbor_bundle(
+                args.bundle, args.output, load_translation_policy(args.policy)
+            )
+            print(receipt.model_dump_json(indent=2))
+            return 0
         elif args.command == "check":
             value = check_package_compatibility(
                 ContainerArtifactDescriptor.model_validate(_read_descriptor(args.artifact)),
@@ -95,6 +112,9 @@ def main(argv: list[str] | None = None) -> int:
             )
         print(value.model_dump_json(indent=2))
         return 0
+    except HarborTranslationError as error:
+        print(json.dumps(asdict(error.refusal), sort_keys=True))
+        return 2
     except ExecutionPackageError as error:
         print(json.dumps(asdict(error.refusal), sort_keys=True))
         return 2

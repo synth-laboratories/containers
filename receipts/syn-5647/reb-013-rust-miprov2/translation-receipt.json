@@ -1,0 +1,478 @@
+{
+  "schema_version": "synth.harbor-translation-receipt.v1",
+  "bundle_id": "013-rust-miprov2",
+  "source_dialect": "reb-task-metadata",
+  "source_task_toml_digest": "sha256:178a465e44c88e0b23c05a89fabac1ec30f0f3c20797a20019ee2ac51a03216a",
+  "source_declarations": {
+    "task": {
+      "id": "013-rust-miprov2",
+      "title": "Rust MIPROv2 TPE Prompt Optimizer",
+      "version": "0.1.0",
+      "status": "in-progress",
+      "language": "rust",
+      "submission_file": "miprov2.rs"
+    },
+    "family": {
+      "development": "banking77",
+      "transfer": [
+        "heart_disease",
+        "healthbench"
+      ],
+      "out_of_scope": [
+        "iris",
+        "hover",
+        "hotpotqa",
+        "gsm8k",
+        "math",
+        "humaneval"
+      ]
+    },
+    "splits": {
+      "visible": [
+        "banking77_train",
+        "banking77_validation"
+      ],
+      "hidden": [
+        "heart_disease",
+        "healthbench"
+      ]
+    },
+    "paths": {
+      "workspace": "workspace",
+      "reference": "reference",
+      "evaluator": "evaluator",
+      "heldout_eval": "evaluator/heldout_eval.json",
+      "rubric": "rubric.json",
+      "interface": "INTERFACE.md",
+      "instruction": "instruction.md",
+      "notes": "notes.md",
+      "proxy": "evaluator/proxy/proxy_server.py"
+    },
+    "policy": {
+      "model": "openai/gpt-oss-20b",
+      "provider": "groq",
+      "scoring_backend": "groq",
+      "scoring_backend_for_gold_ceiling": "groq",
+      "proposer_role": "proposer",
+      "surrogate": "tpe"
+    },
+    "budgets": {
+      "agent_wall_time_seconds": 1800
+    }
+  },
+  "policy_digest": "sha256:090d8e9731835ba8fad15668b6289edbae6afa44ffee40697f2db6952ea80369",
+  "phases": [
+    {
+      "name": "build",
+      "entrypoint": "build.sh",
+      "packaged": true,
+      "isolation": null,
+      "source_isolation_spelling": null,
+      "network_mode": null,
+      "timeout_seconds": null
+    },
+    {
+      "name": "agent",
+      "entrypoint": "instruction.md",
+      "packaged": true,
+      "isolation": null,
+      "source_isolation_spelling": null,
+      "network_mode": null,
+      "timeout_seconds": 1800
+    },
+    {
+      "name": "verifier",
+      "entrypoint": "tests/test.sh",
+      "packaged": false,
+      "isolation": "isolated",
+      "source_isolation_spelling": null,
+      "network_mode": null,
+      "timeout_seconds": null
+    }
+  ],
+  "visible_inputs": [
+    {
+      "path": "environment/entrypoint.sh",
+      "digest": "sha256:0d6ead01c716556d5473822b5d50edee02bbfa18d8a12ab39ab76fe7ee00ad11",
+      "size_bytes": 7652,
+      "executable": true
+    },
+    {
+      "path": "environment/fixtures/banking77.json",
+      "digest": "sha256:c0f268864fee2318b72422fa4f3bca2c3ac3b2101fd16e5917bde5f4512148f1",
+      "size_bytes": 70527,
+      "executable": false
+    },
+    {
+      "path": "environment/fixtures/manifest.json",
+      "digest": "sha256:e7c2a80d990dcba9473d6226fdea910cd7cf10cfeb24ebf5e4394f8c81b0e9af",
+      "size_bytes": 395,
+      "executable": false
+    },
+    {
+      "path": "environment/harness/.gitignore",
+      "digest": "sha256:0d8cdff62e0a93865e239b1be32f28f01268524ffe9d692643206542c617eb79",
+      "size_bytes": 43,
+      "executable": false
+    },
+    {
+      "path": "environment/harness/Cargo.toml",
+      "digest": "sha256:c10442bf6ec18372faf4e2b1876551bfaa76f2945ef7e1effe4ddab4075b2df4",
+      "size_bytes": 301,
+      "executable": false
+    },
+    {
+      "path": "environment/harness/src/main.rs",
+      "digest": "sha256:20aee74d3a6b35f0503ac313c08ed3f5a9f79fbb8483240ef3d042c330d477f0",
+      "size_bytes": 704,
+      "executable": false
+    },
+    {
+      "path": "environment/local_verifier/test.sh",
+      "digest": "sha256:02bc98bf27d8802eea7756bae94532cab664506aefce7de88cafdc9753e0a1a3",
+      "size_bytes": 1100,
+      "executable": true
+    },
+    {
+      "path": "environment/proxy/proxy_server.py",
+      "digest": "sha256:1882d0afbf2fe2b7ea533e8687e70efc3c87510ef056e5a2e5870c547de4ae6c",
+      "size_bytes": 67857,
+      "executable": true
+    },
+    {
+      "path": "environment/workspace/.gitignore",
+      "digest": "sha256:f48c4d5c656bb4126eae5ad9f19d1f5be1dc93dcb83958913f6618bd2e113b30",
+      "size_bytes": 11,
+      "executable": false
+    },
+    {
+      "path": "environment/workspace/INTERFACE.md",
+      "digest": "sha256:ac80555283b22e8715bc26cf32ba4a78aa3d4af2cb7174a0c6f8d57c4084ecb4",
+      "size_bytes": 5256,
+      "executable": false
+    },
+    {
+      "path": "environment/workspace/RESEARCH_LOG.md",
+      "digest": "sha256:e2ad45bfa1ae02819cd96bf29768c0da480af1e178d2a2e2d8f2366f4bad539c",
+      "size_bytes": 2469,
+      "executable": false
+    },
+    {
+      "path": "environment/workspace/TASK.md",
+      "digest": "sha256:004039165c114d2833772b67afbbe5a1086e05734aaf1d2279d20d03ce202e40",
+      "size_bytes": 2626,
+      "executable": false
+    },
+    {
+      "path": "environment/workspace/TIME_LIMIT.md",
+      "digest": "sha256:faeba8dfc774b9d5022f71246faf81b2db6f3d646566df0b00b2692a85ee798d",
+      "size_bytes": 760,
+      "executable": false
+    },
+    {
+      "path": "environment/workspace/dev_loop.py",
+      "digest": "sha256:22e3438077fe58ea7e5204d8a3616bf8df106b30a79a0e3d38ed0688bd4cbea1",
+      "size_bytes": 10795,
+      "executable": true
+    },
+    {
+      "path": "environment/workspace/miprov2.rs",
+      "digest": "sha256:f3aafb8bf0dc3a131b17a1aad00f93eeb2774cd5558e0b9e4e189b0c3ff0738b",
+      "size_bytes": 8119,
+      "executable": false
+    },
+    {
+      "path": "environment/workspace/pins.json",
+      "digest": "sha256:d8cc3e51968cbfd3873694481675512f0db53beab936fe96140046875a00ad3e",
+      "size_bytes": 323,
+      "executable": false
+    },
+    {
+      "path": "environment/workspace/research_log.py",
+      "digest": "sha256:b1548ade77fc98918c91927941873b074133978cd9516ba084a741d2fde93453",
+      "size_bytes": 17835,
+      "executable": true
+    },
+    {
+      "path": "environment/workspace/research_log.sh",
+      "digest": "sha256:f94d675c13d2b4d7a98fe715313e6e7f537ec23aa6a89a4a9b87123623bdd1ad",
+      "size_bytes": 173,
+      "executable": true
+    },
+    {
+      "path": "environment/workspace/run_dev.sh",
+      "digest": "sha256:82928a7925edd8c27198d65c404f3792a922747cfb2135aca522da4a95fdc6a7",
+      "size_bytes": 552,
+      "executable": true
+    },
+    {
+      "path": "environment/workspace/train/.gitkeep",
+      "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "executable": false
+    },
+    {
+      "path": "environment/workspace/train/banking77.json",
+      "digest": "sha256:f8009f0e01246eef6ad446dc03f48d264d8b923e77fe206965799e9a502afbad",
+      "size_bytes": 37481,
+      "executable": false
+    },
+    {
+      "path": "instruction.md",
+      "digest": "sha256:6d16c3167464454c59f59aaa9dd85df6c8c8072d9826d5d5b426350c6fc89626",
+      "size_bytes": 2497,
+      "executable": false
+    }
+  ],
+  "excluded_inputs": [
+    {
+      "path": "tests/INTERFACE.md",
+      "digest": "sha256:ac80555283b22e8715bc26cf32ba4a78aa3d4af2cb7174a0c6f8d57c4084ecb4",
+      "size_bytes": 5256,
+      "reason": "verifier_only"
+    },
+    {
+      "path": "tests/evaluator/agent_fixtures/banking77.json",
+      "digest": "sha256:c0f268864fee2318b72422fa4f3bca2c3ac3b2101fd16e5917bde5f4512148f1",
+      "size_bytes": 70527,
+      "reason": "verifier_only"
+    },
+    {
+      "path": "tests/evaluator/agent_fixtures/manifest.json",
+      "digest": "sha256:e7c2a80d990dcba9473d6226fdea910cd7cf10cfeb24ebf5e4394f8c81b0e9af",
+      "size_bytes": 395,
+      "reason": "verifier_only"
+    },
+    {
+      "path": "tests/evaluator/agent_trace_lib.py",
+      "digest": "sha256:8d10a722344c1a3ecb27c3e8a42f9a28c0eda5d229b39208f09dd2a8475d62e1",
+      "size_bytes": 8192,
+      "reason": "verifier_only"
+    },
+    {
+      "path": "tests/evaluator/dev_runner.py",
+      "digest": "sha256:e37070817fe553635fe85d78302361eaf17920557b6c8c59186e925b06982818",
+      "size_bytes": 7898,
+      "reason": "verifier_only"
+    },
+    {
+      "path": "tests/evaluator/eval.sh",
+      "digest": "sha256:c210e0ce2a782b664455e69a06954d8df9aff334971361f0c6d1f71a41774858",
+      "size_bytes": 397,
+      "reason": "verifier_only"
+    },
+    {
+      "path": "tests/evaluator/eval_submission.sh",
+      "digest": "sha256:044b5311f696db33fe91c13aaefc3eb07219b59c4330643f0a4fc0426fe6e416",
+      "size_bytes": 2641,
+      "reason": "verifier_only"
+    },
+    {
+      "path": "tests/evaluator/harness/.gitignore",
+      "digest": "sha256:0d8cdff62e0a93865e239b1be32f28f01268524ffe9d692643206542c617eb79",
+      "size_bytes": 43,
+      "reason": "verifier_only"
+    },
+    {
+      "path": "tests/evaluator/harness/Cargo.toml",
+      "digest": "sha256:c10442bf6ec18372faf4e2b1876551bfaa76f2945ef7e1effe4ddab4075b2df4",
+      "size_bytes": 301,
+      "reason": "verifier_only"
+    },
+    {
+      "path": "tests/evaluator/harness/src/main.rs",
+      "digest": "sha256:20aee74d3a6b35f0503ac313c08ed3f5a9f79fbb8483240ef3d042c330d477f0",
+      "size_bytes": 704,
+      "reason": "verifier_only"
+    },
+    {
+      "path": "tests/evaluator/heldout/.gitkeep",
+      "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "reason": "verifier_only"
+    },
+    {
+      "path": "tests/evaluator/heldout/healthbench.json",
+      "digest": "sha256:1b4f776b1583ffa17449b7b880a1174e5ae628542bb9ee2a7ff21bbd9e0f5943",
+      "size_bytes": 286399,
+      "reason": "verifier_only"
+    },
+    {
+      "path": "tests/evaluator/heldout/heart_disease.json",
+      "digest": "sha256:3c1f7a653315d2b040728184f9666ac106f6991a6ad499a9a7eeebc201e97c01",
+      "size_bytes": 116975,
+      "reason": "verifier_only"
+    },
+    {
+      "path": "tests/evaluator/heldout/manifest.json",
+      "digest": "sha256:1ce385526feb0d59315e735982e39eee08ab30714e7d3409decd2186038118d2",
+      "size_bytes": 1027,
+      "reason": "verifier_only"
+    },
+    {
+      "path": "tests/evaluator/heldout_eval.json",
+      "digest": "sha256:fee6bd10cbf0d971603ff344edf23cde21bdc13f1518dcc2691578111da32e72",
+      "size_bytes": 6152,
+      "reason": "verifier_only"
+    },
+    {
+      "path": "tests/evaluator/postmortem_rubric.py",
+      "digest": "sha256:6a981d7f4353304e205d5de9995b1be9e27c37e0e3672f067c5f2ea6ff2f0a80",
+      "size_bytes": 7311,
+      "reason": "verifier_only"
+    },
+    {
+      "path": "tests/evaluator/process_rubric.py",
+      "digest": "sha256:11682fc1a26269ed6003e61e2d5c6f27928df88581ad5e4e8ff33f86adac2620",
+      "size_bytes": 13583,
+      "reason": "verifier_only"
+    },
+    {
+      "path": "tests/evaluator/proxy/proxy_server.py",
+      "digest": "sha256:1882d0afbf2fe2b7ea533e8687e70efc3c87510ef056e5a2e5870c547de4ae6c",
+      "size_bytes": 67857,
+      "reason": "verifier_only"
+    },
+    {
+      "path": "tests/evaluator/research_log_lib.py",
+      "digest": "sha256:b8ce9c9e064c656940ab68542679c3fd732fc54f624213098cef873a8390402d",
+      "size_bytes": 15503,
+      "reason": "verifier_only"
+    },
+    {
+      "path": "tests/evaluator/score.py",
+      "digest": "sha256:9e1ff16d97381fe9476460902bb48904a15ab3f84ae409c393c99d6599c58b98",
+      "size_bytes": 80066,
+      "reason": "verifier_only"
+    },
+    {
+      "path": "tests/evaluator/semantic_rubric.py",
+      "digest": "sha256:62244e7f1c32a8189d038d8d77cc291602b0709b7bc7ca575da507f15530093e",
+      "size_bytes": 13645,
+      "reason": "verifier_only"
+    },
+    {
+      "path": "tests/reference/miprov2.rs",
+      "digest": "sha256:c7bc7b1eda732b7ebc8618f32f39b4081e30f7c5038801170b8e7170e20e69a3",
+      "size_bytes": 41149,
+      "reason": "verifier_only"
+    },
+    {
+      "path": "tests/rubric.json",
+      "digest": "sha256:108d949d18222b7c53cd53c8dfa2a4f4d10f4347cda8de012b27b80183551285",
+      "size_bytes": 7286,
+      "reason": "verifier_only"
+    },
+    {
+      "path": "tests/test.sh",
+      "digest": "sha256:6cbf76e7b52a1333aa1acf2f369011acbe1869ab9efeab234b07ffd41277bb3c",
+      "size_bytes": 3035,
+      "reason": "verifier_only"
+    },
+    {
+      "path": "solution/miprov2.rs",
+      "digest": "sha256:c7bc7b1eda732b7ebc8618f32f39b4081e30f7c5038801170b8e7170e20e69a3",
+      "size_bytes": 41149,
+      "reason": "reference_solution"
+    },
+    {
+      "path": "solution/solve.sh",
+      "digest": "sha256:27f58eaf1c7e755098032c03dbfaee576ef489c7f0ad338caa8f90e35d95075f",
+      "size_bytes": 469,
+      "reason": "reference_solution"
+    },
+    {
+      "path": "environment/Dockerfile.local",
+      "digest": "sha256:a6d2da53cc7091ab4b16dbd1192cf3478a6ca5ac879a1ae33306d3c487e16e91",
+      "size_bytes": 1835,
+      "reason": "alternate_recipe"
+    },
+    {
+      "path": "fixtures/banking77.json",
+      "digest": "sha256:c0f268864fee2318b72422fa4f3bca2c3ac3b2101fd16e5917bde5f4512148f1",
+      "size_bytes": 70527,
+      "reason": "outside_build_context"
+    },
+    {
+      "path": "fixtures/manifest.json",
+      "digest": "sha256:e7c2a80d990dcba9473d6226fdea910cd7cf10cfeb24ebf5e4394f8c81b0e9af",
+      "size_bytes": 395,
+      "reason": "outside_build_context"
+    },
+    {
+      "path": "environment/Dockerfile",
+      "digest": "sha256:e3d494961a275906c15d47791696e10d6570a93b6d1eb471ee9817f481df8f32",
+      "size_bytes": 1366,
+      "reason": "translated_recipe"
+    }
+  ],
+  "dockerfile_rewrites": [
+    {
+      "line": 23,
+      "action": "replaced",
+      "original": "RUN cd /app/harness && cp /app/workspace/miprov2.rs /app/harness/src/submission.rs && cargo fetch && cargo build --release --quiet",
+      "replacement": [
+        "RUN cd /app/harness && cp /app/workspace/miprov2.rs /app/harness/src/submission.rs",
+        "COPY .synth-cargo-home/registry/ /usr/local/cargo/registry/"
+      ],
+      "reason": "raw cargo removed from the image build: `cargo fetch` runs on the build host as `mbx fetch` into the frozen context and is copied into CARGO_HOME; `cargo build` was a compile warm-up only. Removed: ['cargo fetch', 'cargo build --release --quiet']"
+    }
+  ],
+  "requirement_provenance": {
+    "platform": "policy",
+    "network": "policy",
+    "privileged": "fixed:false (translation never grants privilege)",
+    "verifier_isolation": "derived:training-container scores are self-reported/unattested; the held-out verifier is a separate phase (derived:splits.hidden declared; tests/test.sh is a trusted held-out scorer)",
+    "resources": "policy",
+    "max_wall_seconds": "source:budgets.agent_wall_time_seconds"
+  },
+  "package_id": "013-rust-miprov2",
+  "manifest_digest": "sha256:098859e3a21ba6061d013d33430ea68c164b3f2013062a9a35b9c70f524e3c8b",
+  "build_input_digest": "sha256:5666beb4ab0be57013009a497d6042b4c81d0dfb4255e480cba8614620893b7d",
+  "execution_requirements": {
+    "schema_version": "synth.container-execution-requirements.v1",
+    "platform": "linux/amd64",
+    "resources": {
+      "cpu_millis": 4000,
+      "memory_bytes": 8589934592,
+      "disk_bytes": 21474836480,
+      "gpu_kind": "none",
+      "gpu_count": 0
+    },
+    "max_wall_seconds": 1800,
+    "network": {
+      "mode": "none",
+      "hosts": []
+    },
+    "privileged": false,
+    "verifier_isolation": "self_reported"
+  },
+  "execution_requirements_digest": "sha256:638a115a666249efff29afd32732359e5bfb991b5acd6af3abcb2873fbfa4d5d",
+  "verifier_requirements": {
+    "schema_version": "synth.container-execution-requirements.v1",
+    "platform": "linux/amd64",
+    "resources": {
+      "cpu_millis": 4000,
+      "memory_bytes": 8589934592,
+      "disk_bytes": 21474836480,
+      "gpu_kind": "none",
+      "gpu_count": 0
+    },
+    "max_wall_seconds": 3600,
+    "network": {
+      "mode": "none",
+      "hosts": []
+    },
+    "privileged": false,
+    "verifier_isolation": "isolated"
+  },
+  "verifier_requirements_digest": "sha256:b019ab9f24105f712bc2e8f7201df15730ccd098b929b4ca321a38ab97744646",
+  "verifier_requirement_provenance": {
+    "platform": "policy",
+    "network": "policy:verifier",
+    "max_wall_seconds": "policy:verifier",
+    "resources": "policy:verifier",
+    "privileged": "fixed:false (translation never grants privilege)",
+    "verifier_isolation": "derived:splits.hidden declared; tests/test.sh is a trusted held-out scorer"
+  }
+}

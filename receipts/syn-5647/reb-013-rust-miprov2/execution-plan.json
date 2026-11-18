@@ -1,0 +1,231 @@
+{
+  "schema_version": "synth.container-execution-package.v1",
+  "build_plan": {
+    "schema_version": "synth.container-build-plan.v1",
+    "manifest": {
+      "package_id": "013-rust-miprov2",
+      "build": {
+        "entrypoint": "build.sh",
+        "inputs": [
+          "Dockerfile",
+          "context",
+          "execution-requirements.toml",
+          "instruction.md"
+        ],
+        "arguments": [],
+        "platform": "linux/amd64"
+      },
+      "runtime": {
+        "profile": "command",
+        "command": [
+          "bash"
+        ],
+        "working_directory": "/app",
+        "readiness": {
+          "kind": "process",
+          "path": null,
+          "port": null,
+          "adapter": null
+        }
+      },
+      "contracts": [],
+      "credentials": [],
+      "dependencies": [],
+      "schema_version": "synth.container-package.v1"
+    },
+    "files": [
+      {
+        "path": "Dockerfile",
+        "digest": "sha256:3b960e2f14dc7b0b7dd3bd7cfa1218eea2ddc6eaabfcb10eedbbeabca2a967ac",
+        "size_bytes": 852,
+        "executable": false
+      },
+      {
+        "path": "build.sh",
+        "digest": "sha256:84b4fe1a031eab13a388fdec8b46d6169d515dc37be1f6ccf303f08f1d6d1b55",
+        "size_bytes": 955,
+        "executable": true
+      },
+      {
+        "path": "container.toml",
+        "digest": "sha256:098859e3a21ba6061d013d33430ea68c164b3f2013062a9a35b9c70f524e3c8b",
+        "size_bytes": 335,
+        "executable": false
+      },
+      {
+        "path": "context/entrypoint.sh",
+        "digest": "sha256:0d6ead01c716556d5473822b5d50edee02bbfa18d8a12ab39ab76fe7ee00ad11",
+        "size_bytes": 7652,
+        "executable": true
+      },
+      {
+        "path": "context/fixtures/banking77.json",
+        "digest": "sha256:c0f268864fee2318b72422fa4f3bca2c3ac3b2101fd16e5917bde5f4512148f1",
+        "size_bytes": 70527,
+        "executable": false
+      },
+      {
+        "path": "context/fixtures/manifest.json",
+        "digest": "sha256:e7c2a80d990dcba9473d6226fdea910cd7cf10cfeb24ebf5e4394f8c81b0e9af",
+        "size_bytes": 395,
+        "executable": false
+      },
+      {
+        "path": "context/harness/.gitignore",
+        "digest": "sha256:0d8cdff62e0a93865e239b1be32f28f01268524ffe9d692643206542c617eb79",
+        "size_bytes": 43,
+        "executable": false
+      },
+      {
+        "path": "context/harness/Cargo.toml",
+        "digest": "sha256:c10442bf6ec18372faf4e2b1876551bfaa76f2945ef7e1effe4ddab4075b2df4",
+        "size_bytes": 301,
+        "executable": false
+      },
+      {
+        "path": "context/harness/src/main.rs",
+        "digest": "sha256:20aee74d3a6b35f0503ac313c08ed3f5a9f79fbb8483240ef3d042c330d477f0",
+        "size_bytes": 704,
+        "executable": false
+      },
+      {
+        "path": "context/local_verifier/test.sh",
+        "digest": "sha256:02bc98bf27d8802eea7756bae94532cab664506aefce7de88cafdc9753e0a1a3",
+        "size_bytes": 1100,
+        "executable": true
+      },
+      {
+        "path": "context/proxy/proxy_server.py",
+        "digest": "sha256:1882d0afbf2fe2b7ea533e8687e70efc3c87510ef056e5a2e5870c547de4ae6c",
+        "size_bytes": 67857,
+        "executable": true
+      },
+      {
+        "path": "context/workspace/.gitignore",
+        "digest": "sha256:f48c4d5c656bb4126eae5ad9f19d1f5be1dc93dcb83958913f6618bd2e113b30",
+        "size_bytes": 11,
+        "executable": false
+      },
+      {
+        "path": "context/workspace/INTERFACE.md",
+        "digest": "sha256:ac80555283b22e8715bc26cf32ba4a78aa3d4af2cb7174a0c6f8d57c4084ecb4",
+        "size_bytes": 5256,
+        "executable": false
+      },
+      {
+        "path": "context/workspace/RESEARCH_LOG.md",
+        "digest": "sha256:e2ad45bfa1ae02819cd96bf29768c0da480af1e178d2a2e2d8f2366f4bad539c",
+        "size_bytes": 2469,
+        "executable": false
+      },
+      {
+        "path": "context/workspace/TASK.md",
+        "digest": "sha256:004039165c114d2833772b67afbbe5a1086e05734aaf1d2279d20d03ce202e40",
+        "size_bytes": 2626,
+        "executable": false
+      },
+      {
+        "path": "context/workspace/TIME_LIMIT.md",
+        "digest": "sha256:faeba8dfc774b9d5022f71246faf81b2db6f3d646566df0b00b2692a85ee798d",
+        "size_bytes": 760,
+        "executable": false
+      },
+      {
+        "path": "context/workspace/dev_loop.py",
+        "digest": "sha256:22e3438077fe58ea7e5204d8a3616bf8df106b30a79a0e3d38ed0688bd4cbea1",
+        "size_bytes": 10795,
+        "executable": true
+      },
+      {
+        "path": "context/workspace/miprov2.rs",
+        "digest": "sha256:f3aafb8bf0dc3a131b17a1aad00f93eeb2774cd5558e0b9e4e189b0c3ff0738b",
+        "size_bytes": 8119,
+        "executable": false
+      },
+      {
+        "path": "context/workspace/pins.json",
+        "digest": "sha256:d8cc3e51968cbfd3873694481675512f0db53beab936fe96140046875a00ad3e",
+        "size_bytes": 323,
+        "executable": false
+      },
+      {
+        "path": "context/workspace/research_log.py",
+        "digest": "sha256:b1548ade77fc98918c91927941873b074133978cd9516ba084a741d2fde93453",
+        "size_bytes": 17835,
+        "executable": true
+      },
+      {
+        "path": "context/workspace/research_log.sh",
+        "digest": "sha256:f94d675c13d2b4d7a98fe715313e6e7f537ec23aa6a89a4a9b87123623bdd1ad",
+        "size_bytes": 173,
+        "executable": true
+      },
+      {
+        "path": "context/workspace/run_dev.sh",
+        "digest": "sha256:82928a7925edd8c27198d65c404f3792a922747cfb2135aca522da4a95fdc6a7",
+        "size_bytes": 552,
+        "executable": true
+      },
+      {
+        "path": "context/workspace/train/.gitkeep",
+        "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size_bytes": 0,
+        "executable": false
+      },
+      {
+        "path": "context/workspace/train/banking77.json",
+        "digest": "sha256:f8009f0e01246eef6ad446dc03f48d264d8b923e77fe206965799e9a502afbad",
+        "size_bytes": 37481,
+        "executable": false
+      },
+      {
+        "path": "execution-requirements.toml",
+        "digest": "sha256:66e85eb755149e092b0ea5b5d061470b07fef175ad6f9495ffa7e7899f4842f6",
+        "size_bytes": 316,
+        "executable": false
+      },
+      {
+        "path": "instruction.md",
+        "digest": "sha256:6d16c3167464454c59f59aaa9dd85df6c8c8072d9826d5d5b426350c6fc89626",
+        "size_bytes": 2497,
+        "executable": false
+      }
+    ],
+    "directories": [
+      "context",
+      "context/fixtures",
+      "context/harness",
+      "context/harness/src",
+      "context/local_verifier",
+      "context/proxy",
+      "context/workspace",
+      "context/workspace/train"
+    ],
+    "input_digest": "sha256:5666beb4ab0be57013009a497d6042b4c81d0dfb4255e480cba8614620893b7d"
+  },
+  "requirements_file": {
+    "path": "execution-requirements.toml",
+    "digest": "sha256:66e85eb755149e092b0ea5b5d061470b07fef175ad6f9495ffa7e7899f4842f6",
+    "size_bytes": 316,
+    "executable": false
+  },
+  "execution_requirements": {
+    "schema_version": "synth.container-execution-requirements.v1",
+    "platform": "linux/amd64",
+    "resources": {
+      "cpu_millis": 4000,
+      "memory_bytes": 8589934592,
+      "disk_bytes": 21474836480,
+      "gpu_kind": "none",
+      "gpu_count": 0
+    },
+    "max_wall_seconds": 1800,
+    "network": {
+      "mode": "none",
+      "hosts": []
+    },
+    "privileged": false,
+    "verifier_isolation": "self_reported"
+  },
+  "execution_requirements_digest": "sha256:638a115a666249efff29afd32732359e5bfb991b5acd6af3abcb2873fbfa4d5d"
+}

@@ -1,0 +1,6 @@
+schema_version = "synth.harbor-translation-policy.v1"
+platform = "linux/amd64"
+runtime_command = ["bash"]
+[network]
+mode = "none"
+hosts = []

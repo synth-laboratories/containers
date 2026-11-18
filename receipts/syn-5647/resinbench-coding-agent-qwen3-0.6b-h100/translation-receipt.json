@@ -1,0 +1,265 @@
+{
+  "schema_version": "synth.harbor-translation-receipt.v1",
+  "bundle_id": "coding-agent-qwen3-0.6b-h100",
+  "source_dialect": "harbor-task-1.0",
+  "source_task_toml_digest": "sha256:b7bc9b8d968c3dd00b9b2e78c0115a5e6c734f8bfa68268be7d89771c7698e1f",
+  "source_declarations": {
+    "version": "1.0",
+    "metadata": {
+      "category": "systems-optimization",
+      "model": "Qwen/Qwen3-0.6B",
+      "model_revision": "c1899de289a04d12100db370d81485cdf75e47ca",
+      "resin_commit": "3e9dd91d29824dfd823d8c6cfc0f4b936bbee82c",
+      "gpu": "H100"
+    },
+    "agent": {
+      "timeout_sec": 600.0
+    },
+    "verifier": {
+      "timeout_sec": 1500.0,
+      "environment_mode": "separate",
+      "network_mode": "no-network"
+    },
+    "environment": {
+      "build_timeout_sec": 600.0,
+      "cpus": 2,
+      "memory_mb": 4096,
+      "storage_mb": 10240
+    },
+    "artifacts": [
+      {
+        "source": "/app/candidate"
+      }
+    ]
+  },
+  "policy_digest": "sha256:03d5f011f574ee2aa8669e2cdaa040cf55f524e4cadd5777aa22518088c358fe",
+  "phases": [
+    {
+      "name": "build",
+      "entrypoint": "build.sh",
+      "packaged": true,
+      "isolation": null,
+      "source_isolation_spelling": null,
+      "network_mode": null,
+      "timeout_seconds": null
+    },
+    {
+      "name": "agent",
+      "entrypoint": "instruction.md",
+      "packaged": true,
+      "isolation": null,
+      "source_isolation_spelling": null,
+      "network_mode": null,
+      "timeout_seconds": 600
+    },
+    {
+      "name": "verifier",
+      "entrypoint": "tests/test.sh",
+      "packaged": false,
+      "isolation": "isolated",
+      "source_isolation_spelling": "separate",
+      "network_mode": "no-network",
+      "timeout_seconds": 1500
+    }
+  ],
+  "visible_inputs": [
+    {
+      "path": "environment/bench-config.json",
+      "digest": "sha256:b137a3006abf979c8c39921063ee40483232f5f9ee9f30fc9679782d27859b06",
+      "size_bytes": 42,
+      "executable": false
+    },
+    {
+      "path": "environment/bench.py",
+      "digest": "sha256:09758be37cfa3fd23d6afb05a4732569bf83cc0061317304b8d67a723b2215f5",
+      "size_bytes": 717,
+      "executable": false
+    },
+    {
+      "path": "environment/candidate/qwen3/__init__.py",
+      "digest": "sha256:fc57a5d7af4a8be0cf630a1498ed48f9b2fbf1c2b41a3d90e546008a57158eba",
+      "size_bytes": 69,
+      "executable": false
+    },
+    {
+      "path": "environment/candidate/qwen3/cache.py",
+      "digest": "sha256:47cdef21ebe552aa33745a2fb00ffad7bf74e1dfb0fd730e3d90cd3fd46c42ee",
+      "size_bytes": 3928,
+      "executable": false
+    },
+    {
+      "path": "environment/candidate/qwen3/checkpoint.py",
+      "digest": "sha256:2869046b58bd089aaca736ee6b2240adc74cb51db62ecaab36dfaf237bbfce15",
+      "size_bytes": 2704,
+      "executable": false
+    },
+    {
+      "path": "environment/candidate/qwen3/cuda.py",
+      "digest": "sha256:8ee86b99f329fc28970cacccfed93a6f62b7a48f6b366370c963c99595f32c1f",
+      "size_bytes": 18147,
+      "executable": false
+    },
+    {
+      "path": "environment/candidate/qwen3/kv_append.py",
+      "digest": "sha256:307fe9a204bcbf3a47ecf3f19aa281556a8d6c3a4f04e338b3f6ad8fcd5a4b1e",
+      "size_bytes": 3213,
+      "executable": false
+    },
+    {
+      "path": "environment/candidate/qwen3/model.py",
+      "digest": "sha256:31b4f0fa365fffbbe83d044361082db8d2b71ba7754632410f4c4818d27705fb",
+      "size_bytes": 9723,
+      "executable": false
+    },
+    {
+      "path": "environment/candidate/qwen3/rotary.py",
+      "digest": "sha256:8a35846b1a5ec702d03d0d32d8e0dc8b46f63f0132c937b8a7141bfa8c035853",
+      "size_bytes": 3864,
+      "executable": false
+    },
+    {
+      "path": "instruction.md",
+      "digest": "sha256:cb6e48fab6f1965e1dc53efe0d86f6853258beea0bb050e9ad54ea4656fa1a33",
+      "size_bytes": 2634,
+      "executable": false
+    }
+  ],
+  "excluded_inputs": [
+    {
+      "path": "tests/Dockerfile",
+      "digest": "sha256:5312d1c32084ae85d0a12dd5bca6c42e3da49094c287041bdc5385179cf1a757",
+      "size_bytes": 49,
+      "reason": "verifier_only"
+    },
+    {
+      "path": "tests/evaluator.json",
+      "digest": "sha256:1e67f1f94bd64df3643395ced72b79405a1d654cf2c1ef6216ca2716510f135a",
+      "size_bytes": 96,
+      "reason": "verifier_only"
+    },
+    {
+      "path": "tests/test.sh",
+      "digest": "sha256:8049579dd7fe00eb6db08ad18d355f1a3c14ca6cb0f5f1596c3650e25ee8ab1f",
+      "size_bytes": 45,
+      "reason": "verifier_only"
+    },
+    {
+      "path": "tests/verifier.py",
+      "digest": "sha256:2ab2f7b24d664bbd8357a6dce92aef6cd9426fa3ac58551e7e2e97edc6662ea9",
+      "size_bytes": 2044,
+      "reason": "verifier_only"
+    },
+    {
+      "path": "solution/reference/qwen3/__init__.py",
+      "digest": "sha256:fc57a5d7af4a8be0cf630a1498ed48f9b2fbf1c2b41a3d90e546008a57158eba",
+      "size_bytes": 69,
+      "reason": "reference_solution"
+    },
+    {
+      "path": "solution/reference/qwen3/cache.py",
+      "digest": "sha256:47cdef21ebe552aa33745a2fb00ffad7bf74e1dfb0fd730e3d90cd3fd46c42ee",
+      "size_bytes": 3928,
+      "reason": "reference_solution"
+    },
+    {
+      "path": "solution/reference/qwen3/checkpoint.py",
+      "digest": "sha256:2869046b58bd089aaca736ee6b2240adc74cb51db62ecaab36dfaf237bbfce15",
+      "size_bytes": 2704,
+      "reason": "reference_solution"
+    },
+    {
+      "path": "solution/reference/qwen3/cuda.py",
+      "digest": "sha256:8ee86b99f329fc28970cacccfed93a6f62b7a48f6b366370c963c99595f32c1f",
+      "size_bytes": 18147,
+      "reason": "reference_solution"
+    },
+    {
+      "path": "solution/reference/qwen3/kv_append.py",
+      "digest": "sha256:307fe9a204bcbf3a47ecf3f19aa281556a8d6c3a4f04e338b3f6ad8fcd5a4b1e",
+      "size_bytes": 3213,
+      "reason": "reference_solution"
+    },
+    {
+      "path": "solution/reference/qwen3/model.py",
+      "digest": "sha256:31b4f0fa365fffbbe83d044361082db8d2b71ba7754632410f4c4818d27705fb",
+      "size_bytes": 9723,
+      "reason": "reference_solution"
+    },
+    {
+      "path": "solution/reference/qwen3/rotary.py",
+      "digest": "sha256:8a35846b1a5ec702d03d0d32d8e0dc8b46f63f0132c937b8a7141bfa8c035853",
+      "size_bytes": 3864,
+      "reason": "reference_solution"
+    },
+    {
+      "path": "solution/solve.sh",
+      "digest": "sha256:87391810c0731365bca08b96ac20fef95dd3c5e4011ac22614a543054bfa3543",
+      "size_bytes": 62,
+      "reason": "reference_solution"
+    },
+    {
+      "path": "environment/Dockerfile",
+      "digest": "sha256:4cba3bbcb7a115e62e3c30e221e7d46848ed9c768483be13345916a92a1dbbbc",
+      "size_bytes": 180,
+      "reason": "translated_recipe"
+    }
+  ],
+  "dockerfile_rewrites": [],
+  "requirement_provenance": {
+    "platform": "policy",
+    "network": "policy",
+    "privileged": "fixed:false (translation never grants privilege)",
+    "verifier_isolation": "derived:training-container scores are self-reported/unattested; the held-out verifier is a separate phase (source:verifier.environment_mode=separate)",
+    "resources": "source:environment.{cpus,memory_mb,storage_mb,gpus}",
+    "max_wall_seconds": "source:agent.timeout_sec"
+  },
+  "package_id": "coding-agent-qwen3-0.6b-h100",
+  "manifest_digest": "sha256:5ec309168cf17567101166036fb2dfd9b0872a755baea3cb3ed5e8ee4d8a2211",
+  "build_input_digest": "sha256:79aa274dcfb6b9920e81a0ef17c95989efc09ae09865f650cfcd2ed12622a1f9",
+  "execution_requirements": {
+    "schema_version": "synth.container-execution-requirements.v1",
+    "platform": "linux/amd64",
+    "resources": {
+      "cpu_millis": 2000,
+      "memory_bytes": 4294967296,
+      "disk_bytes": 10737418240,
+      "gpu_kind": "none",
+      "gpu_count": 0
+    },
+    "max_wall_seconds": 600,
+    "network": {
+      "mode": "none",
+      "hosts": []
+    },
+    "privileged": false,
+    "verifier_isolation": "self_reported"
+  },
+  "execution_requirements_digest": "sha256:13275f0fcbf16086d5f178d3ea151d4db05df26570905ad51d5fb3e757d719d1",
+  "verifier_requirements": {
+    "schema_version": "synth.container-execution-requirements.v1",
+    "platform": "linux/amd64",
+    "resources": {
+      "cpu_millis": 2000,
+      "memory_bytes": 4294967296,
+      "disk_bytes": 10737418240,
+      "gpu_kind": "none",
+      "gpu_count": 0
+    },
+    "max_wall_seconds": 1500,
+    "network": {
+      "mode": "none",
+      "hosts": []
+    },
+    "privileged": false,
+    "verifier_isolation": "isolated"
+  },
+  "verifier_requirements_digest": "sha256:5e49be7f5e71e6b8d2a9af91044878139a98a52797d7772589a01b499f26e91a",
+  "verifier_requirement_provenance": {
+    "platform": "policy",
+    "network": "source:verifier.network_mode",
+    "max_wall_seconds": "source:verifier.timeout_sec",
+    "resources": "source:environment (Harbor verifier inherits it)",
+    "privileged": "fixed:false (translation never grants privilege)",
+    "verifier_isolation": "source:verifier.environment_mode=separate"
+  }
+}

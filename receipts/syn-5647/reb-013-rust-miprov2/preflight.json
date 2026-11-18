@@ -1,0 +1,435 @@
+{
+  "schema_version": "synth.harbor-translation-proof.v1",
+  "label": "fixture capability packets; no live ScoringOfferCapabilities producer exists, so no supplier, adapter, image or egress policy is qualified",
+  "source_ref": "ResearchEngineeringBench@/Users/joshuapurtell/GitHub/worktrees/5647-containers-20261118/f3e9ce6108dd9c58189c647b41f78f37902c8f7fdapters/harbor/bundles/013-rust-miprov2",
+  "bundle_id": "013-rust-miprov2",
+  "source_dialect": "reb-task-metadata",
+  "translation_receipt_digest": "sha256:a54bcb4653530085901cd2baf52c0bc9c6517bea96c2557cb65044f08c9cec22",
+  "build_input_digest": "sha256:5666beb4ab0be57013009a497d6042b4c81d0dfb4255e480cba8614620893b7d",
+  "execution_requirements_digest": "sha256:638a115a666249efff29afd32732359e5bfb991b5acd6af3abcb2873fbfa4d5d",
+  "verifier_requirements_digest": "sha256:b019ab9f24105f712bc2e8f7201df15730ccd098b929b4ca321a38ab97744646",
+  "offers": {
+    "training": {
+      "provider": "daytona",
+      "offer_id": "fixture:amd64-4c-8g-20g-1h-nonet-self-reported",
+      "option_id": "sbo1_0000000000000000_0000000000000000000000000000000000000000000000000000000000000000",
+      "catalog_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "descriptor_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "tariff_revision": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "adapter_revision": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "qualification": "qualified",
+      "release_admitted": true,
+      "platforms": [
+        "linux/amd64"
+      ],
+      "resources": {
+        "cpu_millis": 4000,
+        "memory_bytes": 8589934592,
+        "disk_bytes": 21474836480,
+        "gpu_kind": "none",
+        "gpu_count": 0
+      },
+      "max_wall_seconds": 3600,
+      "network_modes": [
+        "none"
+      ],
+      "network_policy_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+      "allowed_hosts": [],
+      "verifier_modes": [
+        "self_reported"
+      ],
+      "privileged": false
+    },
+    "verifier": {
+      "provider": "daytona",
+      "offer_id": "fixture:amd64-4c-8g-20g-2h-nonet-isolated",
+      "option_id": "sbo1_0000000000000000_0000000000000000000000000000000000000000000000000000000000000000",
+      "catalog_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "descriptor_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "tariff_revision": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "adapter_revision": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "qualification": "qualified",
+      "release_admitted": true,
+      "platforms": [
+        "linux/amd64"
+      ],
+      "resources": {
+        "cpu_millis": 4000,
+        "memory_bytes": 8589934592,
+        "disk_bytes": 21474836480,
+        "gpu_kind": "none",
+        "gpu_count": 0
+      },
+      "max_wall_seconds": 7200,
+      "network_modes": [
+        "none"
+      ],
+      "network_policy_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+      "allowed_hosts": [],
+      "verifier_modes": [
+        "isolated"
+      ],
+      "privileged": false
+    }
+  },
+  "packaged_paths": [
+    "Dockerfile",
+    "build.sh",
+    "container.toml",
+    "context/entrypoint.sh",
+    "context/fixtures/banking77.json",
+    "context/fixtures/manifest.json",
+    "context/harness/.gitignore",
+    "context/harness/Cargo.toml",
+    "context/harness/src/main.rs",
+    "context/local_verifier/test.sh",
+    "context/proxy/proxy_server.py",
+    "context/workspace/.gitignore",
+    "context/workspace/INTERFACE.md",
+    "context/workspace/RESEARCH_LOG.md",
+    "context/workspace/TASK.md",
+    "context/workspace/TIME_LIMIT.md",
+    "context/workspace/dev_loop.py",
+    "context/workspace/miprov2.rs",
+    "context/workspace/pins.json",
+    "context/workspace/research_log.py",
+    "context/workspace/research_log.sh",
+    "context/workspace/run_dev.sh",
+    "context/workspace/train/.gitkeep",
+    "context/workspace/train/banking77.json",
+    "execution-requirements.toml",
+    "instruction.md"
+  ],
+  "excluded_paths": [
+    "tests/INTERFACE.md",
+    "tests/evaluator/agent_fixtures/banking77.json",
+    "tests/evaluator/agent_fixtures/manifest.json",
+    "tests/evaluator/agent_trace_lib.py",
+    "tests/evaluator/dev_runner.py",
+    "tests/evaluator/eval.sh",
+    "tests/evaluator/eval_submission.sh",
+    "tests/evaluator/harness/.gitignore",
+    "tests/evaluator/harness/Cargo.toml",
+    "tests/evaluator/harness/src/main.rs",
+    "tests/evaluator/heldout/.gitkeep",
+    "tests/evaluator/heldout/healthbench.json",
+    "tests/evaluator/heldout/heart_disease.json",
+    "tests/evaluator/heldout/manifest.json",
+    "tests/evaluator/heldout_eval.json",
+    "tests/evaluator/postmortem_rubric.py",
+    "tests/evaluator/process_rubric.py",
+    "tests/evaluator/proxy/proxy_server.py",
+    "tests/evaluator/research_log_lib.py",
+    "tests/evaluator/score.py",
+    "tests/evaluator/semantic_rubric.py",
+    "tests/reference/miprov2.rs",
+    "tests/rubric.json",
+    "tests/test.sh",
+    "solution/miprov2.rs",
+    "solution/solve.sh",
+    "environment/Dockerfile.local",
+    "fixtures/banking77.json",
+    "fixtures/manifest.json",
+    "environment/Dockerfile"
+  ],
+  "preflight": {
+    "training": {
+      "supported": [
+        "supported",
+        "execution_supported"
+      ],
+      "artifact_platform_mismatch": [
+        "unsupported",
+        "execution_artifact_platform_mismatch"
+      ],
+      "verifier_isolation_unavailable": [
+        "unsupported",
+        "execution_verifier_isolation_unsupported"
+      ],
+      "network_mode_unenforced": [
+        "unsupported",
+        "execution_network_unsupported"
+      ],
+      "wall_time_cap_below_required": [
+        "unsupported",
+        "execution_wall_time_unsupported"
+      ],
+      "offer_unqualified": [
+        "unqualified",
+        "execution_offer_unqualified"
+      ]
+    },
+    "verifier": {
+      "supported": [
+        "supported",
+        "execution_supported"
+      ],
+      "artifact_platform_mismatch": [
+        "unsupported",
+        "execution_artifact_platform_mismatch"
+      ],
+      "verifier_isolation_unavailable": [
+        "unsupported",
+        "execution_verifier_isolation_unsupported"
+      ],
+      "network_mode_unenforced": [
+        "unsupported",
+        "execution_network_unsupported"
+      ],
+      "wall_time_cap_below_required": [
+        "unsupported",
+        "execution_wall_time_unsupported"
+      ],
+      "offer_unqualified": [
+        "unqualified",
+        "execution_offer_unqualified"
+      ]
+    }
+  },
+  "preflight_receipts": {
+    "training": {
+      "supported": {
+        "schema_version": "synth.container-execution-preflight.v1",
+        "result": "supported",
+        "code": "execution_supported",
+        "cause": "All declared requirements fit the exact qualified release offer",
+        "stage": "scoring_preflight",
+        "requirements_digest": "sha256:638a115a666249efff29afd32732359e5bfb991b5acd6af3abcb2873fbfa4d5d",
+        "requested_requirements_digest": "sha256:638a115a666249efff29afd32732359e5bfb991b5acd6af3abcb2873fbfa4d5d",
+        "provider": "daytona",
+        "offer_id": "fixture:amd64-4c-8g-20g-1h-nonet-self-reported",
+        "option_id": "sbo1_0000000000000000_0000000000000000000000000000000000000000000000000000000000000000",
+        "catalog_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "descriptor_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "tariff_revision": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "adapter_revision": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+        "network_policy_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+        "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "artifact_platform": "linux/amd64",
+        "artifact_inspection_receipt_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "artifact_platform_mismatch": {
+        "schema_version": "synth.container-execution-preflight.v1",
+        "result": "unsupported",
+        "code": "execution_artifact_platform_mismatch",
+        "cause": "Inspected image platform linux/arm64 differs from required linux/amd64",
+        "stage": "scoring_preflight",
+        "requirements_digest": "sha256:638a115a666249efff29afd32732359e5bfb991b5acd6af3abcb2873fbfa4d5d",
+        "requested_requirements_digest": "sha256:638a115a666249efff29afd32732359e5bfb991b5acd6af3abcb2873fbfa4d5d",
+        "provider": "daytona",
+        "offer_id": "fixture:amd64-4c-8g-20g-1h-nonet-self-reported",
+        "option_id": "sbo1_0000000000000000_0000000000000000000000000000000000000000000000000000000000000000",
+        "catalog_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "descriptor_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "tariff_revision": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "adapter_revision": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+        "network_policy_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+        "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "artifact_platform": "linux/arm64",
+        "artifact_inspection_receipt_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "verifier_isolation_unavailable": {
+        "schema_version": "synth.container-execution-preflight.v1",
+        "result": "unsupported",
+        "code": "execution_verifier_isolation_unsupported",
+        "cause": "Adapter sha256:4444444444444444444444444444444444444444444444444444444444444444 does not enforce self_reported verifier isolation",
+        "stage": "scoring_preflight",
+        "requirements_digest": "sha256:638a115a666249efff29afd32732359e5bfb991b5acd6af3abcb2873fbfa4d5d",
+        "requested_requirements_digest": "sha256:638a115a666249efff29afd32732359e5bfb991b5acd6af3abcb2873fbfa4d5d",
+        "provider": "daytona",
+        "offer_id": "fixture:amd64-4c-8g-20g-1h-nonet-self-reported",
+        "option_id": "sbo1_0000000000000000_0000000000000000000000000000000000000000000000000000000000000000",
+        "catalog_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "descriptor_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "tariff_revision": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "adapter_revision": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+        "network_policy_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+        "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "artifact_platform": "linux/amd64",
+        "artifact_inspection_receipt_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "network_mode_unenforced": {
+        "schema_version": "synth.container-execution-preflight.v1",
+        "result": "unsupported",
+        "code": "execution_network_unsupported",
+        "cause": "Adapter sha256:4444444444444444444444444444444444444444444444444444444444444444 does not enforce none networking",
+        "stage": "scoring_preflight",
+        "requirements_digest": "sha256:638a115a666249efff29afd32732359e5bfb991b5acd6af3abcb2873fbfa4d5d",
+        "requested_requirements_digest": "sha256:638a115a666249efff29afd32732359e5bfb991b5acd6af3abcb2873fbfa4d5d",
+        "provider": "daytona",
+        "offer_id": "fixture:amd64-4c-8g-20g-1h-nonet-self-reported",
+        "option_id": "sbo1_0000000000000000_0000000000000000000000000000000000000000000000000000000000000000",
+        "catalog_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "descriptor_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "tariff_revision": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "adapter_revision": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+        "network_policy_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+        "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "artifact_platform": "linux/amd64",
+        "artifact_inspection_receipt_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "wall_time_cap_below_required": {
+        "schema_version": "synth.container-execution-preflight.v1",
+        "result": "unsupported",
+        "code": "execution_wall_time_unsupported",
+        "cause": "Requested wall time 1800s exceeds 1799s",
+        "stage": "scoring_preflight",
+        "requirements_digest": "sha256:638a115a666249efff29afd32732359e5bfb991b5acd6af3abcb2873fbfa4d5d",
+        "requested_requirements_digest": "sha256:638a115a666249efff29afd32732359e5bfb991b5acd6af3abcb2873fbfa4d5d",
+        "provider": "daytona",
+        "offer_id": "fixture:amd64-4c-8g-20g-1h-nonet-self-reported",
+        "option_id": "sbo1_0000000000000000_0000000000000000000000000000000000000000000000000000000000000000",
+        "catalog_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "descriptor_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "tariff_revision": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "adapter_revision": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+        "network_policy_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+        "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "artifact_platform": "linux/amd64",
+        "artifact_inspection_receipt_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "offer_unqualified": {
+        "schema_version": "synth.container-execution-preflight.v1",
+        "result": "unqualified",
+        "code": "execution_offer_unqualified",
+        "cause": "Offer fixture:amd64-4c-8g-20g-1h-nonet-self-reported has no qualified adapter/capability packet",
+        "stage": "scoring_preflight",
+        "requirements_digest": "sha256:638a115a666249efff29afd32732359e5bfb991b5acd6af3abcb2873fbfa4d5d",
+        "requested_requirements_digest": "sha256:638a115a666249efff29afd32732359e5bfb991b5acd6af3abcb2873fbfa4d5d",
+        "provider": "daytona",
+        "offer_id": "fixture:amd64-4c-8g-20g-1h-nonet-self-reported",
+        "option_id": "sbo1_0000000000000000_0000000000000000000000000000000000000000000000000000000000000000",
+        "catalog_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "descriptor_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "tariff_revision": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "adapter_revision": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+        "network_policy_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+        "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "artifact_platform": "linux/amd64",
+        "artifact_inspection_receipt_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "verifier": {
+      "supported": {
+        "schema_version": "synth.container-execution-preflight.v1",
+        "result": "supported",
+        "code": "execution_supported",
+        "cause": "All declared requirements fit the exact qualified release offer",
+        "stage": "scoring_preflight",
+        "requirements_digest": "sha256:b019ab9f24105f712bc2e8f7201df15730ccd098b929b4ca321a38ab97744646",
+        "requested_requirements_digest": "sha256:b019ab9f24105f712bc2e8f7201df15730ccd098b929b4ca321a38ab97744646",
+        "provider": "daytona",
+        "offer_id": "fixture:amd64-4c-8g-20g-2h-nonet-isolated",
+        "option_id": "sbo1_0000000000000000_0000000000000000000000000000000000000000000000000000000000000000",
+        "catalog_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "descriptor_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "tariff_revision": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "adapter_revision": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+        "network_policy_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+        "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "artifact_platform": "linux/amd64",
+        "artifact_inspection_receipt_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "artifact_platform_mismatch": {
+        "schema_version": "synth.container-execution-preflight.v1",
+        "result": "unsupported",
+        "code": "execution_artifact_platform_mismatch",
+        "cause": "Inspected image platform linux/arm64 differs from required linux/amd64",
+        "stage": "scoring_preflight",
+        "requirements_digest": "sha256:b019ab9f24105f712bc2e8f7201df15730ccd098b929b4ca321a38ab97744646",
+        "requested_requirements_digest": "sha256:b019ab9f24105f712bc2e8f7201df15730ccd098b929b4ca321a38ab97744646",
+        "provider": "daytona",
+        "offer_id": "fixture:amd64-4c-8g-20g-2h-nonet-isolated",
+        "option_id": "sbo1_0000000000000000_0000000000000000000000000000000000000000000000000000000000000000",
+        "catalog_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "descriptor_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "tariff_revision": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "adapter_revision": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+        "network_policy_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+        "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "artifact_platform": "linux/arm64",
+        "artifact_inspection_receipt_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "verifier_isolation_unavailable": {
+        "schema_version": "synth.container-execution-preflight.v1",
+        "result": "unsupported",
+        "code": "execution_verifier_isolation_unsupported",
+        "cause": "Adapter sha256:4444444444444444444444444444444444444444444444444444444444444444 does not enforce isolated verifier isolation",
+        "stage": "scoring_preflight",
+        "requirements_digest": "sha256:b019ab9f24105f712bc2e8f7201df15730ccd098b929b4ca321a38ab97744646",
+        "requested_requirements_digest": "sha256:b019ab9f24105f712bc2e8f7201df15730ccd098b929b4ca321a38ab97744646",
+        "provider": "daytona",
+        "offer_id": "fixture:amd64-4c-8g-20g-2h-nonet-isolated",
+        "option_id": "sbo1_0000000000000000_0000000000000000000000000000000000000000000000000000000000000000",
+        "catalog_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "descriptor_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "tariff_revision": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "adapter_revision": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+        "network_policy_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+        "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "artifact_platform": "linux/amd64",
+        "artifact_inspection_receipt_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "network_mode_unenforced": {
+        "schema_version": "synth.container-execution-preflight.v1",
+        "result": "unsupported",
+        "code": "execution_network_unsupported",
+        "cause": "Adapter sha256:4444444444444444444444444444444444444444444444444444444444444444 does not enforce none networking",
+        "stage": "scoring_preflight",
+        "requirements_digest": "sha256:b019ab9f24105f712bc2e8f7201df15730ccd098b929b4ca321a38ab97744646",
+        "requested_requirements_digest": "sha256:b019ab9f24105f712bc2e8f7201df15730ccd098b929b4ca321a38ab97744646",
+        "provider": "daytona",
+        "offer_id": "fixture:amd64-4c-8g-20g-2h-nonet-isolated",
+        "option_id": "sbo1_0000000000000000_0000000000000000000000000000000000000000000000000000000000000000",
+        "catalog_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "descriptor_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "tariff_revision": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "adapter_revision": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+        "network_policy_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+        "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "artifact_platform": "linux/amd64",
+        "artifact_inspection_receipt_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "wall_time_cap_below_required": {
+        "schema_version": "synth.container-execution-preflight.v1",
+        "result": "unsupported",
+        "code": "execution_wall_time_unsupported",
+        "cause": "Requested wall time 3600s exceeds 3599s",
+        "stage": "scoring_preflight",
+        "requirements_digest": "sha256:b019ab9f24105f712bc2e8f7201df15730ccd098b929b4ca321a38ab97744646",
+        "requested_requirements_digest": "sha256:b019ab9f24105f712bc2e8f7201df15730ccd098b929b4ca321a38ab97744646",
+        "provider": "daytona",
+        "offer_id": "fixture:amd64-4c-8g-20g-2h-nonet-isolated",
+        "option_id": "sbo1_0000000000000000_0000000000000000000000000000000000000000000000000000000000000000",
+        "catalog_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "descriptor_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "tariff_revision": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "adapter_revision": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+        "network_policy_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+        "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "artifact_platform": "linux/amd64",
+        "artifact_inspection_receipt_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "offer_unqualified": {
+        "schema_version": "synth.container-execution-preflight.v1",
+        "result": "unqualified",
+        "code": "execution_offer_unqualified",
+        "cause": "Offer fixture:amd64-4c-8g-20g-2h-nonet-isolated has no qualified adapter/capability packet",
+        "stage": "scoring_preflight",
+        "requirements_digest": "sha256:b019ab9f24105f712bc2e8f7201df15730ccd098b929b4ca321a38ab97744646",
+        "requested_requirements_digest": "sha256:b019ab9f24105f712bc2e8f7201df15730ccd098b929b4ca321a38ab97744646",
+        "provider": "daytona",
+        "offer_id": "fixture:amd64-4c-8g-20g-2h-nonet-isolated",
+        "option_id": "sbo1_0000000000000000_0000000000000000000000000000000000000000000000000000000000000000",
+        "catalog_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "descriptor_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "tariff_revision": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "adapter_revision": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+        "network_policy_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+        "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "artifact_platform": "linux/amd64",
+        "artifact_inspection_receipt_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    }
+  }
+}

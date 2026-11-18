@@ -1,0 +1,154 @@
+{
+  "schema_version": "synth.container-execution-package.v1",
+  "build_plan": {
+    "schema_version": "synth.container-build-plan.v1",
+    "manifest": {
+      "package_id": "coding-agent-qwen3-0.6b-h100",
+      "build": {
+        "entrypoint": "build.sh",
+        "inputs": [
+          "Dockerfile",
+          "context",
+          "execution-requirements.toml",
+          "instruction.md"
+        ],
+        "arguments": [],
+        "platform": "linux/amd64"
+      },
+      "runtime": {
+        "profile": "command",
+        "command": [
+          "bash"
+        ],
+        "working_directory": "/app",
+        "readiness": {
+          "kind": "process",
+          "path": null,
+          "port": null,
+          "adapter": null
+        }
+      },
+      "contracts": [],
+      "credentials": [],
+      "dependencies": [],
+      "schema_version": "synth.container-package.v1"
+    },
+    "files": [
+      {
+        "path": "Dockerfile",
+        "digest": "sha256:ea951849cc575c93c102864ed4453f56b086e5c174a71faf235208b6f663c642",
+        "size_bytes": 334,
+        "executable": false
+      },
+      {
+        "path": "build.sh",
+        "digest": "sha256:d87f7d010131be41f891f6f0703dc226f16a162b1d134762ad10ce33bd616b89",
+        "size_bytes": 849,
+        "executable": true
+      },
+      {
+        "path": "container.toml",
+        "digest": "sha256:5ec309168cf17567101166036fb2dfd9b0872a755baea3cb3ed5e8ee4d8a2211",
+        "size_bytes": 347,
+        "executable": false
+      },
+      {
+        "path": "context/bench-config.json",
+        "digest": "sha256:b137a3006abf979c8c39921063ee40483232f5f9ee9f30fc9679782d27859b06",
+        "size_bytes": 42,
+        "executable": false
+      },
+      {
+        "path": "context/bench.py",
+        "digest": "sha256:09758be37cfa3fd23d6afb05a4732569bf83cc0061317304b8d67a723b2215f5",
+        "size_bytes": 717,
+        "executable": false
+      },
+      {
+        "path": "context/candidate/qwen3/__init__.py",
+        "digest": "sha256:fc57a5d7af4a8be0cf630a1498ed48f9b2fbf1c2b41a3d90e546008a57158eba",
+        "size_bytes": 69,
+        "executable": false
+      },
+      {
+        "path": "context/candidate/qwen3/cache.py",
+        "digest": "sha256:47cdef21ebe552aa33745a2fb00ffad7bf74e1dfb0fd730e3d90cd3fd46c42ee",
+        "size_bytes": 3928,
+        "executable": false
+      },
+      {
+        "path": "context/candidate/qwen3/checkpoint.py",
+        "digest": "sha256:2869046b58bd089aaca736ee6b2240adc74cb51db62ecaab36dfaf237bbfce15",
+        "size_bytes": 2704,
+        "executable": false
+      },
+      {
+        "path": "context/candidate/qwen3/cuda.py",
+        "digest": "sha256:8ee86b99f329fc28970cacccfed93a6f62b7a48f6b366370c963c99595f32c1f",
+        "size_bytes": 18147,
+        "executable": false
+      },
+      {
+        "path": "context/candidate/qwen3/kv_append.py",
+        "digest": "sha256:307fe9a204bcbf3a47ecf3f19aa281556a8d6c3a4f04e338b3f6ad8fcd5a4b1e",
+        "size_bytes": 3213,
+        "executable": false
+      },
+      {
+        "path": "context/candidate/qwen3/model.py",
+        "digest": "sha256:31b4f0fa365fffbbe83d044361082db8d2b71ba7754632410f4c4818d27705fb",
+        "size_bytes": 9723,
+        "executable": false
+      },
+      {
+        "path": "context/candidate/qwen3/rotary.py",
+        "digest": "sha256:8a35846b1a5ec702d03d0d32d8e0dc8b46f63f0132c937b8a7141bfa8c035853",
+        "size_bytes": 3864,
+        "executable": false
+      },
+      {
+        "path": "execution-requirements.toml",
+        "digest": "sha256:3f241082949eb4ab5c4ce71748843920105d79e1c4163ac61d13a489a43f4a11",
+        "size_bytes": 315,
+        "executable": false
+      },
+      {
+        "path": "instruction.md",
+        "digest": "sha256:cb6e48fab6f1965e1dc53efe0d86f6853258beea0bb050e9ad54ea4656fa1a33",
+        "size_bytes": 2634,
+        "executable": false
+      }
+    ],
+    "directories": [
+      "context",
+      "context/candidate",
+      "context/candidate/qwen3"
+    ],
+    "input_digest": "sha256:79aa274dcfb6b9920e81a0ef17c95989efc09ae09865f650cfcd2ed12622a1f9"
+  },
+  "requirements_file": {
+    "path": "execution-requirements.toml",
+    "digest": "sha256:3f241082949eb4ab5c4ce71748843920105d79e1c4163ac61d13a489a43f4a11",
+    "size_bytes": 315,
+    "executable": false
+  },
+  "execution_requirements": {
+    "schema_version": "synth.container-execution-requirements.v1",
+    "platform": "linux/amd64",
+    "resources": {
+      "cpu_millis": 2000,
+      "memory_bytes": 4294967296,
+      "disk_bytes": 10737418240,
+      "gpu_kind": "none",
+      "gpu_count": 0
+    },
+    "max_wall_seconds": 600,
+    "network": {
+      "mode": "none",
+      "hosts": []
+    },
+    "privileged": false,
+    "verifier_isolation": "self_reported"
+  },
+  "execution_requirements_digest": "sha256:13275f0fcbf16086d5f178d3ea151d4db05df26570905ad51d5fb3e757d719d1"
+}

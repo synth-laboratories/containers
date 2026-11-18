@@ -1,0 +1,16 @@
+schema_version = "synth.container-execution-requirements.v1"
+platform = "linux/amd64"
+max_wall_seconds = 600
+privileged = false
+verifier_isolation = "self_reported"
+
+[resources]
+cpu_millis = 2000
+memory_bytes = 4294967296
+disk_bytes = 10737418240
+gpu_kind = "none"
+gpu_count = 0
+
+[network]
+mode = "none"
+hosts = []

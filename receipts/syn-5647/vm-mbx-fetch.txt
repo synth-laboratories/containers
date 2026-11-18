@@ -1,0 +1,19 @@
+SYN-5647 build-script Rust mapping check, exe.dev VM synth-slot-c1, 2026-11-18T05:2xZ.
+Input: REB 013 environment/harness/Cargo.toml from ResearchEngineeringBench origin/dev.
+Command (as emitted in build.sh, run under nice):
+  CARGO_HOME="$root/context/.synth-cargo-home" mbx fetch --manifest-path "$root/context/harness/Cargo.toml"
+Result: exit 0; downloaded serde, serde_json, tokio and transitive crates;
+context/harness/Cargo.lock created; context/.synth-cargo-home/registry/{cache,index,src} = 19M;
+no target/ directory created (fetch only, no compile). Temporary directory removed.
+No docker build, image publish or provider call was run.
+
+Image-side resolve check (same VM, after the host mbx fetch above), resolve-only, no compile:
+  docker run --rm --network none -e CARGO_NET_OFFLINE=true \
+    -v <context>/.synth-cargo-home/registry:/usr/local/cargo/registry:ro \
+    -v <context>/harness:/app/harness:ro rust:1.85-bookworm \
+    cargo fetch --locked --offline --manifest-path /app/harness/Cargo.toml
+Result: cargo 1.85.1 (the bundle's base image toolchain) resolved the mbx-generated
+Cargo.lock (version = 4) from the copied registry with networking disabled: exit 0.
+The amd64 rust:1.85-bookworm base was pulled for this check (same base the bundle uses).
+Not run: the full translated docker build (VM free disk was below the 30 GiB floor) and
+any in-sandbox compile.

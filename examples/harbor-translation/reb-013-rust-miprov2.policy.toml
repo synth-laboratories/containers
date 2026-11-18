@@ -1,0 +1,27 @@
+schema_version = "synth.harbor-translation-policy.v1"
+platform = "linux/amd64"
+[network]
+mode = "none"
+hosts = []
+[resources]
+cpu_millis = 4000
+memory_bytes = 8589934592
+disk_bytes = 21474836480
+gpu_kind = "none"
+gpu_count = 0
+
+# The REB dialect declares no verifier limits. tests/test.sh calls a live scorer,
+# so a real run also needs an exact scorer egress host (an open decision).
+[verifier]
+max_wall_seconds = 3600
+
+[verifier.network]
+mode = "none"
+hosts = []
+
+[verifier.resources]
+cpu_millis = 4000
+memory_bytes = 8589934592
+disk_bytes = 21474836480
+gpu_kind = "none"
+gpu_count = 0

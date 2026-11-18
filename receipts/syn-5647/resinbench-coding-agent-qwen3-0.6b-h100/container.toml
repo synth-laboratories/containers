@@ -1,0 +1,15 @@
+schema_version = "synth.container-package.v1"
+package_id = "coding-agent-qwen3-0.6b-h100"
+
+[build]
+entrypoint = "build.sh"
+inputs = ["Dockerfile", "context", "execution-requirements.toml", "instruction.md"]
+platform = "linux/amd64"
+
+[runtime]
+profile = "command"
+command = ["bash"]
+working_directory = "/app"
+
+[runtime.readiness]
+kind = "process"
