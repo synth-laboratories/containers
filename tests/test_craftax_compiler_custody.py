@@ -94,3 +94,16 @@ def test_unsupported_platform_refuses_before_any_build(monkeypatch):
     with pytest.raises(SystemExit) as error:
         module.main()
     assert error.value.code == 2
+
+
+def test_authorized_boundary_is_the_running_users_github_root(tmp_path):
+    """The x86 build VM runs this preparer natively; its workspace is not a Mac path."""
+    import os
+    import subprocess
+    import sys
+
+    probe = "import runpy,sys; print(runpy.run_path(sys.argv[1])['BOUNDARY'])"
+    env = {**os.environ, "HOME": str(tmp_path)}
+    out = subprocess.run([sys.executable, "-I", "-c", probe, str(path)], env=env,
+                         capture_output=True, text=True, check=True).stdout.strip()
+    assert Path(out) == tmp_path / "GitHub"
