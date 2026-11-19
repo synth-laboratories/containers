@@ -12,7 +12,9 @@ from pydantic import ValidationError
 
 from .execution_package import ExecutionPackageError, ExecutionPackagePlan, plan_execution_package
 from .harbor_translation import (
+    RECEIPT_FILENAME,
     HarborTranslationError,
+    HarborTranslationReceipt,
     load_translation_policy,
     translate_harbor_bundle,
 )
@@ -23,7 +25,9 @@ from .package_compatibility import (
     check_package_compatibility,
 )
 from .package_files import ContainerPackageError, read_package_file
+from .verifier_phase import PHASE_FILENAME, VerifierPhaseError, derive_verifier_phase
 from .package_models import (
+    ImageArtifactIdentity,
     ContainerArtifactDescriptor,
     ContainerPackageManifest,
     ContainerServicePackageManifest,
@@ -54,6 +58,29 @@ def _read_descriptor(path: Path) -> object:
         raise ContainerPackageError("container_package_descriptor_invalid") from error
 
 
+def verifier_phase_from_paths(
+    package: Path, candidate_output: Path, verifier_image: str, verifier_config: Path
+):
+    """Derive the phase from the translated package, its build output and the verifier image."""
+    receipt = HarborTranslationReceipt.model_validate(_read_descriptor(package / RECEIPT_FILENAME))
+    plan = plan_execution_package(package / "container.toml")
+    candidate = PackageBuildOutput.model_validate(_read_descriptor(candidate_output)).artifact
+    config_path = verifier_config.absolute()
+    config_bytes = read_package_file(config_path.parent, config_path.name, maximum=8 * 1024 * 1024)
+    config = json.loads(config_bytes)
+    digest = verifier_image.rpartition("@")[2]
+    verifier = ImageArtifactIdentity(
+        kind="oci_image",
+        digest_kind="oci_manifest",
+        reference=verifier_image,
+        digest=digest,
+        platform=f"{config.get('os')}/{config.get('architecture')}",
+    )
+    return derive_verifier_phase(
+        receipt, plan, candidate=candidate, verifier=verifier, verifier_config=config
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="synth-containers package")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -74,6 +101,14 @@ def main(argv: list[str] | None = None) -> int:
     translate.add_argument("bundle", type=Path)
     translate.add_argument("--policy", type=Path, required=True)
     translate.add_argument("--output", type=Path, required=True)
+    verifier = sub.add_parser(
+        "verifier-phase",
+        help="derive the held-out verifier phase of a translated package (SYN-5685)",
+    )
+    verifier.add_argument("package", type=Path, help="translate-harbor output directory")
+    verifier.add_argument("--candidate-output", type=Path, required=True)
+    verifier.add_argument("--verifier-image", required=True, help="registry reference @sha256")
+    verifier.add_argument("--verifier-config", type=Path, required=True, help="OCI config blob")
     build = sub.add_parser("build", help="execute the package build/resolve entrypoint")
     build.add_argument("manifest", type=Path)
     build.add_argument("--output", type=Path, required=True)
@@ -94,6 +129,13 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(receipt.model_dump_json(indent=2))
             return 0
+        elif args.command == "verifier-phase":
+            phase = verifier_phase_from_paths(
+                args.package, args.candidate_output, args.verifier_image, args.verifier_config
+            )
+            (args.package / PHASE_FILENAME).write_text(phase.model_dump_json(indent=2) + "\n")
+            print(phase.model_dump_json(indent=2))
+            return 0
         elif args.command == "check":
             value = check_package_compatibility(
                 ContainerArtifactDescriptor.model_validate(_read_descriptor(args.artifact)),
@@ -112,6 +154,9 @@ def main(argv: list[str] | None = None) -> int:
             )
         print(value.model_dump_json(indent=2))
         return 0
+    except VerifierPhaseError as error:
+        print(json.dumps(asdict(error.refusal), sort_keys=True))
+        return 2
     except HarborTranslationError as error:
         print(json.dumps(asdict(error.refusal), sort_keys=True))
         return 2
