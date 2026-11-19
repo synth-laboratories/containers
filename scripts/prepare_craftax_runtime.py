@@ -18,8 +18,7 @@ import subprocess
 import sys
 from uuid import uuid4
 
-# The running user's workspace root: the Mac and the x86 build VM both keep it at ~/GitHub.
-BOUNDARY = Path.home() / "GitHub"
+BOUNDARY = Path("/Users/joshuapurtell/GitHub")
 SOURCE_MOUNT = "/opt/gamebench/tasks/craftax-singleplayer"
 RUST_IMAGE = "rust:1.97-slim-bookworm@sha256:2775a09d208ff0d7c1f50490c45b62db929e87ba1dcbc3f2132ac71a704bcdd3"
 # Producer and runtime verifier share one qualified compiler/platform table.
