@@ -2,7 +2,7 @@
 <p align="center">Shared task, runtime and evidence contracts for Synth optimizers and evals.</p>
 <p align="center">
 <a href="https://pypi.org/project/synth-containers/">PyPI</a> ·
-<a href="https://github.com/synth-laboratories/optimizers">Optimizers</a> ·
+<a href="https://github.com/synth-laboratories/hillclimb">Hillclimb</a> ·
 <a href="https://github.com/synth-laboratories/synth-cookbooks-public">Cookbooks</a>
 </p>
 
@@ -10,7 +10,7 @@ A Synth container packages a task as a command job, HTTP service or native
 environment adapter. Task contracts retain dataset, scoring/verifier, mutable
 prompt or policy and credential boundaries. Through the HTTP optimizer profile,
 an optimizer like
-[`synth-optimizers`](https://github.com/synth-laboratories/optimizers) GEPA sees one URL
+[`synth-optimizers`](https://pypi.org/project/synth-optimizers/) GEPA sees one URL
 and a typed rollout contract — it never imports your task package or reads private
 evaluator state. The same contract works whether the task is a classifier, a coding
 agent, or a live game environment, and in Python, Rust, or TypeScript.
@@ -120,7 +120,7 @@ for complete containers: Banking77, HotpotQA, MiniGrid, TBLite, and Crafter.
 
 ## Links
 
-- [Optimizers](https://github.com/synth-laboratories/optimizers) — GEPA on this contract
+- [Hillclimb](https://github.com/synth-laboratories/hillclimb) — optimizer framework repository
 - [Cookbooks](https://github.com/synth-laboratories/synth-cookbooks-public) — runnable containers
 - [Agent skill](skills/containers/SKILL.md) — drop into a coding agent to build and debug containers
 - [Contract OpenAPI](openapi/container-contract-v1.yaml)
